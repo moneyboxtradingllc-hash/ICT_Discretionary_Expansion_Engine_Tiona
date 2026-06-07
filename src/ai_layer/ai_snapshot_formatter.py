@@ -282,6 +282,23 @@ def format_experience_line(exp: dict) -> str:
     return "Experience: " + " | ".join(parts) + " | AUTHORITY=OBSERVE_ONLY"
 
 
+def format_experience_link_line(exp: dict) -> str:
+    """One-line linkage stats. OBSERVE_ONLY — never influences decisions."""
+    if not exp or not exp.get("experience_enabled"):
+        return ""
+    linked   = exp.get("linked_trade_count",    0)
+    closed   = exp.get("closed_trade_count",    0)
+    unlinked = exp.get("unlinked_intent_count", 0)
+    quality  = exp.get("linkage_quality",       "none")
+    if linked == 0 and unlinked == 0:
+        return ""
+    return (
+        f"Experience Link: {linked} linked | {closed} closed"
+        f" | {unlinked} unlinked | quality={quality}"
+        f" | AUTHORITY=OBSERVE_ONLY"
+    )
+
+
 def format_correlation_line(corr: dict) -> str:
     """One-line correlation intelligence summary. OBSERVE_ONLY — never influences decisions."""
     if not corr or not corr.get("enabled"):
@@ -628,6 +645,11 @@ def format_for_ai(snapshot: dict) -> str:
     exp_line = format_experience_line(snapshot.get("experience_summary", {}))
     if exp_line:
         parts.append(exp_line)
+
+    # Experience Linkage (Phase 3C — OBSERVE_ONLY)
+    link_line = format_experience_link_line(snapshot.get("experience_summary", {}))
+    if link_line:
+        parts.append(link_line)
 
     # Experience Correlation (Phase 3B — OBSERVE_ONLY)
     corr_line = format_correlation_line(snapshot.get("experience_correlation", {}))

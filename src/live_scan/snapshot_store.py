@@ -111,6 +111,11 @@ def save_snapshot(snapshot: dict, symbol: str) -> str:
             "best_playbook":        snapshot.get("experience_summary", {}).get("best_playbook"),
             "worst_playbook":       snapshot.get("experience_summary", {}).get("worst_playbook"),
             "confidence_modifier":  snapshot.get("experience_summary", {}).get("confidence_modifier", 0),
+            "linked_trade_count":   snapshot.get("experience_summary", {}).get("linked_trade_count",  0),   # Phase 3C
+            "closed_trade_count":   snapshot.get("experience_summary", {}).get("closed_trade_count",  0),   # Phase 3C
+            "open_trade_count":     snapshot.get("experience_summary", {}).get("open_trade_count",    0),   # Phase 3C
+            "unlinked_intent_count": snapshot.get("experience_summary", {}).get("unlinked_intent_count", 0), # Phase 3C
+            "linkage_quality":      snapshot.get("experience_summary", {}).get("linkage_quality",    "none"), # Phase 3C
             "notes":                snapshot.get("experience_summary", {}).get("notes", []),
         },
         "experience_report": snapshot.get("experience_report"),

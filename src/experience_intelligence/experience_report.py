@@ -1,6 +1,7 @@
 """
-Phase 3A/3B — Experience Report.
-Quality-tiered report from experience summary, now including Phase 3B correlation fields.
+Phase 3A/3B/3C — Experience Report.
+Quality-tiered report from experience summary.
+Phase 3C adds linkage statistics.
 OBSERVE_ONLY — no execution influence.
 
 Quality thresholds:
@@ -21,19 +22,24 @@ def build_experience_report(summary: dict) -> dict:
     matches = summary.get("historical_matches",  0)
 
     return {
-        "sample_size":            n,
-        "historical_matches":     matches,
-        "experience_quality":     _quality_label(n),
-        "authority_level":        "observe_only",
-        "win_rate":               summary.get("win_rate"),
-        "average_r":              summary.get("average_r"),
-        "best_session":           summary.get("best_session"),
-        "worst_session":          summary.get("worst_session"),
-        "best_playbook":          summary.get("best_playbook"),
-        "worst_playbook":         summary.get("worst_playbook"),
-        "correlation_available":  summary.get("correlation_available",  False),  # Phase 3B
-        "correlation_confidence": summary.get("correlation_confidence", "none"),  # Phase 3B
-        "notes":                  summary.get("notes", []),
+        "sample_size":             n,
+        "historical_matches":      matches,
+        "experience_quality":      _quality_label(n),
+        "authority_level":         "observe_only",
+        "win_rate":                summary.get("win_rate"),
+        "average_r":               summary.get("average_r"),
+        "best_session":            summary.get("best_session"),
+        "worst_session":           summary.get("worst_session"),
+        "best_playbook":           summary.get("best_playbook"),
+        "worst_playbook":          summary.get("worst_playbook"),
+        "correlation_available":   summary.get("correlation_available",  False),  # Phase 3B
+        "correlation_confidence":  summary.get("correlation_confidence", "none"), # Phase 3B
+        "linked_trade_count":      summary.get("linked_trade_count",     0),      # Phase 3C
+        "closed_trade_count":      summary.get("closed_trade_count",     0),      # Phase 3C
+        "open_trade_count":        summary.get("open_trade_count",       0),      # Phase 3C
+        "unlinked_intent_count":   summary.get("unlinked_intent_count",  0),      # Phase 3C
+        "linkage_quality":         summary.get("linkage_quality",        "none"), # Phase 3C
+        "notes":                   summary.get("notes", []),
     }
 
 
@@ -47,17 +53,22 @@ def _quality_label(n: int) -> str:
 
 def _empty_report() -> dict:
     return {
-        "sample_size":            0,
-        "historical_matches":     0,
-        "experience_quality":     "insufficient",
-        "authority_level":        "observe_only",
-        "win_rate":               None,
-        "average_r":              None,
-        "best_session":           None,
-        "worst_session":          None,
-        "best_playbook":          None,
-        "worst_playbook":         None,
-        "correlation_available":  False,   # Phase 3B
-        "correlation_confidence": "none",  # Phase 3B
-        "notes":                  ["No experience data available"],
+        "sample_size":             0,
+        "historical_matches":      0,
+        "experience_quality":      "insufficient",
+        "authority_level":         "observe_only",
+        "win_rate":                None,
+        "average_r":               None,
+        "best_session":            None,
+        "worst_session":           None,
+        "best_playbook":           None,
+        "worst_playbook":          None,
+        "correlation_available":   False,   # Phase 3B
+        "correlation_confidence":  "none",  # Phase 3B
+        "linked_trade_count":      0,       # Phase 3C
+        "closed_trade_count":      0,       # Phase 3C
+        "open_trade_count":        0,       # Phase 3C
+        "unlinked_intent_count":   0,       # Phase 3C
+        "linkage_quality":         "none",  # Phase 3C
+        "notes":                   ["No experience data available"],
     }

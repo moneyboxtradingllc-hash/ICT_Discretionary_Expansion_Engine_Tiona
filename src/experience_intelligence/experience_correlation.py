@@ -1,6 +1,7 @@
 """
-Phase 3B — Experience Correlation Engine.
+Phase 3B/3C — Experience Correlation Engine.
 Analyzes completed paper trades across 10 correlation dimensions.
+Phase 3C: optional linked_outcomes enriches per-dimension MFE/MAE and linkage counts.
 OBSERVE_ONLY — authority_level always 'observe_only', confidence_modifier always 0.
 Never modifies decisions, execution, or confidence.
 """
@@ -15,23 +16,36 @@ _MIN_SAMPLE_RATE   = 3    # minimum trades to compute win/loss rates per group
 _MIN_SAMPLE_STRONG = 10   # minimum trades for strongest correlation candidates
 
 
-def build_correlation(trades: list[dict]) -> dict:
+def build_correlation(
+    trades: list[dict],
+    linked_outcomes: "list[dict] | None" = None,
+) -> dict:
     """
     Entry point. Accepts a flat list of closed trade dicts.
+    Phase 3C: optional linked_outcomes enriches per-dimension MFE/MAE and counts.
     Never raises. Returns safe default on any error.
     confidence_modifier is ALWAYS 0.
     """
     try:
-        return _build(trades)
+        return _build(trades, linked_outcomes)
     except Exception as exc:
         return _safe_default([f"correlation build error: {exc}"])
 
 
 def build_correlation_for_symbol(symbol: str, days: int = 30) -> dict:
-    """Convenience wrapper: loads trades for a symbol and builds correlation."""
-    from experience_intelligence.experience_query import load_completed_trades
-    trades = load_completed_trades(symbol, days)
-    return build_correlation(trades)
+    """
+    Convenience wrapper: loads trades + runs Phase 3C linkage, builds correlation.
+    """
+    from experience_intelligence.experience_query        import (
+        load_completed_trades, load_all_intent_records,
+    )
+    from experience_intelligence.intent_trade_linker     import link_intents_to_trades
+    from experience_intelligence.linked_outcome_metrics  import compute_linked_metrics
+    trades          = load_completed_trades(symbol, days)
+    intents         = load_all_intent_records(symbol, days)
+    links           = link_intents_to_trades(intents, trades)
+    linked_outcomes = compute_linked_metrics(links, intents, trades)
+    return build_correlation(trades, linked_outcomes)
 
 
 def correlation_confidence(n: int) -> str:
@@ -39,16 +53,35 @@ def correlation_confidence(n: int) -> str:
     return _confidence_label(n)
 
 
-def _build(trades: list[dict]) -> dict:
+def _build(
+    trades: list[dict],
+    linked_outcomes: "list[dict] | None" = None,
+) -> dict:
     n = len(trades)
     if n == 0:
         return _safe_default(["No completed trades available for correlation analysis"])
 
+    # Build trade_id → linked_outcome lookup for O(1) enrichment per trade
+    linked_by_trade: dict = {}
+    if linked_outcomes:
+        for lo in linked_outcomes:
+            tid = lo.get("trade_id")
+            if tid and lo.get("linked"):
+                linked_by_trade[tid] = lo
+
     dimension_reports: dict = {}
     for dim in _DIMENSIONS:
-        dimension_reports[dim] = _analyze_dimension(trades, dim)
+        dimension_reports[dim] = _analyze_dimension(trades, dim, linked_by_trade)
 
     pos_corr, neg_corr = _find_strongest(dimension_reports)
+
+    # Top-level linked closed count for warnings
+    total_linked_closed = sum(
+        1 for lo in (linked_outcomes or []) if lo.get("linked") and lo.get("closed")
+    )
+    warnings = _build_warnings(n)
+    if linked_outcomes is not None and total_linked_closed == 0:
+        warnings.append("No linked closed trades available for outcome correlation")
 
     return {
         "enabled":                         True,
@@ -58,7 +91,7 @@ def _build(trades: list[dict]) -> dict:
         "dimension_reports":                dimension_reports,
         "strongest_positive_correlations":  pos_corr,
         "strongest_negative_correlations":  neg_corr,
-        "warnings":                         _build_warnings(n),
+        "warnings":                         warnings,
         "notes":                            [],
     }
 
@@ -89,8 +122,13 @@ def _extract_trade_attrs(trade: dict) -> dict:
     }
 
 
-def _analyze_dimension(trades: list[dict], dimension: str) -> dict:
+def _analyze_dimension(
+    trades: list[dict],
+    dimension: str,
+    linked_by_trade: dict | None = None,
+) -> dict:
     """Group trades by dimension value and compute stats per group."""
+    lbt    = linked_by_trade or {}
     groups: dict[str, list[dict]] = {}
     for trade in trades:
         attrs = _extract_trade_attrs(trade)
@@ -98,14 +136,27 @@ def _analyze_dimension(trades: list[dict], dimension: str) -> dict:
         if not val:
             continue
         groups.setdefault(val, []).append(trade)
-    return {val: _compute_entry(dimension, val, grp) for val, grp in groups.items()}
+    return {
+        val: _compute_entry(dimension, val, grp, lbt)
+        for val, grp in groups.items()
+    }
 
 
-def _compute_entry(dimension: str, value: str, trades: list[dict]) -> dict:
-    """Compute win rate, loss rate, and average R for one dimension+value group."""
+def _compute_entry(
+    dimension: str,
+    value: str,
+    trades: list[dict],
+    linked_by_trade: dict | None = None,
+) -> dict:
+    """Compute stats for one dimension+value group, enriched with linked outcomes."""
+    lbt      = linked_by_trade or {}
     n        = len(trades)
     r_values: list[float] = []
     wins     = 0
+    mfe_vals: list[float] = []
+    mae_vals: list[float] = []
+    linked_count = 0
+    closed_count = 0
 
     for t in trades:
         pnl  = t.get("realized_pnl")
@@ -119,24 +170,49 @@ def _compute_entry(dimension: str, value: str, trades: list[dict]) -> dict:
         if pnl > 0:
             wins += 1
 
+        # Phase 3C: enrich from linked outcome
+        tid = _trade_id(t)
+        if tid and tid in lbt:
+            lo = lbt[tid]
+            linked_count += 1
+            if lo.get("closed"):
+                closed_count += 1
+            if lo.get("mfe") is not None:
+                mfe_vals.append(lo["mfe"])
+            if lo.get("mae") is not None:
+                mae_vals.append(lo["mae"])
+
     m         = len(r_values)
     win_rate  = round(wins / m * 100, 1)       if m >= _MIN_SAMPLE_RATE else None
     loss_rate = round((m - wins) / m * 100, 1) if m >= _MIN_SAMPLE_RATE else None
     avg_r     = round(sum(r_values) / m, 2)    if m >= _MIN_SAMPLE_RATE else None
+    avg_mfe   = round(sum(mfe_vals) / len(mfe_vals), 2) if mfe_vals else None
+    avg_mae   = round(sum(mae_vals) / len(mae_vals), 2) if mae_vals else None
 
     return {
-        "dimension":    dimension,
-        "value":        value,
-        "sample_size":  n,
-        "win_rate":     win_rate,
-        "loss_rate":    loss_rate,
-        "average_r":    avg_r,
-        "average_mfe":  None,   # Phase 3C: requires intent-to-trade linkage
-        "average_mae":  None,   # Phase 3C: requires intent-to-trade linkage
-        "best_context":  "",    # Phase 3C: cross-dimension analysis
-        "worst_context": "",    # Phase 3C: cross-dimension analysis
-        "confidence":   _confidence_label(n),
+        "dimension":          dimension,
+        "value":              value,
+        "sample_size":        n,
+        "win_rate":           win_rate,
+        "loss_rate":          loss_rate,
+        "average_r":          avg_r,
+        "average_mfe":        avg_mfe,        # Phase 3C: from linked outcomes
+        "average_mae":        avg_mae,         # Phase 3C: from linked outcomes
+        "linked_trade_count": linked_count,   # Phase 3C
+        "closed_trade_count": closed_count,   # Phase 3C
+        "best_context":        "",            # Phase 3D: cross-dimension analysis
+        "worst_context":       "",            # Phase 3D: cross-dimension analysis
+        "confidence":          _confidence_label(n),
     }
+
+
+def _trade_id(trade: dict):
+    return (
+        trade.get("trade_id")
+        or trade.get("alpaca_order_id")
+        or trade.get("order_id")
+        or trade.get("id")
+    )
 
 
 def _find_strongest(

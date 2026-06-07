@@ -1,6 +1,7 @@
 """
-Phase 3A — Experience Metrics.
+Phase 3A/3C — Experience Metrics.
 Pure statistical computation from completed trade records.
+Phase 3C adds optional linked_outcomes for MFE/MAE and linkage count fields.
 OBSERVE_ONLY — no decision influence, no execution changes.
 """
 from datetime import datetime
@@ -83,12 +84,22 @@ def _best_worst(bucket: dict[str, list[float]]) -> tuple[str | None, str | None]
     return max(rates, key=rates.get), min(rates, key=rates.get)
 
 
-def compute_metrics(trades: list[dict]) -> dict:
+def compute_metrics(
+    trades: list[dict],
+    linked_outcomes: "list[dict] | None" = None,
+) -> dict:
     """
     Compute all performance metrics from a list of closed trade records.
+    Phase 3C: optional linked_outcomes enriches MFE/MAE and adds linkage counts.
     Fields are None when sample_size < _MIN_RATE_SAMPLE.
     """
     n = len(trades)
+
+    _zero_counts = {
+        "linked_trade_count": 0,
+        "closed_trade_count": 0,
+        "open_trade_count":   0,
+    }
 
     _empty = {
         "sample_size":       0,
@@ -102,9 +113,10 @@ def compute_metrics(trades: list[dict]) -> dict:
         "worst_session":     None,
         "best_playbook":     None,
         "worst_playbook":    None,
+        **_zero_counts,
     }
 
-    if n == 0:
+    if n == 0 and not linked_outcomes:
         return _empty
 
     r_multiples  = [r for r in (_r_multiple(t)  for t in trades) if r is not None]
@@ -130,16 +142,31 @@ def compute_metrics(trades: list[dict]) -> dict:
     best_sess, worst_sess = _best_worst(sessions)
     best_pb,   worst_pb   = _best_worst(playbooks)
 
+    # Phase 3C: derive MFE/MAE and linkage counts from linked outcomes
+    closed_lo     = [lo for lo in (linked_outcomes or [])
+                     if lo.get("linked") and lo.get("closed")]
+    mfe_vals      = [lo["mfe"] for lo in closed_lo if lo.get("mfe") is not None]
+    mae_vals      = [lo["mae"] for lo in closed_lo if lo.get("mae") is not None]
+    avg_mfe       = round(sum(mfe_vals) / len(mfe_vals), 2) if mfe_vals else None
+    avg_mae       = round(sum(mae_vals) / len(mae_vals), 2) if mae_vals else None
+
+    linked_count  = sum(1 for lo in (linked_outcomes or []) if lo.get("linked"))
+    closed_count  = len(closed_lo)
+    open_count    = linked_count - closed_count
+
     return {
-        "sample_size":       n,
-        "win_rate":          win_rate,
-        "loss_rate":         loss_rate,
-        "average_r":         avg_r,
-        "average_hold_time": avg_hold,
-        "average_mfe":       None,    # Phase 3B: link trades to intent archive records
-        "average_mae":       None,    # Phase 3B: link trades to intent archive records
-        "best_session":      best_sess,
-        "worst_session":     worst_sess,
-        "best_playbook":     best_pb,
-        "worst_playbook":    worst_pb,
+        "sample_size":        n,
+        "win_rate":           win_rate,
+        "loss_rate":          loss_rate,
+        "average_r":          avg_r,
+        "average_hold_time":  avg_hold,
+        "average_mfe":        avg_mfe,        # Phase 3C: from linked closed outcomes
+        "average_mae":        avg_mae,         # Phase 3C: from linked closed outcomes
+        "best_session":       best_sess,
+        "worst_session":      worst_sess,
+        "best_playbook":      best_pb,
+        "worst_playbook":     worst_pb,
+        "linked_trade_count": linked_count,   # Phase 3C
+        "closed_trade_count": closed_count,   # Phase 3C
+        "open_trade_count":   open_count,     # Phase 3C
     }

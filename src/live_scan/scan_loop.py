@@ -50,7 +50,7 @@ from ai_layer.ai_snapshot_formatter                 import (
     format_position_monitor_line, format_stop_enforcer_line,
     format_operational_readiness_line, format_activation_line,
     format_paper_activation_line, format_experience_line,
-    format_correlation_line,
+    format_experience_link_line, format_correlation_line,
 )
 
 _EASTERN = pytz.timezone("America/New_York")
@@ -309,6 +309,10 @@ def _print_scan_summary(snapshot: dict, symbol: str, scan_num: int, saved_path: 
         if corr_neg:
             c_parts.append(f"- {corr_neg[0]}")
         print("Exp Corr      : " + " | ".join(c_parts) + " | AUTHORITY=OBSERVE_ONLY")
+
+    exp_link_line = format_experience_link_line(exp)
+    if exp_link_line:
+        print(exp_link_line)
 
     pa_plan   = snapshot.get("paper_activation_plan", {})
     pa        = snapshot.get("paper_activation", {})
@@ -622,6 +626,13 @@ def run_scan_loop():
             if corr_line:
                 snapshot["ai_context"]["summary"] = (
                     snapshot["ai_context"].get("summary", "") + " " + corr_line
+                ).strip()
+
+            # ── Experience Linkage (Phase 3C — OBSERVE_ONLY) ──────────────
+            link_line = format_experience_link_line(snapshot["experience_summary"])
+            if link_line:
+                snapshot["ai_context"]["summary"] = (
+                    snapshot["ai_context"].get("summary", "") + " " + link_line
                 ).strip()
 
             # ── Position Monitor (Phase 2B — moved up) ────────────────────

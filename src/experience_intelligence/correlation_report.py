@@ -1,6 +1,7 @@
 """
-Phase 3B — Correlation Report.
+Phase 3B/3C — Correlation Report.
 Compact top-level summary from raw correlation data for snapshot storage and AI input.
+Phase 3C: dimension entries now carry linked_trade_count, closed_trade_count, MFE/MAE.
 OBSERVE_ONLY — authority_level always 'observe_only', confidence_modifier always 0.
 """
 from experience_intelligence.experience_correlation import correlation_confidence
