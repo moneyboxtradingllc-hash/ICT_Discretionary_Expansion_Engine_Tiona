@@ -44,6 +44,7 @@ from experience_intelligence.experience_summary     import build_experience_summ
 from experience_intelligence.experience_report      import build_experience_report
 from experience_intelligence.experience_correlation import build_correlation_for_symbol
 from experience_intelligence.correlation_report     import build_correlation_report
+from paper_execution.trade_reconciliation           import reconcile_trade
 from ai_layer.ai_snapshot_formatter                 import (
     format_decision_line, format_gate_line, format_intent_line,
     format_score_line, format_archive_line, format_paper_execution_line,
@@ -380,6 +381,30 @@ def _print_scan_summary(snapshot: dict, symbol: str, scan_num: int, saved_path: 
     else:
         print("Stop Enforcer : DISABLED")
 
+    recon        = snapshot.get("trade_reconciliation", {})
+    recon_status = recon.get("status", "no_active_trade")
+    if recon_status == "closed":
+        pnl = recon.get("realized_pnl")
+        r   = recon.get("realized_r")
+        hm  = recon.get("holding_minutes")
+        pnl_str = f"{pnl:+.2f}" if pnl is not None else "unknown"
+        r_str   = f" | R={r:.2f}" if r is not None else ""
+        hm_str  = f" | {hm:.0f}min" if hm is not None else ""
+        print(f"Trade Recon   : CLOSED | pnl={pnl_str}{r_str}{hm_str}")
+    elif recon_status == "externally_closed":
+        print("Trade Recon   : EXTERNALLY CLOSED | pnl=unknown")
+    elif recon_status == "open":
+        print("Trade Recon   : OPEN")
+    elif recon_status in ("canceled", "cancelled", "rejected", "expired"):
+        print(f"Trade Recon   : ENTRY {recon_status.upper()}")
+    elif recon_status == "no_active_trade":
+        print("Trade Recon   : NO ACTIVE TRADE")
+    elif recon_status == "error":
+        warns = recon.get("warnings", [])
+        print(f"Trade Recon   : ERROR | {warns[0][:70] if warns else '?'}")
+    else:
+        print(f"Trade Recon   : {recon_status.upper()}")
+
     orr         = snapshot.get("operational_readiness", {})
     orr_score   = orr.get("score", 0)
     orr_ready   = orr.get("ready", False)
@@ -701,6 +726,19 @@ def run_scan_loop():
             if se_line:
                 snapshot["ai_context"]["summary"] = (
                     snapshot["ai_context"].get("summary", "") + " " + se_line
+                ).strip()
+
+            # ── Trade Reconciliation (Phase 4A) ───────────────────────────
+            snapshot["trade_reconciliation"] = reconcile_trade(symbol)
+            recon = snapshot["trade_reconciliation"]
+            if recon.get("status") == "closed":
+                pnl = recon.get("realized_pnl")
+                r   = recon.get("realized_r")
+                pnl_str = f"{pnl:+.2f}" if pnl is not None else "unknown"
+                r_str   = f" R={r:.2f}" if r is not None else ""
+                recon_ai_line = f"Trade closed: pnl={pnl_str}{r_str}"
+                snapshot["ai_context"]["summary"] = (
+                    snapshot["ai_context"].get("summary", "") + " " + recon_ai_line
                 ).strip()
 
             # ── Persist snapshot ───────────────────────────────────────────

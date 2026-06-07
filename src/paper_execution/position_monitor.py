@@ -11,7 +11,7 @@ Paper account only. Never touches live endpoint.
 import os
 
 from paper_execution.paper_broker  import is_paper_account_safe, get_position, get_order
-from paper_execution.trade_journal import find_active_trade, update_trade_status
+from paper_execution.trade_journal import find_active_trade, find_any_active_trade, update_trade_status
 
 
 # ── Fallback price from snapshot ──────────────────────────────────────────────
@@ -41,6 +41,7 @@ def _base() -> dict:
         "stop_distance":         None,
         "unrealized_pnl":        None,
         "exit_already_submitted": False,
+        "reconciliation_needed": False,   # Phase 4A
         "status":                "disabled",
         "warnings":              [],
     }
@@ -83,7 +84,15 @@ def _monitor(snapshot: dict, symbol: str) -> dict:
     position = get_position(symbol)
 
     if position is None:
-        return _no_pos()
+        # Phase 4A: detect if a trade was open when position vanished
+        active_trade, _ = find_any_active_trade(symbol)
+        if active_trade:
+            r = _no_pos(["position gone from broker while journal trade is active"])
+            r["reconciliation_needed"] = True
+        else:
+            r = _no_pos()
+            r["reconciliation_needed"] = False
+        return r
 
     if "error" in position:
         return _no_pos([f"position fetch error: {position['error']}"])

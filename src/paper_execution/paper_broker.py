@@ -239,6 +239,48 @@ def close_position_market(symbol: str) -> dict:
         raise RuntimeError(f"close_position_market failed: {exc}") from exc
 
 
+def get_recent_closed_orders_for_symbol(symbol: str, limit: int = 10) -> list:
+    """
+    Return recent closed/filled orders for symbol (most recent first).
+    Used by trade_reconciliation to detect externally-closed positions.
+    Returns empty list on failure.
+    """
+    try:
+        from alpaca.trading.requests import GetOrdersRequest
+        client = _build_client()
+        try:
+            request = GetOrdersRequest(status="closed", symbols=[symbol], limit=limit)
+        except TypeError:
+            request = GetOrdersRequest(status="closed", limit=limit)
+        orders = client.get_orders(filter=request) or []
+        result = []
+        for o in orders:
+            if str(o.symbol) != symbol:
+                continue
+            try:
+                status = o.status.value
+            except AttributeError:
+                raw    = str(o.status).lower()
+                status = raw.split(".")[-1] if "." in raw else raw
+            filled_avg = str(o.filled_avg_price) if o.filled_avg_price is not None else None
+            filled_qty = str(o.filled_qty)       if o.filled_qty       is not None else None
+            result.append({
+                "id":               str(o.id),
+                "symbol":           str(o.symbol),
+                "status":           status,
+                "side":             str(o.side).lower(),
+                "qty":              str(o.qty),
+                "filled_qty":       filled_qty,
+                "filled_avg_price": filled_avg,
+                "submitted_at":     str(o.submitted_at),
+            })
+            if len(result) >= limit:
+                break
+        return result
+    except Exception as exc:
+        return [{"error": str(exc)}]
+
+
 def submit_paper_order(order_request) -> dict:
     """
     Submit a paper limit order to Alpaca.

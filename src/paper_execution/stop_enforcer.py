@@ -27,15 +27,16 @@ _EASTERN = pytz.timezone("America/New_York")
 
 def _base() -> dict:
     return {
-        "enabled":          False,
-        "stop_evaluated":   False,
-        "stop_breached":    False,
-        "breach_reason":    None,
-        "exit_submitted":   False,
-        "exit_order_id":    None,
-        "exit_reason":      None,
-        "action_taken":     "disabled",
-        "warnings":         [],
+        "enabled":                 False,
+        "stop_evaluated":          False,
+        "stop_breached":           False,
+        "breach_reason":           None,
+        "exit_submitted":          False,
+        "exit_order_id":           None,
+        "exit_reason":             None,
+        "action_taken":            "disabled",
+        "reconciliation_pending":  False,   # Phase 4A: set True after exit submitted
+        "warnings":                [],
     }
 
 
@@ -173,10 +174,11 @@ def _enforce(snapshot: dict, symbol: str, monitor_result: dict) -> dict:
             )
 
         result.update({
-            "exit_submitted":   True,
-            "exit_order_id":    exit_order_id,
-            "exit_reason":      exit_reason,
-            "action_taken":     "exit_submitted",
+            "exit_submitted":          True,
+            "exit_order_id":           exit_order_id,
+            "exit_reason":             exit_reason,
+            "action_taken":            "exit_submitted",
+            "reconciliation_pending":  True,   # Phase 4A: reconciler polls exit fill
         })
 
     except RuntimeError as exc:

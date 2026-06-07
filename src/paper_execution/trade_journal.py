@@ -140,6 +140,12 @@ def make_record(
         "realized_pnl":       None,
         "closed_at":          None,
         "close_reason":       None,
+        # Phase 4A closure fields (set by trade_reconciliation)
+        "entry_price":        None,
+        "exit_price":         None,
+        "realized_r":         None,
+        "holding_minutes":    None,
+        "final_status":       None,
     }
 
 
@@ -262,18 +268,49 @@ def mark_closed(
     closed_at: str,
     reason: str,
     symbol: str,
+    *,
+    realized_r: float | None = None,
+    holding_minutes: float | None = None,
+    entry_price: float | None = None,
+    exit_price: float | None = None,
+    final_status: str | None = "closed",
 ) -> bool:
     """
-    Mark a trade as fully closed with realized P&L.
-    Sets order_status='closed'.
+    Mark a trade as fully closed with realized P&L and closure metrics.
+    Sets order_status='closed'. Called by trade_reconciliation (Phase 4A).
     """
     _, fp = _find_trade_filepath(trade_id, symbol)
     if fp is None:
         return False
     return _update_trade_in_file(
         trade_id, fp,
-        order_status  = "closed",
-        realized_pnl  = round(float(realized_pnl), 4),
-        closed_at     = closed_at,
-        close_reason  = reason,
+        order_status    = "closed",
+        realized_pnl    = round(float(realized_pnl), 4),
+        closed_at       = closed_at,
+        close_reason    = reason,
+        realized_r      = round(float(realized_r), 4) if realized_r is not None else None,
+        holding_minutes = round(float(holding_minutes), 2) if holding_minutes is not None else None,
+        entry_price     = round(float(entry_price), 4) if entry_price is not None else None,
+        exit_price      = round(float(exit_price), 4) if exit_price is not None else None,
+        final_status    = final_status or "closed",
     )
+
+
+# ── Phase 4A: find any non-terminal trade ──────────────────────────────────────
+
+_TERMINAL_STATUSES = frozenset({
+    "closed", "canceled", "cancelled", "rejected", "expired", "done_for_day", "stopped",
+})
+
+
+def find_any_active_trade(symbol: str) -> tuple[dict | None, str | None]:
+    """
+    Find the most recent non-terminal trade for symbol, regardless of side.
+    Searches up to 7 recent days, most recent entry first.
+    Non-terminal means: order_status not in closed/canceled/rejected/expired.
+    """
+    for _, fp, trades in _search_recent_files(symbol):
+        for t in reversed(trades):
+            if t.get("order_status", "") not in _TERMINAL_STATUSES:
+                return t, fp
+    return None, None
