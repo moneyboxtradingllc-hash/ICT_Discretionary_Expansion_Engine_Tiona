@@ -12,6 +12,7 @@ import os
 
 from paper_execution.paper_broker  import is_paper_account_safe, get_position, get_order
 from paper_execution.trade_journal import find_active_trade, find_any_active_trade, update_trade_status
+from paper_execution.protective_stop import submit_protective_stop, verify_protective_stop_exists
 
 
 # ── Fallback price from snapshot ──────────────────────────────────────────────
@@ -26,6 +27,11 @@ def _price_from_snapshot(snapshot: dict) -> float | None:
 
 
 # ── Result constructors ───────────────────────────────────────────────────────
+
+_BROKER_STOP_DISABLED = {
+    "enabled": False, "status": "disabled", "stop_order_id": None, "stop_price": None,
+}
+
 
 def _base() -> dict:
     return {
@@ -42,6 +48,7 @@ def _base() -> dict:
         "unrealized_pnl":        None,
         "exit_already_submitted": False,
         "reconciliation_needed": False,   # Phase 4A
+        "broker_stop":           _BROKER_STOP_DISABLED,  # Phase 4B
         "status":                "disabled",
         "warnings":              [],
     }
@@ -51,6 +58,52 @@ def _no_pos(warnings: list | None = None) -> dict:
     r = _base()
     r.update({"enabled": True, "status": "no_position", "warnings": warnings or []})
     return r
+
+
+def _handle_broker_stop(
+    linked_trade: dict,
+    symbol: str,
+    position_side: str,
+    qty: int,
+    stop_reference,
+) -> dict:
+    """
+    Phase 4B — check / submit broker-side protective stop.
+    Called only when BROKER_STOP_ENABLED=true, position is open, and entry is filled.
+    """
+    if stop_reference is None:
+        return {
+            "enabled": True, "status": "missing",
+            "stop_order_id": None, "stop_price": None,
+        }
+
+    trade_id             = linked_trade.get("trade_id", "")
+    broker_stop_order_id = linked_trade.get("broker_stop_order_id")
+
+    if broker_stop_order_id:
+        # Already have a stop order — verify it still exists at the broker
+        result = verify_protective_stop_exists(
+            trade_id, symbol, position_side, float(stop_reference)
+        )
+        return {
+            "enabled":       result.get("enabled", True),
+            "status":        result.get("status", "missing"),
+            "stop_order_id": result.get("stop_order_id"),
+            "stop_price":    result.get("stop_price"),
+        }
+
+    # No stop yet — submit one
+    result = submit_protective_stop(
+        trade_id, symbol, position_side, qty, float(stop_reference)
+    )
+    if not result.get("enabled", True):
+        return _BROKER_STOP_DISABLED
+    return {
+        "enabled":       True,
+        "status":        "submitted" if result.get("stop_submitted") else "missing",
+        "stop_order_id": result.get("stop_order_id"),
+        "stop_price":    result.get("stop_price"),
+    }
 
 
 # ── Public entry point ────────────────────────────────────────────────────────
@@ -149,6 +202,21 @@ def _monitor(snapshot: dict, symbol: str) -> dict:
     else:
         warnings.append("no linked journal trade — position may be from a prior session")
 
+    # ── Phase 4B: Broker-side protective stop ──────────────────────────────────
+    broker_stop_enabled = os.getenv("BROKER_STOP_ENABLED", "false").lower().strip() == "true"
+    if (
+        broker_stop_enabled
+        and linked_trade
+        and linked_trade.get("order_status") in ("filled", "partially_filled")
+        and not exit_already
+    ):
+        broker_stop = _handle_broker_stop(linked_trade, symbol, side, qty, stop_reference)
+    else:
+        broker_stop = dict(_BROKER_STOP_DISABLED)
+        if broker_stop_enabled and not linked_trade:
+            broker_stop["enabled"] = True
+            broker_stop["status"]  = "missing"
+
     # ── Calculate stop distance ────────────────────────────────────────────────
     if stop_reference is not None:
         sr = float(stop_reference)
@@ -172,6 +240,7 @@ def _monitor(snapshot: dict, symbol: str) -> dict:
         "stop_distance":         stop_distance,
         "unrealized_pnl":        round(unrealized_pnl, 4),
         "exit_already_submitted": exit_already,
+        "broker_stop":           broker_stop,   # Phase 4B
         "status":                "monitoring",
         "warnings":              warnings[:5],
     }

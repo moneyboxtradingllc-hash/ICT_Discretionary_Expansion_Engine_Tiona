@@ -281,6 +281,153 @@ def get_recent_closed_orders_for_symbol(symbol: str, limit: int = 10) -> list:
         return [{"error": str(exc)}]
 
 
+def submit_protective_stop_order(
+    symbol: str, qty: int, side: str, stop_price: float
+) -> dict:
+    """
+    Submit a paper STOP order to protect an open position.
+    side must be "sell" (to protect a long) or "buy" (to protect a short).
+    Returns {"alpaca_order_id": ..., "status": ..., ...} or {"error": ...}.
+    """
+    safe, reason = is_paper_account_safe()
+    if not safe:
+        return {"error": f"paper safety check failed: {reason}"}
+
+    if qty <= 0:
+        return {"error": f"qty must be > 0 (got {qty})"}
+    if stop_price <= 0:
+        return {"error": f"invalid stop_price {stop_price}"}
+    if side not in ("buy", "sell"):
+        return {"error": f"invalid side '{side}'"}
+
+    from alpaca.trading.requests import StopOrderRequest
+    from alpaca.trading.enums    import OrderSide, TimeInForce
+
+    order_side = OrderSide.SELL if side.lower() == "sell" else OrderSide.BUY
+    try:
+        order_request = StopOrderRequest(
+            symbol        = symbol,
+            qty           = qty,
+            side          = order_side,
+            time_in_force = TimeInForce.GTC,   # GTC — stop persists until triggered
+            stop_price    = round(float(stop_price), 2),
+        )
+        client = _build_client()
+        order  = client.submit_order(order_data=order_request)
+        return {
+            "alpaca_order_id": str(order.id),
+            "status":          str(order.status),
+            "symbol":          str(order.symbol),
+            "side":            str(order.side),
+            "qty":             str(order.qty),
+            "stop_price":      str(order.stop_price) if order.stop_price is not None else None,
+            "submitted_at":    str(order.submitted_at),
+        }
+    except Exception as exc:
+        return {"error": f"stop order submission failed: {exc}"}
+
+
+def get_open_orders(symbol: str | None = None) -> list:
+    """
+    Return list of open orders, optionally filtered by symbol.
+    Each item includes: id, symbol, side, type, qty, status, stop_price, limit_price.
+    Returns empty list on failure.
+    """
+    try:
+        from alpaca.trading.requests import GetOrdersRequest
+        client = _build_client()
+        try:
+            req = GetOrdersRequest(status="open", symbols=[symbol]) if symbol else GetOrdersRequest(status="open")
+        except TypeError:
+            req = GetOrdersRequest(status="open")
+        orders = client.get_orders(filter=req) or []
+        result = []
+        for o in orders:
+            if symbol and str(o.symbol) != symbol:
+                continue
+            try:
+                order_type = o.type.value if hasattr(o.type, "value") else str(o.type).lower()
+                order_type = order_type.split(".")[-1] if "." in order_type else order_type
+            except Exception:
+                order_type = "unknown"
+            try:
+                status = o.status.value
+            except AttributeError:
+                raw    = str(o.status).lower()
+                status = raw.split(".")[-1] if "." in raw else raw
+            result.append({
+                "id":          str(o.id),
+                "symbol":      str(o.symbol),
+                "side":        str(o.side).lower().split(".")[-1],
+                "type":        order_type,
+                "qty":         str(o.qty),
+                "status":      status,
+                "stop_price":  str(o.stop_price)  if o.stop_price  is not None else None,
+                "limit_price": str(o.limit_price) if o.limit_price is not None else None,
+                "submitted_at": str(o.submitted_at),
+            })
+        return result
+    except Exception as exc:
+        return [{"error": str(exc)}]
+
+
+def find_open_stop_order(
+    symbol: str,
+    side: str,
+    stop_price: float,
+    tolerance: float = 0.02,
+) -> dict | None:
+    """
+    Find an open stop order for symbol matching side and stop_price (within tolerance).
+    Returns the first matching order dict or None.
+    """
+    try:
+        orders = get_open_orders(symbol)
+        for o in orders:
+            if "error" in o:
+                continue
+            if str(o.get("symbol", "")) != symbol:
+                continue
+            o_side = o.get("side", "").lower().split(".")[-1]
+            if o_side != side.lower():
+                continue
+            o_type = o.get("type", "")
+            if o_type not in ("stop", "stop_limit"):
+                continue
+            raw_sp = o.get("stop_price")
+            if raw_sp is None:
+                continue
+            try:
+                if abs(float(raw_sp) - float(stop_price)) <= tolerance:
+                    return o
+            except (ValueError, TypeError):
+                continue
+        return None
+    except Exception:
+        return None
+
+
+def cancel_order(order_id: str) -> dict:
+    """
+    Cancel an open order by ID.
+    Returns {"canceled": True} or {"canceled": False, "reason": str}.
+    Non-cancelable (already filled/expired) is treated as non-fatal.
+    """
+    safe, reason = is_paper_account_safe()
+    if not safe:
+        return {"canceled": False, "reason": f"paper safety check failed: {reason}"}
+
+    try:
+        client = _build_client()
+        client.cancel_order_by_id(order_id)
+        return {"canceled": True}
+    except Exception as exc:
+        exc_str = str(exc)
+        if any(k in exc_str for k in ("422", "not cancelable", "not found", "404")):
+            return {"canceled": False, "reason": f"order not cancelable (may be filled/expired): {exc_str}"}
+        return {"canceled": False, "reason": str(exc)}
+
+
 def submit_paper_order(order_request) -> dict:
     """
     Submit a paper limit order to Alpaca.

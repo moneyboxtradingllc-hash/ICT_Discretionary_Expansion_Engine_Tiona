@@ -129,6 +129,19 @@ def _enforce(snapshot: dict, symbol: str, monitor_result: dict) -> dict:
     if not breached:
         return result
 
+    # ── Phase 4B: if broker stop is active, defer — it will handle the exit ───
+    broker_stop        = monitor_result.get("broker_stop", {})
+    broker_stop_status = broker_stop.get("status", "disabled")
+    if broker_stop_status in ("verified", "submitted"):
+        result.update({
+            "action_taken": "broker_stop_active",
+            "warnings":     warnings + [
+                f"stop breached but broker stop is active ({broker_stop_status})"
+                " — deferring to broker stop"
+            ],
+        })
+        return result
+
     # ── Stop is breached — check whether to act ───────────────────────────────
     paper_exit_on = os.getenv("PAPER_EXIT_ON_STOP", "false").lower().strip()
 

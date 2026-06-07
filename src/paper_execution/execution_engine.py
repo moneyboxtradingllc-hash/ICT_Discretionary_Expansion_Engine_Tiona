@@ -173,8 +173,30 @@ def _attempt(snapshot: dict, symbol: str) -> dict:
 
     # ── Layer 10: submit paper order ──────────────────────────────────────────
     trade_id = _make_trade_id(symbol)
+    broker_stop_notes = ""
+
+    # Phase 4B: attempt bracket/OTO if mode configured
+    broker_stop_enabled = os.getenv("BROKER_STOP_ENABLED", "false").lower().strip() == "true"
+    broker_stop_mode    = os.getenv("BROKER_STOP_MODE", "after_fill").lower().strip()
+    order_to_submit     = order_result["order_request"]
+
+    if broker_stop_enabled and broker_stop_mode == "bracket_if_supported":
+        from paper_execution.bracket_builder import build_bracket_order
+        bracket = build_bracket_order(
+            symbol      = symbol,
+            side        = order_result["side"],
+            qty         = order_result["qty"],
+            limit_price = order_result["entry_reference"],
+            stop_price  = order_result["stop_reference"],
+        )
+        if bracket["supported"]:
+            order_to_submit   = bracket["order_request"]
+            broker_stop_notes = "bracket_order_used"
+        else:
+            broker_stop_notes = f"bracket_fallback: {bracket.get('reason','unsupported')}"
+
     try:
-        submission = submit_paper_order(order_result["order_request"])
+        submission = submit_paper_order(order_to_submit)
         alpaca_id  = submission.get("alpaca_order_id")
         order_status = "submitted"
         side_str = order_result["side"]
@@ -182,6 +204,8 @@ def _attempt(snapshot: dict, symbol: str) -> dict:
         entry    = round(order_result["entry_reference"], 2)
         order_summary = f"{side_str} {qty} {symbol} limit {entry}"
         reason = "paper order submitted successfully"
+        if broker_stop_notes:
+            reason += f" ({broker_stop_notes})"
     except RuntimeError as exc:
         alpaca_id    = None
         order_status = "rejected"

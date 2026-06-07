@@ -52,6 +52,7 @@ from ai_layer.ai_snapshot_formatter                 import (
     format_operational_readiness_line, format_activation_line,
     format_paper_activation_line, format_experience_line,
     format_experience_link_line, format_correlation_line,
+    format_broker_stop_line,
 )
 
 _EASTERN = pytz.timezone("America/New_York")
@@ -381,6 +382,22 @@ def _print_scan_summary(snapshot: dict, symbol: str, scan_num: int, saved_path: 
     else:
         print("Stop Enforcer : DISABLED")
 
+    bs          = snapshot.get("broker_stop", {})
+    bs_enabled  = bs.get("enabled", False)
+    bs_status   = (bs.get("status") or "disabled").upper()
+    bs_price    = bs.get("stop_price")
+    bs_id       = bs.get("stop_order_id")
+    if not bs_enabled:
+        print("Broker Stop   : DISABLED | BROKER_STOP_ENABLED=false")
+    elif bs_status == "VERIFIED":
+        print(f"Broker Stop   : VERIFIED | stop {bs_price} | order_id={bs_id}")
+    elif bs_status == "SUBMITTED":
+        print(f"Broker Stop   : SUBMITTED | stop {bs_price} | order_id={bs_id}")
+    elif bs_status == "MISSING":
+        print("Broker Stop   : MISSING | software stop backup active")
+    else:
+        print(f"Broker Stop   : {bs_status}")
+
     recon        = snapshot.get("trade_reconciliation", {})
     recon_status = recon.get("status", "no_active_trade")
     if recon_status == "closed":
@@ -666,6 +683,16 @@ def run_scan_loop():
             if pm_line:
                 snapshot["ai_context"]["summary"] = (
                     snapshot["ai_context"].get("summary", "") + " " + pm_line
+                ).strip()
+
+            # ── Broker Stop (Phase 4B) ─────────────────────────────────────
+            snapshot["broker_stop"] = snapshot["position_monitor"].get(
+                "broker_stop", {"enabled": False, "status": "disabled"}
+            )
+            bs_line = format_broker_stop_line(snapshot["broker_stop"])
+            if bs_line:
+                snapshot["ai_context"]["summary"] = (
+                    snapshot["ai_context"].get("summary", "") + " " + bs_line
                 ).strip()
 
             # ── Operational Readiness (Phase 2C) ──────────────────────────

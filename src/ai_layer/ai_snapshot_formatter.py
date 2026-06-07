@@ -416,6 +416,22 @@ def format_stop_enforcer_line(se: dict) -> str:
     return ""   # monitoring with no breach — no line needed
 
 
+def format_broker_stop_line(bs: dict) -> str:
+    """One-line broker stop summary for the ai_context summary."""
+    if not bs or not bs.get("enabled"):
+        return ""
+    status    = (bs.get("status") or "disabled").upper()
+    stop_price = bs.get("stop_price")
+    order_id   = bs.get("stop_order_id")
+    if status == "VERIFIED":
+        return f"Broker Stop: VERIFIED. stop_price={stop_price}. order_id={order_id}."
+    if status == "SUBMITTED":
+        return f"Broker Stop: SUBMITTED. stop_price={stop_price}."
+    if status == "MISSING":
+        return "Broker Stop: MISSING. Software stop backup active."
+    return f"Broker Stop: {status}."
+
+
 def format_archive_line(ia: dict) -> str:
     """One-line intent archive summary -- appended to ai_context summary by the scan loop."""
     if not ia:

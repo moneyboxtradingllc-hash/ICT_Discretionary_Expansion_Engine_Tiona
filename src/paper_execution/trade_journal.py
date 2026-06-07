@@ -146,6 +146,12 @@ def make_record(
         "realized_r":         None,
         "holding_minutes":    None,
         "final_status":       None,
+        # Phase 4B broker stop fields (set by protective_stop)
+        "broker_stop_order_id":   None,
+        "broker_stop_status":     None,
+        "broker_stop_price":      None,
+        "broker_stop_submitted_at": None,
+        "broker_stop_verified":   False,
     }
 
 
@@ -294,6 +300,42 @@ def mark_closed(
         exit_price      = round(float(exit_price), 4) if exit_price is not None else None,
         final_status    = final_status or "closed",
     )
+
+
+# ── Phase 4B: broker stop journal update ─────────────────────────────────────
+
+def update_broker_stop(
+    trade_id: str,
+    symbol: str,
+    order_id: str | None,
+    stop_price: float | None,
+    status: str,
+    submitted_at: str | None,
+) -> bool:
+    """
+    Update broker stop fields on a journal trade record.
+    status should be one of: broker_stop_pending, broker_stop_submitted,
+    broker_stop_verified, broker_stop_missing, broker_stop_canceled.
+    Returns True on success.
+    """
+    _, fp = _find_trade_filepath(trade_id, symbol)
+    if fp is None:
+        return False
+
+    fields: dict = {"broker_stop_status": status}
+    if order_id is not None:
+        fields["broker_stop_order_id"] = order_id
+    if stop_price is not None:
+        fields["broker_stop_price"] = round(float(stop_price), 4)
+    if submitted_at is not None:
+        fields["broker_stop_submitted_at"] = submitted_at
+    # Reflect verification boolean
+    if status == "broker_stop_verified":
+        fields["broker_stop_verified"] = True
+    elif status == "broker_stop_missing":
+        fields["broker_stop_verified"] = False
+
+    return _update_trade_in_file(trade_id, fp, **fields)
 
 
 # ── Phase 4A: find any non-terminal trade ──────────────────────────────────────

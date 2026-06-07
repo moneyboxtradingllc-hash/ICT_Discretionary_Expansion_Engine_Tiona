@@ -129,6 +129,12 @@ def save_snapshot(snapshot: dict, symbol: str) -> str:
             "strongest_negative_correlations":  snapshot.get("experience_correlation", {}).get("strongest_negative_correlations", []),
             "warnings":                         snapshot.get("experience_correlation", {}).get("warnings", []),
         },
+        "broker_stop": {
+            "enabled":       snapshot.get("broker_stop", {}).get("enabled"),
+            "status":        snapshot.get("broker_stop", {}).get("status"),
+            "stop_order_id": snapshot.get("broker_stop", {}).get("stop_order_id"),
+            "stop_price":    snapshot.get("broker_stop", {}).get("stop_price"),
+        },
         "trade_reconciliation": {
             "trade_found":     snapshot.get("trade_reconciliation", {}).get("trade_found"),
             "status":          snapshot.get("trade_reconciliation", {}).get("status"),
