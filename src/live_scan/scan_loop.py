@@ -40,14 +40,17 @@ from operational_readiness.activation_controller   import determine_activation
 from paper_activation.activation_plan              import build_activation_plan
 from paper_activation.activation_runner            import run_activation
 from paper_activation.activation_report            import log_activation_event
-from experience_intelligence.experience_summary    import build_experience_summary
-from experience_intelligence.experience_report     import build_experience_report
-from ai_layer.ai_snapshot_formatter                import (
+from experience_intelligence.experience_summary     import build_experience_summary
+from experience_intelligence.experience_report      import build_experience_report
+from experience_intelligence.experience_correlation import build_correlation_for_symbol
+from experience_intelligence.correlation_report     import build_correlation_report
+from ai_layer.ai_snapshot_formatter                 import (
     format_decision_line, format_gate_line, format_intent_line,
     format_score_line, format_archive_line, format_paper_execution_line,
     format_position_monitor_line, format_stop_enforcer_line,
     format_operational_readiness_line, format_activation_line,
     format_paper_activation_line, format_experience_line,
+    format_correlation_line,
 )
 
 _EASTERN = pytz.timezone("America/New_York")
@@ -292,6 +295,20 @@ def _print_scan_summary(snapshot: dict, symbol: str, scan_num: int, saved_path: 
         if exp_matches:
             parts.append(f"{exp_matches} similar")
         print("Experience    : " + " | ".join(parts) + " | AUTHORITY=OBSERVE_ONLY")
+
+    corr_rep  = snapshot.get("experience_correlation", {})
+    corr_n    = corr_rep.get("sample_size", 0)
+    corr_pos  = corr_rep.get("strongest_positive_correlations", [])
+    corr_neg  = corr_rep.get("strongest_negative_correlations", [])
+    if corr_n == 0 or (not corr_pos and not corr_neg):
+        print("Exp Corr      : insufficient sample | AUTHORITY=OBSERVE_ONLY")
+    else:
+        c_parts = []
+        if corr_pos:
+            c_parts.append(f"+ {corr_pos[0]}")
+        if corr_neg:
+            c_parts.append(f"- {corr_neg[0]}")
+        print("Exp Corr      : " + " | ".join(c_parts) + " | AUTHORITY=OBSERVE_ONLY")
 
     pa_plan   = snapshot.get("paper_activation_plan", {})
     pa        = snapshot.get("paper_activation", {})
@@ -596,6 +613,15 @@ def run_scan_loop():
             if exp_line:
                 snapshot["ai_context"]["summary"] = (
                     snapshot["ai_context"].get("summary", "") + " " + exp_line
+                ).strip()
+
+            # ── Experience Correlation (Phase 3B — OBSERVE_ONLY) ──────────
+            _raw_corr = build_correlation_for_symbol(symbol)
+            snapshot["experience_correlation"] = build_correlation_report(_raw_corr)
+            corr_line = format_correlation_line(snapshot["experience_correlation"])
+            if corr_line:
+                snapshot["ai_context"]["summary"] = (
+                    snapshot["ai_context"].get("summary", "") + " " + corr_line
                 ).strip()
 
             # ── Position Monitor (Phase 2B — moved up) ────────────────────

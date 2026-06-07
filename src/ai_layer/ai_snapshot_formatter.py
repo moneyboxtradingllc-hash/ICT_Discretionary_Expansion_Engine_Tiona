@@ -282,6 +282,26 @@ def format_experience_line(exp: dict) -> str:
     return "Experience: " + " | ".join(parts) + " | AUTHORITY=OBSERVE_ONLY"
 
 
+def format_correlation_line(corr: dict) -> str:
+    """One-line correlation intelligence summary. OBSERVE_ONLY — never influences decisions."""
+    if not corr or not corr.get("enabled"):
+        return ""
+    n   = corr.get("sample_size", 0)
+    pos = corr.get("strongest_positive_correlations", [])
+    neg = corr.get("strongest_negative_correlations", [])
+
+    if n == 0 or (not pos and not neg):
+        return "Experience Corr: insufficient sample | AUTHORITY=OBSERVE_ONLY"
+
+    parts = []
+    if pos:
+        parts.append(f"+ {pos[0]}")
+    if neg:
+        parts.append(f"- {neg[0]}")
+
+    return "Experience Corr: " + " | ".join(parts) + " | AUTHORITY=OBSERVE_ONLY"
+
+
 def format_paper_execution_line(pe: dict) -> str:
     """One-line paper execution summary -- appended to ai_context summary by the scan loop."""
     if not pe:
@@ -608,6 +628,11 @@ def format_for_ai(snapshot: dict) -> str:
     exp_line = format_experience_line(snapshot.get("experience_summary", {}))
     if exp_line:
         parts.append(exp_line)
+
+    # Experience Correlation (Phase 3B — OBSERVE_ONLY)
+    corr_line = format_correlation_line(snapshot.get("experience_correlation", {}))
+    if corr_line:
+        parts.append(corr_line)
 
     # Paper Activation (Phase 2D)
     pa_line = format_paper_activation_line(snapshot.get("paper_activation", {}))

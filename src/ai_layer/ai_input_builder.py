@@ -205,5 +205,16 @@ def build_compact_ai_input(snapshot: dict) -> dict:
             "authority_level": exp.get("authority_level", "observe_only"),
         }
 
+    # Phase 3B — include correlation context (OBSERVE_ONLY).
+    # AI may read and reference correlations. AI must not alter decisions.
+    corr = snapshot.get("experience_correlation") or {}
+    result["experience_correlation"] = {
+        "authority_level":        "observe_only",
+        "sample_size":            corr.get("sample_size",            0),
+        "correlation_confidence": corr.get("correlation_confidence", "none"),
+        "positive":               corr.get("strongest_positive_correlations", []),
+        "negative":               corr.get("strongest_negative_correlations", []),
+    }
+
     return result
 

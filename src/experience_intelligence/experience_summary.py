@@ -1,8 +1,8 @@
 """
-Phase 3A — Experience Summary.
+Phase 3A/3B — Experience Summary.
 Builds the OBSERVE_ONLY experience intelligence block for each scan snapshot.
 
-SAFETY CONSTRAINTS (immutable for Phase 3A — never remove or weaken):
+SAFETY CONSTRAINTS (immutable — never remove or weaken):
   authority_level      = "observe_only"    ← constant, never changes
   confidence_modifier  = 0                 ← always 0, never non-zero
 
@@ -12,10 +12,13 @@ This module NEVER modifies:
   paper_activation, or any downstream execution variable.
 """
 
-from experience_intelligence.experience_query   import (
+from experience_intelligence.experience_query       import (
     load_completed_trades, find_similar_setups,
 )
-from experience_intelligence.experience_metrics import compute_metrics
+from experience_intelligence.experience_metrics     import compute_metrics
+from experience_intelligence.experience_correlation import (
+    build_correlation, correlation_confidence as _corr_confidence,
+)
 
 _AUTHORITY   = "observe_only"
 _EXP_ENABLED = True
@@ -40,6 +43,12 @@ def _build(snapshot: dict, symbol: str) -> dict:
     historical_matches = len(similar_setups)
     n                  = metrics["sample_size"]
 
+    # Phase 3B: correlation fields derived from the same trade set (no extra load)
+    corr             = build_correlation(completed_trades)
+    corr_n           = corr.get("sample_size", 0)
+    corr_available   = corr_n > 0
+    corr_conf        = _corr_confidence(corr_n) if corr_available else "none"
+
     notes: list[str] = []
     if n == 0:
         notes.append("Insufficient sample size — awaiting first completed trade")
@@ -54,41 +63,45 @@ def _build(snapshot: dict, symbol: str) -> dict:
         notes.append(f"{historical_matches} historically similar setup(s) found this session")
 
     return {
-        "experience_enabled":   _EXP_ENABLED,
-        "authority_level":      _AUTHORITY,
-        "sample_size":          n,
-        "historical_matches":   historical_matches,
-        "win_rate":             metrics["win_rate"],
-        "loss_rate":            metrics["loss_rate"],
-        "average_r":            metrics["average_r"],
-        "average_hold_time":    metrics["average_hold_time"],
-        "average_mfe":          metrics["average_mfe"],
-        "average_mae":          metrics["average_mae"],
-        "best_session":         metrics["best_session"],
-        "worst_session":        metrics["worst_session"],
-        "best_playbook":        metrics["best_playbook"],
-        "worst_playbook":       metrics["worst_playbook"],
-        "confidence_modifier":  0,   # ALWAYS 0 — Phase 3A OBSERVE_ONLY
-        "notes":                notes,
+        "experience_enabled":    _EXP_ENABLED,
+        "authority_level":       _AUTHORITY,
+        "sample_size":           n,
+        "historical_matches":    historical_matches,
+        "win_rate":              metrics["win_rate"],
+        "loss_rate":             metrics["loss_rate"],
+        "average_r":             metrics["average_r"],
+        "average_hold_time":     metrics["average_hold_time"],
+        "average_mfe":           metrics["average_mfe"],
+        "average_mae":           metrics["average_mae"],
+        "best_session":          metrics["best_session"],
+        "worst_session":         metrics["worst_session"],
+        "best_playbook":         metrics["best_playbook"],
+        "worst_playbook":        metrics["worst_playbook"],
+        "confidence_modifier":   0,            # ALWAYS 0 — OBSERVE_ONLY
+        "correlation_available": corr_available,  # Phase 3B
+        "correlation_confidence": corr_conf,      # Phase 3B
+        "notes":                 notes,
     }
 
 
 def _safe_default(notes: list[str]) -> dict:
     return {
-        "experience_enabled":   _EXP_ENABLED,
-        "authority_level":      _AUTHORITY,
-        "sample_size":          0,
-        "historical_matches":   0,
-        "win_rate":             None,
-        "loss_rate":            None,
-        "average_r":            None,
-        "average_hold_time":    None,
-        "average_mfe":          None,
-        "average_mae":          None,
-        "best_session":         None,
-        "worst_session":        None,
-        "best_playbook":        None,
-        "worst_playbook":       None,
-        "confidence_modifier":  0,
-        "notes":                notes,
+        "experience_enabled":    _EXP_ENABLED,
+        "authority_level":       _AUTHORITY,
+        "sample_size":           0,
+        "historical_matches":    0,
+        "win_rate":              None,
+        "loss_rate":             None,
+        "average_r":             None,
+        "average_hold_time":     None,
+        "average_mfe":           None,
+        "average_mae":           None,
+        "best_session":          None,
+        "worst_session":         None,
+        "best_playbook":         None,
+        "worst_playbook":        None,
+        "confidence_modifier":   0,
+        "correlation_available": False,   # Phase 3B
+        "correlation_confidence": "none", # Phase 3B
+        "notes":                 notes,
     }

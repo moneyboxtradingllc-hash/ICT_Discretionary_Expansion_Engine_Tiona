@@ -114,6 +114,16 @@ def save_snapshot(snapshot: dict, symbol: str) -> str:
             "notes":                snapshot.get("experience_summary", {}).get("notes", []),
         },
         "experience_report": snapshot.get("experience_report"),
+        "experience_correlation": {
+            "enabled":                         snapshot.get("experience_correlation", {}).get("enabled"),
+            "authority_level":                  snapshot.get("experience_correlation", {}).get("authority_level"),
+            "sample_size":                      snapshot.get("experience_correlation", {}).get("sample_size"),
+            "confidence_modifier":              snapshot.get("experience_correlation", {}).get("confidence_modifier", 0),
+            "correlation_confidence":           snapshot.get("experience_correlation", {}).get("correlation_confidence"),
+            "strongest_positive_correlations":  snapshot.get("experience_correlation", {}).get("strongest_positive_correlations", []),
+            "strongest_negative_correlations":  snapshot.get("experience_correlation", {}).get("strongest_negative_correlations", []),
+            "warnings":                         snapshot.get("experience_correlation", {}).get("warnings", []),
+        },
         "paper_activation_plan": {
             "activation_mode":     snapshot.get("paper_activation_plan", {}).get("activation_mode"),
             "armed":               snapshot.get("paper_activation_plan", {}).get("armed"),
