@@ -1,0 +1,134 @@
+"""
+Snapshot persistence for the live scan loop.
+Saves compact JSON to data/live_snapshots/ — no raw candles, no readiness verbosity.
+"""
+import os
+import json
+from datetime import datetime
+import pytz
+
+_EASTERN     = pytz.timezone("America/New_York")
+_PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
+STORE_DIR = os.path.join(_PROJECT_ROOT, "data", "live_snapshots")
+
+
+def save_snapshot(snapshot: dict, symbol: str) -> str:
+    """
+    Persist a compact scan snapshot to data/live_snapshots/.
+    Returns the full filepath on success. Raises on I/O failure.
+    """
+    os.makedirs(STORE_DIR, exist_ok=True)
+
+    now_et   = datetime.now(_EASTERN)
+    filename = now_et.strftime("%Y%m%d_%H%M%S") + f"_{symbol}.json"
+    filepath = os.path.join(STORE_DIR, filename)
+
+    tb = snapshot.get("toolbox", {})
+
+    # Strip per-candidate readiness/price_level/trigger_prep verbosity — keep status only
+    compact_candidates = [
+        {
+            "tool":             c.get("tool"),
+            "score":            c.get("score"),
+            "raw_status":       c.get("raw_status"),
+            "effective_status": c.get("effective_status"),
+        }
+        for c in tb.get("tool_candidates", [])
+    ]
+
+    compact = {
+        "timestamp":    snapshot.get("timestamp"),
+        "symbol":       symbol,
+        "session":      snapshot.get("session"),
+        "qualification": snapshot.get("qualification"),
+        "playbook":     snapshot.get("playbook"),
+        "risk": {
+            "risk_tier":        snapshot.get("risk", {}).get("risk_tier"),
+            "trade_allowed":    snapshot.get("risk", {}).get("trade_allowed"),
+            "authority_reason": snapshot.get("risk", {}).get("authority_reason"),
+            "blocks":           snapshot.get("risk", {}).get("blocks",       []),
+            "restrictions":     snapshot.get("risk", {}).get("restrictions", []),
+        },
+        "toolbox": {
+            "preferred_tool":                  tb.get("preferred_tool"),
+            "best_available_raw_status":        tb.get("best_available_raw_status"),
+            "best_available_effective_status":  tb.get("best_available_effective_status"),
+            "tool_candidates":                  compact_candidates,
+        },
+        "state_transition":  snapshot.get("state_transition"),
+        "setup_lifecycle":   snapshot.get("setup_lifecycle"),
+        "ai_debate":         snapshot.get("ai_debate"),
+        "decision_authority": snapshot.get("decision_authority"),
+        "execution_gate":    snapshot.get("execution_gate"),
+        "trade_intent":      snapshot.get("trade_intent"),
+        "intent_score":      snapshot.get("intent_score"),
+        "intent_archive":    snapshot.get("intent_archive"),
+        "paper_execution": {
+            "status":          snapshot.get("paper_execution", {}).get("status"),
+            "reason":          snapshot.get("paper_execution", {}).get("reason"),
+            "order_summary":   snapshot.get("paper_execution", {}).get("order_summary"),
+            "alpaca_order_id": snapshot.get("paper_execution", {}).get("alpaca_order_id"),
+            "trade_id":        snapshot.get("paper_execution", {}).get("trade_id"),
+        },
+        "position_monitor": {
+            "enabled":               snapshot.get("position_monitor", {}).get("enabled"),
+            "has_open_position":     snapshot.get("position_monitor", {}).get("has_open_position"),
+            "status":                snapshot.get("position_monitor", {}).get("status"),
+            "side":                  snapshot.get("position_monitor", {}).get("side"),
+            "qty":                   snapshot.get("position_monitor", {}).get("qty"),
+            "avg_entry_price":       snapshot.get("position_monitor", {}).get("avg_entry_price"),
+            "current_price":         snapshot.get("position_monitor", {}).get("current_price"),
+            "stop_reference":        snapshot.get("position_monitor", {}).get("stop_reference"),
+            "stop_distance":         snapshot.get("position_monitor", {}).get("stop_distance"),
+            "unrealized_pnl":        snapshot.get("position_monitor", {}).get("unrealized_pnl"),
+            "linked_trade_id":       snapshot.get("position_monitor", {}).get("linked_trade_id"),
+            "exit_already_submitted": snapshot.get("position_monitor", {}).get("exit_already_submitted"),
+            "warnings":              snapshot.get("position_monitor", {}).get("warnings", []),
+        },
+        "stop_enforcer": {
+            "enabled":       snapshot.get("stop_enforcer", {}).get("enabled"),
+            "stop_evaluated": snapshot.get("stop_enforcer", {}).get("stop_evaluated"),
+            "stop_breached": snapshot.get("stop_enforcer", {}).get("stop_breached"),
+            "breach_reason": snapshot.get("stop_enforcer", {}).get("breach_reason"),
+            "exit_submitted": snapshot.get("stop_enforcer", {}).get("exit_submitted"),
+            "exit_order_id": snapshot.get("stop_enforcer", {}).get("exit_order_id"),
+            "exit_reason":   snapshot.get("stop_enforcer", {}).get("exit_reason"),
+            "action_taken":  snapshot.get("stop_enforcer", {}).get("action_taken"),
+            "warnings":      snapshot.get("stop_enforcer", {}).get("warnings", []),
+        },
+        "paper_activation_plan": {
+            "activation_mode":     snapshot.get("paper_activation_plan", {}).get("activation_mode"),
+            "armed":               snapshot.get("paper_activation_plan", {}).get("armed"),
+            "symbol":              snapshot.get("paper_activation_plan", {}).get("symbol"),
+            "max_trades":          snapshot.get("paper_activation_plan", {}).get("max_trades"),
+            "risk_dollars":        snapshot.get("paper_activation_plan", {}).get("risk_dollars"),
+            "requirements_passed": snapshot.get("paper_activation_plan", {}).get("requirements_passed"),
+            "requirements":        snapshot.get("paper_activation_plan", {}).get("requirements", {}),
+            "blocking_issues":     snapshot.get("paper_activation_plan", {}).get("blocking_issues", []),
+            "reason":              snapshot.get("paper_activation_plan", {}).get("reason"),
+        },
+        "paper_activation": snapshot.get("paper_activation"),
+        "operational_readiness": {
+            "ready":           snapshot.get("operational_readiness", {}).get("ready"),
+            "score":           snapshot.get("operational_readiness", {}).get("score"),
+            "checks":          snapshot.get("operational_readiness", {}).get("checks", {}),
+            "warnings":        snapshot.get("operational_readiness", {}).get("warnings", []),
+            "blocking_issues": snapshot.get("operational_readiness", {}).get("blocking_issues", []),
+        },
+        "activation_controller": snapshot.get("activation_controller"),
+        "ai_discretionary": snapshot.get("ai_discretionary"),
+        "confidence_fusion": snapshot.get("confidence_fusion"),
+        "ai_context": {
+            "market_narrative": snapshot.get("ai_context", {}).get("market_narrative"),
+            "confidence_score": snapshot.get("ai_context", {}).get("confidence_score"),
+            "confidence_tier":  snapshot.get("ai_context", {}).get("confidence_tier"),
+            "summary":          snapshot.get("ai_context", {}).get("summary"),
+        },
+    }
+
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(compact, f, indent=2, default=str)
+
+    return filepath
