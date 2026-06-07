@@ -40,12 +40,14 @@ from operational_readiness.activation_controller   import determine_activation
 from paper_activation.activation_plan              import build_activation_plan
 from paper_activation.activation_runner            import run_activation
 from paper_activation.activation_report            import log_activation_event
+from experience_intelligence.experience_summary    import build_experience_summary
+from experience_intelligence.experience_report     import build_experience_report
 from ai_layer.ai_snapshot_formatter                import (
     format_decision_line, format_gate_line, format_intent_line,
     format_score_line, format_archive_line, format_paper_execution_line,
     format_position_monitor_line, format_stop_enforcer_line,
     format_operational_readiness_line, format_activation_line,
-    format_paper_activation_line,
+    format_paper_activation_line, format_experience_line,
 )
 
 _EASTERN = pytz.timezone("America/New_York")
@@ -270,6 +272,27 @@ def _print_scan_summary(snapshot: dict, symbol: str, scan_num: int, saved_path: 
     else:
         print("Intent Archive: no active records")
 
+    exp         = snapshot.get("experience_summary", {})
+    exp_n       = exp.get("sample_size", 0)
+    exp_wr      = exp.get("win_rate")
+    exp_r       = exp.get("average_r")
+    exp_matches = exp.get("historical_matches", 0)
+    if exp_n == 0:
+        print(f"Experience    : {exp_n} setup(s) | Insufficient Sample | AUTHORITY=OBSERVE_ONLY")
+    elif exp_n < 20:
+        match_tag = f" | {exp_matches} similar" if exp_matches else ""
+        print(f"Experience    : {exp_n} setup(s) | Developing{match_tag} | AUTHORITY=OBSERVE_ONLY")
+    else:
+        parts = [f"{exp_n} setups"]
+        if exp_wr is not None:
+            parts.append(f"WR {exp_wr:.0f}%")
+        if exp_r is not None:
+            sign = "+" if exp_r >= 0 else ""
+            parts.append(f"Avg {sign}{exp_r:.1f}R")
+        if exp_matches:
+            parts.append(f"{exp_matches} similar")
+        print("Experience    : " + " | ".join(parts) + " | AUTHORITY=OBSERVE_ONLY")
+
     pa_plan   = snapshot.get("paper_activation_plan", {})
     pa        = snapshot.get("paper_activation", {})
     pa_status = (pa.get("status") or "disabled").upper()
@@ -405,10 +428,11 @@ def run_scan_loop():
     ai_fallbacks = 0
     start_time   = datetime.now(_EASTERN)
 
-    previous_snapshot   = None
-    previous_qual_state = None
-    bars_in_state       = 0
-    setup_tracker       = SetupTracker()
+    previous_snapshot        = None
+    previous_qual_state      = None
+    bars_in_state            = 0
+    setup_tracker            = SetupTracker()
+    prev_experience_summary  = None   # Phase 3A: carry forward for AI input next scan
 
     # Initialise provider (fail fast before entering the loop)
     try:
@@ -477,6 +501,7 @@ def run_scan_loop():
                     raw_data,
                     memory=memory,
                     ai_mode_override=mode_override,
+                    experience_summary=prev_experience_summary,
                 )
             except Exception as exc:
                 print(f"  [SNAPSHOT ERROR scan #{scan_count}] {exc}")
@@ -559,6 +584,18 @@ def run_scan_loop():
             if archive_line:
                 snapshot["ai_context"]["summary"] = (
                     snapshot["ai_context"].get("summary", "") + " " + archive_line
+                ).strip()
+
+            # ── Experience Intelligence (Phase 3A — OBSERVE_ONLY) ─────────
+            snapshot["experience_summary"] = build_experience_summary(snapshot, symbol)
+            snapshot["experience_report"]  = build_experience_report(
+                snapshot["experience_summary"]
+            )
+            prev_experience_summary = snapshot["experience_summary"]
+            exp_line = format_experience_line(snapshot["experience_summary"])
+            if exp_line:
+                snapshot["ai_context"]["summary"] = (
+                    snapshot["ai_context"].get("summary", "") + " " + exp_line
                 ).strip()
 
             # ── Position Monitor (Phase 2B — moved up) ────────────────────

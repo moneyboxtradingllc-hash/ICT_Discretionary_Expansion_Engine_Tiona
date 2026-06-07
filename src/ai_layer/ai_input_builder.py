@@ -133,7 +133,7 @@ def build_compact_ai_input(snapshot: dict) -> dict:
     candidates  = tb.get("tool_candidates", [])
     mem_global  = (mem.get("global") or {}) if mem and mem.get("available") else {}
 
-    return {
+    result = {
         "timestamp": snapshot.get("timestamp"),
         "session":   snapshot.get("session"),
 
@@ -193,3 +193,17 @@ def build_compact_ai_input(snapshot: dict) -> dict:
         "expansion":  _expansion_summary(snapshot.get("expansion",  {})),
         "liquidity":  _liquidity_events(snapshot.get("liquidity",  {})),
     }
+
+    # Phase 3A — include experience context when available (OBSERVE_ONLY).
+    # AI may reference and discuss experience. AI must not alter decisions.
+    exp = snapshot.get("experience_summary")
+    if exp and exp.get("experience_enabled"):
+        result["experience"] = {
+            "sample_size":     exp.get("sample_size",   0),
+            "win_rate":        exp.get("win_rate"),
+            "average_r":       exp.get("average_r"),
+            "authority_level": exp.get("authority_level", "observe_only"),
+        }
+
+    return result
+

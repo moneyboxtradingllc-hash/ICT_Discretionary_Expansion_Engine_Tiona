@@ -261,6 +261,27 @@ def _discretionary_line(ai_disc: dict, fusion: dict) -> str:
     return " ".join(parts)
 
 
+def format_experience_line(exp: dict) -> str:
+    """One-line experience intelligence summary. OBSERVE_ONLY — never influences decisions."""
+    if not exp or not exp.get("experience_enabled"):
+        return ""
+    n     = exp.get("sample_size",  0)
+    wr    = exp.get("win_rate")
+    avg_r = exp.get("average_r")
+
+    if n == 0 or n < 20:
+        return f"Experience: {n} setup(s) | Insufficient Sample | AUTHORITY=OBSERVE_ONLY"
+
+    parts = [f"{n} setups"]
+    if wr is not None:
+        parts.append(f"WR {wr:.0f}%")
+    if avg_r is not None:
+        sign = "+" if avg_r >= 0 else ""
+        parts.append(f"Avg {sign}{avg_r:.1f}R")
+
+    return "Experience: " + " | ".join(parts) + " | AUTHORITY=OBSERVE_ONLY"
+
+
 def format_paper_execution_line(pe: dict) -> str:
     """One-line paper execution summary -- appended to ai_context summary by the scan loop."""
     if not pe:
@@ -582,6 +603,11 @@ def format_for_ai(snapshot: dict) -> str:
     archive_line = format_archive_line(snapshot.get("intent_archive", {}))
     if archive_line:
         parts.append(archive_line)
+
+    # Experience Intelligence (Phase 3A — OBSERVE_ONLY)
+    exp_line = format_experience_line(snapshot.get("experience_summary", {}))
+    if exp_line:
+        parts.append(exp_line)
 
     # Paper Activation (Phase 2D)
     pa_line = format_paper_activation_line(snapshot.get("paper_activation", {}))

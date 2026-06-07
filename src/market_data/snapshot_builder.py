@@ -21,7 +21,13 @@ TIMEFRAMES = ["15m", "5m", "3m", "1m"]
 _NO_MEMORY = {"available": False, "snapshot_count": 0, "global": None, "timeframes": None}
 
 
-def build_snapshot(raw_data: dict, ref_timestamp: str = None, memory=None, ai_mode_override: str = None) -> dict:
+def build_snapshot(
+    raw_data: dict,
+    ref_timestamp: str = None,
+    memory=None,
+    ai_mode_override: str = None,
+    experience_summary: dict = None,
+) -> dict:
     timeframes = {}
     all_normalized = {}
 
@@ -117,6 +123,11 @@ def build_snapshot(raw_data: dict, ref_timestamp: str = None, memory=None, ai_mo
 
     # Toolbox: reads playbook + risk + all evidence to select entry tools
     snapshot["toolbox"] = run_toolbox(snapshot)
+
+    # Experience Intelligence (Phase 3A): OBSERVE_ONLY context from previous scan.
+    # confidence_modifier is always 0 and must never influence toolbox or decisions.
+    if experience_summary:
+        snapshot["experience_summary"] = experience_summary
 
     # AI Discretionary Engine: interprets the full assembled snapshot
     ai_disc, confidence_fusion, ai_debate = run_discretionary_ai(snapshot, mode_override=ai_mode_override)
