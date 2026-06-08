@@ -96,6 +96,42 @@ def intent_already_journaled(intent_id: str, symbol: str) -> bool:
     )
 
 
+_AI_FB_DEFAULTS = {
+    "ai_direction_at_entry":             "unknown",
+    "ai_confidence_at_entry":            0,
+    "ai_agreement_with_playbook":        None,
+    "ai_agreement_with_risk":            None,
+    "ai_external_used":                  False,
+    "ai_fallback_used":                  False,
+    "ai_fallback_reason":                None,
+    "ai_model_used":                     None,
+    "mechanical_confidence_at_entry":    0,
+    "confidence_fusion_status_at_entry": "unknown",
+    "confidence_delta_at_entry":         0,
+    "ai_debate_dominant_thesis":         "unknown",
+    "ai_debate_recommended_stance":      "unknown",
+    "ai_debate_verdict_confidence":      0,
+    # Phase 5B outcome fields (set after closure by trade_reconciliation)
+    "ai_outcome_scored":                 False,
+    "ai_was_directionally_correct":      None,
+    "ai_agreement_outcome":              "unknown",
+    "ai_confidence_quality":             "unknown",
+    "ai_value_label":                    "unknown",
+    "ai_outcome_reason":                 None,
+}
+
+
+def _ai_feedback_fields(ai_feedback: "dict | None") -> dict:
+    """Merge supplied ai_feedback dict over defaults, stripping non-journal meta keys."""
+    _exclude = {"authority_level", "confidence_modifier"}
+    result = dict(_AI_FB_DEFAULTS)
+    if ai_feedback:
+        for k, v in ai_feedback.items():
+            if k in result and k not in _exclude:
+                result[k] = v
+    return result
+
+
 def make_record(
     *,
     trade_id: str,
@@ -118,6 +154,8 @@ def make_record(
     regime_confidence:    int = 0,
     volatility_state:     str = "unknown",
     expansion_state:      str = "unknown",
+    # Phase 5B: AI feedback at entry (OBSERVE_ONLY — never affect execution)
+    ai_feedback: "dict | None" = None,
 ) -> dict:
     """Build a canonical trade journal record."""
     return {
@@ -142,6 +180,8 @@ def make_record(
         "regime_confidence":    regime_confidence,
         "volatility_state":     volatility_state,
         "expansion_state":      expansion_state,
+        # Phase 5B: AI feedback at entry (OBSERVE_ONLY — scored after closure)
+        **_ai_feedback_fields(ai_feedback),
         # Phase 2B lifecycle fields (default values)
         "avg_fill_price":     None,
         "filled_qty":         None,

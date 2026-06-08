@@ -319,6 +319,26 @@ def format_correlation_line(corr: dict) -> str:
     return "Experience Corr: " + " | ".join(parts) + " | AUTHORITY=OBSERVE_ONLY"
 
 
+def format_ai_feedback_line(fb: dict) -> str:
+    """One-line AI feedback summary. OBSERVE_ONLY — never influences decisions."""
+    if not fb or not fb.get("enabled"):
+        return ""
+    n   = fb.get("sample_size", 0)
+    hr  = fb.get("ai_helpful_rate")
+    awr = fb.get("agreement_win_rate")
+    dwr = fb.get("disagreement_win_rate")
+    if n == 0:
+        return "AI Feedback: 0 samples | insufficient | OBSERVE_ONLY"
+    if hr is not None:
+        parts = [f"{n} samples", f"helpful {hr:.0f}%"]
+        if awr is not None:
+            parts.append(f"agreement WR {awr:.0f}%")
+        if dwr is not None:
+            parts.append(f"disagreement WR {dwr:.0f}%")
+        return "AI Feedback: " + " | ".join(parts) + " | OBSERVE_ONLY"
+    return f"AI Feedback: {n} samples | developing | OBSERVE_ONLY"
+
+
 def format_regime_line(regime: dict) -> str:
     """One-line market regime summary. OBSERVE_ONLY — never influences decisions."""
     if not regime or not regime.get("enabled"):
@@ -692,6 +712,11 @@ def format_for_ai(snapshot: dict) -> str:
     regime_line = format_regime_line(snapshot.get("market_regime", {}))
     if regime_line:
         parts.append(regime_line)
+
+    # AI Feedback (Phase 5B — OBSERVE_ONLY)
+    fb_line = format_ai_feedback_line(snapshot.get("ai_feedback_summary", {}))
+    if fb_line:
+        parts.append(fb_line)
 
     # Paper Activation (Phase 2D)
     pa_line = format_paper_activation_line(snapshot.get("paper_activation", {}))

@@ -24,6 +24,7 @@ from paper_execution.position_guard import check_all as guard_check_all
 from paper_execution.trade_journal  import (
     append_trade, make_record, count_submitted_today, total_risk_today,
 )
+from ai_feedback.ai_feedback_builder import build_ai_feedback_from_snapshot
 
 _EASTERN = pytz.timezone("America/New_York")
 
@@ -180,6 +181,7 @@ def _attempt(snapshot: dict, symbol: str) -> dict:
             reason          = guard["reason"],
             snapshot_summary = _snapshot_summary(snapshot),
             **_regime_from_snapshot(snapshot),
+            ai_feedback     = build_ai_feedback_from_snapshot(snapshot),
         )
         append_trade(record, symbol)
         return _skipped_result(f"position guard: {guard['reason']}", guard)
@@ -242,6 +244,7 @@ def _attempt(snapshot: dict, symbol: str) -> dict:
         reason          = reason,
         snapshot_summary = _snapshot_summary(snapshot),
         **_regime_from_snapshot(snapshot),
+        ai_feedback     = build_ai_feedback_from_snapshot(snapshot),
     )
     append_trade(record, symbol)
 

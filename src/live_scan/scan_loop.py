@@ -54,6 +54,7 @@ from ai_layer.ai_snapshot_formatter                 import (
     format_experience_link_line, format_correlation_line,
     format_broker_stop_line,
     format_regime_line,
+    format_ai_feedback_line,
 )
 
 _EASTERN = pytz.timezone("America/New_York")
@@ -329,6 +330,23 @@ def _print_scan_summary(snapshot: dict, symbol: str, scan_num: int, saved_path: 
         )
     else:
         print("Regime        : unknown | insufficient evidence | OBSERVE_ONLY")
+
+    fb     = snapshot.get("ai_feedback_summary") or {}
+    fb_n   = fb.get("sample_size", 0)
+    fb_hr  = fb.get("ai_helpful_rate")
+    fb_awr = fb.get("agreement_win_rate")
+    fb_dwr = fb.get("disagreement_win_rate")
+    if fb_n == 0:
+        print("AI Feedback   : 0 samples | insufficient | OBSERVE_ONLY")
+    elif fb_hr is not None:
+        parts = [f"{fb_n} samples", f"helpful {fb_hr:.0f}%"]
+        if fb_awr is not None:
+            parts.append(f"agreement WR {fb_awr:.0f}%")
+        if fb_dwr is not None:
+            parts.append(f"disagreement WR {fb_dwr:.0f}%")
+        print("AI Feedback   : " + " | ".join(parts) + " | OBSERVE_ONLY")
+    else:
+        print(f"AI Feedback   : {fb_n} samples | developing | OBSERVE_ONLY")
 
     pa_plan   = snapshot.get("paper_activation_plan", {})
     pa        = snapshot.get("paper_activation", {})
@@ -667,6 +685,10 @@ def run_scan_loop():
             snapshot["experience_summary"] = build_experience_summary(snapshot, symbol)
             snapshot["experience_report"]  = build_experience_report(
                 snapshot["experience_summary"]
+            )
+            # Phase 5B: expose AI feedback summary as top-level snapshot key
+            snapshot["ai_feedback_summary"] = (
+                snapshot["experience_summary"].get("ai_feedback_summary") or {}
             )
             prev_experience_summary = snapshot["experience_summary"]
             exp_line = format_experience_line(snapshot["experience_summary"])

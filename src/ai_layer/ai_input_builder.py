@@ -229,5 +229,20 @@ def build_compact_ai_input(snapshot: dict) -> dict:
             "authority_level":  "observe_only",
         }
 
+    # Phase 5B — include AI feedback context (OBSERVE_ONLY).
+    # AI may reference feedback. AI must not alter decisions or risk behavior.
+    fb = (
+        snapshot.get("ai_feedback_summary")
+        or (snapshot.get("experience_summary") or {}).get("ai_feedback_summary")
+        or {}
+    )
+    result["ai_feedback"] = {
+        "sample_size":          fb.get("sample_size",           0),
+        "ai_helpful_rate":      fb.get("ai_helpful_rate"),
+        "agreement_win_rate":   fb.get("agreement_win_rate"),
+        "disagreement_win_rate": fb.get("disagreement_win_rate"),
+        "authority_level":      "observe_only",
+    }
+
     return result
 

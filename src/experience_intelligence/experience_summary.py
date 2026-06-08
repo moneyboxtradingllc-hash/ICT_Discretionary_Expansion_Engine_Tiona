@@ -21,6 +21,7 @@ from experience_intelligence.experience_correlation  import (
 )
 from experience_intelligence.intent_trade_linker     import link_intents_to_trades
 from experience_intelligence.linked_outcome_metrics  import compute_linked_metrics
+from ai_feedback.ai_feedback_summary                 import build_ai_feedback_summary
 
 _AUTHORITY   = "observe_only"
 _EXP_ENABLED = True
@@ -62,6 +63,9 @@ def _build(snapshot: dict, symbol: str) -> dict:
     corr_available   = corr_n > 0
     corr_conf        = _corr_confidence(corr_n) if corr_available else "none"
 
+    # Phase 5B: AI feedback summary
+    ai_fb_summary = build_ai_feedback_summary(completed_trades)
+
     notes: list[str] = []
     if n == 0:
         notes.append("Insufficient sample size — awaiting first completed trade")
@@ -90,8 +94,13 @@ def _build(snapshot: dict, symbol: str) -> dict:
         "worst_session":          metrics["worst_session"],
         "best_playbook":          metrics["best_playbook"],
         "worst_playbook":         metrics["worst_playbook"],
-        "best_regime":            metrics.get("best_regime"),   # Phase 5A
-        "worst_regime":           metrics.get("worst_regime"),  # Phase 5A
+        "best_regime":            metrics.get("best_regime"),             # Phase 5A
+        "worst_regime":           metrics.get("worst_regime"),            # Phase 5A
+        "ai_helpful_rate":        metrics.get("ai_helpful_rate"),         # Phase 5B
+        "ai_harmful_rate":        metrics.get("ai_harmful_rate"),         # Phase 5B
+        "agreement_win_rate":     metrics.get("agreement_win_rate"),      # Phase 5B
+        "disagreement_win_rate":  metrics.get("disagreement_win_rate"),   # Phase 5B
+        "ai_feedback_summary":    ai_fb_summary,                          # Phase 5B
         "confidence_modifier":    0,               # ALWAYS 0 — OBSERVE_ONLY
         "correlation_available":  corr_available,  # Phase 3B
         "correlation_confidence": corr_conf,       # Phase 3B
@@ -133,6 +142,11 @@ def _safe_default(notes: list[str]) -> dict:
         "worst_playbook":         None,
         "best_regime":            None,    # Phase 5A
         "worst_regime":           None,    # Phase 5A
+        "ai_helpful_rate":        None,    # Phase 5B
+        "ai_harmful_rate":        None,    # Phase 5B
+        "agreement_win_rate":     None,    # Phase 5B
+        "disagreement_win_rate":  None,    # Phase 5B
+        "ai_feedback_summary":    None,    # Phase 5B
         "confidence_modifier":    0,
         "correlation_available":  False,   # Phase 3B
         "correlation_confidence": "none",  # Phase 3B

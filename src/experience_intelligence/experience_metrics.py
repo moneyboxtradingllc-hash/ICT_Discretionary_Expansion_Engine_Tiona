@@ -120,6 +120,10 @@ def compute_metrics(
         "worst_playbook":    None,
         "best_regime":       None,
         "worst_regime":      None,
+        "ai_helpful_rate":   None,
+        "ai_harmful_rate":   None,
+        "agreement_win_rate":    None,
+        "disagreement_win_rate": None,
         **_zero_counts,
     }
 
@@ -154,6 +158,33 @@ def compute_metrics(
     best_pb,    worst_pb    = _best_worst(playbooks)
     best_reg,   worst_reg   = _best_worst(regimes)
 
+    # Phase 5B: AI feedback metrics
+    ai_helpful  = 0
+    ai_harmful  = 0
+    ai_scored   = 0
+    agree_wins  = 0
+    agree_tot   = 0
+    disag_wins  = 0
+    disag_tot   = 0
+    for t in trades:
+        label    = (t.get("ai_value_label") or "unknown").lower()
+        agree_pb = t.get("ai_agreement_with_playbook")
+        r_val    = _r_multiple(t)
+        if label == "helpful":  ai_helpful += 1; ai_scored += 1
+        elif label == "harmful": ai_harmful += 1; ai_scored += 1
+        elif label == "neutral": ai_scored += 1
+        if r_val is not None and agree_pb is not None:
+            if agree_pb:
+                agree_wins += (1 if r_val > 0 else 0); agree_tot += 1
+            else:
+                disag_wins += (1 if r_val > 0 else 0); disag_tot += 1
+
+    _min = _MIN_RATE_SAMPLE
+    ai_helpful_rate      = round(ai_helpful / ai_scored * 100, 1) if ai_scored >= _min else None
+    ai_harmful_rate      = round(ai_harmful / ai_scored * 100, 1) if ai_scored >= _min else None
+    agreement_win_rate   = round(agree_wins / agree_tot * 100, 1)  if agree_tot >= _min else None
+    disagreement_win_rate = round(disag_wins / disag_tot * 100, 1) if disag_tot >= _min else None
+
     # Phase 3C: derive MFE/MAE and linkage counts from linked outcomes
     closed_lo     = [lo for lo in (linked_outcomes or [])
                      if lo.get("linked") and lo.get("closed")]
@@ -178,8 +209,12 @@ def compute_metrics(
         "worst_session":      worst_sess,
         "best_playbook":      best_pb,
         "worst_playbook":     worst_pb,
-        "best_regime":        best_reg,        # Phase 5A
-        "worst_regime":       worst_reg,       # Phase 5A
+        "best_regime":            best_reg,              # Phase 5A
+        "worst_regime":           worst_reg,             # Phase 5A
+        "ai_helpful_rate":        ai_helpful_rate,       # Phase 5B
+        "ai_harmful_rate":        ai_harmful_rate,       # Phase 5B
+        "agreement_win_rate":     agreement_win_rate,    # Phase 5B
+        "disagreement_win_rate":  disagreement_win_rate, # Phase 5B
         "linked_trade_count": linked_count,   # Phase 3C
         "closed_trade_count": closed_count,   # Phase 3C
         "open_trade_count":   open_count,     # Phase 3C

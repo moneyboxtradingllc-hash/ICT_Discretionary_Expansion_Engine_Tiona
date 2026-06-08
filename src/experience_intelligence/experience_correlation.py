@@ -11,7 +11,13 @@ _DIMENSIONS: list[str] = [
     "playbook", "preferred_tool", "session", "direction",
     "qualification_status", "risk_tier", "intent_quality",
     "ai_debate_dominant", "decision_type", "setup_lifecycle_phase",
-    "market_regime_label",   # Phase 5A — extracted from trade top-level
+    "market_regime_label",           # Phase 5A — trade top-level
+    "ai_agreement_with_playbook",    # Phase 5B — trade top-level
+    "ai_agreement_with_risk",        # Phase 5B — trade top-level
+    "ai_debate_dominant_thesis",     # Phase 5B — trade top-level
+    "ai_debate_recommended_stance",  # Phase 5B — trade top-level
+    "confidence_fusion_status_at_entry",  # Phase 5B — trade top-level
+    "ai_value_label",                # Phase 5B — trade top-level (set after closure)
 ]
 _MIN_SAMPLE_RATE   = 3    # minimum trades to compute win/loss rates per group
 _MIN_SAMPLE_STRONG = 10   # minimum trades for strongest correlation candidates
@@ -121,7 +127,16 @@ def _extract_trade_attrs(trade: dict) -> dict:
         "decision_type":         da.get("decision",           ""),
         "setup_lifecycle_phase": sl.get("current_phase",      ""),
         # Phase 5A: top-level trade field, not in snapshot_summary
-        "market_regime_label":   (trade.get("market_regime_label") or "").lower(),
+        "market_regime_label":          (trade.get("market_regime_label") or "").lower(),
+        # Phase 5B: AI feedback fields — top-level trade fields
+        "ai_agreement_with_playbook":   str(trade.get("ai_agreement_with_playbook", "")).lower(),
+        "ai_agreement_with_risk":       str(trade.get("ai_agreement_with_risk",     "")).lower(),
+        "ai_debate_dominant_thesis":    (trade.get("ai_debate_dominant_thesis")    or "").lower(),
+        "ai_debate_recommended_stance": (trade.get("ai_debate_recommended_stance") or "").lower(),
+        "confidence_fusion_status_at_entry": (
+            trade.get("confidence_fusion_status_at_entry") or ""
+        ).lower(),
+        "ai_value_label":               (trade.get("ai_value_label") or "").lower(),
     }
 
 

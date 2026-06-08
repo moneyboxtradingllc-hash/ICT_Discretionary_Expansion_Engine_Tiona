@@ -24,6 +24,7 @@ from paper_execution.trade_journal import (
     find_any_active_trade, update_trade_status, mark_closed,
 )
 from paper_execution.protective_stop import cancel_protective_stop_if_position_closed
+from ai_feedback.ai_outcome_scorer import score_ai_outcome
 
 _EASTERN = pytz.timezone("America/New_York")
 
@@ -215,6 +216,10 @@ def _close_from_exit(
         final_status    = "closed",
     )
 
+    # Phase 5B: score AI outcome after closure (non-blocking)
+    if journal_updated:
+        _score_and_persist_ai_outcome(trade, realized_r, symbol, warnings)
+
     if reason != "broker_stop_triggered":
         _cancel_stop_after_close(trade, symbol)
 
@@ -289,6 +294,10 @@ def _handle_externally_closed(
         exit_price      = None,
         final_status    = "externally_closed",
     )
+    # Phase 5B: score AI outcome (realized_r=None → will produce 'unknown' score)
+    if journal_updated:
+        _score_and_persist_ai_outcome(trade, None, symbol, warnings)
+
     _cancel_stop_after_close(trade, symbol)
     warnings.append("position gone without tracked exit — realized_pnl unknown")
 
@@ -305,6 +314,41 @@ def _handle_externally_closed(
         "journal_updated":  journal_updated,
         "warnings":         warnings,
     }
+
+
+def _score_and_persist_ai_outcome(
+    trade: dict,
+    realized_r: "float | None",
+    symbol: str,
+    warnings: list[str],
+) -> None:
+    """
+    Phase 5B — Score AI outcome after closure and persist to journal.
+    Non-blocking: any error adds a warning but does not interrupt reconciliation.
+    """
+    try:
+        scored_trade = {
+            **trade,
+            "order_status": "closed",
+            "realized_r":   realized_r,
+        }
+        outcome = score_ai_outcome(scored_trade)
+        if outcome.get("scored"):
+            update_trade_status(
+                trade["trade_id"],
+                "closed",
+                {
+                    "ai_outcome_scored":            True,
+                    "ai_was_directionally_correct": outcome.get("ai_was_directionally_correct"),
+                    "ai_agreement_outcome":         outcome.get("ai_agreement_outcome", "unknown"),
+                    "ai_confidence_quality":        outcome.get("ai_confidence_quality", "unknown"),
+                    "ai_value_label":               outcome.get("ai_value_label", "unknown"),
+                    "ai_outcome_reason":            outcome.get("reason"),
+                },
+                symbol,
+            )
+    except Exception as exc:
+        warnings.append(f"ai outcome scoring failed (non-blocking): {exc}")
 
 
 def _open_result(warnings: list[str] | None = None) -> dict:
