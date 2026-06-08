@@ -23,6 +23,7 @@ from paper_execution.paper_broker import (
 from paper_execution.trade_journal import (
     find_any_active_trade, update_trade_status, mark_closed,
 )
+from paper_execution.protective_stop import cancel_protective_stop_if_position_closed
 
 _EASTERN = pytz.timezone("America/New_York")
 
@@ -143,6 +144,19 @@ def _reconcile(symbol: str) -> dict:
         elif exit_info and "error" in exit_info:
             warnings.append(f"exit order query error: {exit_info['error']}")
 
+    # ── 4b. Broker stop order fill check ──────────────────────────────────────
+    broker_stop_order_id = trade.get("broker_stop_order_id")
+    if (not exit_submitted and broker_stop_order_id
+            and order_status in _FILLED_STATUSES):
+        stop_info = get_order(broker_stop_order_id)
+        if stop_info and "error" not in stop_info:
+            if stop_info.get("status", "") in _EXIT_FILLED:
+                return _close_from_exit(
+                    trade, stop_info, "broker_stop_triggered", symbol, warnings,
+                )
+        elif stop_info and "error" in stop_info:
+            warnings.append(f"broker stop order query error: {stop_info['error']}")
+
     # ── 5. Position-gone detection (no exit tracked) ──────────────────────────
     if order_status in _FILLED_STATUSES:
         position = get_position(symbol)
@@ -201,6 +215,9 @@ def _close_from_exit(
         final_status    = "closed",
     )
 
+    if reason != "broker_stop_triggered":
+        _cancel_stop_after_close(trade, symbol)
+
     return {
         "trade_found":      True,
         "status":           "closed",
@@ -241,11 +258,12 @@ def _handle_externally_closed(
             break
         o_side   = str(o.get("side", "")).lower()
         o_status = str(o.get("status", "")).lower()
-        o_subm   = str(o.get("submitted_at", ""))
-        # Match: correct exit side, filled status, submitted after entry
-        if (exit_side in o_side
-                and o_status == "filled"
-                and o_subm[:15] >= entry_ts[:15]):
+        o_subm    = str(o.get("submitted_at", ""))
+        o_subm_dt = _parse_alpaca_ts(o_subm)
+        entry_dt  = _parse_ts(entry_ts)
+        ts_ok     = (o_subm_dt is not None and entry_dt is not None
+                     and o_subm_dt >= entry_dt)
+        if (exit_side in o_side and o_status == "filled" and ts_ok):
             exit_info = o
             break
 
@@ -271,6 +289,7 @@ def _handle_externally_closed(
         exit_price      = None,
         final_status    = "externally_closed",
     )
+    _cancel_stop_after_close(trade, symbol)
     warnings.append("position gone without tracked exit — realized_pnl unknown")
 
     return {
@@ -328,3 +347,25 @@ def _compute_holding_minutes(entry_ts: str | None, exit_ts: str | None) -> float
         return None
     diff = (t2 - t1).total_seconds() / 60.0
     return round(diff, 2) if diff >= 0 else None
+
+
+def _parse_alpaca_ts(ts_str: str):
+    """Parse Alpaca ISO format timestamp (hyphens, tz offset) to aware datetime, or None."""
+    if not ts_str or len(ts_str) < 10:
+        return None
+    try:
+        dt = datetime.fromisoformat(ts_str)
+        if dt.tzinfo is None:
+            dt = _EASTERN.localize(dt)
+        return dt
+    except (ValueError, TypeError):
+        return None
+
+
+def _cancel_stop_after_close(trade: dict, symbol: str) -> None:
+    """Cancel orphaned broker stop when position is closed by non-broker-stop means."""
+    broker_stop_id = trade.get("broker_stop_order_id")
+    if broker_stop_id:
+        cancel_protective_stop_if_position_closed(
+            trade.get("trade_id", ""), symbol, broker_stop_id
+        )
