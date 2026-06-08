@@ -50,7 +50,7 @@ def _session_of(trade: dict) -> str:
     if dt is None:
         return "unknown"
     t = dt.hour * 60 + dt.minute
-    if t < 9 * 60 + 30:   return "pre_market"
+    if t < 9 * 60 + 30:   return "premarket"
     if t < 10 * 60 + 30:  return "open"
     if t < 15 * 60:       return "mid_day"
     if t < 16 * 60:       return "power_hour"

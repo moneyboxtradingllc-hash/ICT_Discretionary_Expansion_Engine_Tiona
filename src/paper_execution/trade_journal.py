@@ -72,19 +72,19 @@ def append_trade(record: dict, symbol: str) -> bool:
 
 
 def count_submitted_today(symbol: str) -> int:
-    """Count trades with order_status == 'submitted' for today."""
+    """Count trades that reached Alpaca today (any status with a broker order ID)."""
     return sum(
         1 for t in load_today_trades(symbol)
-        if t.get("order_status") == "submitted"
+        if t.get("alpaca_order_id") is not None
     )
 
 
 def total_risk_today(symbol: str) -> float:
-    """Sum of risk_dollars for submitted trades today (conservative loss estimate)."""
+    """Sum of risk_dollars for all trades that reached Alpaca today (conservative estimate)."""
     return sum(
         float(t.get("risk_dollars", 0))
         for t in load_today_trades(symbol)
-        if t.get("order_status") == "submitted"
+        if t.get("alpaca_order_id") is not None
     )
 
 

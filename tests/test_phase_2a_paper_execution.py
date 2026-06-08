@@ -131,13 +131,13 @@ class TestTradeJournal(unittest.TestCase):
             if os.path.exists(tmp):
                 os.unlink(tmp)
 
-    def _make_rec(self, status="submitted", intent_id="I1", risk=250.0):
+    def _make_rec(self, status="submitted", intent_id="I1", risk=250.0, alpaca_id=None):
         return make_record(
             trade_id="T1", symbol="QQQ", intent_id=intent_id,
             intent_type="long", side="buy", qty=2,
             entry_reference=479.0, stop_reference=476.0,
             risk_per_share=3.0, risk_dollars=risk,
-            order_status=status, alpaca_order_id=None,
+            order_status=status, alpaca_order_id=alpaca_id,
             reason="test",
         )
 
@@ -153,19 +153,29 @@ class TestTradeJournal(unittest.TestCase):
     def test_02_count_submitted_only(self):
         def fn(tmp):
             with patch.object(tj_mod, "_journal_filepath", return_value=tmp):
-                append_trade(self._make_rec(status="submitted"), "QQQ")
-                append_trade(self._make_rec(status="rejected"),  "QQQ")
-                append_trade(self._make_rec(status="skipped"),   "QQQ")
+                append_trade(self._make_rec(status="submitted", alpaca_id="ALPA_001"), "QQQ")
+                append_trade(self._make_rec(status="rejected",  alpaca_id=None),       "QQQ")
+                append_trade(self._make_rec(status="skipped",   alpaca_id=None),       "QQQ")
                 count = count_submitted_today("QQQ")
             self.assertEqual(count, 1)
+        self._run_with_tmp(fn)
+
+    def test_02b_count_includes_filled_and_closed(self):
+        """Filled and closed trades still count toward the daily limit."""
+        def fn(tmp):
+            with patch.object(tj_mod, "_journal_filepath", return_value=tmp):
+                append_trade(self._make_rec(status="filled", alpaca_id="ALPA_001"), "QQQ")
+                append_trade(self._make_rec(status="closed", alpaca_id="ALPA_002"), "QQQ")
+                count = count_submitted_today("QQQ")
+            self.assertEqual(count, 2)
         self._run_with_tmp(fn)
 
     def test_03_total_risk_submitted_only(self):
         def fn(tmp):
             with patch.object(tj_mod, "_journal_filepath", return_value=tmp):
-                append_trade(self._make_rec(status="submitted", risk=300.0), "QQQ")
-                append_trade(self._make_rec(status="submitted", risk=200.0), "QQQ")
-                append_trade(self._make_rec(status="rejected",  risk=500.0), "QQQ")
+                append_trade(self._make_rec(status="submitted", risk=300.0, alpaca_id="ALPA_001"), "QQQ")
+                append_trade(self._make_rec(status="submitted", risk=200.0, alpaca_id="ALPA_002"), "QQQ")
+                append_trade(self._make_rec(status="rejected",  risk=500.0, alpaca_id=None),       "QQQ")
                 total = total_risk_today("QQQ")
             self.assertAlmostEqual(total, 500.0, places=2)
         self._run_with_tmp(fn)

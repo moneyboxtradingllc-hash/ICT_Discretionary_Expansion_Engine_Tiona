@@ -405,7 +405,7 @@ def _score_neutral(snapshot: dict, ai_disc: dict) -> tuple[int, list, list, str,
         evidence.append("Qualification: watchlist — setup forming but unconfirmed")
 
     # Session
-    if session in ("pre_market", "after_hours", "closed", "overnight"):
+    if session in ("premarket", "after_hours", "closed", "overnight"):
         pts += 15
         evidence.append(f"Session: {session} — reduced market reliability")
 

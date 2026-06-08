@@ -259,7 +259,7 @@ def _governor_warnings(snapshot: dict) -> list:
             w.append(warn)
 
     session = snapshot.get("session", "")
-    if session in ("pre_market", "overnight"):
+    if session in ("premarket", "overnight"):
         msg = f"{session} session — reduced liquidity environment"
         if msg not in seen:
             w.append(msg)

@@ -108,7 +108,7 @@ def _derive_session_from_ts(timestamp_str: str) -> str:
         dt = datetime.strptime(timestamp_str[:15], "%Y%m%dT%H%M%S")
         dt = _EASTERN.localize(dt)
         t  = dt.hour * 60 + dt.minute
-        if t < 9 * 60 + 30:   return "pre_market"
+        if t < 9 * 60 + 30:   return "premarket"
         if t < 10 * 60 + 30:  return "open"
         if t < 15 * 60:       return "mid_day"
         if t < 16 * 60:       return "power_hour"
