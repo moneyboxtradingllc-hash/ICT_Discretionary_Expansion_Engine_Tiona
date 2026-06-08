@@ -567,16 +567,26 @@ def _metadata(
     fallback_used: bool,
     fallback_reason: str | None,
     latency_ms: int | None,
+    ai_external_attempted: bool = False,
+    ai_external_success: bool = False,
+    ai_external_error_type: str | None = None,
+    ai_external_error_message_safe: str | None = None,
+    ai_model_used: str | None = None,
 ) -> dict:
     """Build the standard metadata block for ai_discretionary."""
     return {
-        "ai_mode":               mode,
-        "external_ai_connected": external_connected,
-        "provider":              cfg["provider"] if external_connected else None,
-        "model":                 cfg["model"]    if external_connected else None,
-        "fallback_used":         fallback_used,
-        "fallback_reason":       fallback_reason,
-        "latency_ms":            latency_ms,
+        "ai_mode":                        mode,
+        "external_ai_connected":          external_connected,
+        "provider":                       cfg["provider"] if external_connected else None,
+        "model":                          cfg["model"]    if external_connected else None,
+        "fallback_used":                  fallback_used,
+        "fallback_reason":                fallback_reason,
+        "latency_ms":                     latency_ms,
+        "ai_external_attempted":          ai_external_attempted,
+        "ai_external_success":            ai_external_success,
+        "ai_external_error_type":         ai_external_error_type,
+        "ai_external_error_message_safe": ai_external_error_message_safe,
+        "ai_model_used":                  ai_model_used or (cfg["model"] if external_connected else None),
     }
 
 
@@ -612,7 +622,10 @@ def run_discretionary_ai(snapshot: dict, mode_override: str = None) -> tuple:
                            external_connected=False,
                            fallback_used=False,
                            fallback_reason=None,
-                           latency_ms=None)
+                           latency_ms=None,
+                           ai_external_attempted=False,
+                           ai_external_success=False,
+                           ai_model_used=None)
         fusion = _confidence_fusion(snapshot, det_conf)
         disc   = {**meta, **det_content}
         return disc, fusion, build_debate(snapshot, disc)
@@ -642,7 +655,12 @@ def run_discretionary_ai(snapshot: dict, mode_override: str = None) -> tuple:
                            external_connected=False,
                            fallback_used=True,
                            fallback_reason=fb_reason,
-                           latency_ms=latency_ms)
+                           latency_ms=latency_ms,
+                           ai_external_attempted=adapter.get("ai_external_attempted", True),
+                           ai_external_success=False,
+                           ai_external_error_type=adapter.get("ai_external_error_type"),
+                           ai_external_error_message_safe=adapter.get("ai_external_error_message_safe"),
+                           ai_model_used=cfg["model"])
         fusion = _confidence_fusion(snapshot, det_conf)
         disc   = {**meta, **det_content}
         return disc, fusion, build_debate(snapshot, disc)
@@ -665,13 +683,18 @@ def run_discretionary_ai(snapshot: dict, mode_override: str = None) -> tuple:
 
     # Build metadata manually for external success — uses actual model returned by adapter
     meta = {
-        "ai_mode":               ai_mode,
-        "external_ai_connected": True,
-        "provider":              cfg["provider"],
-        "model":                 model_used,
-        "fallback_used":         False,
-        "fallback_reason":       None,
-        "latency_ms":            latency_ms,
+        "ai_mode":                        ai_mode,
+        "external_ai_connected":          True,
+        "provider":                       cfg["provider"],
+        "model":                          model_used,
+        "fallback_used":                  False,
+        "fallback_reason":                None,
+        "latency_ms":                     latency_ms,
+        "ai_external_attempted":          True,
+        "ai_external_success":            True,
+        "ai_external_error_type":         None,
+        "ai_external_error_message_safe": None,
+        "ai_model_used":                  model_used,
     }
     fusion = _confidence_fusion(snapshot, ext_conf)
     disc   = {**meta, **ext_content}

@@ -85,25 +85,58 @@ def get_ai_config() -> dict:
     }
 
 
+# ── Error categorisation (safe — no secrets) ─────────────────────────────────
+
+def _categorize_error(reason: str) -> str:
+    if not reason:
+        return "unknown"
+    r = reason.lower()
+    if ("model" in r and "not_found" in r) or ("404" in r and "model" in r):
+        return "model_not_found"
+    if "timeout" in r:
+        return "timeout"
+    if "authentication" in r:
+        return "authentication_failed"
+    if "rate_limit" in r:
+        return "rate_limit"
+    if "connection" in r:
+        return "connection_error"
+    if "parse" in r or "schema" in r:
+        return "parse_error"
+    if "package" in r or "missing" in r:
+        return "config_error"
+    if "empty" in r:
+        return "empty_response"
+    return "api_error"
+
+
 # ── Result builders ───────────────────────────────────────────────────────────
 
 def _fallback(reason: str, latency_ms: int | None = None) -> dict:
     return {
-        "fallback_required": True,
-        "fallback_reason":   reason,
-        "response":          None,
-        "latency_ms":        latency_ms,
-        "model_used":        None,
+        "fallback_required":              True,
+        "fallback_reason":                reason,
+        "response":                       None,
+        "latency_ms":                     latency_ms,
+        "model_used":                     None,
+        "ai_external_attempted":          True,
+        "ai_external_success":            False,
+        "ai_external_error_type":         _categorize_error(reason),
+        "ai_external_error_message_safe": reason,
     }
 
 
 def _success(response: dict, latency_ms: int, model_used: str) -> dict:
     return {
-        "fallback_required": False,
-        "fallback_reason":   None,
-        "response":          response,
-        "latency_ms":        latency_ms,
-        "model_used":        model_used,
+        "fallback_required":              False,
+        "fallback_reason":                None,
+        "response":                       response,
+        "latency_ms":                     latency_ms,
+        "model_used":                     model_used,
+        "ai_external_attempted":          True,
+        "ai_external_success":            True,
+        "ai_external_error_type":         None,
+        "ai_external_error_message_safe": None,
     }
 
 

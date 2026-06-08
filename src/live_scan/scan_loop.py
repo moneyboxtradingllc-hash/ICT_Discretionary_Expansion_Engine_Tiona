@@ -114,12 +114,17 @@ def _print_scan_summary(snapshot: dict, symbol: str, scan_num: int, saved_path: 
     raw_trig   = tp.get("raw_trigger_status",      "n/a")
     eff_trig   = tp.get("effective_trigger_status", "n/a")
 
-    ai_mode    = ai.get("ai_mode", "?")
-    ai_model   = ai.get("model") or "internal"
-    ai_conf    = ai.get("ai_confidence", 0)
-    ai_reused  = ai.get("ai_reused", False)
-    fallback   = ai.get("fallback_used", False)
-    age_secs   = ai.get("ai_last_refresh_age_seconds")
+    ai_mode        = ai.get("ai_mode", "?")
+    ai_model       = ai.get("model") or "internal"
+    ai_conf        = ai.get("ai_confidence", 0)
+    ai_reused      = ai.get("ai_reused", False)
+    fallback       = ai.get("fallback_used", False)
+    age_secs       = ai.get("ai_last_refresh_age_seconds")
+    ai_ext_att     = ai.get("ai_external_attempted", False)
+    ai_ext_ok      = ai.get("ai_external_success",   False)
+    ai_err_type    = ai.get("ai_external_error_type")
+    ai_model_used  = ai.get("ai_model_used") or ai_model
+    ai_latency     = ai.get("latency_ms")
 
     mech     = fus.get("mechanical_score",    0)
     ai_c     = fus.get("ai_confidence",       0)
@@ -152,6 +157,14 @@ def _print_scan_summary(snapshot: dict, symbol: str, scan_num: int, saved_path: 
         reuse_tag = "reused=false"
     fallback_tag = " [fallback]" if fallback else ""
     print(f"AI            : {ai_mode} {ai_model}{fallback_tag} | confidence={ai_conf} | {reuse_tag}")
+
+    if ai_ext_att:
+        if ai_ext_ok:
+            lat_str = f" | latency={ai_latency}ms" if ai_latency is not None else ""
+            print(f"AI External   : SUCCESS | model={ai_model_used}{lat_str}")
+        else:
+            err_str = f" | reason={ai_err_type}" if ai_err_type else ""
+            print(f"AI External   : FALLBACK | model={ai_model_used}{err_str}")
 
     print(f"Fusion        : mechanical={mech} / AI={ai_c} / combined={combined} / {fstatus.upper()}")
 
@@ -586,6 +599,10 @@ def run_scan_loop():
     bars_in_state            = 0
     setup_tracker            = SetupTracker()
     prev_experience_summary  = None   # Phase 3A: carry forward for AI input next scan
+    # Phase 5E.3: carry 5C/5D/5E summaries forward so AI sees them on the next scan
+    prev_memory_search       = None
+    prev_dashboard           = None
+    prev_recommendations     = None
 
     # Initialise provider (fail fast before entering the loop)
     try:
@@ -655,6 +672,9 @@ def run_scan_loop():
                     memory=memory,
                     ai_mode_override=mode_override,
                     experience_summary=prev_experience_summary,
+                    prior_memory_search=prev_memory_search,
+                    prior_dashboard=prev_dashboard,
+                    prior_recommendations=prev_recommendations,
                 )
             except Exception as exc:
                 print(f"  [SNAPSHOT ERROR scan #{scan_count}] {exc}")
@@ -775,6 +795,8 @@ def run_scan_loop():
             _ms_result = find_similar_setups(snapshot, symbol)
             snapshot["memory_search"] = build_memory_summary(_ms_result)
             snapshot["memory_search"]["_full_result"] = _ms_result
+            # Phase 5E.3: persist summary (no large objects) for next scan's AI input
+            prev_memory_search = {k: v for k, v in snapshot["memory_search"].items() if k != "_full_result"}
             ms_line = format_memory_search_line(snapshot["memory_search"])
             if ms_line:
                 snapshot["ai_context"]["summary"] = (
@@ -788,6 +810,8 @@ def run_scan_loop():
             )
             snapshot["performance_dashboard"] = build_dashboard_summary(_dash_full)
             snapshot["performance_dashboard"]["_full_dashboard"] = _dash_full
+            # Phase 5E.3: persist summary (no large objects) for next scan's AI input
+            prev_dashboard = {k: v for k, v in snapshot["performance_dashboard"].items() if k != "_full_dashboard"}
             dash_line = format_dashboard_line(snapshot["performance_dashboard"])
             if dash_line:
                 snapshot["ai_context"]["summary"] = (
@@ -799,6 +823,8 @@ def run_scan_loop():
             _rec_full = build_recommendations(symbol, snapshot, dashboard=_dash_full)
             snapshot["recommendations"] = build_recommendation_summary(_rec_full)
             snapshot["recommendations"]["_full_result"] = _rec_full
+            # Phase 5E.3: persist summary (no large objects) for next scan's AI input
+            prev_recommendations = {k: v for k, v in snapshot["recommendations"].items() if k != "_full_result"}
             rec_line = format_recommendations_line(snapshot["recommendations"])
             if rec_line:
                 snapshot["ai_context"]["summary"] = (

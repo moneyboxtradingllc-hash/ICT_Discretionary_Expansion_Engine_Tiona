@@ -28,6 +28,9 @@ def build_snapshot(
     memory=None,
     ai_mode_override: str = None,
     experience_summary: dict = None,
+    prior_memory_search: dict = None,
+    prior_dashboard: dict = None,
+    prior_recommendations: dict = None,
 ) -> dict:
     timeframes = {}
     all_normalized = {}
@@ -132,6 +135,16 @@ def build_snapshot(
     # confidence_modifier is always 0 and must never influence toolbox or decisions.
     if experience_summary:
         snapshot["experience_summary"] = experience_summary
+
+    # Phase 5E.3 — inject prior-scan intelligence so AI input sees real data.
+    # These are 1-scan stale but far better than empty dicts.
+    # scan_loop.py overwrites them with fresh values after this function returns.
+    if prior_memory_search:
+        snapshot["memory_search"] = prior_memory_search
+    if prior_dashboard:
+        snapshot["performance_dashboard"] = prior_dashboard
+    if prior_recommendations:
+        snapshot["recommendations"] = prior_recommendations
 
     # AI Discretionary Engine: interprets the full assembled snapshot
     ai_disc, confidence_fusion, ai_debate = run_discretionary_ai(snapshot, mode_override=ai_mode_override)
