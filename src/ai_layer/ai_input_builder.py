@@ -244,5 +244,19 @@ def build_compact_ai_input(snapshot: dict) -> dict:
         "authority_level":      "observe_only",
     }
 
+    # Phase 5C — include memory similarity search context (OBSERVE_ONLY).
+    # AI may reference memory. AI must not alter decisions or risk behavior.
+    ms = snapshot.get("memory_search") or {}
+    result["memory_search"] = {
+        "authority_level":    "observe_only",
+        "match_count":        ms.get("match_count",        0),
+        "closed_match_count": ms.get("closed_match_count", 0),
+        "best_similarity":    ms.get("best_similarity",    0.0),
+        "similar_win_rate":   ms.get("similar_win_rate"),
+        "similar_average_r":  ms.get("similar_average_r"),
+        "memory_quality":     ms.get("memory_quality",     "none"),
+        "top_match_reasons":  ms.get("top_match_reasons",  []),
+    }
+
     return result
 

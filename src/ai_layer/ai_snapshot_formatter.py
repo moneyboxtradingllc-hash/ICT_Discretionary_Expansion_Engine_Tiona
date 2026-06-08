@@ -339,6 +339,27 @@ def format_ai_feedback_line(fb: dict) -> str:
     return f"AI Feedback: {n} samples | developing | OBSERVE_ONLY"
 
 
+def format_memory_search_line(ms: dict) -> str:
+    """One-line memory similarity search summary. OBSERVE_ONLY — never influences decisions."""
+    if not ms or not ms.get("enabled"):
+        return ""
+    cnt    = ms.get("match_count",        0)
+    closed = ms.get("closed_match_count", 0)
+    wr     = ms.get("similar_win_rate")
+    ar     = ms.get("similar_average_r")
+    quality = ms.get("memory_quality", "none")
+    if closed == 0:
+        return f"Memory Search: no similar closed trades ({cnt} raw matches) | {quality.upper()} | OBSERVE_ONLY"
+    parts = [f"{cnt} matches", f"{closed} closed"]
+    if wr is not None:
+        parts.append(f"WR {wr:.1f}%")
+    if ar is not None:
+        sign = "+" if ar >= 0 else ""
+        parts.append(f"AvgR {sign}{ar:.2f}")
+    parts.append(quality.upper())
+    return "Memory Search: " + " | ".join(parts) + " | OBSERVE_ONLY"
+
+
 def format_regime_line(regime: dict) -> str:
     """One-line market regime summary. OBSERVE_ONLY — never influences decisions."""
     if not regime or not regime.get("enabled"):

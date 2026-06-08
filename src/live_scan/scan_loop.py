@@ -55,7 +55,10 @@ from ai_layer.ai_snapshot_formatter                 import (
     format_broker_stop_line,
     format_regime_line,
     format_ai_feedback_line,
+    format_memory_search_line,
 )
+from memory_search.similarity_search import find_similar_setups
+from memory_search.memory_summary    import build_memory_summary
 
 _EASTERN = pytz.timezone("America/New_York")
 _DIV     = "=" * 60
@@ -347,6 +350,24 @@ def _print_scan_summary(snapshot: dict, symbol: str, scan_num: int, saved_path: 
         print("AI Feedback   : " + " | ".join(parts) + " | OBSERVE_ONLY")
     else:
         print(f"AI Feedback   : {fb_n} samples | developing | OBSERVE_ONLY")
+
+    ms     = snapshot.get("memory_search") or {}
+    ms_cnt = ms.get("match_count", 0)
+    ms_cl  = ms.get("closed_match_count", 0)
+    ms_wr  = ms.get("similar_win_rate")
+    ms_ar  = ms.get("similar_average_r")
+    ms_q   = ms.get("memory_quality", "none")
+    if ms_cl == 0:
+        print(f"Memory Search : no similar closed trades ({ms_cnt} raw matches) | {ms_q.upper()} | OBSERVE_ONLY")
+    else:
+        ms_parts = [f"{ms_cnt} matches", f"{ms_cl} closed"]
+        if ms_wr is not None:
+            ms_parts.append(f"WR {ms_wr:.1f}%")
+        if ms_ar is not None:
+            sign = "+" if ms_ar >= 0 else ""
+            ms_parts.append(f"AvgR {sign}{ms_ar:.2f}")
+        ms_parts.append(ms_q.upper())
+        print("Memory Search : " + " | ".join(ms_parts) + " | OBSERVE_ONLY")
 
     pa_plan   = snapshot.get("paper_activation_plan", {})
     pa        = snapshot.get("paper_activation", {})
@@ -711,6 +732,16 @@ def run_scan_loop():
             if link_line:
                 snapshot["ai_context"]["summary"] = (
                     snapshot["ai_context"].get("summary", "") + " " + link_line
+                ).strip()
+
+            # ── Memory Similarity Search (Phase 5C — OBSERVE_ONLY) ────────
+            _ms_result = find_similar_setups(snapshot, symbol)
+            snapshot["memory_search"] = build_memory_summary(_ms_result)
+            snapshot["memory_search"]["_full_result"] = _ms_result
+            ms_line = format_memory_search_line(snapshot["memory_search"])
+            if ms_line:
+                snapshot["ai_context"]["summary"] = (
+                    snapshot["ai_context"].get("summary", "") + " " + ms_line
                 ).strip()
 
             # ── Position Monitor (Phase 2B — moved up) ────────────────────

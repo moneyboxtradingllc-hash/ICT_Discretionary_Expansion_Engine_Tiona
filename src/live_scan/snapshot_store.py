@@ -192,6 +192,18 @@ def save_snapshot(snapshot: dict, symbol: str) -> str:
             "best_ai_condition":    snapshot.get("ai_feedback_summary", {}).get("best_ai_condition"),
             "worst_ai_condition":   snapshot.get("ai_feedback_summary", {}).get("worst_ai_condition"),
         },
+        "memory_search": {
+            "enabled":             snapshot.get("memory_search", {}).get("enabled"),
+            "authority_level":     "observe_only",
+            "confidence_modifier": 0,
+            "match_count":         snapshot.get("memory_search", {}).get("match_count",        0),
+            "closed_match_count":  snapshot.get("memory_search", {}).get("closed_match_count", 0),
+            "best_similarity":     snapshot.get("memory_search", {}).get("best_similarity",    0.0),
+            "similar_win_rate":    snapshot.get("memory_search", {}).get("similar_win_rate"),
+            "similar_average_r":   snapshot.get("memory_search", {}).get("similar_average_r"),
+            "memory_quality":      snapshot.get("memory_search", {}).get("memory_quality",     "none"),
+            "notes":               snapshot.get("memory_search", {}).get("notes",              []),
+        },
         "ai_discretionary": snapshot.get("ai_discretionary"),
         "confidence_fusion": snapshot.get("confidence_fusion"),
         "ai_context": {
