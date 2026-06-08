@@ -244,6 +244,21 @@ def build_compact_ai_input(snapshot: dict) -> dict:
         "authority_level":      "observe_only",
     }
 
+    # Phase 5D — include performance dashboard context (OBSERVE_ONLY).
+    # AI may reference dashboard. AI must not alter decisions or risk behavior.
+    pd = snapshot.get("performance_dashboard") or {}
+    result["performance_dashboard"] = {
+        "authority_level":     "observe_only",
+        "performance_quality": pd.get("performance_quality", "none"),
+        "sample_size":         pd.get("sample_size",         0),
+        "win_rate":            pd.get("win_rate"),
+        "average_r":           pd.get("average_r"),
+        "best_regime":         pd.get("best_regime"),
+        "worst_regime":        pd.get("worst_regime"),
+        "best_playbook":       pd.get("best_playbook"),
+        "memory_quality":      pd.get("memory_quality",      "none"),
+    }
+
     # Phase 5C — include memory similarity search context (OBSERVE_ONLY).
     # AI may reference memory. AI must not alter decisions or risk behavior.
     ms = snapshot.get("memory_search") or {}

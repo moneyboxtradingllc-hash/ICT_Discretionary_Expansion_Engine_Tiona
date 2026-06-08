@@ -159,18 +159,30 @@ def _normalize_trade(trade: dict) -> dict | None:
     if not trade_id:
         return None
 
-    outcome = _derive_trade_outcome(trade)
+    outcome  = _derive_trade_outcome(trade)
+    snap_sum = trade.get("snapshot_summary") or {}
+
+    # Playbook: explicit > snapshot_summary > intent_type fallback
+    playbook = (
+        trade.get("playbook")
+        or snap_sum.get("playbook")
+        or trade.get("intent_type")
+        or ""
+    ).lower()
+
+    # Session: explicit > snapshot_summary
+    session = (trade.get("session") or snap_sum.get("session") or "").lower()
 
     return {
         "intent_id":             trade.get("intent_id") or None,
         "trade_id":              trade_id,
         "symbol":                (trade.get("symbol") or "").upper(),
         "timestamp":             trade.get("timestamp") or trade.get("entry_time") or "",
-        "playbook":              (trade.get("playbook") or trade.get("intent_type") or "").lower(),
+        "playbook":              playbook,
         "direction":             (trade.get("direction") or trade.get("intent_type") or "").lower(),
         "preferred_tool":        (trade.get("preferred_tool") or "").lower(),
         "qualification":         (trade.get("qualification_status") or "").lower(),
-        "session":               (trade.get("session") or "").lower(),
+        "session":               session,
         "market_regime_label":   (trade.get("market_regime_label") or "unknown").lower(),
         "market_regime_family":  (trade.get("market_regime_family") or "unknown").lower(),
         "volatility_state":      (trade.get("volatility_state") or "unknown").lower(),
@@ -183,6 +195,9 @@ def _normalize_trade(trade: dict) -> dict | None:
         "mfe":                   _to_float(trade.get("mfe")),
         "mae":                   _to_float(trade.get("mae")),
         "holding_minutes":       _to_float(trade.get("holding_minutes")),
+        "close_reason":          trade.get("close_reason") or trade.get("exit_reason") or None,
+        "ai_value_label":        (trade.get("ai_value_label") or "unknown").lower(),
+        "ai_was_directionally_correct": trade.get("ai_was_directionally_correct"),
         "outcome":               outcome,
         "_source":               "paper_trades",
         "_status":               (trade.get("order_status") or "unknown").lower(),

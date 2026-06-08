@@ -56,9 +56,12 @@ from ai_layer.ai_snapshot_formatter                 import (
     format_regime_line,
     format_ai_feedback_line,
     format_memory_search_line,
+    format_dashboard_line,
 )
 from memory_search.similarity_search import find_similar_setups
 from memory_search.memory_summary    import build_memory_summary
+from performance_intelligence.dashboard_builder import build_dashboard
+from performance_intelligence.dashboard_summary  import build_dashboard_summary
 
 _EASTERN = pytz.timezone("America/New_York")
 _DIV     = "=" * 60
@@ -368,6 +371,26 @@ def _print_scan_summary(snapshot: dict, symbol: str, scan_num: int, saved_path: 
             ms_parts.append(f"AvgR {sign}{ms_ar:.2f}")
         ms_parts.append(ms_q.upper())
         print("Memory Search : " + " | ".join(ms_parts) + " | OBSERVE_ONLY")
+
+    dash   = snapshot.get("performance_dashboard") or {}
+    d_n    = dash.get("sample_size", 0)
+    d_wr   = dash.get("win_rate")
+    d_ar   = dash.get("average_r")
+    d_br   = dash.get("best_regime")
+    d_qual = dash.get("performance_quality", "none")
+    if d_n == 0:
+        print(f"Dashboard     : insufficient sample | {d_qual.upper()} | OBSERVE_ONLY")
+    else:
+        d_parts = [f"{d_n} trades"]
+        if d_wr is not None:
+            d_parts.append(f"WR {d_wr:.1f}%")
+        if d_ar is not None:
+            sign = "+" if d_ar >= 0 else ""
+            d_parts.append(f"AvgR {sign}{d_ar:.2f}")
+        if d_br:
+            d_parts.append(f"Best Regime {d_br}")
+        d_parts.append(d_qual.upper())
+        print("Dashboard     : " + " | ".join(d_parts) + " | OBSERVE_ONLY")
 
     pa_plan   = snapshot.get("paper_activation_plan", {})
     pa        = snapshot.get("paper_activation", {})
@@ -742,6 +765,19 @@ def run_scan_loop():
             if ms_line:
                 snapshot["ai_context"]["summary"] = (
                     snapshot["ai_context"].get("summary", "") + " " + ms_line
+                ).strip()
+
+            # ── Performance Intelligence Dashboard (Phase 5D — OBSERVE_ONLY) ─
+            _dash_full = build_dashboard(
+                symbol,
+                memory_summary=snapshot.get("memory_search"),
+            )
+            snapshot["performance_dashboard"] = build_dashboard_summary(_dash_full)
+            snapshot["performance_dashboard"]["_full_dashboard"] = _dash_full
+            dash_line = format_dashboard_line(snapshot["performance_dashboard"])
+            if dash_line:
+                snapshot["ai_context"]["summary"] = (
+                    snapshot["ai_context"].get("summary", "") + " " + dash_line
                 ).strip()
 
             # ── Position Monitor (Phase 2B — moved up) ────────────────────

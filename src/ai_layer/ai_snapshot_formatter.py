@@ -339,6 +339,30 @@ def format_ai_feedback_line(fb: dict) -> str:
     return f"AI Feedback: {n} samples | developing | OBSERVE_ONLY"
 
 
+def format_dashboard_line(dash: dict) -> str:
+    """One-line performance dashboard summary. OBSERVE_ONLY — never influences decisions."""
+    if not dash or not dash.get("enabled"):
+        return ""
+    n   = dash.get("sample_size", 0)
+    wr  = dash.get("win_rate")
+    ar  = dash.get("average_r")
+    br  = dash.get("best_regime")
+    bp  = dash.get("best_playbook")
+    if n == 0:
+        return "Dashboard: insufficient sample | OBSERVE_ONLY"
+    parts = [f"{n} trades"]
+    if wr is not None:
+        parts.append(f"WR {wr:.1f}%")
+    if ar is not None:
+        sign = "+" if ar >= 0 else ""
+        parts.append(f"AvgR {sign}{ar:.2f}")
+    if br:
+        parts.append(f"Best Regime {br}")
+    if bp:
+        parts.append(f"Best PB {bp}")
+    return "Dashboard: " + " | ".join(parts) + " | OBSERVE_ONLY"
+
+
 def format_memory_search_line(ms: dict) -> str:
     """One-line memory similarity search summary. OBSERVE_ONLY — never influences decisions."""
     if not ms or not ms.get("enabled"):

@@ -51,12 +51,15 @@ def _snapshot_summary(snapshot: dict) -> dict:
     iscr = snapshot.get("intent_score", {})
     eg   = snapshot.get("execution_gate", {})
     da   = snapshot.get("decision_authority", {})
+    pb   = snapshot.get("playbook", {})
     return {
-        "decision":    da.get("decision"),
-        "intent_type": ti.get("intent_type"),
-        "gated_score": iscr.get("gated_score"),
+        "decision":      da.get("decision"),
+        "intent_type":   ti.get("intent_type"),
+        "gated_score":   iscr.get("gated_score"),
         "gated_quality": iscr.get("gated_quality"),
-        "gate_status": eg.get("gate_status"),
+        "gate_status":   eg.get("gate_status"),
+        "playbook":      pb.get("selected_playbook"),
+        "session":       snapshot.get("session"),
     }
 
 
