@@ -500,7 +500,7 @@ def _final_verdict(
     sl            = snapshot.get("setup_lifecycle", {})
     lifecycle_phase = (sl.get("current_phase") or "dormant") if sl.get("active") else "dormant"
     trig          = _trigger_status(snapshot)
-    trig_active   = trig in ("confirmed", "retest_in_progress")
+    trig_active   = trig in ("confirmed", "retest_in_progress", "confirmation_needed")
 
     scores   = {"bullish": bull_score, "bearish": bear_score, "neutral": neut_score}
     dominant = max(scores, key=lambda k: scores[k])
