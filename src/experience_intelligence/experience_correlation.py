@@ -11,6 +11,7 @@ _DIMENSIONS: list[str] = [
     "playbook", "preferred_tool", "session", "direction",
     "qualification_status", "risk_tier", "intent_quality",
     "ai_debate_dominant", "decision_type", "setup_lifecycle_phase",
+    "market_regime_label",   # Phase 5A — extracted from trade top-level
 ]
 _MIN_SAMPLE_RATE   = 3    # minimum trades to compute win/loss rates per group
 _MIN_SAMPLE_STRONG = 10   # minimum trades for strongest correlation candidates
@@ -119,6 +120,8 @@ def _extract_trade_attrs(trade: dict) -> dict:
         "ai_debate_dominant":    verdict.get("dominant_thesis", ""),
         "decision_type":         da.get("decision",           ""),
         "setup_lifecycle_phase": sl.get("current_phase",      ""),
+        # Phase 5A: top-level trade field, not in snapshot_summary
+        "market_regime_label":   (trade.get("market_regime_label") or "").lower(),
     }
 
 

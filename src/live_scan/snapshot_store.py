@@ -168,6 +168,16 @@ def save_snapshot(snapshot: dict, symbol: str) -> str:
             "blocking_issues": snapshot.get("operational_readiness", {}).get("blocking_issues", []),
         },
         "activation_controller": snapshot.get("activation_controller"),
+        "market_regime": {
+            "enabled":       snapshot.get("market_regime", {}).get("enabled"),
+            "regime_label":  snapshot.get("market_regime", {}).get("regime_label",  "unknown"),
+            "regime_family": snapshot.get("market_regime", {}).get("regime_family", "unknown"),
+            "confidence":    snapshot.get("market_regime", {}).get("confidence",    0),
+            "volatility_state": snapshot.get("market_regime", {}).get("volatility_state", "unknown"),
+            "expansion_state":  snapshot.get("market_regime", {}).get("expansion_state",  "unknown"),
+            "authority_level":  "observe_only",
+            "confidence_modifier": 0,
+        },
         "ai_discretionary": snapshot.get("ai_discretionary"),
         "confidence_fusion": snapshot.get("confidence_fusion"),
         "ai_context": {

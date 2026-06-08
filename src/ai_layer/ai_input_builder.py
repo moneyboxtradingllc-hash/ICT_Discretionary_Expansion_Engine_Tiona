@@ -216,5 +216,18 @@ def build_compact_ai_input(snapshot: dict) -> dict:
         "negative":               corr.get("strongest_negative_correlations", []),
     }
 
+    # Phase 5A — include regime context (OBSERVE_ONLY).
+    # AI may reference regime. AI must not alter decisions or risk behavior.
+    regime = snapshot.get("market_regime", {}) or {}
+    if regime and regime.get("enabled"):
+        result["market_regime"] = {
+            "regime_label":    regime.get("regime_label",    "unknown"),
+            "regime_family":   regime.get("regime_family",   "unknown"),
+            "confidence":      regime.get("confidence",      0),
+            "volatility_state": regime.get("volatility_state", "unknown"),
+            "expansion_state":  regime.get("expansion_state",  "unknown"),
+            "authority_level":  "observe_only",
+        }
+
     return result
 

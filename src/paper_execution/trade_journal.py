@@ -112,6 +112,12 @@ def make_record(
     alpaca_order_id: str | None,
     reason: str,
     snapshot_summary: dict | None = None,
+    # Phase 5A: regime enrichment fields (OBSERVE_ONLY — never affect execution)
+    market_regime_label:  str = "unknown",
+    market_regime_family: str = "unknown",
+    regime_confidence:    int = 0,
+    volatility_state:     str = "unknown",
+    expansion_state:      str = "unknown",
 ) -> dict:
     """Build a canonical trade journal record."""
     return {
@@ -130,6 +136,12 @@ def make_record(
         "alpaca_order_id":    alpaca_order_id,
         "reason":             reason,
         "snapshot_summary":   snapshot_summary or {},
+        # Phase 5A: regime fields (OBSERVE_ONLY — stored for experience correlation)
+        "market_regime_label":  market_regime_label,
+        "market_regime_family": market_regime_family,
+        "regime_confidence":    regime_confidence,
+        "volatility_state":     volatility_state,
+        "expansion_state":      expansion_state,
         # Phase 2B lifecycle fields (default values)
         "avg_fill_price":     None,
         "filled_qty":         None,

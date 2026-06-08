@@ -53,6 +53,7 @@ from ai_layer.ai_snapshot_formatter                 import (
     format_paper_activation_line, format_experience_line,
     format_experience_link_line, format_correlation_line,
     format_broker_stop_line,
+    format_regime_line,
 )
 
 _EASTERN = pytz.timezone("America/New_York")
@@ -315,6 +316,19 @@ def _print_scan_summary(snapshot: dict, symbol: str, scan_num: int, saved_path: 
     exp_link_line = format_experience_link_line(exp)
     if exp_link_line:
         print(exp_link_line)
+
+    regime     = snapshot.get("market_regime", {})
+    reg_label  = (regime.get("regime_label") or "unknown")
+    reg_conf   = regime.get("confidence", 0)
+    reg_vol    = (regime.get("volatility_state") or "unknown")
+    reg_exp    = (regime.get("expansion_state")  or "unknown")
+    if reg_label != "unknown":
+        print(
+            f"Regime        : {reg_label} | confidence={reg_conf}"
+            f" | vol={reg_vol} | expansion={reg_exp} | OBSERVE_ONLY"
+        )
+    else:
+        print("Regime        : unknown | insufficient evidence | OBSERVE_ONLY")
 
     pa_plan   = snapshot.get("paper_activation_plan", {})
     pa        = snapshot.get("paper_activation", {})

@@ -90,6 +90,8 @@ def _build(snapshot: dict, symbol: str) -> dict:
         "worst_session":          metrics["worst_session"],
         "best_playbook":          metrics["best_playbook"],
         "worst_playbook":         metrics["worst_playbook"],
+        "best_regime":            metrics.get("best_regime"),   # Phase 5A
+        "worst_regime":           metrics.get("worst_regime"),  # Phase 5A
         "confidence_modifier":    0,               # ALWAYS 0 — OBSERVE_ONLY
         "correlation_available":  corr_available,  # Phase 3B
         "correlation_confidence": corr_conf,       # Phase 3B
@@ -129,6 +131,8 @@ def _safe_default(notes: list[str]) -> dict:
         "worst_session":          None,
         "best_playbook":          None,
         "worst_playbook":         None,
+        "best_regime":            None,    # Phase 5A
+        "worst_regime":           None,    # Phase 5A
         "confidence_modifier":    0,
         "correlation_available":  False,   # Phase 3B
         "correlation_confidence": "none",  # Phase 3B

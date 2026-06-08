@@ -57,6 +57,11 @@ def _session_of(trade: dict) -> str:
     return "after_hours"
 
 
+def _regime_of(trade: dict) -> str:
+    label = (trade.get("market_regime_label") or "").strip().lower()
+    return label or "unknown"
+
+
 def _playbook_of(trade: dict) -> str:
     ss = trade.get("snapshot_summary") or {}
     pb = ss.get("playbook") or {}
@@ -113,6 +118,8 @@ def compute_metrics(
         "worst_session":     None,
         "best_playbook":     None,
         "worst_playbook":    None,
+        "best_regime":       None,
+        "worst_regime":      None,
         **_zero_counts,
     }
 
@@ -132,15 +139,20 @@ def compute_metrics(
 
     sessions  = {}
     playbooks = {}
+    regimes   = {}
     for t in trades:
         r = _r_multiple(t)
         if r is None:
             continue
         sessions.setdefault(_session_of(t),  []).append(r)
         playbooks.setdefault(_playbook_of(t), []).append(r)
+        reg = _regime_of(t)
+        if reg != "unknown":
+            regimes.setdefault(reg, []).append(r)
 
-    best_sess, worst_sess = _best_worst(sessions)
-    best_pb,   worst_pb   = _best_worst(playbooks)
+    best_sess,  worst_sess  = _best_worst(sessions)
+    best_pb,    worst_pb    = _best_worst(playbooks)
+    best_reg,   worst_reg   = _best_worst(regimes)
 
     # Phase 3C: derive MFE/MAE and linkage counts from linked outcomes
     closed_lo     = [lo for lo in (linked_outcomes or [])
@@ -166,6 +178,8 @@ def compute_metrics(
         "worst_session":      worst_sess,
         "best_playbook":      best_pb,
         "worst_playbook":     worst_pb,
+        "best_regime":        best_reg,        # Phase 5A
+        "worst_regime":       worst_reg,       # Phase 5A
         "linked_trade_count": linked_count,   # Phase 3C
         "closed_trade_count": closed_count,   # Phase 3C
         "open_trade_count":   open_count,     # Phase 3C

@@ -32,6 +32,18 @@ def _make_trade_id(symbol: str) -> str:
     return f"PT_{symbol}_{datetime.now(_EASTERN).strftime('%Y%m%dT%H%M%S')}"
 
 
+def _regime_from_snapshot(snapshot: dict) -> dict:
+    """Extract regime fields for make_record() from snapshot['market_regime']."""
+    r = snapshot.get("market_regime") or {}
+    return {
+        "market_regime_label":  r.get("regime_label",    "unknown"),
+        "market_regime_family": r.get("regime_family",   "unknown"),
+        "regime_confidence":    r.get("confidence",      0),
+        "volatility_state":     r.get("volatility_state", "unknown"),
+        "expansion_state":      r.get("expansion_state",  "unknown"),
+    }
+
+
 def _snapshot_summary(snapshot: dict) -> dict:
     """Compact snapshot fields for journal record."""
     ti   = snapshot.get("trade_intent", {})
@@ -167,6 +179,7 @@ def _attempt(snapshot: dict, symbol: str) -> dict:
             alpaca_order_id = None,
             reason          = guard["reason"],
             snapshot_summary = _snapshot_summary(snapshot),
+            **_regime_from_snapshot(snapshot),
         )
         append_trade(record, symbol)
         return _skipped_result(f"position guard: {guard['reason']}", guard)
@@ -228,6 +241,7 @@ def _attempt(snapshot: dict, symbol: str) -> dict:
         alpaca_order_id = alpaca_id,
         reason          = reason,
         snapshot_summary = _snapshot_summary(snapshot),
+        **_regime_from_snapshot(snapshot),
     )
     append_trade(record, symbol)
 

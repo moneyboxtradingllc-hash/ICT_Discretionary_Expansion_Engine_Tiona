@@ -15,6 +15,7 @@ from playbooks.playbook_classifier import classify_playbook
 from risk.risk_governor import evaluate_risk
 from toolbox.toolbox_engine import run_toolbox
 from ai_layer.discretionary_ai import run_discretionary_ai
+from regime_classification.regime_classifier import classify_regime
 
 TIMEFRAMES = ["15m", "5m", "3m", "1m"]
 
@@ -123,6 +124,9 @@ def build_snapshot(
 
     # Toolbox: reads playbook + risk + all evidence to select entry tools
     snapshot["toolbox"] = run_toolbox(snapshot)
+
+    # Regime Classifier (Phase 5A): OBSERVE_ONLY label — never influences decisions.
+    snapshot["market_regime"] = classify_regime(snapshot, all_normalized)
 
     # Experience Intelligence (Phase 3A): OBSERVE_ONLY context from previous scan.
     # confidence_modifier is always 0 and must never influence toolbox or decisions.

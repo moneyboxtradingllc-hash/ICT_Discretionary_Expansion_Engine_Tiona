@@ -319,6 +319,22 @@ def format_correlation_line(corr: dict) -> str:
     return "Experience Corr: " + " | ".join(parts) + " | AUTHORITY=OBSERVE_ONLY"
 
 
+def format_regime_line(regime: dict) -> str:
+    """One-line market regime summary. OBSERVE_ONLY — never influences decisions."""
+    if not regime or not regime.get("enabled"):
+        return ""
+    label = regime.get("regime_label", "unknown")
+    conf  = regime.get("confidence",   0)
+    vol   = regime.get("volatility_state", "unknown")
+    exp   = regime.get("expansion_state",  "unknown")
+    if label == "unknown":
+        return "Market Regime: unknown | insufficient evidence | OBSERVE_ONLY"
+    return (
+        f"Market Regime: {label} | confidence={conf} | "
+        f"vol={vol} | expansion={exp} | OBSERVE_ONLY"
+    )
+
+
 def format_paper_execution_line(pe: dict) -> str:
     """One-line paper execution summary -- appended to ai_context summary by the scan loop."""
     if not pe:
@@ -671,6 +687,11 @@ def format_for_ai(snapshot: dict) -> str:
     corr_line = format_correlation_line(snapshot.get("experience_correlation", {}))
     if corr_line:
         parts.append(corr_line)
+
+    # Market Regime (Phase 5A — OBSERVE_ONLY)
+    regime_line = format_regime_line(snapshot.get("market_regime", {}))
+    if regime_line:
+        parts.append(regime_line)
 
     # Paper Activation (Phase 2D)
     pa_line = format_paper_activation_line(snapshot.get("paper_activation", {}))
