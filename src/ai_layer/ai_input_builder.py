@@ -244,6 +244,17 @@ def build_compact_ai_input(snapshot: dict) -> dict:
         "authority_level":      "observe_only",
     }
 
+    # Phase 5E — include recommendations context (OBSERVE_ONLY).
+    # AI may reference recommendations. AI must not alter decisions or risk behavior.
+    rec = snapshot.get("recommendations") or {}
+    result["recommendations"] = {
+        "authority_level":        "observe_only",
+        "recommendation_count":   rec.get("recommendation_count",   0),
+        "top_recommendation":     rec.get("top_recommendation"),
+        "recommendation_quality": rec.get("recommendation_quality", "none"),
+        "status":                 rec.get("status",                 "no_recommendations"),
+    }
+
     # Phase 5D — include performance dashboard context (OBSERVE_ONLY).
     # AI may reference dashboard. AI must not alter decisions or risk behavior.
     pd = snapshot.get("performance_dashboard") or {}

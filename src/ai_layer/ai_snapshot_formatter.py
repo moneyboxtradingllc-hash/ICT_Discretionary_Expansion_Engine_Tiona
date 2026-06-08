@@ -339,6 +339,19 @@ def format_ai_feedback_line(fb: dict) -> str:
     return f"AI Feedback: {n} samples | developing | OBSERVE_ONLY"
 
 
+def format_recommendations_line(rec: dict) -> str:
+    """One-line recommendations summary. OBSERVE_ONLY — never influences decisions."""
+    if not rec or not rec.get("enabled"):
+        return ""
+    count = rec.get("recommendation_count", 0)
+    top   = rec.get("top_recommendation")
+    qual  = rec.get("recommendation_quality", "none")
+    if count == 0:
+        return f"Recommendations: none | {qual.upper()} | OBSERVE_ONLY"
+    top_str = f" | top={top[:60]}" if top else ""
+    return f"Recommendations: {count} active{top_str} | OBSERVE_ONLY"
+
+
 def format_dashboard_line(dash: dict) -> str:
     """One-line performance dashboard summary. OBSERVE_ONLY — never influences decisions."""
     if not dash or not dash.get("enabled"):
