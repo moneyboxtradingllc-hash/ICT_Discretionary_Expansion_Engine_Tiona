@@ -63,8 +63,9 @@ from memory_search.similarity_search import find_similar_setups
 from memory_search.memory_summary    import build_memory_summary
 from performance_intelligence.dashboard_builder  import build_dashboard
 from performance_intelligence.dashboard_summary  import build_dashboard_summary
-from recommendation_engine.recommendation_builder import build_recommendations
-from recommendation_engine.recommendation_summary import build_recommendation_summary
+from recommendation_engine.recommendation_builder     import build_recommendations
+from recommendation_engine.recommendation_summary     import build_recommendation_summary
+from recommendation_engine.recommendation_persistence import save_recommendations
 
 _EASTERN = pytz.timezone("America/New_York")
 _DIV     = "=" * 60
@@ -794,7 +795,8 @@ def run_scan_loop():
                 ).strip()
 
             # ── Recommendation Engine (Phase 5E — OBSERVE_ONLY) ────────────
-            _rec_full = build_recommendations(symbol, snapshot)
+            # Pass _dash_full explicitly to avoid a redundant disk read inside builder
+            _rec_full = build_recommendations(symbol, snapshot, dashboard=_dash_full)
             snapshot["recommendations"] = build_recommendation_summary(_rec_full)
             snapshot["recommendations"]["_full_result"] = _rec_full
             rec_line = format_recommendations_line(snapshot["recommendations"])
@@ -802,6 +804,9 @@ def run_scan_loop():
                 snapshot["ai_context"]["summary"] = (
                     snapshot["ai_context"].get("summary", "") + " " + rec_line
                 ).strip()
+
+            # ── Recommendation Persistence (Phase 5E.1) ────────────────────
+            save_recommendations(symbol, _rec_full)
 
             # ── Position Monitor (Phase 2B — moved up) ────────────────────
             snapshot["position_monitor"] = monitor_paper_position(snapshot, symbol)

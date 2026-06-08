@@ -1,6 +1,8 @@
 """
 Phase 5C — Memory Record Builder.
 Loads and normalizes prior intent/trade records into a common schema.
+Phase 5E.1 — Deduplication fix: paper trades load first and claim their intent_ids.
+Any intent archive record whose intent_id is claimed by a paper trade is skipped.
 OBSERVE_ONLY — no decision logic, no execution influence.
 """
 import json
@@ -12,24 +14,53 @@ _PROJECT_ROOT = os.path.dirname(
 _INTENT_DIR = os.path.join(_PROJECT_ROOT, "data", "intent_archive")
 _TRADES_DIR = os.path.join(_PROJECT_ROOT, "data", "paper_trades")
 
-_CLOSED_STATUSES = {"closed", "externally_closed"}
+_CLOSED_STATUSES  = {"closed", "externally_closed"}
+_CLOSED_OUTCOMES  = {"win", "loss", "breakeven"}
 
 
 def load_memory_records(symbol: str | None = None) -> list[dict]:
     """
     Load and normalize all available memory records for the given symbol.
-    Returns a list of normalized dicts. Never raises — skips bad files/records.
+    Paper trade records are loaded first and claim their linked intent_ids.
+    Intent archive records whose intent_id is claimed are skipped to prevent
+    double-counting a single trade across both sources.
+    Returns a deduplicated list of normalized dicts. Never raises.
     """
-    records: list[dict] = []
-    records.extend(_load_from_intent_archive(symbol))
-    records.extend(_load_from_paper_trades(symbol))
-    return records
+    # Step 1: load paper trades and deduplicate by trade_id
+    trade_records = _load_from_paper_trades(symbol)
+    seen_trade_ids: set[str] = set()
+    deduped_trades: list[dict] = []
+    for rec in trade_records:
+        tid = rec.get("trade_id")
+        if tid and tid in seen_trade_ids:
+            continue
+        if tid:
+            seen_trade_ids.add(tid)
+        deduped_trades.append(rec)
+
+    # Step 2: collect intent_ids already represented by a paper trade
+    claimed_intent_ids: set[str] = {
+        rec["intent_id"] for rec in deduped_trades if rec.get("intent_id")
+    }
+
+    # Step 3: load intent archive records, skipping any claimed intent_id
+    intent_records = _load_from_intent_archive(symbol, claimed_intent_ids)
+
+    # Paper trades first (authoritative), then unlinked intent records
+    return deduped_trades + intent_records
 
 
 # ── Intent Archive ────────────────────────────────────────────────────────────
 
-def _load_from_intent_archive(symbol: str | None) -> list[dict]:
+def _load_from_intent_archive(
+    symbol: str | None,
+    skip_intent_ids: set[str] | None = None,
+) -> list[dict]:
     records: list[dict] = []
+    skip = skip_intent_ids or set()
+    # Also deduplicate within the intent archive itself (same intent_id in multiple files)
+    seen_in_archive: set[str] = set()
+
     if not os.path.isdir(_INTENT_DIR):
         return records
 
@@ -53,8 +84,16 @@ def _load_from_intent_archive(symbol: str | None) -> list[dict]:
         for intent in intents:
             try:
                 rec = _normalize_intent(intent, sym or symbol or "")
-                if rec:
-                    records.append(rec)
+                if not rec:
+                    continue
+                iid = rec.get("intent_id")
+                if iid and iid in skip:
+                    continue  # claimed by a paper trade
+                if iid and iid in seen_in_archive:
+                    continue  # duplicate within the archive
+                if iid:
+                    seen_in_archive.add(iid)
+                records.append(rec)
             except Exception:
                 continue
 
@@ -71,10 +110,9 @@ def _normalize_intent(intent: dict, symbol: str = "") -> dict | None:
 
     outcome = _derive_intent_outcome(intent)
 
-    # Pull context snapshot fields from scan_updates if present
-    scan_updates = intent.get("scan_updates") or []
-    first_snap = scan_updates[0] if scan_updates and isinstance(scan_updates[0], dict) else {}
-
+    # Top-level fields are preferred (populated by Phase 5E.1 enrichment).
+    # scan_updates fallback is kept for backward compatibility but those dicts
+    # do not carry session/regime fields in the current schema.
     return {
         "intent_id":             intent_id,
         "trade_id":              intent.get("linked_trade_id") or None,
@@ -84,7 +122,7 @@ def _normalize_intent(intent: dict, symbol: str = "") -> dict | None:
         "direction":             (intent.get("direction") or "").lower(),
         "preferred_tool":        (intent.get("preferred_tool") or "").lower(),
         "qualification":         (intent.get("quality_at_creation") or "").lower(),
-        "session":               (intent.get("session") or first_snap.get("session") or "").lower(),
+        "session":               (intent.get("session") or "").lower(),
         "market_regime_label":   (intent.get("market_regime_label") or "unknown").lower(),
         "market_regime_family":  (intent.get("market_regime_family") or "unknown").lower(),
         "volatility_state":      (intent.get("volatility_state") or "unknown").lower(),
@@ -98,6 +136,8 @@ def _normalize_intent(intent: dict, symbol: str = "") -> dict | None:
         "mae":                   _to_float(intent.get("mae")),
         "holding_minutes":       _to_float(intent.get("holding_minutes")),
         "outcome":               outcome,
+        "record_source":         "intent_archive",
+        "data_completeness":     "partial",
         "_source":               "intent_archive",
         "_status":               (intent.get("status") or "unknown").lower(),
     }
@@ -173,6 +213,9 @@ def _normalize_trade(trade: dict) -> dict | None:
     # Session: explicit > snapshot_summary
     session = (trade.get("session") or snap_sum.get("session") or "").lower()
 
+    # data_completeness: full only when a closed outcome is recorded
+    completeness = "full" if outcome in _CLOSED_OUTCOMES else "partial"
+
     return {
         "intent_id":             trade.get("intent_id") or None,
         "trade_id":              trade_id,
@@ -199,6 +242,8 @@ def _normalize_trade(trade: dict) -> dict | None:
         "ai_value_label":        (trade.get("ai_value_label") or "unknown").lower(),
         "ai_was_directionally_correct": trade.get("ai_was_directionally_correct"),
         "outcome":               outcome,
+        "record_source":         "paper_trade",
+        "data_completeness":     completeness,
         "_source":               "paper_trades",
         "_status":               (trade.get("order_status") or "unknown").lower(),
     }

@@ -1,6 +1,7 @@
 """
 Phase 5E — Recommendation Builder.
 Builds evidence-backed recommendations from performance intelligence.
+Phase 5E.1 — Accepts an explicit pre-built dashboard to avoid redundant disk reads.
 OBSERVE_ONLY — informational only. No execution influence.
 All recommendations require human review.
 """
@@ -12,13 +13,15 @@ from recommendation_engine.recommendation_rules  import check_all_rules
 def build_recommendations(
     symbol: str | None = None,
     snapshot: dict | None = None,
+    dashboard: dict | None = None,
 ) -> dict:
     """
     Build recommendations from live scan snapshot and/or trade history.
+    If dashboard is provided it is used directly — no rebuild, no extra disk read.
     Never raises. Returns safe defaults on any error.
     """
     try:
-        return _build(symbol, snapshot or {})
+        return _build(symbol, snapshot or {}, dashboard)
     except Exception as exc:
         return _empty_result(warnings=[f"recommendation build failed (non-blocking): {exc}"])
 
@@ -37,14 +40,15 @@ def build_recommendations_from_context(context: dict) -> dict:
 
 # ── Internal ──────────────────────────────────────────────────────────────────
 
-def _build(symbol: str | None, snapshot: dict) -> dict:
-    # Pull available intelligence from snapshot or load fresh
-    dashboard  = (
-        snapshot.get("performance_dashboard", {}).get("_full_dashboard")
+def _build(symbol: str | None, snapshot: dict, provided_dashboard: dict | None) -> dict:
+    # Priority: explicit parameter → snapshot._full_dashboard → snapshot summary → fresh load
+    dash = (
+        provided_dashboard
+        or snapshot.get("performance_dashboard", {}).get("_full_dashboard")
         or snapshot.get("performance_dashboard")
         or build_dashboard(symbol)
     )
-    ai_feedback   = (
+    ai_feedback = (
         snapshot.get("ai_feedback_summary")
         or (snapshot.get("experience_summary") or {}).get("ai_feedback_summary")
         or {}
@@ -56,7 +60,7 @@ def _build(symbol: str | None, snapshot: dict) -> dict:
     )
 
     context = {
-        "dashboard":    dashboard,
+        "dashboard":    dash,
         "ai_feedback":  ai_feedback,
         "memory_search": memory_search,
     }

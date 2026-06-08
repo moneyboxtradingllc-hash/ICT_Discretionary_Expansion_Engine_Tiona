@@ -255,11 +255,21 @@ class TestSimilaritySearch(unittest.TestCase):
         self.assertEqual(scores, sorted(scores, reverse=True))
 
     def test_09_duplicate_records_removed(self):
-        # Two records with same intent_id — should appear only once
-        snap    = _snapshot()
-        r1 = _normalize_intent(_intent("I_DUP", realized_r=1.0), "QQQ")
-        r2 = _normalize_intent(_intent("I_DUP", realized_r=0.5), "QQQ")
-        result = self._search_with_records(snap, [r1, r2], min_similarity=0.0)
+        # Two intent archive entries with the same intent_id should yield one match.
+        # Deduplication now lives in load_memory_records, so test through the real loader.
+        snap = _snapshot()
+        intent_data = {
+            "date": "20260608", "symbol": "QQQ",
+            "intents": [_intent("I_DUP", realized_r=1.0), _intent("I_DUP", realized_r=0.5)],
+        }
+        import memory_search.memory_record_builder as mrb
+        with tempfile.TemporaryDirectory() as intent_dir, \
+             tempfile.TemporaryDirectory() as trades_dir:
+            with open(os.path.join(intent_dir, "20260608_QQQ_intents.json"), "w") as f:
+                json.dump(intent_data, f)
+            with patch.object(mrb, "_INTENT_DIR", intent_dir), \
+                 patch.object(mrb, "_TRADES_DIR", trades_dir):
+                result = find_similar_setups(snap, symbol="QQQ", min_similarity=0.0)
         intent_ids = [m.get("intent_id") for m in result["top_matches"]]
         self.assertEqual(intent_ids.count("I_DUP"), 1)
 

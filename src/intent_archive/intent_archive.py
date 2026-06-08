@@ -83,10 +83,11 @@ def _should_archive(snapshot: dict) -> bool:
 
 
 def _make_new_record(symbol: str, snapshot: dict, archive_key: str) -> dict:
-    ti   = snapshot.get("trade_intent", {})
-    iscr = snapshot.get("intent_score", {})
-    sl   = snapshot.get("setup_lifecycle", {})
-    now  = datetime.now(_EASTERN).strftime("%Y%m%dT%H%M%S")
+    ti     = snapshot.get("trade_intent", {})
+    iscr   = snapshot.get("intent_score", {})
+    sl     = snapshot.get("setup_lifecycle", {})
+    regime = snapshot.get("market_regime") or {}
+    now    = datetime.now(_EASTERN).strftime("%Y%m%dT%H%M%S")
     return {
         "intent_id":               f"{symbol}_{now}",
         "archive_key":             archive_key,
@@ -109,6 +110,13 @@ def _make_new_record(symbol: str, snapshot: dict, archive_key: str) -> dict:
         "trigger_became_ready":    False,
         "expiration_reason":       None,
         "scan_updates":            [],
+        # Phase 5E.1 — regime/session context at creation time for memory similarity search
+        "session":               (snapshot.get("session") or "").lower(),
+        "market_regime_label":   (regime.get("regime_label")   or "unknown").lower(),
+        "market_regime_family":  (regime.get("regime_family")  or "unknown").lower(),
+        "regime_confidence":     regime.get("confidence", 0),
+        "volatility_state":      (regime.get("volatility_state") or "unknown").lower(),
+        "expansion_state":       (regime.get("expansion_state")  or "unknown").lower(),
     }
 
 
