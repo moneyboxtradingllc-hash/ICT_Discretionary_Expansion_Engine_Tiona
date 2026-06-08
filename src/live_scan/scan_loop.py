@@ -45,6 +45,7 @@ from experience_intelligence.experience_report      import build_experience_repo
 from experience_intelligence.experience_correlation import build_correlation_for_symbol
 from experience_intelligence.correlation_report     import build_correlation_report
 from paper_execution.trade_reconciliation           import reconcile_trade
+from paper_execution.pending_order_lifecycle        import cancel_pending_entry_order_if_setup_dead
 from ai_layer.ai_snapshot_formatter                 import (
     format_decision_line, format_gate_line, format_intent_line,
     format_score_line, format_archive_line, format_paper_execution_line,
@@ -525,6 +526,29 @@ def _print_scan_summary(snapshot: dict, symbol: str, scan_num: int, saved_path: 
     else:
         print(f"Trade Recon   : {recon_status.upper()}")
 
+    peo = snapshot.get("pending_entry_order") or {}
+    peo_status = (peo.get("status") or "none").upper()
+    peo_tid    = peo.get("trade_id")
+    peo_oid    = peo.get("alpaca_order_id")
+    peo_warns  = peo.get("warnings") or []
+    if peo_status == "CANCELLED":
+        tid_tag = f" | trade_id={peo_tid}" if peo_tid else ""
+        print(f"Pending Entry : CANCELLED{tid_tag} | reason=setup_lifecycle_dead")
+    elif peo_status == "NONE":
+        print("Pending Entry : NONE")
+    elif peo_status == "LIVE":
+        os_before = peo.get("order_status_before") or "?"
+        tid_tag   = f" | trade_id={peo_tid}" if peo_tid else ""
+        print(f"Pending Entry : LIVE{tid_tag} | status={os_before}")
+    elif peo_status == "CANCEL_FAILED":
+        warn_str = f" | {peo_warns[0][:60]}" if peo_warns else ""
+        print(f"Pending Entry : CANCEL_FAILED{warn_str}")
+    elif peo_status == "ERROR":
+        warn_str = f" | {peo_warns[0][:60]}" if peo_warns else ""
+        print(f"Pending Entry : ERROR{warn_str}")
+    else:
+        print(f"Pending Entry : {peo_status}")
+
     orr         = snapshot.get("operational_readiness", {})
     orr_score   = orr.get("score", 0)
     orr_ready   = orr.get("ready", False)
@@ -924,6 +948,11 @@ def run_scan_loop():
                 snapshot["ai_context"]["summary"] = (
                     snapshot["ai_context"].get("summary", "") + " " + recon_ai_line
                 ).strip()
+
+            # ── Pending Entry Order Lifecycle (Phase 5E.5) ────────────────
+            snapshot["pending_entry_order"] = cancel_pending_entry_order_if_setup_dead(
+                snapshot, symbol
+            )
 
             # ── Persist snapshot ───────────────────────────────────────────
             saved_path = None

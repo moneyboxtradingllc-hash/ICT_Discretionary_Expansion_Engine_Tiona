@@ -72,19 +72,29 @@ def append_trade(record: dict, symbol: str) -> bool:
 
 
 def count_submitted_today(symbol: str) -> int:
-    """Count trades that reached Alpaca today (any status with a broker order ID)."""
+    """
+    Count trades that reached Alpaca today.
+    Phase 5E.5: excludes orders cancelled by setup death without filling
+    (pending_order_cancelled=True) so they do not consume MAX_TRADES_PER_DAY.
+    """
     return sum(
         1 for t in load_today_trades(symbol)
         if t.get("alpaca_order_id") is not None
+        and not t.get("pending_order_cancelled", False)
     )
 
 
 def total_risk_today(symbol: str) -> float:
-    """Sum of risk_dollars for all trades that reached Alpaca today (conservative estimate)."""
+    """
+    Sum of risk_dollars for all trades that reached Alpaca today.
+    Phase 5E.5: excludes orders cancelled by setup death without filling
+    — risk was never actually committed on those attempts.
+    """
     return sum(
         float(t.get("risk_dollars", 0))
         for t in load_today_trades(symbol)
         if t.get("alpaca_order_id") is not None
+        and not t.get("pending_order_cancelled", False)
     )
 
 
@@ -204,6 +214,11 @@ def make_record(
         "broker_stop_price":      None,
         "broker_stop_submitted_at": None,
         "broker_stop_verified":   False,
+        # Phase 5E.5 entry lifecycle cancel fields (set by pending_order_lifecycle)
+        "pending_order_cancelled":   False,
+        "cancel_reason":             None,
+        "cancelled_at":              None,
+        "setup_lifecycle_at_cancel": None,
     }
 
 
@@ -408,3 +423,35 @@ def find_any_active_trade(symbol: str) -> tuple[dict | None, str | None]:
             if t.get("order_status", "") not in _TERMINAL_STATUSES:
                 return t, fp
     return None, None
+
+
+# ── Phase 5E.5: pending entry order lookup ────────────────────────────────────
+
+_PENDING_ENTRY_STATUSES = frozenset({"submitted", "accepted", "pending_new", "new"})
+
+
+def find_pending_entry_order(symbol: str) -> dict | None:
+    """
+    Phase 5E.5 — Find the most recent pending (unfilled) entry order for symbol.
+
+    Searches up to 7 recent days, most recent first.
+    Returns the trade record dict, or None if not found.
+
+    A pending entry order satisfies all of:
+    - order_status in (submitted, accepted, pending_new, new)
+    - alpaca_order_id is set (order reached Alpaca)
+    - exit_submitted is False (no exit has been attempted)
+    - final_status is not "closed"
+    """
+    for _, _fp, trades in _search_recent_files(symbol):
+        for t in reversed(trades):
+            if t.get("order_status", "") not in _PENDING_ENTRY_STATUSES:
+                continue
+            if not t.get("alpaca_order_id"):
+                continue
+            if t.get("exit_submitted", False):
+                continue
+            if t.get("final_status") == "closed":
+                continue
+            return t
+    return None
