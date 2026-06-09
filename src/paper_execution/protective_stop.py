@@ -1,5 +1,6 @@
 """
 Phase 4B — Protective Stop Manager.
+Phase 5E.7 — Broker stop price validation after fill.
 
 Submits and verifies broker-side protective stop orders for paper positions.
 PAPER TRADING ONLY. BROKER_STOP_ENABLED=false (default) disables all actions.
@@ -7,6 +8,14 @@ PAPER TRADING ONLY. BROKER_STOP_ENABLED=false (default) disables all actions.
 BROKER_STOP_MODE=after_fill   — stop submitted after fill confirmation (default).
 BROKER_STOP_MODE=bracket_if_supported — OTO/bracket at entry time if supported;
                                          falls back to after_fill if not.
+
+Phase 5E.7 — stop price validation:
+  Before submitting, fetch current_price (and fill_price as fallback) from the
+  open position. For a long STOP SELL, stop must be < current_price. For a short
+  STOP BUY, stop must be > current_price. When the pre-trade stop_reference
+  violates this, adjust by BROKER_STOP_PRICE_BUFFER (default 0.05) away from
+  the reference price. If the adjusted price is invalid, return a warning and
+  do not submit.
 
 Safety:
   - Paper endpoint validated before every submission.
@@ -23,10 +32,107 @@ from paper_execution.paper_broker  import (
     submit_protective_stop_order,
     find_open_stop_order,
     cancel_order,
+    get_position,
 )
 from paper_execution.trade_journal import update_broker_stop
 
 _EASTERN = pytz.timezone("America/New_York")
+
+
+def _stop_price_buffer() -> float:
+    try:
+        return float(os.getenv("BROKER_STOP_PRICE_BUFFER", "0.05"))
+    except (TypeError, ValueError):
+        return 0.05
+
+
+def _fetch_reference_price(symbol: str) -> tuple:
+    """
+    Fetch current_market_price and fill_price for stop validation.
+    Returns (current_price, fill_price, source_label).
+    Never raises.
+    """
+    try:
+        pos = get_position(symbol)
+        if pos and "error" not in pos:
+            raw_current = pos.get("current_price")
+            raw_fill    = pos.get("avg_entry_price")
+            current = float(raw_current) if raw_current is not None else None
+            fill    = float(raw_fill)    if raw_fill    is not None else None
+            return current, fill, "current_market_price"
+    except Exception:
+        pass
+    return None, None, "unavailable"
+
+
+def _adjust_stop_price(
+    stop_price: float,
+    current_price,
+    fill_price,
+    position_side: str,
+    buffer: float,
+) -> dict:
+    """
+    Phase 5E.7 — validate stop_price against market and adjust if needed.
+
+    For long:  stop must be < current_price (STOP SELL triggers on downward move).
+    For short: stop must be > current_price (STOP BUY  triggers on upward move).
+
+    Returns:
+      {"valid": True, "adjusted_stop": float, "stop_adjusted": bool,
+       "adjustment_reason": str, "reference_price_used": float|None,
+       "reference_source": str}
+    or
+      {"valid": False, "reason": str}
+    """
+    if current_price is not None and current_price > 0:
+        ref_price  = current_price
+        ref_source = "current_market_price"
+    elif fill_price is not None and fill_price > 0:
+        ref_price  = fill_price
+        ref_source = "fill_price"
+    else:
+        return {
+            "valid":                True,
+            "adjusted_stop":        stop_price,
+            "stop_adjusted":        False,
+            "adjustment_reason":    "no_reference_price_available",
+            "reference_price_used": None,
+            "reference_source":     "unavailable",
+        }
+
+    adjusted_stop     = stop_price
+    stop_adjusted     = False
+    adjustment_reason = "no_adjustment_needed"
+
+    if position_side == "long":
+        if stop_price >= ref_price:
+            adjusted_stop     = round(ref_price - buffer, 2)
+            stop_adjusted     = True
+            adjustment_reason = "long_stop_above_market"
+    else:  # short
+        if stop_price <= ref_price:
+            adjusted_stop     = round(ref_price + buffer, 2)
+            stop_adjusted     = True
+            adjustment_reason = "short_stop_below_market"
+
+    if adjusted_stop <= 0:
+        return {
+            "valid":  False,
+            "reason": (
+                f"adjusted_stop_price={adjusted_stop:.4f} is invalid (<= 0) "
+                f"after applying buffer={buffer} to ref={ref_price}"
+            ),
+        }
+
+    return {
+        "valid":                True,
+        "adjusted_stop":        adjusted_stop,
+        "stop_adjusted":        stop_adjusted,
+        "adjustment_reason":    adjustment_reason,
+        "reference_price_used": ref_price,
+        "reference_source":     ref_source,
+    }
 
 
 # ── Result helpers ────────────────────────────────────────────────────────────
@@ -137,9 +243,27 @@ def _submit(
     if not stop_build["valid"]:
         return _error(f"invalid stop parameters: {stop_build['reason']}")
 
-    stop_side   = stop_build["stop_side"]
-    clean_price = stop_build["stop_price"]
-    clean_qty   = stop_build["qty"]
+    stop_side      = stop_build["stop_side"]
+    original_price = stop_build["stop_price"]
+    clean_qty      = stop_build["qty"]
+
+    # ── Phase 5E.7: validate stop price against current market ───────────────
+    current_price, fill_price, ref_source = _fetch_reference_price(symbol)
+    adjustment = _adjust_stop_price(
+        stop_price    = original_price,
+        current_price = current_price,
+        fill_price    = fill_price,
+        position_side = position_side,
+        buffer        = _stop_price_buffer(),
+    )
+
+    if not adjustment["valid"]:
+        return _error(
+            f"stop price invalid after adjustment: {adjustment['reason']}",
+            warnings=[adjustment["reason"]],
+        )
+
+    clean_price = adjustment["adjusted_stop"]
 
     submission = submit_protective_stop_order(symbol, clean_qty, stop_side, clean_price)
     if "error" in submission:
@@ -159,13 +283,20 @@ def _submit(
         )
 
     return {
-        "enabled":        True,
-        "stop_submitted": True,
-        "stop_order_id":  stop_order_id,
-        "stop_price":     clean_price,
-        "status":         "submitted",
-        "reason":         "protective stop submitted after fill",
-        "warnings":       [],
+        "enabled":              True,
+        "stop_submitted":       True,
+        "stop_order_id":        stop_order_id,
+        "stop_price":           clean_price,
+        "status":               "submitted",
+        "reason":               "protective stop submitted after fill",
+        "warnings":             [],
+        # ── Phase 5E.7 fields ─────────────────────────────────────────────
+        "original_stop_price":  original_price,
+        "adjusted_stop_price":  clean_price,
+        "stop_adjusted":        adjustment["stop_adjusted"],
+        "adjustment_reason":    adjustment["adjustment_reason"],
+        "reference_price_used": adjustment["reference_price_used"],
+        "reference_source":     adjustment["reference_source"],
     }
 
 
