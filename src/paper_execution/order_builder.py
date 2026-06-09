@@ -1,18 +1,26 @@
 """
 Phase 2A — Paper Order Builder.
+Phase 5E.6 — Buying-power-aware sizing cap.
 
 Constructs a LIMIT order request from trade_intent + price_level + risk config.
 Does NOT submit. Does NOT call Alpaca. Pure construction logic.
 
-Risk sizing:
-  risk_per_share = abs(entry_reference - stop_reference)
-  qty = floor(RISK_PER_TRADE_DOLLARS / risk_per_share)
+Risk sizing (Phase 5E.6):
+  risk_per_share    = abs(entry_reference - stop_reference)
+  risk_qty          = floor(RISK_PER_TRADE_DOLLARS / risk_per_share)
+  max_affordable    = floor(buying_power / entry_reference)
+  qty               = min(risk_qty, max_affordable)
 
 Entry: zone midpoint (limit order).
 Stop:  invalidation_level from price_level (recorded in journal; no bracket in Phase 2A).
 """
+import logging
 import os
 import math
+
+from paper_execution.paper_broker import get_account as _get_account
+
+_log = logging.getLogger(__name__)
 
 
 _QUALITY_RANK = {
@@ -95,8 +103,8 @@ def build_order(snapshot: dict, symbol: str) -> dict:
     if risk_per_share <= 0:
         return {"valid": False, "reject_reason": f"risk_per_share <= 0 ({risk_per_share})"}
 
-    qty = math.floor(risk_budget / risk_per_share)
-    if qty <= 0:
+    risk_qty = math.floor(risk_budget / risk_per_share)
+    if risk_qty <= 0:
         return {
             "valid": False,
             "reject_reason": (
@@ -104,6 +112,34 @@ def build_order(snapshot: dict, symbol: str) -> dict:
                 f"budget {risk_budget}"
             ),
         }
+
+    # ── Phase 5E.6: buying-power cap ─────────────────────────────────────────
+    acct = _get_account()
+    if "error" in acct:
+        return {
+            "valid": False,
+            "reject_reason": f"buying_power_lookup_failed: {acct['error']}",
+        }
+
+    buying_power  = float(acct.get("buying_power", 0))
+    max_affordable = math.floor(buying_power / entry_reference) if entry_reference > 0 else 0
+
+    if max_affordable <= 0:
+        return {
+            "valid": False,
+            "reject_reason": (
+                f"insufficient_buying_power: buying_power={buying_power:.2f} "
+                f"entry={entry_reference:.2f} affordable_qty=0"
+            ),
+        }
+
+    qty = min(risk_qty, max_affordable)
+
+    _log.info(
+        "Sizing: risk_qty=%d affordable_qty=%d final_qty=%d "
+        "buying_power=%.2f entry_price=%.2f",
+        risk_qty, max_affordable, qty, buying_power, entry_reference,
+    )
 
     side = OrderSide.BUY if intent_type == "long" else OrderSide.SELL
 
@@ -126,6 +162,9 @@ def build_order(snapshot: dict, symbol: str) -> dict:
         "risk_per_share":   round(risk_per_share, 4),
         "risk_dollars":     round(risk_per_share * qty, 2),
         "intent_type":      intent_type,
+        "risk_qty":         risk_qty,
+        "affordable_qty":   max_affordable,
+        "buying_power":     round(buying_power, 2),
     }
 
 

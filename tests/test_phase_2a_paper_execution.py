@@ -19,6 +19,7 @@ import paper_execution.trade_journal  as tj_mod
 import paper_execution.paper_broker   as broker_mod
 import paper_execution.position_guard as guard_mod
 import paper_execution.execution_engine as eng_mod
+import paper_execution.order_builder  as ob_mod
 
 from paper_execution.trade_journal  import (
     append_trade, load_today_trades, count_submitted_today,
@@ -197,8 +198,10 @@ class TestOrderBuilder(unittest.TestCase):
 
     def test_05_valid_long_order(self):
         snap = _full_snap(intent_type="long", direction="bullish")
+        mock_acct = {"buying_power": 1_000_000.0, "cash": 1_000_000.0, "equity": 1_000_000.0}
         with patch.dict(os.environ, {"RISK_PER_TRADE_DOLLARS": "500"}):
-            result = build_order(snap, "QQQ")
+            with patch.object(ob_mod, "_get_account", return_value=mock_acct):
+                result = build_order(snap, "QQQ")
         self.assertTrue(result["valid"])
         self.assertEqual(result["side"], "buy")
         # midpoint=479, invalidation=476 → risk_per_share=3.0 → qty=floor(500/3)=166
@@ -209,8 +212,10 @@ class TestOrderBuilder(unittest.TestCase):
 
     def test_06_valid_short_order(self):
         snap = _full_snap(intent_type="short", direction="bearish")
+        mock_acct = {"buying_power": 1_000_000.0, "cash": 1_000_000.0, "equity": 1_000_000.0}
         with patch.dict(os.environ, {"RISK_PER_TRADE_DOLLARS": "500"}):
-            result = build_order(snap, "QQQ")
+            with patch.object(ob_mod, "_get_account", return_value=mock_acct):
+                result = build_order(snap, "QQQ")
         self.assertTrue(result["valid"])
         self.assertEqual(result["side"], "sell")
         # midpoint=479, invalidation=482 → risk_per_share=3.0
@@ -401,12 +406,14 @@ class TestExecutionEngine(unittest.TestCase):
             "limit_price": "479.0",
             "submitted_at": "2026-06-05T09:23:15Z",
         }
+        mock_acct = {"buying_power": 1_000_000.0, "cash": 1_000_000.0, "equity": 1_000_000.0}
         with patch.dict(os.environ, env):
             with patch.object(guard_mod, "get_open_positions", return_value=[]):
             # No open positions
                 with patch.object(eng_mod, "submit_paper_order", return_value=mock_submission):
-                    with patch.object(tj_mod, "_journal_filepath", return_value=tmp):
-                        result = attempt_paper_execution(snap, "QQQ")
+                    with patch.object(ob_mod, "_get_account", return_value=mock_acct):
+                        with patch.object(tj_mod, "_journal_filepath", return_value=tmp):
+                            result = attempt_paper_execution(snap, "QQQ")
         self.assertEqual(result["status"], "submitted")
         self.assertEqual(result["alpaca_order_id"], "alpaca-uuid-123")
         self.assertIn("buy", result["order_summary"])
