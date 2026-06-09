@@ -46,6 +46,7 @@ from experience_intelligence.experience_correlation import build_correlation_for
 from experience_intelligence.correlation_report     import build_correlation_report
 from paper_execution.trade_reconciliation           import reconcile_trade
 from paper_execution.pending_order_lifecycle        import cancel_pending_entry_order_if_setup_dead
+from paper_execution.trade_manager                  import manage_open_trade
 from ai_layer.ai_snapshot_formatter                 import (
     format_decision_line, format_gate_line, format_intent_line,
     format_score_line, format_archive_line, format_paper_execution_line,
@@ -948,6 +949,14 @@ def run_scan_loop():
                 snapshot["ai_context"]["summary"] = (
                     snapshot["ai_context"].get("summary", "") + " " + recon_ai_line
                 ).strip()
+
+            # ── Trade Management (Phase 5E.8) ─────────────────────────────
+            snapshot["trade_management"] = manage_open_trade(snapshot, symbol)
+            tm = snapshot["trade_management"]
+            if tm.get("action") not in ("none", "no_trade", "hold"):
+                print(
+                    f"  Trade Mgmt   : {tm.get('action')} | {tm.get('details', tm.get('reason', ''))}"
+                )
 
             # ── Pending Entry Order Lifecycle (Phase 5E.5) ────────────────
             snapshot["pending_entry_order"] = cancel_pending_entry_order_if_setup_dead(

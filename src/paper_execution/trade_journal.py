@@ -219,6 +219,18 @@ def make_record(
         "cancel_reason":             None,
         "cancelled_at":              None,
         "setup_lifecycle_at_cancel": None,
+        # Phase 5E.8 trade management fields (set by trade_manager)
+        "breakeven_triggered":       False,
+        "breakeven_triggered_at":    None,
+        "stop_moved_to_breakeven":   False,
+        "take_profit_triggered":     False,
+        "take_profit_triggered_at":  None,
+        "take_profit_r":             None,
+        "trail_stop_active":         False,
+        "trail_stop_updated_at":     None,
+        "trail_reason":              None,
+        "current_stop_reference":    None,
+        "stop_management_state":     "initial",
     }
 
 
@@ -402,6 +414,20 @@ def update_broker_stop(
     elif status == "broker_stop_missing":
         fields["broker_stop_verified"] = False
 
+    return _update_trade_in_file(trade_id, fp, **fields)
+
+
+# ── Phase 5E.8: trade management update ──────────────────────────────────────
+
+def update_trade_management(trade_id: str, fields: dict, symbol: str) -> bool:
+    """
+    Phase 5E.8 — Update trade management fields on a journal record.
+    Accepts any combination of Phase 5E.8 fields (breakeven, take_profit, trail, etc.).
+    Returns True on success.
+    """
+    _, fp = _find_trade_filepath(trade_id, symbol)
+    if fp is None:
+        return False
     return _update_trade_in_file(trade_id, fp, **fields)
 
 
