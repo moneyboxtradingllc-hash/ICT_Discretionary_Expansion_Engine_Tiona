@@ -13,6 +13,21 @@ _TOOL_READY  = frozenset({"ready", "actionable"})
 _TRIG_ACTIVE = frozenset({"waiting_for_retest", "retest_in_progress", "confirmation_needed"})
 _TRIG_FULL   = frozenset({"confirmed"})
 
+# Phase 5F.4 — decision state rename.
+# "ready_for_execution" replaces the legacy "trade_authorized_false" GO-ready state.
+READY_FOR_EXECUTION = "ready_for_execution"
+_LEGACY_READY       = "trade_authorized_false"
+
+
+def normalize_decision(decision: str | None) -> str:
+    """
+    Phase 5F.4 — Normalize a decision string.
+    Maps the legacy 'trade_authorized_false' label (old snapshots, old journals)
+    to 'ready_for_execution'. All other values pass through lowercased.
+    """
+    d = (decision or "stand_down").lower().strip()
+    return READY_FOR_EXECUTION if d == _LEGACY_READY else d
+
 
 # ── Snapshot helpers ──────────────────────────────────────────────────────────
 
@@ -127,9 +142,9 @@ def _select_decision(snapshot: dict, direction: str) -> str:
     if qual_status not in _QUAL_ACTIVE:
         return "monitor"
 
-    # All execution conditions aligned — trade would fire, but Phase 1T blocks it
+    # All execution conditions aligned — execution gate makes the final call
     if exec_rdy and raw_tool in _TOOL_READY:
-        return "trade_authorized_false"
+        return READY_FOR_EXECUTION
 
     # Pre-execution preparation: tool ready + trigger approaching
     if raw_tool in _TOOL_READY and trig_raw in (_TRIG_ACTIVE | _TRIG_FULL):
@@ -181,10 +196,10 @@ def _build_reason(snapshot: dict, decision: str, direction: str) -> str:
             "Awaiting execution_ready signal."
         )
 
-    if decision == "trade_authorized_false":
+    if decision == READY_FOR_EXECUTION:
         return (
-            f"All {direction} execution conditions appear aligned — "
-            "authorization blocked (Phase 1T: execution layer not yet implemented)."
+            f"All {direction} execution conditions aligned — "
+            "ready for execution (final authorization at execution gate)."
         )
 
     return "Decision indeterminate from current conditions."

@@ -153,7 +153,9 @@ def build_intent(snapshot: dict, symbol: str) -> dict:
     tb    = snapshot.get("toolbox", {})
     debate = snapshot.get("ai_debate", {})
 
-    decision       = (da.get("decision") or "stand_down").lower()
+    # Phase 5F.4: normalize legacy 'trade_authorized_false' to 'ready_for_execution'
+    from decision_authority.decision_engine import normalize_decision
+    decision       = normalize_decision(da.get("decision"))
     direction      = (da.get("direction") or "neutral").lower()
     playbook       = (snapshot.get("playbook", {}).get("selected_playbook") or "no_playbook").lower()
     preferred_tool = tb.get("preferred_tool") or None
@@ -216,7 +218,7 @@ def build_intent(snapshot: dict, symbol: str) -> dict:
 
     # ── Long intent ───────────────────────────────────────────────────────────
     long_intent = (
-        decision in ("prepare_long", "trade_authorized_false")
+        decision in ("prepare_long", "ready_for_execution")
         and direction == "bullish"
         and preferred_tool.startswith("bullish_")
         and setup_active
@@ -232,7 +234,7 @@ def build_intent(snapshot: dict, symbol: str) -> dict:
 
     # ── Short intent ──────────────────────────────────────────────────────────
     short_intent = (
-        decision in ("prepare_short", "trade_authorized_false")
+        decision in ("prepare_short", "ready_for_execution")
         and direction == "bearish"
         and preferred_tool.startswith("bearish_")
         and setup_active

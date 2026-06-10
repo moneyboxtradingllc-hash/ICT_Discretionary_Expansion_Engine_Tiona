@@ -9,9 +9,19 @@ When EXECUTION_ENABLED=true and all internal checks pass:
   allow_execution=True, gate_status="authorized"
   Actual paper orders still require ALLOW_PAPER_ORDERS=true (checked separately).
 
+Phase 5F additions:
+  5F.3 — trigger confirmation enforcement (required_trigger_status from
+         regime_permission_matrix; missing matrix defaults to 'confirmed')
+  5F.4 — decision state normalization (legacy 'trade_authorized_false'
+         accepted and mapped to 'ready_for_execution')
+  5F.5 — minimum setup age enforcement (min_setup_age_scans from matrix)
+  plus regime permission blocking (regime_permissions.allowed)
+
 This module ONLY evaluates authorization -- it never submits orders.
 """
 import os
+
+from decision_authority.decision_engine import normalize_decision
 
 
 def _preferred_candidate(snapshot: dict) -> dict:
@@ -19,6 +29,46 @@ def _preferred_candidate(snapshot: dict) -> dict:
     pref  = tb.get("preferred_tool", "") or ""
     cands = tb.get("tool_candidates", [])
     return next((c for c in cands if c.get("tool") == pref), {}) if cands else {}
+
+
+def _regime_constraints(snapshot: dict) -> tuple[bool, "str | None", int, str, list]:
+    """
+    Phase 5F — Extract regime constraint inputs for the gate.
+
+    Returns (regime_allowed, required_trigger_status, min_setup_age, source, blocking_reasons).
+      - Matrix present and enabled  -> its values
+      - Matrix explicitly disabled  -> legacy behavior (no regime gating)
+      - Matrix missing/malformed    -> SAFE DEFAULT: require confirmed, min age 2
+    """
+    rp = snapshot.get("regime_permissions")
+    if not isinstance(rp, dict) or not rp:
+        return True, "confirmed", 2, "missing_matrix_safe_default", []
+
+    if not rp.get("enabled", False):
+        return True, None, 0, "regime_authority_disabled", []
+
+    return (
+        bool(rp.get("allowed", True)),
+        (rp.get("required_trigger_status") or "confirmed").lower(),
+        int(rp.get("min_setup_age_scans", 2) or 0),
+        "regime_permission_matrix",
+        list(rp.get("blocking_reasons", [])),
+    )
+
+
+def _trigger_requirement_met(required: "str | None", actual: str) -> bool:
+    """
+    Phase 5F.3 — confirmation_needed and confirmed are distinct states.
+      required None                  -> no requirement (authority disabled)
+      required 'confirmed'           -> only 'confirmed' passes
+      required 'confirmation_needed' -> 'confirmation_needed' or 'confirmed' passes
+      unknown requirement            -> safe: only 'confirmed' passes
+    """
+    if required is None:
+        return True
+    if required == "confirmation_needed":
+        return actual in ("confirmation_needed", "confirmed")
+    return actual == "confirmed"
 
 
 def evaluate_gate(snapshot: dict) -> dict:
@@ -41,10 +91,12 @@ def evaluate_gate(snapshot: dict) -> dict:
     pref_c = _preferred_candidate(snapshot)
 
     # ── Authorization checks ──────────────────────────────────────────────────
-    decision       = (da.get("decision") or "stand_down").lower()
-    da_trade_auth  = da.get("trade_authorized", False)          # Phase 1T invariant: always False
+    # Phase 5F.4: legacy 'trade_authorized_false' normalizes to 'ready_for_execution'
+    decision       = normalize_decision(da.get("decision"))
+    da_trade_auth  = da.get("trade_authorized", False)          # invariant: always False pre-gate
     risk_allows    = risk.get("trade_allowed", False)
-    exec_ready     = bool(pref_c.get("trigger_prep", {}).get("execution_ready", False))
+    trigger_prep   = pref_c.get("trigger_prep") or {}
+    exec_ready     = bool(trigger_prep.get("execution_ready", False))
     st_inv         = st.get("invalidated", False)
     lc_phase       = (
         (sl.get("current_phase") or "dormant").lower()
@@ -59,6 +111,23 @@ def evaluate_gate(snapshot: dict) -> dict:
     lifecycle_ok   = bool(sl.get("active") and lc_phase not in ("invalidated", "decaying"))
     fusion_status  = (fus.get("fusion_status") or "").lower()
 
+    # ── Phase 5F: regime constraint checks ───────────────────────────────────
+    (
+        regime_allowed,
+        required_trigger,
+        min_setup_age,
+        regime_source,
+        regime_blocking,
+    ) = _regime_constraints(snapshot)
+
+    # 5F.3 — trigger confirmation requirement
+    actual_trigger = (trigger_prep.get("raw_trigger_status") or "unknown").lower()
+    trig_req_met   = _trigger_requirement_met(required_trigger, actual_trigger)
+
+    # 5F.5 — minimum setup age requirement
+    setup_age_actual = int(sl.get("age_scans", 0) or 0) if sl.get("active") else 0
+    setup_age_met    = setup_age_actual >= min_setup_age
+
     auth_checks = {
         "decision_trade_authorized": da_trade_auth,
         "risk_allows_trade":         risk_allows,
@@ -66,26 +135,34 @@ def evaluate_gate(snapshot: dict) -> dict:
         "setup_not_invalidated":     setup_not_inv,
         "ai_verdict_supports_trade": ai_supports,
         "lifecycle_allows_trade":    lifecycle_ok,
+        # Phase 5F regime constraint checks
+        "regime_permission_allowed": regime_allowed,
+        "trigger_requirement_met":   trig_req_met,
+        "setup_age_requirement_met": setup_age_met,
     }
 
     # ── would_authorize_if_enabled ────────────────────────────────────────────
     # True only when every check passes simultaneously and decision reached max readiness.
     # Even when True: allow_execution remains False because EXECUTION_ENABLED=false.
     would_authorize = (
-        decision == "trade_authorized_false"
+        decision == "ready_for_execution"
         and da_trade_auth is False
         and risk_allows
         and exec_ready
         and setup_not_inv
         and ai_supports
         and fusion_status != "strong_disagreement"
+        # Phase 5F — regime constraint authority
+        and regime_allowed
+        and trig_req_met
+        and setup_age_met
     )
 
     # ── Blocking factors ──────────────────────────────────────────────────────
     blocking: list[str] = []
     if not execution_enabled:
         blocking.append("execution globally disabled")
-    if decision != "trade_authorized_false":
+    if decision != "ready_for_execution":
         blocking.append(f"decision_authority decision={decision}")
     if not risk_allows:
         blocking.append("risk blocked")
@@ -97,6 +174,20 @@ def evaluate_gate(snapshot: dict) -> dict:
         blocking.append(f"ai debate stance is {debate_stance}")
     if fusion_status == "strong_disagreement":
         blocking.append("confidence fusion: strong disagreement")
+    # Phase 5F blocking factors
+    if not regime_allowed:
+        detail = f": {regime_blocking[0]}" if regime_blocking else ""
+        blocking.append(f"regime permission blocked{detail}")
+    if not trig_req_met:
+        blocking.append(
+            f"trigger requirement not met "
+            f"(required={required_trigger}, actual={actual_trigger})"
+        )
+    if not setup_age_met:
+        blocking.append(
+            f"setup age requirement not met "
+            f"(required={min_setup_age}, actual={setup_age_actual})"
+        )
 
     # ── Warnings (propagated from decision layer) ─────────────────────────────
     warnings: list[str] = []
@@ -135,6 +226,17 @@ def evaluate_gate(snapshot: dict) -> dict:
         "reason":                     reason,
         "would_authorize_if_enabled": would_authorize,
         "authorization_checks":       auth_checks,
-        "blocking_factors":           blocking[:5],
+        "blocking_factors":           blocking[:8],
         "warnings":                   warnings[:3],
+        # Phase 5F.3 — trigger confirmation enforcement
+        "trigger_requirement_met":    trig_req_met,
+        "required_trigger_status":    required_trigger,
+        "actual_trigger_status":      actual_trigger,
+        # Phase 5F.5 — minimum setup age enforcement
+        "setup_age_requirement":      min_setup_age,
+        "setup_age_actual":           setup_age_actual,
+        "setup_age_requirement_met":  setup_age_met,
+        # Phase 5F — regime permission source
+        "regime_permission_allowed":  regime_allowed,
+        "regime_constraint_source":   regime_source,
     }

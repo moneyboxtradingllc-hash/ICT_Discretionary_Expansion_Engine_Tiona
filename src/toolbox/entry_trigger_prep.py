@@ -36,6 +36,44 @@ def _raw_trigger_status(price_level: dict, raw_status: str) -> str:
     return "waiting_for_retest"
 
 
+def _confirmation_candle_ok(snapshot: dict, direction: str, price_level: dict) -> bool:
+    """
+    Phase 5F.3 — Mechanical trigger confirmation.
+
+    A trigger upgrades from confirmation_needed to confirmed when the last
+    closed candle on the confirmation timeframe (1m, fallback 3m) is a
+    directional candle closing beyond the zone midpoint in the intended
+    direction — the mechanical equivalent of the plain-English confirmation
+    conditions in _confirmation_list().
+
+    Returns False on any missing data — confirmation is never assumed.
+    """
+    try:
+        mid = price_level.get("midpoint")
+        if mid is None:
+            return False
+        mid = float(mid)
+
+        tfs = snapshot.get("timeframes", {}) or {}
+        last = None
+        for tf in ("1m", "3m"):
+            lc = (tfs.get(tf) or {}).get("last_candle")
+            if lc and lc.get("close") is not None and lc.get("open") is not None:
+                last = lc
+                break
+        if last is None:
+            return False
+
+        o  = float(last["open"])
+        cl = float(last["close"])
+
+        if direction == "bullish":
+            return cl > o and cl > mid
+        return cl < o and cl < mid
+    except (TypeError, ValueError):
+        return False
+
+
 def _effective_trigger_status(raw_ts: str, effective_tool_status: str) -> str:
     """
     Apply risk governor override.
@@ -165,6 +203,15 @@ def build_trigger_prep(
     prereqs_ok  = not readiness.get("prerequisites_missing")
 
     raw_ts = _raw_trigger_status(price_level, raw_status)
+
+    # Phase 5F.3 — upgrade to confirmed when the mechanical confirmation
+    # candle condition is met. confirmation_needed and confirmed are now
+    # distinct states; regime permission matrix decides which is required.
+    if raw_ts == "confirmation_needed" and _confirmation_candle_ok(
+        snapshot, direction, price_level
+    ):
+        raw_ts = "confirmed"
+
     eff_ts = _effective_trigger_status(raw_ts, effective_status)
 
     # execution_ready: every condition must be true simultaneously

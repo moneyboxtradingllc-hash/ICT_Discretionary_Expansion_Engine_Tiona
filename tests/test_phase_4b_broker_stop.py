@@ -36,6 +36,10 @@ _SAFE_ENV = {
     "ALPACA_BASE_URL":    "https://paper-api.alpaca.markets",
     "ALPACA_API_KEY":     "TESTKEY",
     "ALPACA_SECRET_KEY":  "TESTSECRET",
+    # Explicit false: other test modules import code that calls load_dotenv(),
+    # which leaks BROKER_STOP_ENABLED=true from .env into the process env and
+    # made these tests order-dependent in full-suite runs.
+    "BROKER_STOP_ENABLED": "false",
 }
 
 _STOP_ENV = {**_SAFE_ENV, "BROKER_STOP_ENABLED": "true"}

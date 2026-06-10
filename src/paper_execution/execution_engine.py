@@ -130,10 +130,12 @@ def _attempt(snapshot: dict, symbol: str) -> dict:
         return _skipped_result("execution gate: would_authorize_if_enabled=false")
 
     # ── Layer 4: decision authority ───────────────────────────────────────────
+    # Phase 5F.4: legacy 'trade_authorized_false' normalizes to 'ready_for_execution'
+    from decision_authority.decision_engine import normalize_decision
     da       = snapshot.get("decision_authority", {})
-    decision = (da.get("decision") or "stand_down").lower()
-    if decision != "trade_authorized_false":
-        return _skipped_result(f"decision authority: {decision} (requires trade_authorized_false)")
+    decision = normalize_decision(da.get("decision"))
+    if decision != "ready_for_execution":
+        return _skipped_result(f"decision authority: {decision} (requires ready_for_execution)")
 
     # ── Layer 5: trade intent ─────────────────────────────────────────────────
     ti          = snapshot.get("trade_intent", {})
@@ -185,6 +187,10 @@ def _attempt(snapshot: dict, symbol: str) -> dict:
             snapshot_summary = _snapshot_summary(snapshot),
             **_regime_from_snapshot(snapshot),
             ai_feedback     = build_ai_feedback_from_snapshot(snapshot),
+            # Phase 5F.1 — risk multiplier audit trail
+            risk_multiplier_applied = order_result.get("risk_multiplier_applied", 1.0),
+            base_risk_budget        = order_result.get("base_risk_budget", 0.0),
+            effective_risk_budget   = order_result.get("effective_risk_budget", 0.0),
         )
         append_trade(record, symbol)
         return _skipped_result(f"position guard: {guard['reason']}", guard)
@@ -248,6 +254,10 @@ def _attempt(snapshot: dict, symbol: str) -> dict:
         snapshot_summary = _snapshot_summary(snapshot),
         **_regime_from_snapshot(snapshot),
         ai_feedback     = build_ai_feedback_from_snapshot(snapshot),
+        # Phase 5F.1 — risk multiplier audit trail
+        risk_multiplier_applied = order_result.get("risk_multiplier_applied", 1.0),
+        base_risk_budget        = order_result.get("base_risk_budget", 0.0),
+        effective_risk_budget   = order_result.get("effective_risk_budget", 0.0),
     )
     append_trade(record, symbol)
 

@@ -1,22 +1,26 @@
 """
 Phase 2A — Paper Order Builder.
 Phase 5E.6 — Buying-power-aware sizing cap.
+Phase 5F.1 — Risk multiplier enforcement (governor tier + regime cap).
 
 Constructs a LIMIT order request from trade_intent + price_level + risk config.
 Does NOT submit. Does NOT call Alpaca. Pure construction logic.
 
-Risk sizing (Phase 5E.6):
-  risk_per_share    = abs(entry_reference - stop_reference)
-  risk_qty          = floor(RISK_PER_TRADE_DOLLARS / risk_per_share)
-  max_affordable    = floor(buying_power / entry_reference)
-  qty               = min(risk_qty, max_affordable)
+Risk sizing (Phase 5F.1):
+  base_risk_budget        = RISK_PER_TRADE_DOLLARS
+  risk_multiplier_applied = min(risk.risk_multiplier, regime_permissions.risk_multiplier_cap)
+  effective_risk_budget   = base_risk_budget * risk_multiplier_applied
+  risk_per_share          = abs(entry_reference - stop_reference)
+  risk_qty                = floor(effective_risk_budget / risk_per_share)
+  max_affordable          = floor(buying_power / entry_reference)
+  qty                     = min(risk_qty, max_affordable)
 
 Entry: zone midpoint (limit order).
 Stop:  invalidation_level from price_level (recorded in journal; no bracket in Phase 2A).
 """
 import logging
-import os
 import math
+import os
 
 from paper_execution.paper_broker import get_account as _get_account
 
@@ -31,6 +35,22 @@ _QUALITY_RANK = {
 
 def quality_rank(quality: str) -> int:
     return _QUALITY_RANK.get((quality or "no_intent").lower(), 0)
+
+
+def _safe_multiplier(raw, default: float = 1.0) -> float:
+    """
+    Phase 5F.1 — Sanitize a risk multiplier value.
+    Missing / non-numeric / NaN -> default. Out-of-range values clamp to [0.0, 1.0].
+    """
+    if raw is None:
+        return default
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        return default
+    if math.isnan(val):
+        return default
+    return max(0.0, min(1.0, val))
 
 
 def _preferred_candidate(snapshot: dict) -> dict:
@@ -61,7 +81,29 @@ def build_order(snapshot: dict, symbol: str) -> dict:
     from alpaca.trading.requests import LimitOrderRequest
     from alpaca.trading.enums   import OrderSide, TimeInForce
 
-    risk_budget = float(os.getenv("RISK_PER_TRADE_DOLLARS", "500"))
+    # ── Phase 5F.1: effective risk budget = base × min(governor multiplier, regime cap)
+    base_risk_budget = float(os.getenv("RISK_PER_TRADE_DOLLARS", "500"))
+
+    governor_multiplier = _safe_multiplier(
+        snapshot.get("risk", {}).get("risk_multiplier"), default=1.0
+    )
+    regime_cap = _safe_multiplier(
+        (snapshot.get("regime_permissions") or {}).get("risk_multiplier_cap"),
+        default=1.0,
+    )
+    risk_multiplier_applied = min(governor_multiplier, regime_cap)
+    effective_risk_budget   = base_risk_budget * risk_multiplier_applied
+
+    if effective_risk_budget <= 0:
+        return {
+            "valid": False,
+            "reject_reason": (
+                f"effective risk budget is 0 "
+                f"(base={base_risk_budget:.2f} multiplier={risk_multiplier_applied})"
+            ),
+        }
+
+    risk_budget = effective_risk_budget
 
     ti     = snapshot.get("trade_intent", {})
     intent_type = (ti.get("intent_type") or "none").lower()
@@ -165,6 +207,12 @@ def build_order(snapshot: dict, symbol: str) -> dict:
         "risk_qty":         risk_qty,
         "affordable_qty":   max_affordable,
         "buying_power":     round(buying_power, 2),
+        # Phase 5F.1 — risk multiplier enforcement audit trail
+        "risk_multiplier_applied": round(risk_multiplier_applied, 4),
+        "governor_multiplier":     round(governor_multiplier, 4),
+        "regime_risk_cap":         round(regime_cap, 4),
+        "base_risk_budget":        round(base_risk_budget, 2),
+        "effective_risk_budget":   round(effective_risk_budget, 2),
     }
 
 

@@ -166,6 +166,10 @@ def make_record(
     expansion_state:      str = "unknown",
     # Phase 5B: AI feedback at entry (OBSERVE_ONLY — never affect execution)
     ai_feedback: "dict | None" = None,
+    # Phase 5F.1: risk multiplier enforcement audit trail
+    risk_multiplier_applied: float = 1.0,
+    base_risk_budget:        float = 0.0,
+    effective_risk_budget:   float = 0.0,
 ) -> dict:
     """Build a canonical trade journal record."""
     return {
@@ -180,6 +184,10 @@ def make_record(
         "stop_reference":     round(float(stop_reference), 4) if stop_reference is not None else None,
         "risk_per_share":     round(float(risk_per_share), 4),
         "risk_dollars":       round(float(risk_dollars), 2),
+        # Phase 5F.1: risk multiplier enforcement audit trail
+        "risk_multiplier_applied": round(float(risk_multiplier_applied), 4),
+        "base_risk_budget":        round(float(base_risk_budget), 2),
+        "effective_risk_budget":   round(float(effective_risk_budget), 2),
         "order_status":       order_status,
         "alpaca_order_id":    alpaca_order_id,
         "reason":             reason,

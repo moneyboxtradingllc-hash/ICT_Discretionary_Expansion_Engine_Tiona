@@ -146,6 +146,20 @@ def _print_scan_summary(snapshot: dict, symbol: str, scan_num: int, saved_path: 
     auth      = risk.get("authority_reason", "")
     print(f"Risk          : {risk_tier} -- {auth}")
 
+    # Phase 5F.2 — regime constraint authority
+    rp = snapshot.get("regime_permissions", {})
+    if rp.get("enabled"):
+        rp_status = (rp.get("permission_status") or "?").upper()
+        rp_block  = rp.get("blocking_reasons") or []
+        rp_tag    = f" | BLOCK: {rp_block[0]}" if rp_block else ""
+        print(
+            f"Regime Auth   : {rp_status}"
+            f" | cap={rp.get('risk_multiplier_cap')}"
+            f" | trigger>={rp.get('required_trigger_status')}"
+            f" | min_age={rp.get('min_setup_age_scans')}"
+            f" | profile={rp.get('management_profile')}{rp_tag}"
+        )
+
     print(f"Tool          : {preferred}  raw={raw_tool.upper()}  eff={eff_tool.upper()}")
 
     trig_line = raw_trig.upper()

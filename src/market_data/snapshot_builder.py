@@ -16,6 +16,7 @@ from risk.risk_governor import evaluate_risk
 from toolbox.toolbox_engine import run_toolbox
 from ai_layer.discretionary_ai import run_discretionary_ai
 from regime_classification.regime_classifier import classify_regime
+from regime_authority.regime_permission_matrix import evaluate_regime_permissions
 
 TIMEFRAMES = ["15m", "5m", "3m", "1m"]
 
@@ -116,20 +117,27 @@ def build_snapshot(
         memory.push_and_get_context(snapshot) if memory else _NO_MEMORY.copy()
     )
 
+    # Regime Classifier (Phase 5A, moved up in 5F): labels the environment.
+    # Confidence-side authority unchanged (observe_only, confidence_modifier=0).
+    # Phase 5F.2 grants regime CONSTRAINT authority via the permission matrix below.
+    snapshot["market_regime"] = classify_regime(snapshot, all_normalized)
+
     # Qualification: reads full snapshot including ai_context + memory
     snapshot["qualification"] = qualify_trade(snapshot)
 
     # Playbook: reads qualification + all evidence to select tactical game plan
     snapshot["playbook"] = classify_playbook(snapshot)
 
+    # Regime Permission Matrix (Phase 5F.2): constraint authority.
+    # Controls permissions (playbooks, risk cap, trigger strictness, setup age)
+    # — NEVER confidence scores. Enforced in order_builder + execution_gate.
+    snapshot["regime_permissions"] = evaluate_regime_permissions(snapshot)
+
     # Risk Governor: reads full snapshot including qualification + playbook
     snapshot["risk"] = evaluate_risk(snapshot)
 
     # Toolbox: reads playbook + risk + all evidence to select entry tools
     snapshot["toolbox"] = run_toolbox(snapshot)
-
-    # Regime Classifier (Phase 5A): OBSERVE_ONLY label — never influences decisions.
-    snapshot["market_regime"] = classify_regime(snapshot, all_normalized)
 
     # Experience Intelligence (Phase 3A): OBSERVE_ONLY context from previous scan.
     # confidence_modifier is always 0 and must never influence toolbox or decisions.
