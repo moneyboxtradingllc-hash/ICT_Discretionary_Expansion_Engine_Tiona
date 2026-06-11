@@ -871,5 +871,82 @@ class TestGovernanceReports(unittest.TestCase):
         self.assertIn("report", report)
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# 5H.5 — Replay validation: the 2026-06-10 losing QQQ trade
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestReplayValidation(unittest.TestCase):
+    """
+    Architecture-mandated assertions on the June 10 loss:
+      R-001 (regime compound)  FIRES   — range_rotation + exhaustion + unstable
+      R-002 (delivery)         ABSTAINS — reversal playbook, not continuation
+      R-003 (reversal w/o evidence) FIRES — sweep playbook, no measured evidence
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        snap_path = os.path.join(
+            os.path.dirname(__file__), "..", "data", "live_snapshots",
+            "20260610_115839_QQQ.json",
+        )
+        with open(snap_path, encoding="utf-8") as f:
+            snap = json.load(f)
+        from shared_context.shared_market_context import build_shared_market_context
+        cls.ctx = build_shared_market_context(snap, "QQQ")
+        cls.snap = snap
+
+    def test_r001_fires_on_compound_hostility(self):
+        fired, reason = regime_environmental_compound_v1(self.ctx)
+        self.assertTrue(fired)
+        self.assertIn("compound hostility (3)", reason)
+
+    def test_r002_abstains_reversal_playbook(self):
+        fired, reason = delivery_continuation_objection_v1(self.ctx)
+        self.assertFalse(fired)
+        self.assertIn("not continuation-family", reason)
+
+    def test_r003_fires_reversal_without_evidence(self):
+        fired, reason = reversal_without_evidence_v1(self.ctx)
+        self.assertTrue(fired)
+        self.assertIn("without measured reversal evidence", reason)
+
+    def test_full_shadow_evaluation_on_replay(self):
+        os.environ.pop("RULE_GOVERNANCE_DIR", None)
+        os.environ["RULE_GOVERNANCE_ENABLED"] = "true"
+        self.addCleanup(lambda: os.environ.pop("RULE_GOVERNANCE_ENABLED", None))
+        from rule_governance.shadow_evaluator import evaluate_shadow_rules
+
+        snap = dict(self.snap)
+        snap["shared_context"] = self.ctx
+        # The live gate authorized this trade (pre-5F world): opportunity=true
+        snap["execution_gate"] = {"would_authorize_if_enabled": True}
+        snap["paper_execution"] = {"status": "submitted",
+                                   "trade_id": "PT_QQQ_20260610T115835"}
+        snap["trade_intent"] = {"intent_id": "QQQ_20260610T115835"}
+
+        rg = evaluate_shadow_rules(snap, "QQQ")
+        self.assertEqual(sorted(rg["fired"]), ["R-001", "R-003"])
+        self.assertEqual(len(rg["events"]), 2)
+        for ev in rg["events"]:
+            self.assertTrue(ev["executed"])
+            self.assertEqual(ev["trade_id"], "PT_QQQ_20260610T115835")
+            self.assertEqual(ev["resolution"]["state"], "pending")
+        self.assertEqual(rg["authority_level"], "observe_only")
+
+    def test_replay_outcome_would_score_as_protection(self):
+        """Had 5H been live on June 10: trade closed at realized_r=-0.96,
+        so both firings resolve as protected loss."""
+        from rule_governance.rule_scoring import score_rule
+        events = [
+            _resolved_event(rule_id="R-001", r=-0.96, source="fill"),
+            _resolved_event(rule_id="R-003", r=-0.96, source="fill"),
+        ]
+        for rid in ("R-001", "R-003"):
+            card = score_rule(rid, events)
+            self.assertEqual(card["protected_loss_R"], 0.96)
+            self.assertEqual(card["missed_opportunity_R"], 0.0)
+            self.assertGreater(card["net_protected_R"], 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
