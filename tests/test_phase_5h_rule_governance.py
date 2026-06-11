@@ -636,5 +636,240 @@ class TestIntentThresholdTracking(unittest.TestCase):
         self.assertEqual(rec["first_threshold_crossed"], "sl_1r")
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# 5H.4 — Scoring, Calibration, Reports
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _resolved_event(rule_id="R-001", r=-1.0, source="proxy",
+                    low_confidence=False, council=None):
+    ev = _event(event_id=f"EV_{rule_id}_{r}_{id(object())}", rule_id=rule_id)
+    ev["resolution"] = {"state": "resolved", "source": source, "r": r}
+    if low_confidence:
+        ev["resolution"]["low_confidence"] = True
+    if council:
+        ev["council_digest"] = council
+    return ev
+
+
+class TestRuleScoring(unittest.TestCase):
+
+    def setUp(self):
+        from rule_governance.rule_scoring import score_rule
+        self.score = score_rule
+
+    def test_protected_missed_net_math(self):
+        events = [
+            _resolved_event(r=-1.0), _resolved_event(r=-1.0),
+            _resolved_event(r=2.0),
+        ]
+        card = self.score("R-001", events)
+        self.assertEqual(card["protected_loss_R"], 2.0)
+        self.assertEqual(card["missed_opportunity_R"], 2.0)
+        self.assertEqual(card["net_protected_R"], 0.0)
+        self.assertEqual(card["efficiency"], 0.5)
+
+    def test_promotion_eligible_on_strong_record(self):
+        events = (
+            [_resolved_event(r=-1.0, source="fill") for _ in range(6)]
+            + [_resolved_event(r=-1.0) for _ in range(12)]
+            + [_resolved_event(r=2.0) for _ in range(2)]
+        )
+        card = self.score("R-001", events, opportunities_seen=100,
+                          sessions_seen=25)
+        self.assertEqual(card["events_resolved"], 20)
+        promo = card["promotion"]
+        self.assertTrue(promo["eligible"], promo["checks"])
+
+    def test_promotion_blocked_by_small_sample(self):
+        events = [_resolved_event(r=-1.0, source="fill") for _ in range(10)]
+        card = self.score("R-001", events, opportunities_seen=50,
+                          sessions_seen=25)
+        self.assertFalse(card["promotion"]["eligible"])
+        self.assertFalse(card["promotion"]["checks"]["sample_size"])
+
+    def test_promotion_blocked_by_outlier_dependence(self):
+        # One huge save, otherwise net-negative
+        events = (
+            [_resolved_event(r=-8.0, source="fill")]
+            + [_resolved_event(r=2.0) for _ in range(3)]
+            + [_resolved_event(r=-0.2, source="fill") for _ in range(16)]
+        )
+        card = self.score("R-001", events, opportunities_seen=100,
+                          sessions_seen=25)
+        self.assertGreater(card["net_protected_R"], 0)
+        self.assertLess(card["net_excl_best_R"], 0)
+        self.assertFalse(card["promotion"]["eligible"])
+        self.assertFalse(card["promotion"]["checks"]["outlier_robust"])
+
+    def test_promotion_blocked_by_fire_rate(self):
+        events = [_resolved_event(r=-1.0, source="fill") for _ in range(20)]
+        card = self.score("R-001", events, opportunities_seen=25,
+                          sessions_seen=25)
+        self.assertFalse(card["promotion"]["checks"]["fire_rate"])  # 20/25 = 0.8
+
+    def test_demotion_flagged_on_negative_net(self):
+        events = (
+            [_resolved_event(r=2.0) for _ in range(8)]
+            + [_resolved_event(r=-1.0) for _ in range(4)]
+        )
+        card = self.score("R-001", events)
+        self.assertTrue(card["demotion"]["flagged"])
+        self.assertTrue(card["demotion"]["checks"]["net_negative"])
+
+    def test_demotion_needs_minimum_window(self):
+        events = [_resolved_event(r=2.0) for _ in range(5)]
+        card = self.score("R-001", events)
+        self.assertFalse(card["demotion"]["flagged"])
+        self.assertIn("insufficient window", card["demotion"]["note"])
+
+    def test_other_rules_events_excluded(self):
+        events = [_resolved_event(rule_id="R-002", r=-1.0) for _ in range(5)]
+        card = self.score("R-001", events)
+        self.assertEqual(card["events_total"], 0)
+
+    def test_never_raises(self):
+        card = self.score("R-001", [{"bad": "event"}, None])
+        self.assertIn("rule_id", card)
+
+
+class TestMemberCalibration(unittest.TestCase):
+
+    def setUp(self):
+        from rule_governance.member_calibration import calibrate_members
+        self.calibrate = calibrate_members
+
+    @staticmethod
+    def _vote(member, vote, conf):
+        return {"member": member, "vote": vote, "confidence": conf}
+
+    def test_no_vote_hit_rate_and_miss_cost(self):
+        events = [
+            _resolved_event(r=-1.0, council=[self._vote("REGIME", "no", 90)]),
+            _resolved_event(r=-1.0, council=[self._vote("REGIME", "no", 90)]),
+            _resolved_event(r=2.0,  council=[self._vote("REGIME", "no", 90)]),
+        ]
+        cal = self.calibrate(events)
+        self.assertEqual(cal["REGIME"]["no_votes"], 3)
+        self.assertEqual(cal["REGIME"]["no_hit_rate"], round(2 / 3, 4))
+        self.assertEqual(cal["REGIME"]["no_miss_cost_R"], 2.0)
+
+    def test_yes_vote_hit_rate(self):
+        events = [
+            _resolved_event(r=2.0,  council=[self._vote("TOOLBOX", "yes", 65)]),
+            _resolved_event(r=-1.0, council=[self._vote("TOOLBOX", "yes", 65)]),
+        ]
+        cal = self.calibrate(events)
+        self.assertEqual(cal["TOOLBOX"]["yes_hit_rate"], 0.5)
+
+    def test_neutral_votes_excluded_from_accuracy(self):
+        events = [
+            _resolved_event(r=-1.0, council=[self._vote("RISK", "neutral", 60)]),
+        ]
+        cal = self.calibrate(events)
+        self.assertEqual(cal["RISK"]["neutral_votes"], 1)
+        self.assertIsNone(cal["RISK"]["no_hit_rate"])
+
+    def test_confidence_buckets_and_honesty(self):
+        events = (
+            # 85+ bucket: 3/3 correct; 50-70 bucket: 1/3 correct -> monotone
+            [_resolved_event(r=-1.0, council=[self._vote("REGIME", "no", 90)])
+             for _ in range(3)]
+            + [_resolved_event(r=2.0, council=[self._vote("REGIME", "no", 60)])
+               for _ in range(2)]
+            + [_resolved_event(r=-1.0, council=[self._vote("REGIME", "no", 60)])]
+        )
+        cal = self.calibrate(events)
+        buckets = cal["REGIME"]["confidence_buckets"]
+        self.assertEqual(buckets["b85_plus"], 1.0)
+        self.assertEqual(buckets["b50_70"], round(1 / 3, 4))
+        self.assertTrue(cal["REGIME"]["confidence_honest"]["honest"])
+
+    def test_dishonest_confidence_detected(self):
+        events = (
+            # high confidence wrong, low confidence right -> not monotone
+            [_resolved_event(r=2.0, council=[self._vote("REGIME", "no", 90)])
+             for _ in range(2)]
+            + [_resolved_event(r=-1.0, council=[self._vote("REGIME", "no", 55)])
+               for _ in range(2)]
+        )
+        cal = self.calibrate(events)
+        self.assertFalse(cal["REGIME"]["confidence_honest"]["honest"])
+
+    def test_never_raises(self):
+        self.assertIsInstance(self.calibrate([{"bad": 1}, None]), dict)
+
+
+class TestGovernanceReports(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        # registry copy + ledger in temp dir
+        with open(_REAL_REGISTRY, encoding="utf-8") as f:
+            data = json.load(f)
+        with open(os.path.join(self.tmp.name, "registry.json"), "w",
+                  encoding="utf-8") as f:
+            json.dump(data, f)
+        os.environ["RULE_GOVERNANCE_DIR"] = self.tmp.name
+        self.addCleanup(lambda: os.environ.pop("RULE_GOVERNANCE_DIR", None))
+
+        from rule_governance import divergence_ledger as dl
+        from rule_governance.governance_report import (
+            build_daily_digest, build_weekly_report,
+        )
+        self.dl = dl
+        self.daily = build_daily_digest
+        self.weekly = build_weekly_report
+
+        from datetime import datetime
+        import pytz
+        self.today = datetime.now(
+            pytz.timezone("America/New_York")).strftime("%Y%m%d")
+
+    def _seed_events(self):
+        ev1 = _event("EV_1", rule_id="R-001")
+        ev1["timestamp"] = f"{self.today}T100000"
+        ev1["resolution"] = {"state": "resolved", "source": "proxy", "r": -1.0}
+        ev2 = _event("EV_2", rule_id="R-003")
+        ev2["timestamp"] = f"{self.today}T110000"
+        self.dl.append_events([ev1, ev2], "QQQ")
+
+    def test_daily_digest(self):
+        self._seed_events()
+        digest = self.daily("QQQ")
+        self.assertEqual(digest["events"], 2)
+        self.assertEqual(digest["events_by_rule"], {"R-001": 1, "R-003": 1})
+        self.assertEqual(digest["resolved"], 1)
+        self.assertEqual(digest["pending_backlog"], 1)
+        self.assertTrue(os.path.exists(digest["report_path"]))
+
+    def test_weekly_report_scorecards_and_files(self):
+        self._seed_events()
+        report = self.weekly("QQQ", opportunities_seen=10, sessions_seen=1)
+        self.assertNotIn("error", report)
+        ids = {c["rule_id"] for c in report["scorecards"]}
+        self.assertTrue({"R-001", "R-002", "R-003"} <= ids)
+        r001 = next(c for c in report["scorecards"] if c["rule_id"] == "R-001")
+        self.assertEqual(r001["events_resolved"], 1)
+        self.assertFalse(r001["promotion"]["eligible"])   # tiny sample
+        # grandfathered laws listed as enforced/instrumentation pending
+        gf = next(c for c in report["scorecards"] if c["rule_id"] == "GF-5F-001")
+        self.assertIn("enforced law", gf["note"])
+        # rules near review present (seeds within 30 days)
+        self.assertTrue(os.path.exists(report["report_path"]))
+        md_path = report["report_path"].replace(".json", ".md")
+        self.assertTrue(os.path.exists(md_path))
+        with open(md_path, encoding="utf-8") as f:
+            md = f.read()
+        self.assertIn("human-reviewed code change", md)
+
+    def test_reports_never_raise_on_empty_world(self):
+        os.environ["RULE_GOVERNANCE_DIR"] = os.path.join(self.tmp.name, "ghost")
+        digest = self.daily("QQQ")
+        self.assertEqual(digest.get("events", 0), 0)
+        report = self.weekly("QQQ")
+        self.assertIn("report", report)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
