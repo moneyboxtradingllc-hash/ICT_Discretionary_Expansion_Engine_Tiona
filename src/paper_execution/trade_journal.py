@@ -249,6 +249,8 @@ def make_record(
         "thesis_exit_signaled_at":   None,
         "thesis_exit_reason":        None,
         "thesis_exit_r_at_signal":   None,
+        # Phase AI-SHADOW — Fable 5 stance at entry (OBSERVE_ONLY evidence)
+        "ai_shadow_at_entry":        None,
         # Phase 5T.3 — partial take-profit (TREND profile)
         "partial_exit_taken":        False,
         "partial_exit_order_id":     None,

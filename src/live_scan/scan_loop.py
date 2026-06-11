@@ -34,6 +34,7 @@ from rule_governance.divergence_ledger     import append_events, resolve_pending
 from paper_execution.trade_journal         import update_trade_management
 from paper_execution.thesis_monitor        import monitor_thesis
 from paper_execution.position_supremacy    import enforce_position_supremacy
+from ai_layer.shadow_ai_evaluator          import evaluate_shadow_ai
 from decision_authority.decision_engine    import make_decision
 from execution_gate.execution_gate         import evaluate_gate
 from trade_intent.intent_builder           import build_intent
@@ -243,6 +244,22 @@ def _print_scan_summary(snapshot: dict, symbol: str, scan_num: int, saved_path: 
             f" | current={sl.get('current_quality','?')}"
             f" | path={path_str}{warn_str}"
         )
+
+    # Phase AI-SHADOW — Fable 5 shadow evaluation (OBSERVE_ONLY)
+    sh = snapshot.get("ai_shadow", {})
+    if sh.get("enabled"):
+        if sh.get("success"):
+            print(
+                f"AI Shadow     : provider=Fable5 | stance={sh.get('stance')}"
+                f" | confidence={sh.get('confidence')}"
+                f" | latency={sh.get('latency_ms')}ms"
+                f" | agrees_with_live={str(sh.get('agrees_with_live')).lower()}"
+            )
+        else:
+            print(
+                f"AI Shadow     : provider=Fable5 | FAILED ({str(sh.get('error'))[:60]})"
+                f" | live trading unaffected"
+            )
 
     # Phase 5G — council (OBSERVE_ONLY, informational)
     co = snapshot.get("council", {})
@@ -852,6 +869,11 @@ def run_scan_loop():
             snapshot["shared_context"] = build_shared_market_context(snapshot, symbol)
             snapshot["council"]        = run_council(snapshot["shared_context"])
 
+            # ── Fable 5 Shadow AI (Phase AI-SHADOW — OBSERVE_ONLY) ─────────
+            # Same input as the live AI; zero execution influence; any
+            # failure leaves live trading unaffected. Evidence before authority.
+            snapshot["ai_shadow"] = evaluate_shadow_ai(snapshot, symbol)
+
             # ── Decision Authority ─────────────────────────────────────────
             snapshot["decision_authority"] = make_decision(snapshot)
             da_line = format_decision_line(snapshot["decision_authority"])
@@ -1049,6 +1071,19 @@ def run_scan_loop():
                     "alpaca_order_id": None,
                     "trade_id":        None,
                 }
+            # Phase AI-SHADOW: stamp the shadow stance onto any submitted trade
+            # (evidence joining only — never influences the order itself)
+            _pe = snapshot["paper_execution"]
+            _sh = snapshot.get("ai_shadow", {})
+            if _pe.get("status") == "submitted" and _pe.get("trade_id") and _sh.get("enabled"):
+                update_trade_management(_pe["trade_id"], {"ai_shadow_at_entry": {
+                    "stance":           _sh.get("stance"),
+                    "confidence":       _sh.get("confidence"),
+                    "live_stance":      _sh.get("live_stance"),
+                    "agrees_with_live": _sh.get("agrees_with_live"),
+                    "success":          _sh.get("success"),
+                }}, symbol)
+
             pe_line = format_paper_execution_line(snapshot["paper_execution"])
             if pe_line:
                 snapshot["ai_context"]["summary"] = (
