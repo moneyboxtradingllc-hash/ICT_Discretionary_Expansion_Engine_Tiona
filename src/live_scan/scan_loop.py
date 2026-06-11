@@ -29,6 +29,7 @@ from state_transitions.transition_engine   import analyze_transition
 from setup_lifecycle.setup_tracker         import SetupTracker
 from shared_context.shared_market_context  import build_shared_market_context
 from shared_context.council                import run_council
+from rule_governance.shadow_evaluator      import evaluate_shadow_rules
 from decision_authority.decision_engine    import make_decision
 from execution_gate.execution_gate         import evaluate_gate
 from trade_intent.intent_builder           import build_intent
@@ -588,6 +589,18 @@ def _print_scan_summary(snapshot: dict, symbol: str, scan_num: int, saved_path: 
     else:
         print(f"Pending Entry : {peo_status}")
 
+    # Phase 5H — rule governance shadow plane (OBSERVE_ONLY, informational)
+    rg = snapshot.get("rule_governance", {})
+    if rg.get("enabled") and (rg.get("fired") or rg.get("opportunity")):
+        fired_str = ",".join(rg.get("fired", [])) or "none"
+        verdict   = "WOULD_BLOCK" if (rg.get("fired") and rg.get("opportunity")) else "OBSERVING"
+        print(
+            f"Rule Gov      : SHADOW | {verdict} | fired={fired_str}"
+            f" | opportunity={str(rg.get('opportunity', False)).lower()}"
+        )
+    if rg.get("warning"):
+        print(f"Rule Gov      : WARNING | {rg['warning'][:70]}")
+
     orr         = snapshot.get("operational_readiness", {})
     orr_score   = orr.get("score", 0)
     orr_ready   = orr.get("ready", False)
@@ -1006,6 +1019,11 @@ def run_scan_loop():
             snapshot["pending_entry_order"] = cancel_pending_entry_order_if_setup_dead(
                 snapshot, symbol
             )
+
+            # ── Rule Governance Shadow Evaluation (Phase 5H — OBSERVE_ONLY)
+            # Runs AFTER gate + execution have settled. No return path to
+            # execution exists, by constitution. Promotion = code change only.
+            snapshot["rule_governance"] = evaluate_shadow_rules(snapshot, symbol)
 
             # ── Persist snapshot ───────────────────────────────────────────
             saved_path = None

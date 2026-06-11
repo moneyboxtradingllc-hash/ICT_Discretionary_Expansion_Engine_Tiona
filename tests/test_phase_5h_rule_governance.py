@@ -287,5 +287,158 @@ class TestRegistryFile(unittest.TestCase):
         self.assertTrue({"R-001", "R-002", "R-003"} <= ids)
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# 5H.2 — Shadow Evaluator
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _shadow_snapshot(ctx_overrides=None, would_authorize=True,
+                     executed=False, trade_id=None, intent_id="TI_1"):
+    ctx = _ctx(**(ctx_overrides or {}))
+    return {
+        "shared_context": ctx,
+        "execution_gate": {"would_authorize_if_enabled": would_authorize},
+        "paper_execution": {
+            "status": "submitted" if executed else "skipped",
+            "trade_id": trade_id,
+        },
+        "trade_intent": {"intent_id": intent_id},
+        "council": {"members": [
+            {"member": "REGIME", "vote": "no", "confidence": 95,
+             "reasons": [], "concerns": []},
+        ]},
+    }
+
+
+class TestShadowEvaluator(unittest.TestCase):
+
+    def setUp(self):
+        # Point at the real seeded registry (read-only usage here)
+        os.environ.pop("RULE_GOVERNANCE_DIR", None)
+        os.environ["RULE_GOVERNANCE_ENABLED"] = "true"
+        self.addCleanup(lambda: os.environ.pop("RULE_GOVERNANCE_ENABLED", None))
+        from rule_governance.shadow_evaluator import evaluate_shadow_rules
+        self.evaluate = evaluate_shadow_rules
+
+    def test_healthy_trend_fires_nothing(self):
+        rg = self.evaluate(_shadow_snapshot(), "QQQ")
+        self.assertTrue(rg["enabled"])
+        self.assertEqual(rg["authority_level"], "observe_only")
+        self.assertEqual(rg["fired"], [])
+        self.assertEqual(rg["events"], [])
+        self.assertEqual(rg["evaluated"], 3)   # R-001, R-002, R-003
+
+    def test_compound_hostility_fires_r001_on_opportunity(self):
+        rg = self.evaluate(_shadow_snapshot(
+            {"regime": "range_rotation", "exhaustion_present": True}), "QQQ")
+        self.assertIn("R-001", rg["fired"])
+        self.assertEqual(len(rg["events"]), 1)
+        ev = rg["events"][0]
+        self.assertEqual(ev["rule_id"], "R-001")
+        self.assertTrue(ev["opportunity"])
+        self.assertEqual(ev["resolution"]["state"], "pending")
+        self.assertEqual(ev["context_digest"]["regime"], "range_rotation")
+        self.assertEqual(ev["council_digest"][0]["member"], "REGIME")
+
+    def test_firing_without_opportunity_creates_no_event(self):
+        rg = self.evaluate(_shadow_snapshot(
+            {"regime": "range_rotation", "exhaustion_present": True},
+            would_authorize=False), "QQQ")
+        self.assertIn("R-001", rg["fired"])       # rate stats still tracked
+        self.assertEqual(rg["events"], [])        # but not scoreable
+
+    def test_executed_trade_linked_in_event(self):
+        rg = self.evaluate(_shadow_snapshot(
+            {"regime": "chop", "volatility_state": "toxic"},
+            executed=True, trade_id="PT_QQQ_X"), "QQQ")
+        self.assertTrue(rg["events"][0]["executed"])
+        self.assertEqual(rg["events"][0]["trade_id"], "PT_QQQ_X")
+        self.assertEqual(rg["events"][0]["intent_id"], "TI_1")
+
+    def test_symbol_scope_respected(self):
+        rg = self.evaluate(_shadow_snapshot(
+            {"regime": "range_rotation", "exhaustion_present": True}), "SPY")
+        self.assertEqual(rg["evaluated"], 0)      # seeds are scoped to QQQ
+        self.assertEqual(rg["fired"], [])
+
+    def test_disabled_by_env(self):
+        os.environ["RULE_GOVERNANCE_ENABLED"] = "false"
+        rg = self.evaluate(_shadow_snapshot(), "QQQ")
+        self.assertFalse(rg["enabled"])
+        self.assertEqual(rg["events"], [])
+
+    def test_never_raises_on_garbage(self):
+        rg = self.evaluate(None, "QQQ")
+        self.assertEqual(rg["authority_level"], "observe_only")
+        rg = self.evaluate({"shared_context": "garbage"}, "QQQ")
+        self.assertIn("fired", rg)
+
+
+class TestShadowIsolation(unittest.TestCase):
+    """Constitutional invariant: no return path to execution."""
+
+    def test_gate_output_identical_with_and_without_shadow_plane(self):
+        import copy
+        from execution_gate.execution_gate import evaluate_gate
+        from rule_governance.shadow_evaluator import evaluate_shadow_rules
+
+        os.environ["EXECUTION_ENABLED"] = "true"
+        self.addCleanup(lambda: os.environ.pop("EXECUTION_ENABLED", None))
+
+        snap = _shadow_snapshot({"regime": "range_rotation",
+                                 "exhaustion_present": True})
+        # Make the snapshot gate-evaluable
+        snap.update({
+            "decision_authority": {"decision": "ready_for_execution",
+                                   "trade_authorized": False},
+            "risk": {"trade_allowed": True},
+            "state_transition": {"invalidated": False},
+            "setup_lifecycle": {"active": True, "current_phase": "maturing",
+                                "age_scans": 3},
+            "ai_debate": {"final_verdict": {"recommended_stance": "prepare_long"}},
+            "confidence_fusion": {"fusion_status": "agreement"},
+            "toolbox": {"preferred_tool": "bullish_fvg", "tool_candidates": [{
+                "tool": "bullish_fvg",
+                "trigger_prep": {"execution_ready": True,
+                                 "raw_trigger_status": "confirmed"},
+            }]},
+            "regime_permissions": {"enabled": True, "allowed": True,
+                                   "required_trigger_status": "confirmed",
+                                   "min_setup_age_scans": 2},
+        })
+
+        gate_before = evaluate_gate(copy.deepcopy(snap))
+        snap["rule_governance"] = evaluate_shadow_rules(snap, "QQQ")
+        gate_after = evaluate_gate(snap)
+        self.assertEqual(gate_before, gate_after)
+
+    def test_no_execution_module_imports_rule_governance(self):
+        """Static check: execution-path modules must not import the shadow plane."""
+        execution_path_files = [
+            "src/execution_gate/execution_gate.py",
+            "src/paper_execution/execution_engine.py",
+            "src/paper_execution/order_builder.py",
+            "src/decision_authority/decision_engine.py",
+            "src/regime_authority/regime_permission_matrix.py",
+            "src/risk/risk_governor.py",
+        ]
+        root = os.path.join(os.path.dirname(__file__), "..")
+        for rel in execution_path_files:
+            with open(os.path.join(root, rel), encoding="utf-8") as f:
+                content = f.read()
+            self.assertNotIn("rule_governance", content,
+                             f"{rel} imports the shadow plane — constitutional violation")
+
+    def test_no_enforce_flag_exists_anywhere_in_module(self):
+        root = os.path.join(os.path.dirname(__file__), "..", "src", "rule_governance")
+        for fname in os.listdir(root):
+            if not fname.endswith(".py"):
+                continue
+            with open(os.path.join(root, fname), encoding="utf-8") as f:
+                content = f.read().lower()
+            self.assertNotIn("enforce_mode", content, f"{fname} contains an enforce flag")
+            self.assertNotIn("allow_execution", content,
+                             f"{fname} references execution permission")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
