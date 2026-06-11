@@ -33,6 +33,7 @@ from rule_governance.shadow_evaluator      import evaluate_shadow_rules
 from rule_governance.divergence_ledger     import append_events, resolve_pending
 from paper_execution.trade_journal         import update_trade_management
 from paper_execution.thesis_monitor        import monitor_thesis
+from paper_execution.position_supremacy    import enforce_position_supremacy
 from decision_authority.decision_engine    import make_decision
 from execution_gate.execution_gate         import evaluate_gate
 from trade_intent.intent_builder           import build_intent
@@ -966,6 +967,19 @@ def run_scan_loop():
             # ── Recommendation Persistence (Phase 5E.1) ────────────────────
             save_recommendations(symbol, _rec_full)
 
+            # ── Broker Position Supremacy (exposure is truth) ─────────────
+            # Runs BEFORE the position monitor and before entry evaluation.
+            # If broker and journal disagree: BROKER WINS, immediately.
+            snapshot["position_supremacy"] = enforce_position_supremacy(symbol)
+            _ps = snapshot["position_supremacy"]
+            if _ps.get("mismatch"):
+                print(f"  POSITION_STATE_MISMATCH | case={_ps.get('case')}")
+                print(f"  BROKER_REALITY_OVERRIDES_JOURNAL | forced_sync={str(_ps.get('forced_sync', False)).lower()}")
+                for _a in _ps.get("actions", []):
+                    print(f"    supremacy: {_a}")
+                if _ps.get("emergency"):
+                    print("  EMERGENCY_MANAGEMENT | CRITICAL: stop protection could not be established")
+
             # ── Position Monitor (Phase 2B — moved up) ────────────────────
             snapshot["position_monitor"] = monitor_paper_position(snapshot, symbol)
             pm_line = format_position_monitor_line(snapshot["position_monitor"])
@@ -1005,7 +1019,11 @@ def run_scan_loop():
             # into one decision: may this scan attempt a NEW entry?
             eod = check_eod_state()
             entry_denied_reason = None
-            if ops_mode == "MANAGEMENT_ONLY":
+            if snapshot.get("position_supremacy", {}).get("block_entries"):
+                entry_denied_reason = (
+                    "supremacy: POSITION_STATE_MISMATCH — entries blocked until reconciled"
+                )
+            elif ops_mode == "MANAGEMENT_ONLY":
                 entry_denied_reason = "ops: MANAGEMENT_ONLY (restart with open position)"
             elif not entry_authority:
                 entry_denied_reason = "ops: entry authority revoked (feed instability)"
@@ -1097,6 +1115,8 @@ def run_scan_loop():
             # ── Trade Management (Phase 5E.8) ─────────────────────────────
             snapshot["trade_management"] = manage_open_trade(snapshot, symbol)
             tm = snapshot["trade_management"]
+            if tm.get("invariant_violation"):
+                print(f"  Trade Mgmt   : {tm['invariant_violation']}")
             if tm.get("action") not in ("none", "no_trade", "hold"):
                 print(
                     f"  Trade Mgmt   : {tm.get('action')} | {tm.get('details', tm.get('reason', ''))}"

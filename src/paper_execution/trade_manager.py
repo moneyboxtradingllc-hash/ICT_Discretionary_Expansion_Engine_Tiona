@@ -433,8 +433,17 @@ def _manage(snapshot: dict, symbol: str) -> dict:
         return _no_action("journal_trade_not_found")
 
     order_status = trade_record.get("order_status", "")
+    invariant_violation = None
     if order_status not in ("filled", "partially_filled"):
-        return _no_action(f"not_filled:{order_status}")
+        # BROKER POSITION SUPREMACY: we are inside the has_open_position
+        # branch — the broker says exposure EXISTS. A non-filled journal
+        # status here is a bookkeeping failure, not a reason to abandon a
+        # live position (2026-06-11: 'new' status left +6.77R unmanaged).
+        # Manage the exposure; flag the violation loudly.
+        invariant_violation = (
+            f"INVARIANT VIOLATION: broker position open but journal says "
+            f"'{order_status}' — managing broker reality anyway"
+        )
 
     raw_risk = trade_record.get("risk_per_share")
     if raw_risk is None:
@@ -499,6 +508,8 @@ def _manage(snapshot: dict, symbol: str) -> dict:
 
     result.setdefault("unrealized_r", round(unrealized_r, 4))
     result["management_profile"] = profile
+    if invariant_violation:
+        result["invariant_violation"] = invariant_violation
     return result
 
 

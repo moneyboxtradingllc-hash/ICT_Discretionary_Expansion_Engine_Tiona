@@ -166,14 +166,22 @@ class TestManageOpenTradeGates(unittest.TestCase):
         self.assertEqual(result["action"], "none")
         self.assertIn("exit_already_submitted", result["reason"])
 
-    def test_not_filled_returns_no_action(self):
+    def test_not_filled_with_open_position_manages_anyway(self):
+        """Broker Position Supremacy (2026-06-11): a stale journal status
+        must never stop management of real broker exposure. The old behavior
+        (return no_action 'not_filled') left +6.77R unmanaged into a loss."""
+        import paper_execution.management_policies as mp_mod
         snap   = _make_snapshot(current_price=101.0)
         record = _make_trade_record(order_status="submitted")
         with patch.dict(os.environ, {"TRADE_MANAGEMENT_ENABLED": "true"}):
             with patch.object(tm_mod, "find_any_active_trade", return_value=(record, "f.json")):
-                result = manage_open_trade(snap, "QQQ")
-        self.assertEqual(result["action"], "none")
-        self.assertIn("not_filled", result["reason"])
+                with patch.object(tm_mod, "update_trade_management", return_value=True):
+                    with patch.object(mp_mod, "update_trade_management", return_value=True):
+                        result = manage_open_trade(snap, "QQQ")
+        self.assertNotIn("not_filled", result.get("reason", ""))
+        self.assertIn("INVARIANT VIOLATION", result.get("invariant_violation", ""))
+        self.assertIn(result["action"], ("hold", "breakeven", "take_profit",
+                                         "partial_take_profit", "trail_stop"))
 
 
 # ── manage_open_trade: Rule 1 — Breakeven ─────────────────────────────────────
