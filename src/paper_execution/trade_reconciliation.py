@@ -98,7 +98,9 @@ def _reconcile(symbol: str) -> dict:
     warnings: list[str] = []
 
     # ── 2. Sync entry order if still pending ─────────────────────────────────
-    if order_status in ("submitted", "accepted", "pending_new") and alpaca_order_id:
+    # OPS-1 hotfix: include "new" — Alpaca's accepted-state label — or the
+    # fill-sync deadlocks (see 2026-06-11 unprotected-position incident).
+    if order_status in ("submitted", "accepted", "pending_new", "new") and alpaca_order_id:
         order_info = get_order(alpaca_order_id)
         if order_info and "error" not in order_info:
             new_status = order_info.get("status", "")

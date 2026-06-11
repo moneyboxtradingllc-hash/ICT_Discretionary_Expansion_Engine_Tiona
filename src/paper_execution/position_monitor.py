@@ -187,7 +187,11 @@ def _monitor(snapshot: dict, symbol: str) -> dict:
         # ── Sync order status from Alpaca ──────────────────────────────────────
         alpaca_id  = linked_trade.get("alpaca_order_id")
         cur_status = linked_trade.get("order_status", "")
-        if alpaca_id and cur_status in ("submitted", "accepted"):
+        # OPS-1 hotfix: Alpaca reports accepted orders as "new"/"pending_new".
+        # Excluding those states deadlocked fill-sync (2026-06-11: filled
+        # position ran unprotected because the journal stayed at "new").
+        if alpaca_id and cur_status in ("submitted", "accepted", "new",
+                                        "pending_new", "partially_filled"):
             order_info = get_order(alpaca_id)
             if order_info and "error" not in order_info:
                 new_status = order_info.get("status", "")
