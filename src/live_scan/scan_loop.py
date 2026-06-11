@@ -43,6 +43,13 @@ from paper_execution.position_monitor              import monitor_paper_position
 from paper_execution.stop_enforcer                 import enforce_stop
 from operational_readiness.readiness_checklist     import run_readiness_check
 from operational_readiness.activation_controller   import determine_activation
+from operational_readiness.startup_authority       import (
+    run_startup_authority, release_instance_lock, write_heartbeat,
+)
+from operational_readiness.eod_authority            import (
+    check_eod_state, flatten_position_eod,
+)
+import atexit
 from paper_activation.activation_plan              import build_activation_plan
 from paper_activation.activation_runner            import run_activation
 from paper_activation.activation_report            import log_activation_event
@@ -690,6 +697,29 @@ def run_scan_loop():
         print(f"[SCAN LOOP ERROR] Cannot initialise data provider: {exc}")
         return
 
+    # ── OPS-1: Startup Authority — the single startup decision ────────────
+    auth = run_startup_authority(symbol)
+    print(_DIV)
+    print(f"TRADING_AUTHORITY : {auth['verdict']} | mode={auth['mode']}")
+    for name, chk in auth["checks"].items():
+        flag = "ok " if chk["ok"] else "FAIL"
+        print(f"  [{flag}] {chk['class']:9} {name:22} {chk['detail'][:80]}")
+    if auth["verdict"] == "DENIED":
+        print(_DIV)
+        print("STARTUP DENIED — the loop will not evaluate setups.")
+        for failure in auth["mandatory_failures"]:
+            print(f"  DENY: {failure}")
+        release_instance_lock()
+        return
+    if auth["verdict"] == "DEGRADED":
+        print("  DEGRADED: trading proceeds; evidence collection impaired:")
+        for reason in auth["degraded_reasons"]:
+            print(f"    - {reason}")
+    ops_mode        = auth["mode"]            # NORMAL | MANAGEMENT_ONLY
+    entry_authority = True                    # intraday revocation flag
+    consecutive_feed_failures = 0
+    atexit.register(release_instance_lock)
+
     print(_DIV)
     print(f"Phase 1P - Live Scan Loop | {symbol}")
     print(_DIV)
@@ -724,15 +754,32 @@ def run_scan_loop():
                 candles_1m = provider.fetch_1m_candles(symbol, lookback)
             except DataFeedError as exc:
                 feed_errors += 1
+                consecutive_feed_failures += 1
+                if consecutive_feed_failures >= 5 and entry_authority:
+                    entry_authority = False
+                    print("  [OPS] entry authority REVOKED — 5 consecutive feed failures "
+                          "(positions remain managed)")
                 print(f"  [FEED ERROR scan #{scan_count}] {exc}")
                 _sleep_remainder(scan_start, interval)
                 continue
 
             if not candles_1m:
                 feed_errors += 1
+                consecutive_feed_failures += 1
+                if consecutive_feed_failures >= 5 and entry_authority:
+                    entry_authority = False
+                    print("  [OPS] entry authority REVOKED — 5 consecutive feed failures "
+                          "(positions remain managed)")
                 print(f"  [FEED ERROR scan #{scan_count}] No candles returned for {symbol}.")
                 _sleep_remainder(scan_start, interval)
                 continue
+
+            # Clean scan: reset the failure streak and restore entry authority
+            if consecutive_feed_failures > 0:
+                if not entry_authority:
+                    entry_authority = True
+                    print("  [OPS] entry authority RESTORED — clean scan after feed instability")
+                consecutive_feed_failures = 0
 
             raw_data = build_timeframes(candles_1m)
 
@@ -937,23 +984,6 @@ def run_scan_loop():
                     snapshot["ai_context"].get("summary", "") + " " + bs_line
                 ).strip()
 
-            # ── Operational Readiness (Phase 2C) ──────────────────────────
-            snapshot["operational_readiness"] = run_readiness_check(snapshot)
-            orr_line = format_operational_readiness_line(snapshot["operational_readiness"])
-            if orr_line:
-                snapshot["ai_context"]["summary"] = (
-                    snapshot["ai_context"].get("summary", "") + " " + orr_line
-                ).strip()
-
-            snapshot["activation_controller"] = determine_activation(
-                snapshot["operational_readiness"]
-            )
-            ac_line = format_activation_line(snapshot["activation_controller"])
-            if ac_line:
-                snapshot["ai_context"]["summary"] = (
-                    snapshot["ai_context"].get("summary", "") + " " + ac_line
-                ).strip()
-
             # ── Paper Activation Plan (Phase 2D) ──────────────────────────
             snapshot["paper_activation_plan"] = build_activation_plan(snapshot, symbol)
             snapshot["paper_activation"]      = run_activation(
@@ -970,8 +1000,28 @@ def run_scan_loop():
                 symbol,
             )
 
+            # ── OPS-1: entry authority gate ────────────────────────────────
+            # Startup mode, intraday revocation, and EOD cutoff all funnel
+            # into one decision: may this scan attempt a NEW entry?
+            eod = check_eod_state()
+            entry_denied_reason = None
+            if ops_mode == "MANAGEMENT_ONLY":
+                entry_denied_reason = "ops: MANAGEMENT_ONLY (restart with open position)"
+            elif not entry_authority:
+                entry_denied_reason = "ops: entry authority revoked (feed instability)"
+            elif not eod["entries_allowed"]:
+                entry_denied_reason = f"ops: EOD entry cutoff ({eod['no_entry_after']} ET)"
+
             # ── Paper Execution (Phase 2A — gated by activation) ──────────
-            if snapshot["paper_activation"].get("allow_order_attempts"):
+            if entry_denied_reason is not None:
+                snapshot["paper_execution"] = {
+                    "status":          "skipped",
+                    "reason":          entry_denied_reason,
+                    "order_summary":   None,
+                    "alpaca_order_id": None,
+                    "trade_id":        None,
+                }
+            elif snapshot["paper_activation"].get("allow_order_attempts"):
                 snapshot["paper_execution"] = attempt_paper_execution(snapshot, symbol)
             else:
                 snapshot["paper_execution"] = {
@@ -996,6 +1046,40 @@ def run_scan_loop():
                 snapshot["ai_context"]["summary"] = (
                     snapshot["ai_context"].get("summary", "") + " " + se_line
                 ).strip()
+
+            # ── Operational Readiness (Phase 2C) ──────────────────────────
+            # OPS-1: moved AFTER the stop enforcer so the stop_enforcer_present
+            # check sees reality — ending the perpetual 90/100 false alarm.
+            snapshot["operational_readiness"] = run_readiness_check(snapshot)
+            orr_line = format_operational_readiness_line(snapshot["operational_readiness"])
+            if orr_line:
+                snapshot["ai_context"]["summary"] = (
+                    snapshot["ai_context"].get("summary", "") + " " + orr_line
+                ).strip()
+
+            snapshot["activation_controller"] = determine_activation(
+                snapshot["operational_readiness"]
+            )
+            ac_line = format_activation_line(snapshot["activation_controller"])
+            if ac_line:
+                snapshot["ai_context"]["summary"] = (
+                    snapshot["ai_context"].get("summary", "") + " " + ac_line
+                ).strip()
+
+            # ── OPS-1: End-of-Day Authority ────────────────────────────────
+            if eod["should_flatten"] and snapshot["position_monitor"].get("has_open_position"):
+                eod_result = flatten_position_eod(symbol)
+                snapshot["eod_authority"] = eod_result
+                print(
+                    f"  EOD Authority: FLATTEN | {eod_result.get('reason')}"
+                    f" | order={eod_result.get('exit_order_id')}"
+                )
+
+            # ── OPS-1: MANAGEMENT_ONLY -> NORMAL transition ────────────────
+            if (ops_mode == "MANAGEMENT_ONLY"
+                    and not snapshot["position_monitor"].get("has_open_position")):
+                ops_mode = "NORMAL"
+                print("  Ops Authority: MANAGEMENT_ONLY -> NORMAL (position flat, reconciled)")
 
             # ── Trade Reconciliation (Phase 4A) ───────────────────────────
             snapshot["trade_reconciliation"] = reconcile_trade(symbol)
@@ -1105,6 +1189,9 @@ def run_scan_loop():
 
             # ── Print compact summary ─────────────────────────────────────
             _print_scan_summary(snapshot, symbol, scan_count, saved_path)
+
+            # OPS-1: heartbeat for dead-man monitoring
+            write_heartbeat(scan_count, status=f"{ops_mode.lower()}")
 
             _sleep_remainder(scan_start, interval)
 
