@@ -27,6 +27,8 @@ from live_scan.snapshot_store              import save_snapshot
 from live_scan.ai_refresh_controller       import AIRefreshController
 from state_transitions.transition_engine   import analyze_transition
 from setup_lifecycle.setup_tracker         import SetupTracker
+from shared_context.shared_market_context  import build_shared_market_context
+from shared_context.council                import run_council
 from decision_authority.decision_engine    import make_decision
 from execution_gate.execution_gate         import evaluate_gate
 from trade_intent.intent_builder           import build_intent
@@ -229,6 +231,28 @@ def _print_scan_summary(snapshot: dict, symbol: str, scan_num: int, saved_path: 
             f" | current={sl.get('current_quality','?')}"
             f" | path={path_str}{warn_str}"
         )
+
+    # Phase 5G — council (OBSERVE_ONLY, informational)
+    co = snapshot.get("council", {})
+    if co.get("enabled"):
+        votes = "  ".join(
+            f"{m.get('member','?')}={ (m.get('vote') or '?').upper() }"
+            for m in co.get("members", [])
+        )
+        rep = co.get("report", {})
+        print(f"Council       : {votes}")
+        consensus_line = (
+            f"Consensus     : {(rep.get('dominant_position') or '?').upper()}"
+            f" ({rep.get('consensus_strength', 0)})"
+            f" | yes={rep.get('yes_votes', 0)}"
+            f" no={rep.get('no_votes', 0)}"
+            f" neutral={rep.get('neutral_votes', 0)}"
+            f" | OBSERVE_ONLY"
+        )
+        print(consensus_line)
+        cc = rep.get("critical_concerns") or []
+        if cc:
+            print(f"Concerns      : {cc[0]}" + (f" (+{len(cc)-1} more)" if len(cc) > 1 else ""))
 
     da = snapshot.get("decision_authority", {})
     da_decision = (da.get("decision") or "stand_down").upper()
@@ -757,6 +781,12 @@ def run_scan_loop():
 
             # ── Setup lifecycle tracking ───────────────────────────────────
             snapshot["setup_lifecycle"] = setup_tracker.update(snapshot, symbol)
+
+            # ── Shared Context + Council (Phase 5G — OBSERVE_ONLY) ─────────
+            # The council sees one normalized context and reports agreement/
+            # contradiction. It has NO authority: nothing downstream reads it.
+            snapshot["shared_context"] = build_shared_market_context(snapshot, symbol)
+            snapshot["council"]        = run_council(snapshot["shared_context"])
 
             # ── Decision Authority ─────────────────────────────────────────
             snapshot["decision_authority"] = make_decision(snapshot)
