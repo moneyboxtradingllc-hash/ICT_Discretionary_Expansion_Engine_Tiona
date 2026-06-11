@@ -30,6 +30,8 @@ from setup_lifecycle.setup_tracker         import SetupTracker
 from shared_context.shared_market_context  import build_shared_market_context
 from shared_context.council                import run_council
 from rule_governance.shadow_evaluator      import evaluate_shadow_rules
+from rule_governance.divergence_ledger     import append_events, resolve_pending
+from paper_execution.trade_journal         import update_trade_management
 from decision_authority.decision_engine    import make_decision
 from execution_gate.execution_gate         import evaluate_gate
 from trade_intent.intent_builder           import build_intent
@@ -1024,6 +1026,21 @@ def run_scan_loop():
             # Runs AFTER gate + execution have settled. No return path to
             # execution exists, by constitution. Promotion = code change only.
             snapshot["rule_governance"] = evaluate_shadow_rules(snapshot, symbol)
+
+            # 5H.3 — persist events, tag the journal trade, resolve backlog
+            _rg_events = snapshot["rule_governance"].get("events") or []
+            if _rg_events:
+                append_events(_rg_events, symbol)
+                _rg_trade_id = next(
+                    (e.get("trade_id") for e in _rg_events if e.get("trade_id")), None
+                )
+                if _rg_trade_id:
+                    update_trade_management(
+                        _rg_trade_id,
+                        {"shadow_rules_fired": [e["rule_id"] for e in _rg_events]},
+                        symbol,
+                    )
+            resolve_pending(symbol)
 
             # ── Persist snapshot ───────────────────────────────────────────
             saved_path = None

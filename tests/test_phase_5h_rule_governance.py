@@ -440,5 +440,201 @@ class TestShadowIsolation(unittest.TestCase):
                              f"{fname} references execution permission")
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# 5H.3 — Divergence Ledger
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _event(event_id="EV_1", rule_id="R-001", executed=False,
+           trade_id=None, intent_id="INT_1", resolution=None):
+    return {
+        "event_id": event_id, "rule_id": rule_id,
+        "predicate_version": "x_v1", "symbol": "QQQ",
+        "timestamp": "20260610T120000", "fired": True,
+        "fire_reason": "test", "opportunity": True,
+        "executed": executed, "trade_id": trade_id, "intent_id": intent_id,
+        "context_digest": {}, "council_digest": [],
+        "resolution": resolution or {"state": "pending"},
+    }
+
+
+class TestDivergenceLedger(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        os.environ["RULE_GOVERNANCE_DIR"] = self.tmp.name
+        self.addCleanup(lambda: os.environ.pop("RULE_GOVERNANCE_DIR", None))
+        from rule_governance import divergence_ledger as dl
+        self.dl = dl
+
+    def test_append_and_load(self):
+        result = self.dl.append_events([_event("EV_A"), _event("EV_B")], "QQQ")
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["appended"], 2)
+        events = self.dl.load_events("QQQ", days=2)
+        self.assertEqual({e["event_id"] for e in events}, {"EV_A", "EV_B"})
+
+    def test_append_deduplicates_event_ids(self):
+        self.dl.append_events([_event("EV_A")], "QQQ")
+        result = self.dl.append_events([_event("EV_A"), _event("EV_C")], "QQQ")
+        self.assertEqual(result["appended"], 1)
+        self.assertEqual(len(self.dl.load_events("QQQ", days=2)), 2)
+
+    def test_empty_append_is_noop(self):
+        self.assertEqual(self.dl.append_events([], "QQQ"),
+                         {"appended": 0, "ok": True})
+
+    def test_resolution_from_closed_trade_fill(self):
+        from unittest.mock import patch
+        self.dl.append_events(
+            [_event("EV_T", executed=True, trade_id="PT_X", intent_id=None)], "QQQ")
+        fake_files = [("20260610", "f.json",
+                       [{"trade_id": "PT_X", "realized_r": -0.96}])]
+        with patch("paper_execution.trade_journal._search_recent_files",
+                   return_value=fake_files):
+            stats = self.dl.resolve_pending("QQQ")
+        self.assertEqual(stats["resolved"], 1)
+        ev = self.dl.load_events("QQQ", days=2)[0]
+        self.assertEqual(ev["resolution"]["source"], "fill")
+        self.assertEqual(ev["resolution"]["r"], -0.96)
+
+    def test_open_trade_stays_pending(self):
+        from unittest.mock import patch
+        self.dl.append_events(
+            [_event("EV_T", executed=True, trade_id="PT_X", intent_id=None)], "QQQ")
+        fake_files = [("20260610", "f.json",
+                       [{"trade_id": "PT_X", "realized_r": None}])]
+        with patch("paper_execution.trade_journal._search_recent_files",
+                   return_value=fake_files):
+            stats = self.dl.resolve_pending("QQQ")
+        self.assertEqual(stats["resolved"], 0)
+        self.assertEqual(stats["still_pending"], 1)
+
+    def _resolve_with_intent(self, intent):
+        from unittest.mock import patch
+        self.dl.append_events([_event("EV_I", intent_id="INT_1")], "QQQ")
+        with patch.object(self.dl, "_find_intent", return_value=intent):
+            self.dl.resolve_pending("QQQ")
+        return self.dl.load_events("QQQ", days=2)[0]["resolution"]
+
+    def test_proxy_resolution_sl_first(self):
+        res = self._resolve_with_intent(
+            {"first_threshold_crossed": "sl_1r", "status": "open"})
+        self.assertEqual(res["r"], -1.0)
+        self.assertEqual(res["source"], "proxy")
+
+    def test_proxy_resolution_tp_first(self):
+        res = self._resolve_with_intent(
+            {"first_threshold_crossed": "tp_2r", "status": "open"})
+        self.assertEqual(res["r"], 2.0)
+
+    def test_legacy_proxy_mae_first_assumption(self):
+        res = self._resolve_with_intent({
+            "first_threshold_crossed": None,
+            "risk_per_share_reference": 2.0,
+            "mfe": 5.0, "mae": 2.5,        # both thresholds hit, order unknown
+            "status": "open",
+        })
+        self.assertEqual(res["r"], -1.0)   # conservative: against the rule
+        self.assertEqual(res["basis"], "legacy_mae_first_assumption")
+
+    def test_expired_indeterminate_scores_zero(self):
+        res = self._resolve_with_intent({
+            "first_threshold_crossed": None,
+            "risk_per_share_reference": 2.0,
+            "mfe": 1.0, "mae": 0.5, "status": "expired",
+        })
+        self.assertEqual(res["r"], 0.0)
+        self.assertTrue(res["low_confidence"])
+
+    def test_open_intent_stays_pending(self):
+        from unittest.mock import patch
+        self.dl.append_events([_event("EV_I", intent_id="INT_1")], "QQQ")
+        with patch.object(self.dl, "_find_intent", return_value={
+            "first_threshold_crossed": None,
+            "risk_per_share_reference": 2.0,
+            "mfe": 1.0, "mae": 0.5, "status": "open",
+        }):
+            stats = self.dl.resolve_pending("QQQ")
+        self.assertEqual(stats["still_pending"], 1)
+
+    def test_resolution_is_idempotent(self):
+        from unittest.mock import patch
+        self.dl.append_events([_event("EV_I", intent_id="INT_1")], "QQQ")
+        with patch.object(self.dl, "_find_intent", return_value={
+            "first_threshold_crossed": "tp_2r", "status": "open",
+        }):
+            self.dl.resolve_pending("QQQ")
+            stats2 = self.dl.resolve_pending("QQQ")
+        self.assertEqual(stats2["checked"], 0)   # already resolved — skipped
+
+    def test_never_raises_on_missing_ledger_dir(self):
+        os.environ["RULE_GOVERNANCE_DIR"] = os.path.join(self.tmp.name, "ghost")
+        self.assertEqual(self.dl.load_events("QQQ"), [])
+        stats = self.dl.resolve_pending("QQQ")
+        self.assertEqual(stats["resolved"], 0)
+
+
+class TestIntentThresholdTracking(unittest.TestCase):
+    """5H.3 outcome_tracker enhancement: first_threshold_crossed ordering."""
+
+    def _snapshot(self, current_price, midpoint=100.0, invalidation=98.0):
+        return {
+            "trade_intent": {
+                "intent_type": "long", "direction": "bullish",
+                "intent_created": True,
+                "entry_zone": {"midpoint": midpoint, "zone_low": 99.0,
+                               "zone_high": 101.0},
+            },
+            "toolbox": {
+                "preferred_tool": "bullish_fvg",
+                "tool_candidates": [{
+                    "tool": "bullish_fvg",
+                    "price_level": {"midpoint": midpoint,
+                                    "invalidation_level": invalidation,
+                                    "current_price": current_price,
+                                    "price_relation": "inside_zone"},
+                    "trigger_prep": {"raw_trigger_status": "confirmation_needed"},
+                }],
+            },
+        }
+
+    def test_risk_per_share_reference_from_invalidation(self):
+        from intent_archive.intent_archive import _risk_per_share_reference
+        snap = self._snapshot(100.0)
+        rps = _risk_per_share_reference(snap, snap["trade_intent"])
+        self.assertEqual(rps, 2.0)   # |100 - 98|
+
+    def test_risk_reference_zone_fallback(self):
+        from intent_archive.intent_archive import _risk_per_share_reference
+        snap = self._snapshot(100.0, invalidation=None)
+        snap["toolbox"]["tool_candidates"][0]["price_level"]["invalidation_level"] = None
+        rps = _risk_per_share_reference(snap, snap["trade_intent"])
+        self.assertEqual(rps, 1.0)   # |100 - zone_low 99|
+
+    def test_sl_crossed_first_is_recorded_and_sticky(self):
+        from intent_archive.intent_archive import update_archive
+        import intent_archive.intent_archive as ia
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with unittest.mock.patch.object(ia, "_ARCHIVE_DIR", tmpdir):
+                # Scan 1: create intent (price at midpoint)
+                snap = self._snapshot(100.0)
+                snap["intent_score"] = {"raw_score": 75, "gated_score": 75,
+                                        "gated_quality": "strong_watch"}
+                snap["setup_lifecycle"] = {"active": True, "setup_id": "S1"}
+                snap["market_regime"] = {}
+                update_archive(snap, "QQQ")
+                # Scan 2: price drops 1R -> SL threshold first
+                update_archive(self._snapshot(98.0), "QQQ")
+                # Scan 3: price rockets past 2R -> must NOT overwrite
+                update_archive(self._snapshot(105.0), "QQQ")
+
+                path = ia._archive_filepath("QQQ")
+                with open(path, encoding="utf-8") as f:
+                    rec = json.load(f)["intents"][0]
+        self.assertEqual(rec["risk_per_share_reference"], 2.0)
+        self.assertEqual(rec["first_threshold_crossed"], "sl_1r")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -82,6 +82,40 @@ def _should_archive(snapshot: dict) -> bool:
     return False
 
 
+def _risk_per_share_reference(snapshot: dict, ti: dict) -> "float | None":
+    """
+    Phase 5H.3 — stop distance in price units for R-threshold tracking.
+    Prefers the preferred candidate's invalidation_level; falls back to the
+    entry zone boundary (same fallback order as order_builder sizing).
+    """
+    try:
+        tb     = snapshot.get("toolbox", {}) or {}
+        pref   = tb.get("preferred_tool", "") or ""
+        cands  = tb.get("tool_candidates", []) or []
+        pref_c = next((c for c in cands if c.get("tool") == pref), {})
+        pl     = pref_c.get("price_level", {}) or {}
+
+        ez  = ti.get("entry_zone") or {}
+        mid = pl.get("midpoint", ez.get("midpoint"))
+        if mid is None:
+            return None
+        mid = float(mid)
+
+        inv = pl.get("invalidation_level")
+        if inv is not None:
+            rps = abs(mid - float(inv))
+            return round(rps, 4) if rps > 0 else None
+
+        direction = (ti.get("direction") or "bullish").lower()
+        boundary  = ez.get("zone_low") if direction == "bullish" else ez.get("zone_high")
+        if boundary is None:
+            return None
+        rps = abs(mid - float(boundary))
+        return round(rps, 4) if rps > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _make_new_record(symbol: str, snapshot: dict, archive_key: str) -> dict:
     ti     = snapshot.get("trade_intent", {})
     iscr   = snapshot.get("intent_score", {})
@@ -110,6 +144,10 @@ def _make_new_record(symbol: str, snapshot: dict, archive_key: str) -> dict:
         "trigger_became_ready":    False,
         "expiration_reason":       None,
         "scan_updates":            [],
+        # Phase 5H.3 — threshold-order tracking for proxy outcome resolution.
+        # MFE/MAE aggregates cannot tell which threshold was hit FIRST; this can.
+        "risk_per_share_reference": _risk_per_share_reference(snapshot, ti),
+        "first_threshold_crossed":  None,   # "sl_1r" | "tp_2r" | None
         # Phase 5E.1 — regime/session context at creation time for memory similarity search
         "session":               (snapshot.get("session") or "").lower(),
         "market_regime_label":   (regime.get("regime_label")   or "unknown").lower(),
@@ -177,6 +215,15 @@ def update_archive(snapshot: dict, symbol: str) -> dict:
 
         record["mfe"] = round(max(record.get("mfe", 0.0), outcome["mfe_candidate"]), 4)
         record["mae"] = round(max(record.get("mae", 0.0), outcome["mae_candidate"]), 4)
+
+        # Phase 5H.3 — record which R-threshold was crossed FIRST.
+        # SL checked before TP within a scan: conservative for rule scoring.
+        rps = record.get("risk_per_share_reference")
+        if rps and record.get("first_threshold_crossed") is None:
+            if outcome["mae_candidate"] >= rps:
+                record["first_threshold_crossed"] = "sl_1r"
+            elif outcome["mfe_candidate"] >= 2 * rps:
+                record["first_threshold_crossed"] = "tp_2r"
 
         if outcome["zone_touched_this_scan"]:
             record["zone_was_touched"] = True

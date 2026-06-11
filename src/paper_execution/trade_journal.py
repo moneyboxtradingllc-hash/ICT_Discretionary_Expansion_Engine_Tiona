@@ -239,6 +239,9 @@ def make_record(
         "trail_reason":              None,
         "current_stop_reference":    None,
         "stop_management_state":     "initial",
+        # Phase 5H.3 — shadow rules that fired on this trade's entry scan
+        # (OBSERVE_ONLY — written for postmortems, read by nothing in execution)
+        "shadow_rules_fired":        [],
     }
 
 
