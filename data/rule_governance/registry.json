@@ -124,6 +124,48 @@
       "notes": "5F.5 gate law: min_setup_age_scans by regime (trend=1, range/exhaustion=2, chop=3). Validated against n=1."
     },
     {
+      "rule_id": "P-001",
+      "name": "management_policy_defensive",
+      "predicate_id": null,
+      "sponsor": "REGIME",
+      "rule_class": "management_policy",
+      "status": "grandfathered",
+      "created": "2026-06-11",
+      "review_by": "2026-08-11",
+      "scope": ["QQQ"],
+      "evidence_refs": [],
+      "enforcement_ref": "src/paper_execution/management_policies.py:POLICY_TABLE[defensive]",
+      "notes": "5T.1 baseline policy: all params None (env defaults = exact 5E.8 behavior). The grandfathered law every other policy is measured against."
+    },
+    {
+      "rule_id": "P-002",
+      "name": "management_policy_range",
+      "predicate_id": null,
+      "sponsor": "REGIME",
+      "rule_class": "management_policy",
+      "status": "shadow",
+      "created": "2026-06-11",
+      "review_by": "2026-07-25",
+      "scope": ["QQQ"],
+      "evidence_refs": ["reports/5T0_mfe_mae_study.md"],
+      "monitor_ref": "management action ledger (5T.3) - counterfactual vs P-001",
+      "notes": "5T.0 params: BE 0.75R, TP 1.25R full, tight trail. Dormant (all-None) until 5T.3 activation; counterfactual-measured thereafter."
+    },
+    {
+      "rule_id": "P-003",
+      "name": "management_policy_trend",
+      "predicate_id": null,
+      "sponsor": "REGIME",
+      "rule_class": "management_policy",
+      "status": "shadow",
+      "created": "2026-06-11",
+      "review_by": "2026-07-25",
+      "scope": ["QQQ"],
+      "evidence_refs": ["reports/5T0_mfe_mae_study.md"],
+      "monitor_ref": "management action ledger (5T.3) - counterfactual vs P-001",
+      "notes": "5T.0 params: BE 1.5R, partial 50% at 2R, structure trail uncapped. Dormant (all-None) until 5T.3 activation; counterfactual-measured thereafter."
+    },
+    {
       "rule_id": "GF-5F-007",
       "name": "risk_multiplier_enforcement",
       "predicate_id": null,

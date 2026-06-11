@@ -34,7 +34,10 @@ from rule_governance.predicates import predicate_exists
 
 _VALID_STATUS    = frozenset({"shadow", "promoted", "grandfathered", "retired"})
 _BLOCKING_SPONSORS = frozenset({"REGIME", "DELIVERY", "RISK", "OPPORTUNITY"})
-_VALID_CLASSES   = frozenset({"blocking_candidate", "annotation"})
+# management_policy (5T): governs trade-management parameters; never blocks
+# entries. Shadow management policies are measured via monitor_ref, not a
+# context predicate.
+_VALID_CLASSES   = frozenset({"blocking_candidate", "annotation", "management_policy"})
 
 _LEGAL_TRANSITIONS = {
     "shadow":        frozenset({"promoted", "retired"}),
@@ -87,9 +90,13 @@ def validate_record(rec: dict) -> tuple:
         )
 
     if status == "shadow":
-        pid = rec.get("predicate_id")
-        if not predicate_exists(pid):
-            return False, f"shadow rule requires a library predicate (got '{pid}')"
+        if rule_class == "management_policy":
+            if not rec.get("monitor_ref"):
+                return False, "shadow management_policy requires monitor_ref"
+        else:
+            pid = rec.get("predicate_id")
+            if not predicate_exists(pid):
+                return False, f"shadow rule requires a library predicate (got '{pid}')"
 
     if status in ("promoted", "grandfathered"):
         if not rec.get("enforcement_ref"):

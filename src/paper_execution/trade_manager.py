@@ -19,6 +19,7 @@ import pytz
 
 from paper_execution.paper_broker    import is_paper_account_safe, submit_paper_exit_order, cancel_order
 from paper_execution.protective_stop import submit_protective_stop
+from paper_execution.management_policies import get_policy, resolve_trade_profile
 from paper_execution.trade_journal   import (
     find_any_active_trade,
     mark_exit_submitted,
@@ -403,16 +404,24 @@ def _manage(snapshot: dict, symbol: str) -> dict:
     if tp_triggered:
         return _no_action("take_profit_already_triggered")
 
-    # ── Rule 2: Take profit at 2R (highest priority) ──────────────────────────
-    if _tp_enabled() and unrealized_r >= _tp_r():
+    # ── Phase 5T.1: profile-driven policy (None values = env defaults) ───────
+    profile = resolve_trade_profile(snapshot, trade_record, symbol)
+    policy  = get_policy(profile)
+
+    tp_r_eff       = policy["take_profit_r"]         if policy["take_profit_r"]         is not None else _tp_r()
+    be_trigger_eff = policy["breakeven_trigger_r"]   if policy["breakeven_trigger_r"]   is not None else _be_trigger_r()
+    trail_gate_eff = policy["trail_after_breakeven"] if policy["trail_after_breakeven"] is not None else _trail_after_be()
+
+    # ── Rule 2: Take profit (highest priority) ────────────────────────────────
+    if _tp_enabled() and unrealized_r >= tp_r_eff:
         return _execute_take_profit(trade_record, symbol, side, qty, unrealized_r, current_price)
 
-    # ── Rule 1: Break-even at 1R ──────────────────────────────────────────────
-    if _be_enabled() and not be_triggered and unrealized_r >= _be_trigger_r():
+    # ── Rule 1: Break-even ────────────────────────────────────────────────────
+    if _be_enabled() and not be_triggered and unrealized_r >= be_trigger_eff:
         return _execute_breakeven(trade_record, symbol, side, qty, entry_price)
 
     # ── Rule 3: Structure trail ───────────────────────────────────────────────
-    trail_allowed = (not _trail_after_be()) or be_triggered
+    trail_allowed = (not trail_gate_eff) or be_triggered
     if _trail_enabled() and trail_allowed:
         current_stop = trade_record.get("stop_reference")
         if current_stop is not None:
@@ -422,7 +431,9 @@ def _manage(snapshot: dict, symbol: str) -> dict:
             if trail_stop is not None:
                 return _execute_trail(trade_record, symbol, side, qty, trail_stop, trail_reason)
 
-    return _hold(unrealized_r, be_triggered)
+    result = _hold(unrealized_r, be_triggered)
+    result["management_profile"] = profile
+    return result
 
 
 # ── Public entry point ────────────────────────────────────────────────────────

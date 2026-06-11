@@ -242,6 +242,8 @@ def make_record(
         # Phase 5H.3 — shadow rules that fired on this trade's entry scan
         # (OBSERVE_ONLY — written for postmortems, read by nothing in execution)
         "shadow_rules_fired":        [],
+        # Phase 5T.1 — management profile, locked at first management touch
+        "management_profile":        None,
     }
 
 

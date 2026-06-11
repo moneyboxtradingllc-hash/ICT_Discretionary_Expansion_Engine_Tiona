@@ -90,7 +90,13 @@ def _evaluate(snapshot: dict, symbol: str) -> dict:
 
     now_str = datetime.now(_EASTERN).strftime("%Y%m%dT%H%M%S")
 
-    rules  = [r for r in active_rules("shadow") if symbol in r.get("scope", [])]
+    # Only predicate-bearing rules are evaluated here. Shadow management
+    # policies (5T, rule_class=management_policy) carry no context predicate —
+    # they are measured by the management ledger, not this evaluator.
+    rules  = [
+        r for r in active_rules("shadow")
+        if symbol in r.get("scope", []) and r.get("predicate_id")
+    ]
     fired  = []
     events = []
 

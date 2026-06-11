@@ -221,14 +221,16 @@ class TestRegistryFile(unittest.TestCase):
         self.assertTrue({"R-001", "R-002", "R-003"} <= ids)
         self.assertTrue(any(i.startswith("GF-5F-") for i in ids))
 
-    def test_three_shadow_rules_active(self):
+    def test_three_shadow_blocking_rules_active(self):
         shadow = active_rules("shadow")
-        self.assertEqual({r["rule_id"] for r in shadow},
-                         {"R-001", "R-002", "R-003"})
+        blocking = {r["rule_id"] for r in shadow
+                    if r.get("rule_class") == "blocking_candidate"}
+        self.assertEqual(blocking, {"R-001", "R-002", "R-003"})
 
     def test_grandfather_records_cover_5f_laws(self):
         gf = active_rules("grandfathered")
-        self.assertEqual(len(gf), 7)
+        gf_5f = [r for r in gf if r["rule_id"].startswith("GF-5F-")]
+        self.assertEqual(len(gf_5f), 7)
         for rec in gf:
             self.assertTrue(rec.get("enforcement_ref"),
                             f"{rec['rule_id']} missing enforcement_ref")
