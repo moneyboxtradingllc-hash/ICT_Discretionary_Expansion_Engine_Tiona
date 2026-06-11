@@ -356,6 +356,40 @@ class TestEndOfDayDrill(_OpsBase):
 # Heartbeat
 # ══════════════════════════════════════════════════════════════════════════════
 
+class TestFillSyncDeadlockRegression(unittest.TestCase):
+    """2026-06-11 incident: Alpaca status 'new' deadlocked fill-sync and
+    severed trade linkage while a filled position ran unmanaged to +6.7R."""
+
+    def test_position_monitor_syncs_from_new_status(self):
+        with open(os.path.join(os.path.dirname(__file__), "..", "src",
+                               "paper_execution", "position_monitor.py"),
+                  encoding="utf-8") as f:
+            src = f.read()
+        self.assertIn('"new"', src.split("Sync order status")[1][:500],
+                      "position_monitor fill-sync must trigger on status 'new'")
+
+    def test_reconciliation_syncs_from_new_status(self):
+        with open(os.path.join(os.path.dirname(__file__), "..", "src",
+                               "paper_execution", "trade_reconciliation.py"),
+                  encoding="utf-8") as f:
+            src = f.read()
+        self.assertIn('"pending_new", "new"', src,
+                      "reconciliation entry-sync must trigger on status 'new'")
+
+    def test_find_active_trade_links_new_status(self):
+        import tempfile as tf
+        from unittest.mock import patch as p
+        import paper_execution.trade_journal as tj
+        trade = {"trade_id": "T_NEW", "side": "buy", "order_status": "new",
+                 "exit_submitted": False}
+        with p.object(tj, "_search_recent_files",
+                      return_value=[("20260611", "f.json", [trade])]):
+            found, _ = tj.find_active_trade("QQQ", "buy")
+        self.assertIsNotNone(found,
+                             "status 'new' must not sever position linkage")
+        self.assertEqual(found["trade_id"], "T_NEW")
+
+
 class TestHeartbeat(_OpsBase):
 
     def test_heartbeat_written_with_scan_and_mode(self):

@@ -288,7 +288,11 @@ def find_active_trade(symbol: str, side: str) -> tuple[dict | None, str | None]:
     Active means: order_status in (submitted, accepted, filled, partially_filled)
                   AND exit_submitted is False.
     """
-    active_statuses = {"submitted", "accepted", "filled", "partially_filled"}
+    # OPS-1 hotfix: "new"/"pending_new" are Alpaca's accepted-state labels.
+    # Excluding them severed position-monitor linkage on 2026-06-11 (no
+    # stop_reference, no broker stop) while a filled position ran to +6.7R.
+    active_statuses = {"submitted", "accepted", "new", "pending_new",
+                       "filled", "partially_filled"}
     for _, fp, trades in _search_recent_files(symbol):
         # Reverse to get most recent entry first
         for t in reversed(trades):
