@@ -132,6 +132,84 @@ class TestShadowEvaluation(_Base):
         self.assertIn("429", result["error"])
 
 
+class TestSetupsOnlyMode(_Base):
+    """AI_SHADOW_MODE=setups_only: fire only when a second opinion matters."""
+
+    def _dormant(self):
+        snap = _snapshot("stand_down")
+        snap["qualification"] = {"status": "no_trade"}
+        snap["setup_lifecycle"] = {"active": False}
+        snap["decision_authority"] = {"decision": "stand_down"}
+        return snap
+
+    def test_dormant_scan_skipped_no_api_call(self):
+        os.environ["AI_SHADOW_MODE"] = "setups_only"
+        self.addCleanup(lambda: os.environ.pop("AI_SHADOW_MODE", None))
+        with patch.object(sh_mod.requests, "post") as post:
+            result = evaluate_shadow_ai(self._dormant(), "QQQ")
+        post.assert_not_called()
+        self.assertTrue(result["enabled"])
+        self.assertTrue(result["skipped"])
+
+    def test_fires_on_qualification(self):
+        os.environ["AI_SHADOW_MODE"] = "setups_only"
+        self.addCleanup(lambda: os.environ.pop("AI_SHADOW_MODE", None))
+        for status in ("candidate", "qualified", "elite"):
+            snap = self._dormant()
+            snap["qualification"] = {"status": status}
+            with patch.object(sh_mod.requests, "post",
+                              return_value=_api_response("long", 60)) as post:
+                result = evaluate_shadow_ai(snap, "QQQ")
+            post.assert_called_once()
+            self.assertTrue(result["success"], status)
+
+    def test_fires_on_active_lifecycle(self):
+        os.environ["AI_SHADOW_MODE"] = "setups_only"
+        self.addCleanup(lambda: os.environ.pop("AI_SHADOW_MODE", None))
+        snap = self._dormant()
+        snap["setup_lifecycle"] = {"active": True, "age_scans": 2}
+        with patch.object(sh_mod.requests, "post",
+                          return_value=_api_response()) as post:
+            evaluate_shadow_ai(snap, "QQQ")
+        post.assert_called_once()
+
+    def test_fires_on_ready_decision(self):
+        os.environ["AI_SHADOW_MODE"] = "setups_only"
+        self.addCleanup(lambda: os.environ.pop("AI_SHADOW_MODE", None))
+        for decision in ("ready_for_execution", "prepare_short",
+                         "trade_authorized_false"):
+            snap = self._dormant()
+            snap["decision_authority"] = {"decision": decision}
+            with patch.object(sh_mod.requests, "post",
+                              return_value=_api_response()) as post:
+                evaluate_shadow_ai(snap, "QQQ")
+            post.assert_called_once()
+
+    def test_every_scan_mode_fires_on_dormant(self):
+        os.environ["AI_SHADOW_MODE"] = "every_scan"
+        self.addCleanup(lambda: os.environ.pop("AI_SHADOW_MODE", None))
+        with patch.object(sh_mod.requests, "post",
+                          return_value=_api_response()) as post:
+            evaluate_shadow_ai(self._dormant(), "QQQ")
+        post.assert_called_once()
+
+    def test_skips_not_persisted(self):
+        os.environ["AI_SHADOW_MODE"] = "setups_only"
+        self.addCleanup(lambda: os.environ.pop("AI_SHADOW_MODE", None))
+        evaluate_shadow_ai(self._dormant(), "QQQ")
+        import glob
+        self.assertEqual(
+            glob.glob(os.path.join(self.tmp.name, "*_shadow.json")), [])
+
+    def test_invalid_mode_defaults_to_setups_only(self):
+        os.environ["AI_SHADOW_MODE"] = "yolo"
+        self.addCleanup(lambda: os.environ.pop("AI_SHADOW_MODE", None))
+        with patch.object(sh_mod.requests, "post") as post:
+            result = evaluate_shadow_ai(self._dormant(), "QQQ")
+        post.assert_not_called()
+        self.assertTrue(result["skipped"])
+
+
 class TestPersistence(_Base):
 
     def test_result_persisted_success_and_failure(self):

@@ -247,7 +247,7 @@ def _print_scan_summary(snapshot: dict, symbol: str, scan_num: int, saved_path: 
 
     # Phase AI-SHADOW — Fable 5 shadow evaluation (OBSERVE_ONLY)
     sh = snapshot.get("ai_shadow", {})
-    if sh.get("enabled"):
+    if sh.get("enabled") and not sh.get("skipped"):
         if sh.get("success"):
             print(
                 f"AI Shadow     : provider=Fable5 | stance={sh.get('stance')}"

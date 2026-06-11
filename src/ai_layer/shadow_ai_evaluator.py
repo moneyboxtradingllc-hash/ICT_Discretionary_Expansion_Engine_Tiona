@@ -14,10 +14,18 @@ CONSTITUTION (immutable for this phase):
 
 Env:
   AI_SHADOW_ENABLED          default false
+  AI_SHADOW_MODE             default setups_only   ("setups_only" | "every_scan")
   AI_PROVIDER_SHADOW         default anthropic
   AI_MODEL_SHADOW            default claude-fable-5
   AI_SHADOW_TIMEOUT_SECONDS  default 10
   ANTHROPIC_API_KEY          required for live calls (fails open if absent)
+
+setups_only fires the shadow ONLY when there is something worth a second
+opinion: qualification reached candidate-or-better, a setup lifecycle is
+active, or the decision is ready/prepare. Dormant scans (both AIs trivially
+agree on "nothing here") are skipped — ~70-80% cost reduction with no loss
+of decision-relevant evidence. Every submitted trade always has a shadow
+stance, because submission requires exactly those states.
 """
 import json
 import os
@@ -51,6 +59,28 @@ opportunity present; stand_down = conditions actively hostile."""
 
 def _enabled() -> bool:
     return os.getenv("AI_SHADOW_ENABLED", "false").lower().strip() == "true"
+
+
+def _mode() -> str:
+    mode = os.getenv("AI_SHADOW_MODE", "setups_only").lower().strip()
+    return mode if mode in ("setups_only", "every_scan") else "setups_only"
+
+
+_ACTIVE_QUAL      = ("candidate", "qualified", "elite")
+_ACTIVE_DECISIONS = ("ready_for_execution", "trade_authorized_false",
+                     "prepare_long", "prepare_short")
+
+
+def _should_fire(snapshot: dict) -> bool:
+    """setups_only trigger: is there anything worth a second opinion?"""
+    qual = (snapshot.get("qualification", {}) or {}).get("status", "")
+    if (qual or "").lower() in _ACTIVE_QUAL:
+        return True
+    if (snapshot.get("setup_lifecycle", {}) or {}).get("active"):
+        return True
+    decision = ((snapshot.get("decision_authority", {}) or {})
+                .get("decision") or "").lower()
+    return decision in _ACTIVE_DECISIONS
 
 
 def _model() -> str:
@@ -176,6 +206,12 @@ def evaluate_shadow_ai(snapshot: dict, symbol: str) -> dict:
     if not _enabled():
         return {"enabled": False, "success": False, "stance": None,
                 "agrees_with_live": None}
+    if _mode() == "setups_only" and not _should_fire(snapshot or {}):
+        # Dormant scan — no setup, no decision pressure, no second opinion
+        # needed. Not persisted (skips are noise, not evidence).
+        return {"enabled": True, "skipped": True, "success": False,
+                "stance": None, "agrees_with_live": None,
+                "reason": "setups_only: no active setup or decision"}
     try:
         return _evaluate(snapshot or {}, symbol)
     except Exception as exc:  # noqa: BLE001

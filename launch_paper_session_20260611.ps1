@@ -26,6 +26,7 @@ $env:AI_MODEL_LIVE                 = "gpt-4o-mini"
 $env:AI_PROVIDER_SHADOW            = "anthropic"
 $env:AI_MODEL_SHADOW               = "claude-fable-5"
 $env:AI_SHADOW_ENABLED             = "true"
+$env:AI_SHADOW_MODE                = "setups_only"
 $env:AI_SHADOW_TIMEOUT_SECONDS     = "10"
 
 # Phase 5T — adaptive management + thesis monitor (shadow)
