@@ -496,5 +496,152 @@ class TestTrendProfileBehavior(unittest.TestCase):
         self.assertEqual(result["action"], "take_profit")   # cannot split 1 share
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# 5T.4 — June 10 replay validation (real saved snapshots)
+# ══════════════════════════════════════════════════════════════════════════════
+
+_SNAP_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "live_snapshots")
+
+# The actual June 10 trade (journal facts)
+_JUNE10_TRADE = {
+    "trade_id": "PT_QQQ_20260610T115837", "symbol": "QQQ", "side": "buy",
+    "qty": 88, "order_status": "filled",
+    "entry_reference": 701.41, "stop_reference": 695.73,
+    "risk_per_share": 5.68,
+    "breakeven_triggered": False, "take_profit_triggered": False,
+    "management_profile": "range",        # locked from range_rotation matrix
+    "thesis_exit_signaled": False,
+}
+_JUNE10_REALIZED_R = -0.7173              # journal realized_r at stop-out
+
+
+class TestJune10Replay(unittest.TestCase):
+    """
+    Timeline (saved snapshots):
+      11:58:39  entry scan — range_rotation/exhaustion/unstable
+      11:59     filled @ 701.04
+      12:04:38  setup lifecycle INVALIDATED, position open @ 700.855 (~-0.03R)
+      14:50     stopped out, realized_r = -0.7173
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        with open(os.path.join(_SNAP_DIR, "20260610_115839_QQQ.json"),
+                  encoding="utf-8") as f:
+            cls.entry_snap = json.load(f)
+        with open(os.path.join(_SNAP_DIR, "20260610_120438_QQQ.json"),
+                  encoding="utf-8") as f:
+            cls.death_snap = json.load(f)
+
+    def test_matrix_assigns_range_profile_to_june10_trade(self):
+        from regime_authority.regime_permission_matrix import (
+            evaluate_regime_permissions,
+        )
+        rp = evaluate_regime_permissions(self.entry_snap)
+        self.assertEqual(rp["management_profile"], "range")
+
+    def test_lifecycle_was_invalidated_six_minutes_after_fill(self):
+        sl = self.death_snap["setup_lifecycle"]
+        self.assertTrue(sl["active"])
+        self.assertEqual(sl["current_phase"], "invalidated")
+        self.assertTrue(self.death_snap["position_monitor"]["has_open_position"])
+
+    def test_thesis_monitor_would_have_signaled_at_12_04(self):
+        snap = dict(self.death_snap)
+        # Saved position_monitor is trimmed — restore the live fields
+        pm = dict(snap["position_monitor"])
+        pm.update({"exit_already_submitted": False,
+                   "linked_trade_id": _JUNE10_TRADE["trade_id"],
+                   "side": "long", "qty": 88,
+                   "avg_entry_price": 701.04})
+        snap["position_monitor"] = pm
+
+        rec = dict(_JUNE10_TRADE)
+        with patch.object(th_mod, "find_any_active_trade",
+                          return_value=(rec, "f.json")), \
+             patch.object(th_mod, "update_trade_management", return_value=True):
+            result = monitor_thesis(snap, "QQQ")
+
+        self.assertTrue(result["would_exit"])
+        self.assertEqual(result["reason"], "lifecycle_invalidated")
+        # price 700.855, entry 701.04, rps 5.68 -> r ~= -0.0326
+        self.assertAlmostEqual(result["r_at_signal"], -0.0326, places=3)
+        self._signal_event = result["events"][0]
+
+    def test_counterfactual_thesis_exit_saves_two_thirds_R(self):
+        from rule_governance.rule_scoring import score_thesis_events
+        event = {
+            "event_type": "thesis_exit_shadow", "rule_id": "TFX-001",
+            "event_id": "EV_REPLAY", "fire_reason": "lifecycle_invalidated",
+            "r_at_signal": -0.0326,
+            "resolution": {"state": "resolved", "source": "fill",
+                           "r": _JUNE10_REALIZED_R},
+        }
+        card = score_thesis_events([event])
+        # saved = -0.0326 - (-0.7173) = 0.6847R  (~$342 at $500 risk)
+        self.assertAlmostEqual(card["saved_R"], 0.6847, places=3)
+        self.assertEqual(card["cut_winners_R"], 0.0)
+        self.assertGreater(card["net_saved_R"], 0.65)
+
+    def test_range_profile_params_would_not_have_changed_loss_side(self):
+        """Honesty check: adaptive RANGE params alone do NOT fix June 10 —
+        the trade never reached +0.75R. The thesis monitor is the save."""
+        rec  = dict(_JUNE10_TRADE)
+        snap = {
+            "position_monitor": {
+                "has_open_position": True, "exit_already_submitted": False,
+                "linked_trade_id": rec["trade_id"], "current_price": 700.855,
+                "side": "long", "qty": 88, "avg_entry_price": 701.04,
+            },
+            "regime_permissions": {"enabled": True, "management_profile": "range"},
+            "toolbox": {"tool_candidates": []},
+        }
+        result = _manage(snap, rec)
+        self.assertEqual(result["action"], "hold")
+        self.assertEqual(result["management_profile"], "range")
+
+
+class TestGovernanceVerification(unittest.TestCase):
+
+    def test_registry_loads_clean_with_5t_records(self):
+        os.environ.pop("RULE_GOVERNANCE_DIR", None)
+        from rule_governance.rule_registry import load_registry
+        reg = load_registry()
+        self.assertEqual(reg["quarantined"], [])
+        ids = {r["rule_id"] for r in reg["rules"]}
+        self.assertTrue({"P-001", "P-002", "P-003", "TFX-001"} <= ids)
+
+    def test_weekly_report_includes_thesis_counterfactuals(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(_REAL_REGISTRY, encoding="utf-8") as f:
+                data = json.load(f)
+            with open(os.path.join(tmp, "registry.json"), "w",
+                      encoding="utf-8") as f:
+                json.dump(data, f)
+            os.environ["RULE_GOVERNANCE_DIR"] = tmp
+            try:
+                from rule_governance.governance_report import build_weekly_report
+                report = build_weekly_report("QQQ")
+            finally:
+                os.environ.pop("RULE_GOVERNANCE_DIR", None)
+        self.assertIn("thesis_exit_shadow", report)
+        self.assertEqual(report["thesis_exit_shadow"]["rule_id"], "TFX-001")
+
+    def test_trade_manager_still_imports_no_rule_governance(self):
+        """Management may WRITE to the ledger only via scan_loop — the
+        execution-side modules stay decoupled from the governance plane."""
+        root = os.path.join(os.path.dirname(__file__), "..", "src")
+        for rel in ("paper_execution/trade_manager.py",
+                    "paper_execution/management_policies.py",
+                    "paper_execution/thesis_monitor.py"):
+            with open(os.path.join(root, rel), encoding="utf-8") as f:
+                src = f.read()
+            self.assertNotIn("from rule_governance", src,
+                             f"{rel} imports the governance plane")
+            self.assertNotIn("import rule_governance", src,
+                             f"{rel} imports the governance plane")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
