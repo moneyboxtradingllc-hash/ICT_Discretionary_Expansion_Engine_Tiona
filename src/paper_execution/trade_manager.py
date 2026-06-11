@@ -207,6 +207,7 @@ def _execute_take_profit(
     qty: int,
     unrealized_r: float,
     current_price: float,
+    fraction: float = 1.0,
 ) -> dict:
     trade_id  = trade_record.get("trade_id")
     exit_side = "sell" if side == "long" else "buy"
@@ -215,14 +216,64 @@ def _execute_take_profit(
     if not safe:
         return _error(f"paper safety check failed: {reason}")
 
+    # ── Phase 5T.3: partial take-profit (TREND profile) ───────────────────────
+    partial  = 0.0 < fraction < 1.0
+    exit_qty = qty
+    if partial:
+        exit_qty = max(1, int(qty * fraction))
+        if exit_qty >= qty:
+            partial  = False      # position too small to split — full exit
+            exit_qty = qty
+
     try:
-        result = submit_paper_exit_order(symbol, qty, exit_side)
+        result = submit_paper_exit_order(symbol, exit_qty, exit_side)
     except RuntimeError as exc:
         return _error(f"take_profit exit order failed: {exc}")
 
     order_id = result.get("alpaca_order_id")
     now_str  = datetime.now(_EASTERN).strftime("%Y%m%dT%H%M%S")
 
+    if partial:
+        remaining = qty - exit_qty
+
+        # Journal: partial fields only — exit NOT marked submitted, so the
+        # remainder keeps being managed (trail, uncapped).
+        update_trade_management(trade_id, {
+            "partial_exit_taken":    True,
+            "partial_exit_order_id": order_id,
+            "partial_exit_qty":      exit_qty,
+            "remaining_qty":         remaining,
+            "partial_exit_r":        round(unrealized_r, 4),
+            "partial_exit_at":       now_str,
+            "stop_management_state": "partial_taken",
+        }, symbol)
+
+        # Broker stop must be re-sized for the remainder, or the old full-qty
+        # stop would over-sell when triggered.
+        broker_replaced = False
+        stop_ref = (trade_record.get("current_stop_reference")
+                    or trade_record.get("stop_reference"))
+        if trade_record.get("broker_stop_order_id") and stop_ref is not None:
+            rep = replace_broker_stop(trade_id, symbol, side, remaining, float(stop_ref))
+            broker_replaced = bool(rep.get("replaced", False))
+
+        return {
+            "action":               "partial_take_profit",
+            "unrealized_r":         round(unrealized_r, 4),
+            "exit_order_id":        order_id,
+            "exit_qty":             exit_qty,
+            "remaining_qty":        remaining,
+            "broker_stop_replaced": broker_replaced,
+            "reason":               f"partial take_profit at {unrealized_r:.2f}R",
+            "details": (
+                f"exit {exit_qty}/{qty} | remaining={remaining}"
+                f" | r={unrealized_r:.2f} | stop_resized={broker_replaced}"
+            ),
+            "current_price":        current_price,
+            "status":               "submitted",
+        }
+
+    # ── Full exit (pre-5T behavior) ───────────────────────────────────────────
     mark_exit_submitted(
         trade_id            = trade_id,
         exit_order_id       = order_id,
@@ -411,27 +462,42 @@ def _manage(snapshot: dict, symbol: str) -> dict:
     tp_r_eff       = policy["take_profit_r"]         if policy["take_profit_r"]         is not None else _tp_r()
     be_trigger_eff = policy["breakeven_trigger_r"]   if policy["breakeven_trigger_r"]   is not None else _be_trigger_r()
     trail_gate_eff = policy["trail_after_breakeven"] if policy["trail_after_breakeven"] is not None else _trail_after_be()
+    fraction_eff   = policy["take_profit_fraction"]  if policy["take_profit_fraction"]  is not None else 1.0
+    partial_taken  = bool(trade_record.get("partial_exit_taken", False))
+
+    result = None
 
     # ── Rule 2: Take profit (highest priority) ────────────────────────────────
-    if _tp_enabled() and unrealized_r >= tp_r_eff:
-        return _execute_take_profit(trade_record, symbol, side, qty, unrealized_r, current_price)
+    # After a partial, the TP rule retires — the remainder trails uncapped.
+    if (_tp_enabled() and unrealized_r >= tp_r_eff
+            and not (fraction_eff < 1.0 and partial_taken)):
+        result = _execute_take_profit(
+            trade_record, symbol, side, qty, unrealized_r, current_price,
+            fraction_eff,
+        )
 
     # ── Rule 1: Break-even ────────────────────────────────────────────────────
-    if _be_enabled() and not be_triggered and unrealized_r >= be_trigger_eff:
-        return _execute_breakeven(trade_record, symbol, side, qty, entry_price)
+    elif _be_enabled() and not be_triggered and unrealized_r >= be_trigger_eff:
+        result = _execute_breakeven(trade_record, symbol, side, qty, entry_price)
 
     # ── Rule 3: Structure trail ───────────────────────────────────────────────
-    trail_allowed = (not trail_gate_eff) or be_triggered
-    if _trail_enabled() and trail_allowed:
-        current_stop = trade_record.get("stop_reference")
-        if current_stop is not None:
-            trail_stop, trail_reason = _get_structure_trail_stop(
-                snapshot, side, float(current_stop), entry_price,
-            )
-            if trail_stop is not None:
-                return _execute_trail(trade_record, symbol, side, qty, trail_stop, trail_reason)
+    else:
+        trail_allowed = (not trail_gate_eff) or be_triggered or partial_taken
+        if _trail_enabled() and trail_allowed:
+            current_stop = trade_record.get("stop_reference")
+            if current_stop is not None:
+                trail_stop, trail_reason = _get_structure_trail_stop(
+                    snapshot, side, float(current_stop), entry_price,
+                )
+                if trail_stop is not None:
+                    result = _execute_trail(
+                        trade_record, symbol, side, qty, trail_stop, trail_reason,
+                    )
 
-    result = _hold(unrealized_r, be_triggered)
+    if result is None:
+        result = _hold(unrealized_r, be_triggered)
+
+    result.setdefault("unrealized_r", round(unrealized_r, 4))
     result["management_profile"] = profile
     return result
 

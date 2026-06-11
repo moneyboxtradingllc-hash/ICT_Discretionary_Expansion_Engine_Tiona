@@ -18,6 +18,8 @@ POLICY CONTRACT:
 
 No execution coupling beyond trade_manager. Never raises.
 """
+import os
+
 from paper_execution.trade_journal import update_trade_management
 
 _VALID_PROFILES = ("defensive", "range", "trend")
@@ -25,42 +27,55 @@ _VALID_PROFILES = ("defensive", "range", "trend")
 # profile -> policy params. None = env default (pre-5T behavior).
 #   breakeven_trigger_r:   R at which stop moves to entry
 #   take_profit_r:         R at which profit is taken
-#   take_profit_fraction:  1.0 = full exit; <1.0 = partial (5T.3, TREND)
+#   take_profit_fraction:  1.0/None = full exit; <1.0 = partial (TREND)
 #   trail_after_breakeven: structure trail gating
 #   thesis_exit:           "off" | "shadow"  (live thesis exits require
 #                          promoted evidence — Phase 5T.2+ governance)
+#
+# RANGE/TREND values are from the 5T.0 MFE/MAE study (floor-estimate caveat
+# applies; see data/rule_governance/reports/5T0_mfe_mae_study.md). They are
+# governed objects (P-002/P-003) measured by the management action ledger.
 POLICY_TABLE = {
-    "defensive": {
+    "defensive": {                       # P-001 — the grandfathered baseline
         "breakeven_trigger_r":   None,
         "take_profit_r":         None,
         "take_profit_fraction":  None,
         "trail_after_breakeven": None,
         "thesis_exit":           "shadow",
     },
-    "range": {
-        "breakeven_trigger_r":   None,   # 5T.3: 0.75 (study 5T.0)
-        "take_profit_r":         None,   # 5T.3: 1.25
-        "take_profit_fraction":  None,
-        "trail_after_breakeven": None,
+    "range": {                           # P-002 — 5T.0 study
+        "breakeven_trigger_r":   0.75,
+        "take_profit_r":         1.25,
+        "take_profit_fraction":  1.0,    # full exit at target
+        "trail_after_breakeven": True,
         "thesis_exit":           "shadow",
     },
-    "trend": {
-        "breakeven_trigger_r":   None,   # 5T.3: 1.5
-        "take_profit_r":         None,   # 5T.3: 2.0 with fraction 0.5
-        "take_profit_fraction":  None,
-        "trail_after_breakeven": None,
+    "trend": {                           # P-003 — 5T.0 study
+        "breakeven_trigger_r":   1.5,
+        "take_profit_r":         2.0,
+        "take_profit_fraction":  0.5,    # partial; remainder trails uncapped
+        "trail_after_breakeven": True,
         "thesis_exit":           "shadow",
     },
 }
 
 
+def _adaptive_enabled() -> bool:
+    return os.getenv("ADAPTIVE_MANAGEMENT_ENABLED", "true").lower().strip() == "true"
+
+
 def get_policy(profile: str) -> dict:
-    """Policy params for a profile. Unknown profiles get defensive. Never raises."""
+    """
+    Policy params for a profile. Unknown profiles get defensive.
+    ADAPTIVE_MANAGEMENT_ENABLED=false forces defensive (kill switch back to
+    exact pre-5T behavior). Never raises.
+    """
     p = (profile or "defensive").lower().strip()
-    if p not in _VALID_PROFILES:
+    if p not in _VALID_PROFILES or not _adaptive_enabled():
         p = "defensive"
     policy = dict(POLICY_TABLE[p])
     policy["profile"] = p
+    policy["adaptive_enabled"] = _adaptive_enabled()
     return policy
 
 

@@ -1039,20 +1039,58 @@ def run_scan_loop():
             # execution exists, by constitution. Promotion = code change only.
             snapshot["rule_governance"] = evaluate_shadow_rules(snapshot, symbol)
 
+            # 5T.3 — management action ledger (counterfactual measurement).
+            # Every management action is logged with r_at_action; resolution
+            # attaches realized_r at trade close. Policies are measured, not argued.
+            _tm_res    = snapshot.get("trade_management", {}) or {}
+            _tm_action = _tm_res.get("action")
+            _mgmt_events = []
+            if _tm_action in ("breakeven", "take_profit", "partial_take_profit",
+                              "trail_stop"):
+                _tm_profile = _tm_res.get("management_profile", "defensive")
+                _tm_rule    = {"defensive": "P-001", "range": "P-002",
+                               "trend": "P-003"}.get(_tm_profile, "P-001")
+                _tm_now     = time.strftime("%Y%m%dT%H%M%S")
+                _tm_tid     = snapshot.get("position_monitor", {}).get("linked_trade_id")
+                _mgmt_events.append({
+                    "event_id":          f"EV_{symbol}_{_tm_now}_{_tm_rule}_{_tm_action}",
+                    "event_type":        "management_action",
+                    "rule_id":           _tm_rule,
+                    "predicate_version": "management_policy_v1",
+                    "symbol":            symbol,
+                    "timestamp":         _tm_now,
+                    "fired":             True,
+                    "fire_reason":       f"{_tm_action}: {_tm_res.get('details', '')}"[:120],
+                    "opportunity":       True,
+                    "executed":          True,
+                    "trade_id":          _tm_tid,
+                    "intent_id":         None,
+                    "r_at_action":       _tm_res.get("unrealized_r"),
+                    "management_profile": _tm_profile,
+                    "context_digest":    dict(snapshot.get("shared_context", {}) or {}),
+                    "council_digest":    [],
+                    "resolution":        {"state": "pending"},
+                })
+
             # 5H.3 — persist events, tag the journal trade, resolve backlog
-            # (5T.2: thesis-monitor shadow events ride the same ledger)
-            _rg_events = (snapshot["rule_governance"].get("events") or []) + (
-                snapshot.get("thesis_monitor", {}).get("events") or []
+            # (5T.2 thesis events + 5T.3 management events ride the same ledger)
+            _rg_events = (
+                (snapshot["rule_governance"].get("events") or [])
+                + (snapshot.get("thesis_monitor", {}).get("events") or [])
+                + _mgmt_events
             )
             if _rg_events:
                 append_events(_rg_events, symbol)
+                # Journal tagging uses ENTRY-scan shadow events only — thesis
+                # and management events must not clobber the entry tags.
+                _entry_events = snapshot["rule_governance"].get("events") or []
                 _rg_trade_id = next(
-                    (e.get("trade_id") for e in _rg_events if e.get("trade_id")), None
+                    (e.get("trade_id") for e in _entry_events if e.get("trade_id")), None
                 )
                 if _rg_trade_id:
                     update_trade_management(
                         _rg_trade_id,
-                        {"shadow_rules_fired": [e["rule_id"] for e in _rg_events]},
+                        {"shadow_rules_fired": [e["rule_id"] for e in _entry_events]},
                         symbol,
                     )
             resolve_pending(symbol)

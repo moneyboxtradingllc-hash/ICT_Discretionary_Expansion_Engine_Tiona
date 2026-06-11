@@ -77,14 +77,30 @@ class TestPolicyTable(unittest.TestCase):
         self.assertEqual(get_policy("aggressive")["profile"], "defensive")
         self.assertEqual(get_policy(None)["profile"], "defensive")
 
-    def test_5t1_ships_all_none_zero_behavior_change(self):
-        """Constitution: at 5T.1 ship, every numeric param is None (env default)."""
-        for p in ("defensive", "range", "trend"):
-            policy = get_policy(p)
-            self.assertIsNone(policy["breakeven_trigger_r"], p)
-            self.assertIsNone(policy["take_profit_r"], p)
-            self.assertIsNone(policy["take_profit_fraction"], p)
-            self.assertIsNone(policy["trail_after_breakeven"], p)
+    def test_defensive_is_all_none_baseline(self):
+        """Constitution: DEFENSIVE (P-001) is env-default in every parameter."""
+        policy = get_policy("defensive")
+        self.assertIsNone(policy["breakeven_trigger_r"])
+        self.assertIsNone(policy["take_profit_r"])
+        self.assertIsNone(policy["take_profit_fraction"])
+        self.assertIsNone(policy["trail_after_breakeven"])
+
+    def test_5t3_adaptive_parameters_from_study(self):
+        rng = get_policy("range")
+        self.assertEqual(rng["breakeven_trigger_r"], 0.75)
+        self.assertEqual(rng["take_profit_r"], 1.25)
+        self.assertEqual(rng["take_profit_fraction"], 1.0)
+        trd = get_policy("trend")
+        self.assertEqual(trd["breakeven_trigger_r"], 1.5)
+        self.assertEqual(trd["take_profit_r"], 2.0)
+        self.assertEqual(trd["take_profit_fraction"], 0.5)
+
+    def test_adaptive_kill_switch_forces_defensive(self):
+        os.environ["ADAPTIVE_MANAGEMENT_ENABLED"] = "false"
+        self.addCleanup(lambda: os.environ.pop("ADAPTIVE_MANAGEMENT_ENABLED", None))
+        policy = get_policy("trend")
+        self.assertEqual(policy["profile"], "defensive")
+        self.assertIsNone(policy["take_profit_r"])
 
     def test_thesis_exit_is_shadow_everywhere(self):
         """Live thesis exits require promoted evidence — none exists yet."""
@@ -149,11 +165,13 @@ class TestDefensiveReproducesCurrentBehavior(unittest.TestCase):
         self.assertEqual(result["action"], "hold")
         self.assertEqual(result["management_profile"], "defensive")
 
-    def test_range_profile_identical_at_5t1(self):
-        """All-None RANGE row: same thresholds as defensive until 5T.3."""
+    def test_range_profile_with_kill_switch_matches_defensive(self):
+        """ADAPTIVE off: RANGE behaves exactly like defensive (pre-5T)."""
+        os.environ["ADAPTIVE_MANAGEMENT_ENABLED"] = "false"
+        self.addCleanup(lambda: os.environ.pop("ADAPTIVE_MANAGEMENT_ENABLED", None))
         rec    = _trade_record(management_profile="range")
         result = _manage(_mgmt_snapshot(704.9), rec)   # +0.98R
-        self.assertEqual(result["action"], "hold")     # not 0.75R yet
+        self.assertEqual(result["action"], "hold")     # defensive: BE at 1.0R
         result = _manage(_mgmt_snapshot(705.0), rec)   # +1.0R
         self.assertEqual(result["action"], "breakeven")
 
@@ -384,6 +402,98 @@ class TestThesisCounterfactualScoring(unittest.TestCase):
 
     def test_never_raises(self):
         self.assertIn("rule_id", self.score([{"bad": 1}, None]))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 5T.3 — Adaptive management behavior (RANGE / TREND live)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestRangeProfileBehavior(unittest.TestCase):
+
+    def test_breakeven_fires_at_0_75R(self):
+        rec    = _trade_record(management_profile="range")
+        result = _manage(_mgmt_snapshot(703.7), rec)    # +0.74R
+        self.assertEqual(result["action"], "hold")
+        result = _manage(_mgmt_snapshot(703.75), rec)   # +0.75R
+        self.assertEqual(result["action"], "breakeven")
+        self.assertEqual(result["management_profile"], "range")
+
+    def test_take_profit_fires_full_at_1_25R(self):
+        rec    = _trade_record(management_profile="range")
+        result = _manage(_mgmt_snapshot(706.25), rec)   # +1.25R
+        self.assertEqual(result["action"], "take_profit")   # FULL exit
+        self.assertAlmostEqual(result["unrealized_r"], 1.25)
+
+
+class TestTrendProfileBehavior(unittest.TestCase):
+
+    def test_breakeven_waits_for_1_5R(self):
+        rec    = _trade_record(management_profile="trend")
+        result = _manage(_mgmt_snapshot(705.0), rec)    # +1.0R — defensive would BE
+        self.assertEqual(result["action"], "hold")
+        result = _manage(_mgmt_snapshot(707.5), rec)    # +1.5R
+        self.assertEqual(result["action"], "breakeven")
+
+    def test_partial_take_profit_at_2R(self):
+        rec = _trade_record(management_profile="trend",
+                            broker_stop_order_id="STOP1",
+                            current_stop_reference=695.0)
+        with patch.object(tm_mod, "replace_broker_stop",
+                          return_value={"replaced": True}) as rep, \
+             patch.object(tm_mod, "find_any_active_trade",
+                          return_value=(rec, "f.json")), \
+             patch.object(tm_mod, "update_trade_management",
+                          return_value=True) as upd, \
+             patch.object(mp_mod, "update_trade_management", return_value=True), \
+             patch.object(tm_mod, "is_paper_account_safe",
+                          return_value=(True, "ok")), \
+             patch.object(tm_mod, "submit_paper_exit_order",
+                          return_value={"alpaca_order_id": "X1"}) as sub, \
+             patch.object(tm_mod, "mark_exit_submitted") as mes:
+            result = manage_open_trade(_mgmt_snapshot(710.0), "QQQ")  # +2.0R
+
+        self.assertEqual(result["action"], "partial_take_profit")
+        self.assertEqual(result["exit_qty"], 44)         # half of 88
+        self.assertEqual(result["remaining_qty"], 44)
+        self.assertTrue(result["broker_stop_replaced"])
+        sub.assert_called_once_with("QQQ", 44, "sell")
+        rep.assert_called_once_with("T1", "QQQ", "long", 44, 695.0)
+        mes.assert_not_called()                          # remainder stays managed
+        fields = upd.call_args[0][1]
+        self.assertTrue(fields["partial_exit_taken"])
+        self.assertEqual(fields["remaining_qty"], 44)
+
+    def test_tp_rule_retires_after_partial(self):
+        rec = _trade_record(management_profile="trend",
+                            partial_exit_taken=True, qty=44)
+        snap = _mgmt_snapshot(712.0)                     # +2.4R — would re-fire TP
+        snap["position_monitor"]["qty"] = 44
+        result = _manage(snap, rec)
+        self.assertNotIn(result["action"], ("take_profit", "partial_take_profit"))
+
+    def test_trail_active_after_partial(self):
+        """After partial + BE, the remainder trails by structure, uncapped."""
+        rec = _trade_record(management_profile="trend",
+                            partial_exit_taken=True, qty=44,
+                            breakeven_triggered=True,
+                            stop_reference=695.0)
+        snap = _mgmt_snapshot(712.0)
+        snap["position_monitor"]["qty"] = 44
+        snap["toolbox"] = {"tool_candidates": [{
+            "tool": "bullish_fvg",
+            "price_level": {"direction": "bullish", "zone_low": 705.0,
+                            "zone_high": 707.0},
+        }]}
+        result = _manage(snap, rec)
+        self.assertEqual(result["action"], "trail_stop")
+        self.assertEqual(result["new_stop"], 705.0)
+
+    def test_tiny_position_falls_back_to_full_exit(self):
+        rec = _trade_record(management_profile="trend", qty=1)
+        snap = _mgmt_snapshot(710.0)
+        snap["position_monitor"]["qty"] = 1
+        result = _manage(snap, rec)
+        self.assertEqual(result["action"], "take_profit")   # cannot split 1 share
 
 
 if __name__ == "__main__":
