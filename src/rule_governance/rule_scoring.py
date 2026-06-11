@@ -136,6 +136,56 @@ def _evaluate_promotion(n_resolved, fills, sessions, net, net_excl_best,
     }
 
 
+def score_thesis_events(events: list) -> dict:
+    """
+    Phase 5T.2 — Counterfactual scoring for thesis-exit shadow events.
+
+    saved_r = r_at_signal - realized_r
+      positive -> exiting at the signal would have SAVED that much R
+      negative -> the signal would have cut a trade that recovered
+
+    Never raises.
+    """
+    try:
+        mine = [e for e in events if e.get("event_type") == "thesis_exit_shadow"]
+        resolved = [
+            e for e in mine
+            if (e.get("resolution") or {}).get("state") == "resolved"
+            and e.get("r_at_signal") is not None
+        ]
+
+        saved = missed = 0.0
+        details = []
+        for e in resolved:
+            realized = float(e["resolution"].get("r", 0.0))
+            saved_r  = round(float(e["r_at_signal"]) - realized, 4)
+            details.append({
+                "event_id":    e.get("event_id"),
+                "reason":      e.get("fire_reason", "")[:60],
+                "r_at_signal": e["r_at_signal"],
+                "realized_r":  realized,
+                "saved_r":     saved_r,
+            })
+            if saved_r > 0:
+                saved += saved_r
+            else:
+                missed += abs(saved_r)
+
+        net = round(saved - missed, 4)
+        return {
+            "rule_id":          "TFX-001",
+            "signals_total":    len(mine),
+            "signals_resolved": len(resolved),
+            "saved_R":          round(saved, 4),
+            "cut_winners_R":    round(missed, 4),
+            "net_saved_R":      net,
+            "details":          details[-20:],
+            "note": "shadow only — live thesis exits require promoted evidence",
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"rule_id": "TFX-001", "error": f"thesis scoring error: {exc}"}
+
+
 def _evaluate_demotion(n_resolved, net, efficiency, fire_rate) -> dict:
     bar = DEMOTION_BAR
     if n_resolved < bar["min_window"]:

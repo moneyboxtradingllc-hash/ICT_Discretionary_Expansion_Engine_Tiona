@@ -244,6 +244,11 @@ def make_record(
         "shadow_rules_fired":        [],
         # Phase 5T.1 — management profile, locked at first management touch
         "management_profile":        None,
+        # Phase 5T.2 — thesis-failure monitor (SHADOW: signals, never exits)
+        "thesis_exit_signaled":      False,
+        "thesis_exit_signaled_at":   None,
+        "thesis_exit_reason":        None,
+        "thesis_exit_r_at_signal":   None,
     }
 
 

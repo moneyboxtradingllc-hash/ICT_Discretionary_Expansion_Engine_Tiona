@@ -20,7 +20,7 @@ import pytz
 from rule_governance.divergence_ledger import load_events
 from rule_governance.member_calibration import calibrate_members
 from rule_governance.rule_registry import load_registry, rules_near_review
-from rule_governance.rule_scoring import score_rule
+from rule_governance.rule_scoring import score_rule, score_thesis_events
 
 _EASTERN = pytz.timezone("America/New_York")
 
@@ -123,6 +123,7 @@ def build_weekly_report(symbol: str, days: int = 7,
 
         calibration = calibrate_members(events)
         near_review = rules_near_review(days=7)
+        thesis      = score_thesis_events(events)   # 5T.2 counterfactuals
 
         report = {
             "report":        "weekly_governance",
@@ -132,6 +133,7 @@ def build_weekly_report(symbol: str, days: int = 7,
             "window_days":   days,
             "scorecards":    scorecards,
             "member_calibration": calibration,
+            "thesis_exit_shadow": thesis,
             "rules_near_review":  near_review,
             "quarantined":   registry["quarantined"],
         }

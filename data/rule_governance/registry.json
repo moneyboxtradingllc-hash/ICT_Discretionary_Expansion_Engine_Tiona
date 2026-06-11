@@ -166,6 +166,20 @@
       "notes": "5T.0 params: BE 1.5R, partial 50% at 2R, structure trail uncapped. Dormant (all-None) until 5T.3 activation; counterfactual-measured thereafter."
     },
     {
+      "rule_id": "TFX-001",
+      "name": "thesis_failure_exit",
+      "predicate_id": null,
+      "sponsor": "DELIVERY",
+      "rule_class": "management_policy",
+      "status": "shadow",
+      "created": "2026-06-11",
+      "review_by": "2026-07-25",
+      "scope": ["QQQ"],
+      "evidence_refs": ["reports/5T0_mfe_mae_study.md"],
+      "monitor_ref": "thesis_monitor shadow events (saved_r = r_at_signal - realized_r)",
+      "notes": "Exit when the entry thesis dies while holding: lifecycle invalidation, setup invalidation, or (trend profile) measured delivery collapse. SHADOW ONLY - going live requires promoted evidence."
+    },
+    {
       "rule_id": "GF-5F-007",
       "name": "risk_multiplier_enforcement",
       "predicate_id": null,

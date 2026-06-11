@@ -32,6 +32,7 @@ from shared_context.council                import run_council
 from rule_governance.shadow_evaluator      import evaluate_shadow_rules
 from rule_governance.divergence_ledger     import append_events, resolve_pending
 from paper_execution.trade_journal         import update_trade_management
+from paper_execution.thesis_monitor        import monitor_thesis
 from decision_authority.decision_engine    import make_decision
 from execution_gate.execution_gate         import evaluate_gate
 from trade_intent.intent_builder           import build_intent
@@ -1017,6 +1018,17 @@ def run_scan_loop():
                     f"  Trade Mgmt   : {tm.get('action')} | {tm.get('details', tm.get('reason', ''))}"
                 )
 
+            # ── Thesis-Failure Monitor (Phase 5T.2 — SHADOW ONLY) ─────────
+            # Detects thesis death while holding; logs WOULD_EXIT. Never exits.
+            snapshot["thesis_monitor"] = monitor_thesis(snapshot, symbol)
+            thm = snapshot["thesis_monitor"]
+            if thm.get("would_exit"):
+                print(
+                    f"  Thesis Mon   : WOULD_EXIT | reason={thm.get('reason')}"
+                    f" | r={thm.get('r_at_signal')} | profile={thm.get('profile')}"
+                    f" | SHADOW (no action taken)"
+                )
+
             # ── Pending Entry Order Lifecycle (Phase 5E.5) ────────────────
             snapshot["pending_entry_order"] = cancel_pending_entry_order_if_setup_dead(
                 snapshot, symbol
@@ -1028,7 +1040,10 @@ def run_scan_loop():
             snapshot["rule_governance"] = evaluate_shadow_rules(snapshot, symbol)
 
             # 5H.3 — persist events, tag the journal trade, resolve backlog
-            _rg_events = snapshot["rule_governance"].get("events") or []
+            # (5T.2: thesis-monitor shadow events ride the same ledger)
+            _rg_events = (snapshot["rule_governance"].get("events") or []) + (
+                snapshot.get("thesis_monitor", {}).get("events") or []
+            )
             if _rg_events:
                 append_events(_rg_events, symbol)
                 _rg_trade_id = next(
