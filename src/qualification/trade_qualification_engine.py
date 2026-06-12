@@ -6,6 +6,7 @@ Reads all existing snapshot intelligence and answers:
 Does NOT execute trades, size positions, or place orders.
 All inputs are pre-computed snapshot dicts — no recalculation here.
 """
+import os
 
 TIMEFRAMES = ["15m", "5m", "3m", "1m"]
 
@@ -190,10 +191,43 @@ def _opportunity_score(snapshot: dict) -> int:
 
 # ── Direction ─────────────────────────────────────────────────────────────────
 
-def _direction(ai_context: dict, structure: dict, po3: dict) -> str:
+def _direction_conflict_enabled() -> bool:
+    """Phase FC-0A — June 11 direction-conflict veto. Rollback: env false."""
+    return os.getenv("DIRECTION_CONFLICT_VETO", "true").lower().strip() == "true"
+
+
+def _sweep_semantic_direction(liquidity: dict) -> "str | None":
+    """
+    Phase FC-0A — ICT sweep semantics on the highest timeframe with a
+    confirmed sweep + reclaim:
+      below_low  (sell stops raided, close back above) -> bullish delivery
+      above_high (buy stops raided, close back below)  -> bearish delivery
+    Same semantics as playbook_classifier._direction step 2 — which structure
+    bias silently pre-empted on June 11.
+    """
+    for tf in TIMEFRAMES:
+        liq = (liquidity or {}).get(tf, {}) or {}
+        if liq.get("sweep_detected") and liq.get("reclaim_detected"):
+            sweep_dir = liq.get("sweep_direction", "")
+            if sweep_dir == "below_low":
+                return "bullish"
+            if sweep_dir == "above_high":
+                return "bearish"
+    return None
+
+
+def _direction(ai_context: dict, structure: dict, po3: dict,
+               liquidity: "dict | None" = None) -> str:
     bias = ai_context.get("directional_bias", "neutral")
 
     if bias in ("bullish", "bearish"):
+        # Phase FC-0A — sweep-semantics veto (June 11 root cause):
+        # a confirmed sweep+reclaim whose ICT meaning contradicts the
+        # structure bias is a direction conflict, not a tiebreak loss.
+        if _direction_conflict_enabled():
+            sweep_dir = _sweep_semantic_direction(liquidity or {})
+            if sweep_dir is not None and sweep_dir != bias:
+                return "conflicted"
         # Look for PO3 conflict
         po3_dir = (
             po3.get("15m", {}).get("distribution_direction")
@@ -454,7 +488,8 @@ def qualify_trade(snapshot: dict) -> dict:
     opp_score       = 0 if disqualified else _opportunity_score(snapshot)
     status          = _status(opp_score, disqualified)
     grade           = _grade(opp_score, disqualified)
-    direction       = _direction(ai_context, structure, po3)
+    direction       = _direction(ai_context, structure, po3,
+                                 snapshot.get("liquidity", {}))
     trade_type      = _trade_type(ai_context)
     reasons         = _reasons(snapshot, direction)
     warnings        = _qual_warnings(snapshot, opp_score)
