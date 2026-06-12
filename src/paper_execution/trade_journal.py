@@ -170,6 +170,9 @@ def make_record(
     risk_multiplier_applied: float = 1.0,
     base_risk_budget:        float = 0.0,
     effective_risk_budget:   float = 0.0,
+    # Phase FC-0B: market-order doctrine audit trail
+    execution_mode: str = "limit",
+    decision_price: "float | None" = None,
 ) -> dict:
     """Build a canonical trade journal record."""
     return {
@@ -180,6 +183,12 @@ def make_record(
         "intent_type":        intent_type,
         "side":               side,
         "qty":                qty,
+        # Phase FC-0B: execution doctrine + slippage measurement
+        "execution_mode":     execution_mode,
+        "decision_price":     round(float(decision_price), 4) if decision_price is not None else None,
+        "planned_risk_per_share": None,   # set at fill by trade_reconciliation
+        "planned_risk_dollars":   None,
+        "entry_slippage":         None,
         "entry_reference":    round(float(entry_reference), 4),
         "stop_reference":     round(float(stop_reference), 4) if stop_reference is not None else None,
         "risk_per_share":     round(float(risk_per_share), 4),

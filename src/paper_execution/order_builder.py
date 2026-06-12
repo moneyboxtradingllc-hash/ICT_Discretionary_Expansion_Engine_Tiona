@@ -2,9 +2,21 @@
 Phase 2A — Paper Order Builder.
 Phase 5E.6 — Buying-power-aware sizing cap.
 Phase 5F.1 — Risk multiplier enforcement (governor tier + regime cap).
+Phase FC-0B — Market-order execution doctrine (June 11).
 
-Constructs a LIMIT order request from trade_intent + price_level + risk config.
+Constructs an order request from trade_intent + price_level + risk config.
 Does NOT submit. Does NOT call Alpaca. Pure construction logic.
+
+EXECUTION DOCTRINE (FC-0B): decision time = execution time. Market order at
+the price that exists when authority is granted — never a resting limit that
+fills later in a context that may be dead (June 11: limit filled by the
+rejection that falsified the thesis). ENTRY_ORDER_TYPE=limit exists ONLY as
+emergency rollback to the pre-FC behavior.
+
+Market-mode guards (the limit price used to do this job implicitly):
+  - price_relation must be inside_zone/touching_zone — never chase a price
+    that has left the planned entry zone
+  - chase cap: live risk_per_share <= MAX_CHASE_RISK_MULT x zone risk
 
 Risk sizing (Phase 5F.1):
   base_risk_budget        = RISK_PER_TRADE_DOLLARS
@@ -15,8 +27,8 @@ Risk sizing (Phase 5F.1):
   max_affordable          = floor(buying_power / entry_reference)
   qty                     = min(risk_qty, max_affordable)
 
-Entry: zone midpoint (limit order).
-Stop:  invalidation_level from price_level (recorded in journal; no bracket in Phase 2A).
+Entry: market mode -> current price; limit mode (rollback) -> zone midpoint.
+Stop:  invalidation_level from price_level (recorded in journal).
 """
 import logging
 import math
@@ -60,25 +72,45 @@ def _preferred_candidate(snapshot: dict) -> dict:
     return next((c for c in cands if c.get("tool") == pref), {}) if cands else {}
 
 
+def entry_order_type() -> str:
+    """FC-0B — execution doctrine. 'market' is doctrine; 'limit' is rollback."""
+    mode = os.getenv("ENTRY_ORDER_TYPE", "market").lower().strip()
+    return mode if mode in ("market", "limit") else "market"
+
+
+_IN_ZONE_RELATIONS = frozenset({"inside_zone", "touching_zone"})
+
+
+def _max_chase_risk_mult() -> float:
+    try:
+        return float(os.getenv("MAX_CHASE_RISK_MULT", "2.0"))
+    except (TypeError, ValueError):
+        return 2.0
+
+
 def build_order(snapshot: dict, symbol: str) -> dict:
     """
-    Build a LIMIT order request dict from snapshot state.
+    Build an order request dict from snapshot state.
+    FC-0B: MarketOrderRequest at current price (doctrine), or
+    LimitOrderRequest at zone midpoint (ENTRY_ORDER_TYPE=limit rollback).
 
     Returns:
       {
         "valid": bool,
         "reject_reason": str (if not valid),
-        "order_request": LimitOrderRequest (if valid),
+        "order_request": MarketOrderRequest | LimitOrderRequest (if valid),
+        "order_type": "market"/"limit",
         "side": "buy"/"sell",
         "qty": int,
         "entry_reference": float,
+        "decision_price": float | None,
         "stop_reference": float | None,
         "risk_per_share": float,
         "risk_dollars": float,
         "intent_type": str,
       }
     """
-    from alpaca.trading.requests import LimitOrderRequest
+    from alpaca.trading.requests import LimitOrderRequest, MarketOrderRequest
     from alpaca.trading.enums   import OrderSide, TimeInForce
 
     # ── Phase 5F.1: effective risk budget = base × min(governor multiplier, regime cap)
@@ -115,23 +147,43 @@ def build_order(snapshot: dict, symbol: str) -> dict:
     # Use price_level from the preferred candidate (has invalidation_level)
     pref_c = _preferred_candidate(snapshot)
     pl     = pref_c.get("price_level", {})
+    ez     = ti.get("entry_zone") or {}
 
-    entry_reference = pl.get("midpoint")
+    order_type      = entry_order_type()
     stop_reference  = pl.get("invalidation_level")
+    zone_midpoint   = pl.get("midpoint")
+    if zone_midpoint is None:
+        zone_midpoint = ez.get("midpoint")
+    decision_price  = None
 
-    # Fallback: use entry_zone from trade_intent if no midpoint in price_level
-    if entry_reference is None:
-        ez = ti.get("entry_zone") or {}
-        entry_reference = ez.get("midpoint")
-
-    if entry_reference is None:
-        return {"valid": False, "reject_reason": "no entry reference available (midpoint is None)"}
-
-    entry_reference = float(entry_reference)
+    if order_type == "market":
+        # ── FC-0B: decision time = execution time ────────────────────────────
+        current_price = ez.get("current_price")
+        if current_price is None:
+            return {
+                "valid": False,
+                "reject_reason": "market mode: no current_price in entry_zone",
+            }
+        relation = (ez.get("price_relation") or "unknown").lower()
+        if relation not in _IN_ZONE_RELATIONS:
+            return {
+                "valid": False,
+                "reject_reason": (
+                    f"market mode: price_relation '{relation}' — "
+                    "price has left the planned entry zone"
+                ),
+            }
+        entry_reference = float(current_price)
+        decision_price  = entry_reference
+    else:
+        # Rollback path — pre-FC limit-at-midpoint behavior, bit-for-bit.
+        entry_reference = zone_midpoint
+        if entry_reference is None:
+            return {"valid": False, "reject_reason": "no entry reference available (midpoint is None)"}
+        entry_reference = float(entry_reference)
 
     # Derive stop from invalidation_level; fallback: zone_low (long) or zone_high (short)
     if stop_reference is None:
-        ez = ti.get("entry_zone") or {}
         if intent_type == "long":
             stop_reference = ez.get("zone_low")
         else:
@@ -144,6 +196,18 @@ def build_order(snapshot: dict, symbol: str) -> dict:
 
     if risk_per_share <= 0:
         return {"valid": False, "reject_reason": f"risk_per_share <= 0 ({risk_per_share})"}
+
+    # ── FC-0B: chase cap — market entries may not balloon risk vs the plan ────
+    if order_type == "market" and zone_midpoint is not None:
+        zone_risk = abs(float(zone_midpoint) - stop_reference)
+        if zone_risk > 0 and risk_per_share > zone_risk * _max_chase_risk_mult():
+            return {
+                "valid": False,
+                "reject_reason": (
+                    f"market mode: chase cap — live risk/share {risk_per_share:.4f} "
+                    f"exceeds {_max_chase_risk_mult()}x zone risk {zone_risk:.4f}"
+                ),
+            }
 
     risk_qty = math.floor(risk_budget / risk_per_share)
     if risk_qty <= 0:
@@ -185,18 +249,28 @@ def build_order(snapshot: dict, symbol: str) -> dict:
 
     side = OrderSide.BUY if intent_type == "long" else OrderSide.SELL
 
-    order_request = LimitOrderRequest(
-        symbol         = symbol,
-        qty            = qty,
-        side           = side,
-        time_in_force  = TimeInForce.DAY,
-        limit_price    = round(entry_reference, 2),
-    )
+    if order_type == "market":
+        order_request = MarketOrderRequest(
+            symbol         = symbol,
+            qty            = qty,
+            side           = side,
+            time_in_force  = TimeInForce.DAY,
+        )
+    else:
+        order_request = LimitOrderRequest(
+            symbol         = symbol,
+            qty            = qty,
+            side           = side,
+            time_in_force  = TimeInForce.DAY,
+            limit_price    = round(entry_reference, 2),
+        )
 
     return {
         "valid":            True,
         "reject_reason":    "",
         "order_request":    order_request,
+        "order_type":       order_type,
+        "decision_price":   decision_price,
         "side":             "buy" if intent_type == "long" else "sell",
         "qty":              qty,
         "entry_reference":  entry_reference,

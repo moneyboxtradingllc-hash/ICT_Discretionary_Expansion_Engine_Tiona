@@ -191,6 +191,9 @@ def _attempt(snapshot: dict, symbol: str) -> dict:
             risk_multiplier_applied = order_result.get("risk_multiplier_applied", 1.0),
             base_risk_budget        = order_result.get("base_risk_budget", 0.0),
             effective_risk_budget   = order_result.get("effective_risk_budget", 0.0),
+            # Phase FC-0B — market-order doctrine audit trail
+            execution_mode          = order_result.get("order_type", "limit"),
+            decision_price          = order_result.get("decision_price"),
         )
         append_trade(record, symbol)
         return _skipped_result(f"position guard: {guard['reason']}", guard)
@@ -200,11 +203,15 @@ def _attempt(snapshot: dict, symbol: str) -> dict:
     broker_stop_notes = ""
 
     # Phase 4B: attempt bracket/OTO if mode configured
+    # FC-0B: bracket/OTO requires a limit entry — market doctrine uses
+    # after_fill protective stops instead.
     broker_stop_enabled = os.getenv("BROKER_STOP_ENABLED", "false").lower().strip() == "true"
     broker_stop_mode    = os.getenv("BROKER_STOP_MODE", "after_fill").lower().strip()
     order_to_submit     = order_result["order_request"]
+    order_type          = order_result.get("order_type", "limit")
 
-    if broker_stop_enabled and broker_stop_mode == "bracket_if_supported":
+    if (broker_stop_enabled and broker_stop_mode == "bracket_if_supported"
+            and order_type == "limit"):
         from paper_execution.bracket_builder import build_bracket_order
         bracket = build_bracket_order(
             symbol      = symbol,
@@ -226,7 +233,7 @@ def _attempt(snapshot: dict, symbol: str) -> dict:
         side_str = order_result["side"]
         qty      = order_result["qty"]
         entry    = round(order_result["entry_reference"], 2)
-        order_summary = f"{side_str} {qty} {symbol} limit {entry}"
+        order_summary = f"{side_str} {qty} {symbol} {order_type} {entry}"
         reason = "paper order submitted successfully"
         if broker_stop_notes:
             reason += f" ({broker_stop_notes})"

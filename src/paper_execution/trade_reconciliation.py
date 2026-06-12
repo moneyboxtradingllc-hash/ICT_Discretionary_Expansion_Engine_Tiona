@@ -110,6 +110,10 @@ def _reconcile(symbol: str) -> dict:
                     extra["avg_fill_price"] = order_info.get("filled_avg_price")
                     extra["filled_qty"]      = order_info.get("filled_qty")
                     extra["entry_price"]     = order_info.get("filled_avg_price")
+                    # FC-0B: fill-truth risk — every downstream R denominator
+                    # (trade_manager, thesis_monitor, realized_r) reads the
+                    # journal's risk_per_share; correct it to the actual fill.
+                    extra.update(_fill_truth_risk(trade, order_info))
                 update_trade_status(trade_id, new_status, extra, symbol)
                 order_status = new_status
                 trade = {**trade, "order_status": new_status, **extra}
@@ -406,6 +410,43 @@ def _parse_alpaca_ts(ts_str: str):
         return dt
     except (ValueError, TypeError):
         return None
+
+
+def _fill_truth_risk(trade: dict, order_info: dict) -> dict:
+    """
+    Phase FC-0B — recompute risk from the actual fill (market-order doctrine).
+
+    Pre-FC, risk_per_share was the order-build estimate (zone midpoint vs
+    stop) and never corrected: June 11's journal carried 0.35 while the
+    fill-to-stop risk was 0.33. With market entries the estimate/fill gap is
+    slippage-sized and must not distort R math. The build-time values are
+    preserved as planned_*; entry_slippage is signed (positive = adverse).
+
+    Never raises — returns {} on any missing/invalid input.
+    """
+    out: dict = {}
+    try:
+        fill = order_info.get("filled_avg_price")
+        stop = trade.get("stop_reference")
+        if fill is None or stop is None:
+            return out
+        fill = float(fill)
+        rps  = abs(fill - float(stop))
+        if rps <= 0:
+            return out
+        qty = int(float(order_info.get("filled_qty") or trade.get("qty") or 0))
+        out["planned_risk_per_share"] = trade.get("risk_per_share")
+        out["planned_risk_dollars"]   = trade.get("risk_dollars")
+        out["risk_per_share"]         = round(rps, 4)
+        out["risk_dollars"]           = round(rps * qty, 2) if qty > 0 else trade.get("risk_dollars")
+        decision_price = trade.get("decision_price")
+        if decision_price is not None:
+            side = (trade.get("side") or "buy").lower()
+            slip = (fill - float(decision_price)) if side == "buy" else (float(decision_price) - fill)
+            out["entry_slippage"] = round(slip, 4)
+    except (TypeError, ValueError):
+        return {}
+    return out
 
 
 def _cancel_stop_after_close(trade: dict, symbol: str) -> None:

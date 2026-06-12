@@ -197,9 +197,12 @@ class TestTradeJournal(unittest.TestCase):
 class TestOrderBuilder(unittest.TestCase):
 
     def test_05_valid_long_order(self):
+        # FC-0B: specifies legacy limit-at-midpoint math — pinned to the
+        # ENTRY_ORDER_TYPE=limit rollback path.
         snap = _full_snap(intent_type="long", direction="bullish")
         mock_acct = {"buying_power": 1_000_000.0, "cash": 1_000_000.0, "equity": 1_000_000.0}
-        with patch.dict(os.environ, {"RISK_PER_TRADE_DOLLARS": "500"}):
+        with patch.dict(os.environ, {"RISK_PER_TRADE_DOLLARS": "500",
+                                     "ENTRY_ORDER_TYPE": "limit"}):
             with patch.object(ob_mod, "_get_account", return_value=mock_acct):
                 result = build_order(snap, "QQQ")
         self.assertTrue(result["valid"])
@@ -211,9 +214,11 @@ class TestOrderBuilder(unittest.TestCase):
         self.assertIsNotNone(result["order_request"])
 
     def test_06_valid_short_order(self):
+        # FC-0B: pinned to the ENTRY_ORDER_TYPE=limit rollback path.
         snap = _full_snap(intent_type="short", direction="bearish")
         mock_acct = {"buying_power": 1_000_000.0, "cash": 1_000_000.0, "equity": 1_000_000.0}
-        with patch.dict(os.environ, {"RISK_PER_TRADE_DOLLARS": "500"}):
+        with patch.dict(os.environ, {"RISK_PER_TRADE_DOLLARS": "500",
+                                     "ENTRY_ORDER_TYPE": "limit"}):
             with patch.object(ob_mod, "_get_account", return_value=mock_acct):
                 result = build_order(snap, "QQQ")
         self.assertTrue(result["valid"])
@@ -229,9 +234,12 @@ class TestOrderBuilder(unittest.TestCase):
         self.assertIn("none", result["reject_reason"])
 
     def test_08_rejects_zero_risk_per_share(self):
+        # FC-0B: midpoint==invalidation only zeroes risk in limit mode —
+        # pinned to the ENTRY_ORDER_TYPE=limit rollback path.
         snap = _full_snap()
         snap["toolbox"]["tool_candidates"][0]["price_level"]["invalidation_level"] = 479.0  # == midpoint
-        result = build_order(snap, "QQQ")
+        with patch.dict(os.environ, {"ENTRY_ORDER_TYPE": "limit"}):
+            result = build_order(snap, "QQQ")
         self.assertFalse(result["valid"])
 
     def test_09_rejects_when_qty_is_zero(self):
@@ -373,11 +381,15 @@ class TestExecutionEngine(unittest.TestCase):
             "MAX_TRADES_PER_DAY":      "2",
             "DAILY_LOSS_LIMIT_DOLLARS": "1000",
         }
+        mock_acct = {"buying_power": 1_000_000.0, "cash": 1_000_000.0, "equity": 1_000_000.0}
         with patch.dict(os.environ, env):
             # Mock open positions to simulate an existing position
-            with patch.object(guard_mod, "get_open_positions", return_value=[{"symbol": "QQQ", "qty": "10", "side": "long"}]):
-                with patch.object(tj_mod, "_journal_filepath", return_value=tempfile.mktemp(suffix=".json")):
-                    result = attempt_paper_execution(snap, "QQQ")
+            # (account lookup mocked too — pre-FC this test only passed when
+            # real Alpaca keys were present in the session environment)
+            with patch.object(ob_mod, "_get_account", return_value=mock_acct):
+                with patch.object(guard_mod, "get_open_positions", return_value=[{"symbol": "QQQ", "qty": "10", "side": "long"}]):
+                    with patch.object(tj_mod, "_journal_filepath", return_value=tempfile.mktemp(suffix=".json")):
+                        result = attempt_paper_execution(snap, "QQQ")
         self.assertEqual(result["status"], "skipped")
         self.assertIn("position", result["reason"])
 

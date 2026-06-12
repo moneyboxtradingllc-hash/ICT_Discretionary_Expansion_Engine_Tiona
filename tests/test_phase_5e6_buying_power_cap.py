@@ -68,7 +68,10 @@ def _acct(buying_power: float) -> dict:
     }
 
 
-ENV = {"RISK_PER_TRADE_DOLLARS": "500"}
+# FC-0B: this suite specifies the legacy limit-at-midpoint sizing math —
+# pinned to the ENTRY_ORDER_TYPE=limit rollback path. Market-mode sizing is
+# covered by test_phase_fc0b_market_orders.py.
+ENV = {"RISK_PER_TRADE_DOLLARS": "500", "ENTRY_ORDER_TYPE": "limit"}
 
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
@@ -296,7 +299,8 @@ class TestBuyingPowerCap(unittest.TestCase):
             call_count["n"] += 1
             return _acct(1_000_000.0)
 
-        with patch.dict(os.environ, {"RISK_PER_TRADE_DOLLARS": "1"}):
+        with patch.dict(os.environ, {"RISK_PER_TRADE_DOLLARS": "1",
+                                     "ENTRY_ORDER_TYPE": "limit"}):
             with patch.object(ob_mod, "_get_account", side_effect=mock_acct):
                 result = build_order(snap, "QQQ")
 

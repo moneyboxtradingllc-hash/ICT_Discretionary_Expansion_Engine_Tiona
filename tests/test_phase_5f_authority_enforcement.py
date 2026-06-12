@@ -124,6 +124,10 @@ class TestRiskMultiplierEnforcement(unittest.TestCase):
 
     def setUp(self):
         os.environ["RISK_PER_TRADE_DOLLARS"] = "500"
+        # FC-0B: suite specifies legacy limit-at-midpoint sizing math —
+        # pinned to the ENTRY_ORDER_TYPE=limit rollback path.
+        os.environ["ENTRY_ORDER_TYPE"] = "limit"
+        self.addCleanup(lambda: os.environ.pop("ENTRY_ORDER_TYPE", None))
         patcher = patch.object(ob_mod, "_get_account", return_value=dict(_ACCOUNT_OK))
         self.mock_acct = patcher.start()
         self.addCleanup(patcher.stop)
@@ -558,7 +562,11 @@ class TestPhase5FRegression(unittest.TestCase):
         os.environ["EXECUTION_ENABLED"] = "true"
         os.environ["REGIME_AUTHORITY_ENABLED"] = "true"
         os.environ["RISK_PER_TRADE_DOLLARS"] = "500"
+        # FC-0B: replays the actual 2026-06-10 limit order — pinned to the
+        # ENTRY_ORDER_TYPE=limit rollback path.
+        os.environ["ENTRY_ORDER_TYPE"] = "limit"
         self.addCleanup(lambda: os.environ.pop("EXECUTION_ENABLED", None))
+        self.addCleanup(lambda: os.environ.pop("ENTRY_ORDER_TYPE", None))
 
         with open(_SNAPSHOT_20260610, encoding="utf-8") as f:
             snapshot = json.load(f)
