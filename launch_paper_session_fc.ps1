@@ -43,6 +43,13 @@ $env:PROMOTED_RULES                = "R-001"
 $env:THESIS_EXIT_MODE              = "live"
 $env:THESIS_EXIT_CONFIRM_SCANS     = "1"
 
+# ── NA-1 — Narrative Authority (the widest lens owns the story) ──────────────
+$env:NARRATIVE_AUTHORITY           = "enforce"
+$env:NARRATIVE_AI_MIN_CONF         = "55"
+$env:NARRATIVE_DELIVERY_MIN_CONF   = "25"
+$env:NARRATIVE_PROTECTED_ZONE_PCT  = "0.3"
+$env:NARRATIVE_PROTECTED_BUFFER_PCT = "0.05"
+
 # ── AI layer (live + Fable 5 shadow — FC-3 stays observation-stage) ──────────
 $env:AI_MODEL                      = "gpt-4o-mini"
 $env:AI_TIMEOUT_SECONDS            = "25"
@@ -112,6 +119,7 @@ Write-Host "Err log      : $errPath"
 Write-Host ""
 Write-Host "Authority    : direction-conflict VETO | market-order DOCTRINE"
 Write-Host "             : council ENFORCE | R-001 ENFORCE | thesis exits LIVE"
+Write-Host "             : NARRATIVE AUTHORITY ENFORCE (AI+Delivery own the story)"
 
 Start-Sleep -Seconds 4
 

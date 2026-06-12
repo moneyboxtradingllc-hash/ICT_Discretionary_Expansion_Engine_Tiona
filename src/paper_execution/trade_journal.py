@@ -173,6 +173,8 @@ def make_record(
     # Phase FC-0B: market-order doctrine audit trail
     execution_mode: str = "limit",
     decision_price: "float | None" = None,
+    # Phase NA-1: narrative authority at entry (audit trail)
+    narrative: "dict | None" = None,
 ) -> dict:
     """Build a canonical trade journal record."""
     return {
@@ -209,6 +211,14 @@ def make_record(
         "expansion_state":      expansion_state,
         # Phase 5B: AI feedback at entry (OBSERVE_ONLY — scored after closure)
         **_ai_feedback_fields(ai_feedback),
+        # Phase NA-1: narrative authority at entry
+        "narrative_direction_at_entry":  (narrative or {}).get("narrative_direction"),
+        "narrative_phase_at_entry":      (narrative or {}).get("narrative_phase"),
+        "narrative_confidence_at_entry": (narrative or {}).get("narrative_confidence"),
+        "narrative_conflicts_at_entry":  (narrative or {}).get("conflict_flags", []),
+        "protected_high_at_entry":       ((narrative or {}).get("protected_high") or {}).get("level"),
+        "protected_low_at_entry":        ((narrative or {}).get("protected_low") or {}).get("level"),
+        "liquidity_draw_at_entry":       (narrative or {}).get("active_liquidity_draw"),
         # Phase 2B lifecycle fields (default values)
         "avg_fill_price":     None,
         "filled_qty":         None,

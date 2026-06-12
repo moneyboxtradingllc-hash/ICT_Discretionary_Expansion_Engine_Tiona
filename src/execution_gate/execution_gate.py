@@ -24,11 +24,19 @@ Phase FC-1 additions (June 11 promotions):
     R-001) block when RULE_GOVERNANCE_MODE=enforce
   Both checks fail-open on internal errors and are inert at default env.
 
+Phase NA-1 addition (narrative authority):
+  - narrative_permits_trade: the Narrative Authority Layer's story-coherence
+    verdict blocks when NARRATIVE_AUTHORITY=enforce — a trade may not run
+    against the synthesized market narrative (AI+Delivery agreement,
+    protected swings, conflicts). Structure bias no longer owns direction.
+    Fail-open; inert at default env.
+
 This module ONLY evaluates authorization -- it never submits orders.
 """
 import os
 
 from decision_authority.decision_engine import normalize_decision
+from narrative_authority.narrative_engine import narrative_permits
 from rule_governance.promoted_rules import evaluate_promoted_rules
 
 
@@ -145,6 +153,12 @@ def evaluate_gate(snapshot: dict) -> dict:
     promoted_rules   = evaluate_promoted_rules(snapshot.get("shared_context", {}) or {})
     rules_permit     = not promoted_rules.get("blocked", False)
 
+    # ── Phase NA-1: narrative authority (story coherence) ────────────────────
+    proposed_dir = (snapshot.get("playbook", {}) or {}).get("direction", "")
+    narrative_ok, narrative_reason = narrative_permits(
+        snapshot.get("narrative_authority", {}) or {}, proposed_dir,
+    )
+
     auth_checks = {
         "decision_trade_authorized": da_trade_auth,
         "risk_allows_trade":         risk_allows,
@@ -159,6 +173,8 @@ def evaluate_gate(snapshot: dict) -> dict:
         # Phase FC-1 promoted authority checks
         "council_permits_trade":     council_permits,
         "no_promoted_rule_block":    rules_permit,
+        # Phase NA-1 narrative authority check
+        "narrative_permits_trade":   narrative_ok,
     }
 
     # ── would_authorize_if_enabled ────────────────────────────────────────────
@@ -179,6 +195,8 @@ def evaluate_gate(snapshot: dict) -> dict:
         # Phase FC-1 — promoted authority (June 11)
         and council_permits
         and rules_permit
+        # Phase NA-1 — narrative authority
+        and narrative_ok
     )
 
     # ── Blocking factors ──────────────────────────────────────────────────────
@@ -220,6 +238,9 @@ def evaluate_gate(snapshot: dict) -> dict:
             for f in promoted_rules.get("fired", [])
         )
         blocking.append(f"promoted rule fired — {fired_desc}")
+    # Phase NA-1 blocking factor
+    if not narrative_ok:
+        blocking.append(f"narrative authority: {narrative_reason}")
 
     # ── Warnings (propagated from decision layer) ─────────────────────────────
     warnings: list[str] = []
@@ -277,4 +298,7 @@ def evaluate_gate(snapshot: dict) -> dict:
         "no_promoted_rule_block":     rules_permit,
         "promoted_rules_fired":       promoted_rules.get("fired", []),
         "promoted_rules_enforced":    promoted_rules.get("enforced", False),
+        # Phase NA-1 — narrative authority audit trail
+        "narrative_permits_trade":    narrative_ok,
+        "narrative_reason":           narrative_reason,
     }

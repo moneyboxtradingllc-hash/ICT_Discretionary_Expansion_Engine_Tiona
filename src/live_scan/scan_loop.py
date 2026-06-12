@@ -29,6 +29,8 @@ from state_transitions.transition_engine   import analyze_transition
 from setup_lifecycle.setup_tracker         import SetupTracker
 from shared_context.shared_market_context  import build_shared_market_context
 from shared_context.council                import run_council
+from narrative_authority.narrative_engine  import build_narrative
+from narrative_authority.protected_swings  import ProtectedSwingTracker
 from rule_governance.shadow_evaluator      import evaluate_shadow_rules
 from rule_governance.divergence_ledger     import append_events, resolve_pending
 from paper_execution.trade_journal         import update_trade_management
@@ -282,6 +284,24 @@ def _print_scan_summary(snapshot: dict, symbol: str, scan_num: int, saved_path: 
         cc = rep.get("critical_concerns") or []
         if cc:
             print(f"Concerns      : {cc[0]}" + (f" (+{len(cc)-1} more)" if len(cc) > 1 else ""))
+
+    # Phase NA-1 — narrative authority
+    na = snapshot.get("narrative_authority", {})
+    if na:
+        ph = na.get("protected_high")
+        pl = na.get("protected_low")
+        draw = na.get("active_liquidity_draw")
+        print(
+            f"Narrative     : {(na.get('narrative_direction') or '?').upper()}"
+            f"@{na.get('narrative_confidence', 0)}"
+            f" | phase={na.get('narrative_phase', '?')}"
+            f" | PH={ph['level'] if ph else '-'}"
+            f" PL={pl['level'] if pl else '-'}"
+            f" | draw={draw['side'] + '@' + str(draw['level']) if draw else '-'}"
+            f" | {na.get('authority_level', 'observe_only').upper()}"
+        )
+        if na.get("conflict_flags"):
+            print(f"Narr Conflict : {', '.join(na['conflict_flags'])}")
 
     da = snapshot.get("decision_authority", {})
     da_decision = (da.get("decision") or "stand_down").upper()
@@ -702,6 +722,7 @@ def run_scan_loop():
     previous_qual_state      = None
     bars_in_state            = 0
     setup_tracker            = SetupTracker()
+    swing_tracker            = ProtectedSwingTracker()   # Phase NA-1
     prev_experience_summary  = None   # Phase 3A: carry forward for AI input next scan
     # Phase 5E.3: carry 5C/5D/5E summaries forward so AI sees them on the next scan
     prev_memory_search       = None
@@ -873,6 +894,16 @@ def run_scan_loop():
             # Same input as the live AI; zero execution influence; any
             # failure leaves live trading unaffected. Evidence before authority.
             snapshot["ai_shadow"] = evaluate_shadow_ai(snapshot, symbol)
+
+            # ── Narrative Authority (Phase NA-1) ───────────────────────────
+            # The widest lens owns the market story: AI + Delivery agreement
+            # outranks structure bias; protected swings and the liquidity
+            # draw are persistent memory. Enforced by the gate only when
+            # NARRATIVE_AUTHORITY=enforce.
+            snapshot["protected_swings"]   = swing_tracker.update(snapshot)
+            snapshot["narrative_authority"] = build_narrative(
+                snapshot, snapshot["protected_swings"],
+            )
 
             # ── Decision Authority ─────────────────────────────────────────
             snapshot["decision_authority"] = make_decision(snapshot)

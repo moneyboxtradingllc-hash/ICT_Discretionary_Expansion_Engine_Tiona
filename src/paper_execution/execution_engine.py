@@ -194,6 +194,8 @@ def _attempt(snapshot: dict, symbol: str) -> dict:
             # Phase FC-0B — market-order doctrine audit trail
             execution_mode          = order_result.get("order_type", "limit"),
             decision_price          = order_result.get("decision_price"),
+            # Phase NA-1 — narrative authority at entry
+            narrative               = snapshot.get("narrative_authority"),
         )
         append_trade(record, symbol)
         return _skipped_result(f"position guard: {guard['reason']}", guard)
