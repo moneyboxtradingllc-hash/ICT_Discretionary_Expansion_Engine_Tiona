@@ -331,14 +331,25 @@ class TestThesisMonitor(unittest.TestCase):
         self.assertEqual(result["status"], "no_position")
 
     def test_shadow_only_no_broker_calls_possible(self):
-        """Constitutional: the module must not import any order-submitting API."""
-        import inspect
-        src = inspect.getsource(th_mod)
-        for forbidden in ("submit_paper_exit_order", "submit_order",
-                          "cancel_order", "submit_protective_stop",
-                          "TradingClient"):
-            self.assertNotIn(forbidden, src,
-                             f"thesis_monitor references {forbidden} — shadow violation")
+        """
+        Constitutional — FC-2 amendment: in THESIS_EXIT_MODE=shadow (the
+        default) the monitor makes NO broker calls at runtime, even when a
+        thesis death fires. (The 5T.2 import ban is repealed: FC-2 is the
+        registry-anticipated promotion of TFX-001 to a live exit path.)
+        """
+        os.environ.pop("THESIS_EXIT_MODE", None)   # default = shadow
+        with patch.object(th_mod, "find_any_active_trade",
+                          return_value=(_trade_record(), "f.json")), \
+             patch.object(th_mod, "update_trade_management", return_value=True), \
+             patch.object(th_mod, "submit_paper_exit_order") as exit_mock, \
+             patch.object(th_mod, "cancel_order") as cancel_mock:
+            result = monitor_thesis(
+                _thesis_snapshot(lifecycle_invalidated=True), "QQQ"
+            )
+        exit_mock.assert_not_called()
+        cancel_mock.assert_not_called()
+        self.assertNotEqual(result.get("status"), "exit_submitted")
+        self.assertEqual(result["events"][0]["event_type"], "thesis_exit_shadow")
 
     def test_disabled_by_env(self):
         os.environ["THESIS_MONITOR_ENABLED"] = "false"
