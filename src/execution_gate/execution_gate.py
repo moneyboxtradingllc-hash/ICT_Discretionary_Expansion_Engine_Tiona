@@ -17,11 +17,19 @@ Phase 5F additions:
   5F.5 — minimum setup age enforcement (min_setup_age_scans from matrix)
   plus regime permission blocking (regime_permissions.allowed)
 
+Phase FC-1 additions (June 11 promotions):
+  - council_permits_trade: council veto blocks when COUNCIL_AUTHORITY=enforce
+    (June 11: REGIME NO@95 + DELIVERY NO@75 had no wire into this gate)
+  - no_promoted_rule_block: promoted governance rules (PROMOTED_RULES, e.g.
+    R-001) block when RULE_GOVERNANCE_MODE=enforce
+  Both checks fail-open on internal errors and are inert at default env.
+
 This module ONLY evaluates authorization -- it never submits orders.
 """
 import os
 
 from decision_authority.decision_engine import normalize_decision
+from rule_governance.promoted_rules import evaluate_promoted_rules
 
 
 def _preferred_candidate(snapshot: dict) -> dict:
@@ -128,6 +136,15 @@ def evaluate_gate(snapshot: dict) -> dict:
     setup_age_actual = int(sl.get("age_scans", 0) or 0) if sl.get("active") else 0
     setup_age_met    = setup_age_actual >= min_setup_age
 
+    # ── Phase FC-1: promoted authority (June 11) ─────────────────────────────
+    council          = snapshot.get("council", {}) or {}
+    council_veto     = council.get("veto") or {}
+    council_enforced = (council.get("authority_level") == "enforce")
+    council_permits  = not (council_enforced and council_veto.get("veto_triggered", False))
+
+    promoted_rules   = evaluate_promoted_rules(snapshot.get("shared_context", {}) or {})
+    rules_permit     = not promoted_rules.get("blocked", False)
+
     auth_checks = {
         "decision_trade_authorized": da_trade_auth,
         "risk_allows_trade":         risk_allows,
@@ -139,6 +156,9 @@ def evaluate_gate(snapshot: dict) -> dict:
         "regime_permission_allowed": regime_allowed,
         "trigger_requirement_met":   trig_req_met,
         "setup_age_requirement_met": setup_age_met,
+        # Phase FC-1 promoted authority checks
+        "council_permits_trade":     council_permits,
+        "no_promoted_rule_block":    rules_permit,
     }
 
     # ── would_authorize_if_enabled ────────────────────────────────────────────
@@ -156,6 +176,9 @@ def evaluate_gate(snapshot: dict) -> dict:
         and regime_allowed
         and trig_req_met
         and setup_age_met
+        # Phase FC-1 — promoted authority (June 11)
+        and council_permits
+        and rules_permit
     )
 
     # ── Blocking factors ──────────────────────────────────────────────────────
@@ -188,6 +211,15 @@ def evaluate_gate(snapshot: dict) -> dict:
             f"setup age requirement not met "
             f"(required={min_setup_age}, actual={setup_age_actual})"
         )
+    # Phase FC-1 blocking factors
+    if not council_permits:
+        blocking.append(council_veto.get("veto_reason") or "council veto")
+    if not rules_permit:
+        fired_desc = "; ".join(
+            f"{f.get('rule_id')}: {f.get('reason')}"
+            for f in promoted_rules.get("fired", [])
+        )
+        blocking.append(f"promoted rule fired — {fired_desc}")
 
     # ── Warnings (propagated from decision layer) ─────────────────────────────
     warnings: list[str] = []
@@ -239,4 +271,10 @@ def evaluate_gate(snapshot: dict) -> dict:
         # Phase 5F — regime permission source
         "regime_permission_allowed":  regime_allowed,
         "regime_constraint_source":   regime_source,
+        # Phase FC-1 — promoted authority audit trail
+        "council_permits_trade":      council_permits,
+        "council_authority":          council.get("authority_level", "observe_only"),
+        "no_promoted_rule_block":     rules_permit,
+        "promoted_rules_fired":       promoted_rules.get("fired", []),
+        "promoted_rules_enforced":    promoted_rules.get("enforced", False),
     }

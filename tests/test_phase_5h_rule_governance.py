@@ -414,9 +414,14 @@ class TestShadowIsolation(unittest.TestCase):
         self.assertEqual(gate_before, gate_after)
 
     def test_no_execution_module_imports_rule_governance(self):
-        """Static check: execution-path modules must not import the shadow plane."""
+        """
+        Static check — FC-1 amended constitution: the execution gate (and
+        ONLY the gate) may import rule_governance.promoted_rules, the
+        designated enforcement_ref for promoted rules. No execution module
+        may import the shadow plane (shadow_evaluator / divergence_ledger),
+        and no module other than the gate may import rule_governance at all.
+        """
         execution_path_files = [
-            "src/execution_gate/execution_gate.py",
             "src/paper_execution/execution_engine.py",
             "src/paper_execution/order_builder.py",
             "src/decision_authority/decision_engine.py",
@@ -429,6 +434,17 @@ class TestShadowIsolation(unittest.TestCase):
                 content = f.read()
             self.assertNotIn("rule_governance", content,
                              f"{rel} imports the shadow plane — constitutional violation")
+
+        # The gate: promoted_rules only — never the shadow plane itself.
+        with open(os.path.join(root, "src/execution_gate/execution_gate.py"),
+                  encoding="utf-8") as f:
+            gate_src = f.read()
+        self.assertIn("rule_governance.promoted_rules", gate_src)
+        for forbidden in ("shadow_evaluator", "divergence_ledger",
+                          "rule_registry", "member_calibration"):
+            self.assertNotIn(forbidden, gate_src,
+                             f"execution_gate imports {forbidden} — only "
+                             "promoted_rules is a legal enforcement import")
 
     def test_no_enforce_flag_exists_anywhere_in_module(self):
         root = os.path.join(os.path.dirname(__file__), "..", "src", "rule_governance")

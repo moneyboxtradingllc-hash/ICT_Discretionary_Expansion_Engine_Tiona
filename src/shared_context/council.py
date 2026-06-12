@@ -1,5 +1,6 @@
 """
 Phase 5G.2/5G.3 — Council of Specialists.
+Phase FC-1   — Council veto authority (June 11 promotion).
 
 Each major subsystem becomes a council member. Every member reads the SAME
 SharedMarketContext and returns an opinion:
@@ -7,15 +8,43 @@ SharedMarketContext and returns an opinion:
     {"member": ..., "vote": "yes"|"no"|"neutral", "confidence": 0-100,
      "reasons": [...], "concerns": [...]}
 
-OBSERVE ONLY (immutable for Phase 5G):
-  - The council CANNOT block trades.
-  - The council CANNOT modify scores, risk, decisions, or execution.
-  - authority_level is always "observe_only".
+AUTHORITY (FC-1):
+  COUNCIL_AUTHORITY=observe_only (default) — 5G behavior: microphones only.
+  COUNCIL_AUTHORITY=enforce — the veto becomes a blocking input to the
+  execution gate. June 11 evidence: REGIME voted NO at 95 and DELIVERY NO at
+  75 on a trade that resolved -1.34R; neither vote had a wire to the gate.
 
-Think of this as adding microphones before changing laws.
+  The veto is COMPUTED on every run (observability); it is ENFORCED only by
+  the execution gate, and only when authority_level == "enforce".
+  Rollback: COUNCIL_AUTHORITY=observe_only.
+
+Veto triggers (either):
+  - >= COUNCIL_VETO_MIN_NO_VOTES members vote NO at confidence >=
+    COUNCIL_VETO_MIN_CONFIDENCE   (June 11: 2 members, 95 and 75)
+  - consensus dominant position is NO at confidence >= the same threshold
 """
+import os
 
 _AUTHORITY = "observe_only"
+
+
+def _authority() -> str:
+    level = os.getenv("COUNCIL_AUTHORITY", _AUTHORITY).lower().strip()
+    return level if level in ("observe_only", "enforce") else _AUTHORITY
+
+
+def _veto_min_no_votes() -> int:
+    try:
+        return max(1, int(os.getenv("COUNCIL_VETO_MIN_NO_VOTES", "2")))
+    except (TypeError, ValueError):
+        return 2
+
+
+def _veto_min_confidence() -> int:
+    try:
+        return max(0, min(100, int(os.getenv("COUNCIL_VETO_MIN_CONFIDENCE", "70"))))
+    except (TypeError, ValueError):
+        return 70
 
 _TREND_REGIMES        = frozenset({"trend_up", "trend_down", "expansion_up", "expansion_down"})
 _ROTATIONAL_REGIMES   = frozenset({"range_rotation", "chop"})
@@ -258,11 +287,58 @@ def generate_council_report(opinions: list) -> dict:
         }
 
 
+def evaluate_veto(members: list, report: dict) -> dict:
+    """
+    Phase FC-1 — compute the council veto. Always computed (observability);
+    only the execution gate enforces it, and only under
+    COUNCIL_AUTHORITY=enforce. Never raises.
+    """
+    try:
+        min_conf  = _veto_min_confidence()
+        strong_no = [
+            {"member": m.get("member"), "confidence": m.get("confidence", 0)}
+            for m in (members or [])
+            if m.get("vote") == "no" and m.get("confidence", 0) >= min_conf
+        ]
+        consensus_no = (
+            (report or {}).get("dominant_position") == "no"
+            and (report or {}).get("confidence", 0) >= min_conf
+        )
+        triggered = len(strong_no) >= _veto_min_no_votes() or consensus_no
+
+        if triggered:
+            names = ", ".join(
+                f"{m['member']}@{m['confidence']}" for m in strong_no
+            ) or "consensus NO"
+            reason = f"council veto: high-confidence NO from {names}"
+        else:
+            reason = ""
+
+        return {
+            "veto_triggered":  triggered,
+            "strong_no_votes": strong_no,
+            "consensus_no":    consensus_no,
+            "veto_reason":     reason,
+            "min_no_votes":    _veto_min_no_votes(),
+            "min_confidence":  min_conf,
+        }
+    except Exception as exc:  # noqa: BLE001
+        # Veto computation failure must never block (fail-open).
+        return {
+            "veto_triggered":  False,
+            "strong_no_votes": [],
+            "consensus_no":    False,
+            "veto_reason":     f"veto evaluation error (fail-open): {exc}",
+            "min_no_votes":    2,
+            "min_confidence":  70,
+        }
+
+
 def run_council(ctx: dict) -> dict:
     """
     Phase 5G — Convene the council on a SharedMarketContext.
-    Returns members' opinions + the consensus report.
-    OBSERVE ONLY. Never raises.
+    Phase FC-1 — veto computed every run; enforced only by the gate under
+    COUNCIL_AUTHORITY=enforce. Never raises.
     """
     members = []
     for member_fn in _MEMBERS:
@@ -274,9 +350,12 @@ def run_council(ctx: dict) -> dict:
                 "neutral", 0, [], [f"member error: {exc}"],
             ))
 
+    report = generate_council_report(members)
+
     return {
         "enabled":         True,
-        "authority_level": _AUTHORITY,
+        "authority_level": _authority(),
         "members":         members,
-        "report":          generate_council_report(members),
+        "report":          report,
+        "veto":            evaluate_veto(members, report),
     }
