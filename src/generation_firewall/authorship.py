@@ -62,19 +62,43 @@ def _sweep_semantic_direction(liquidity: dict) -> "str | None":
     return None
 
 
+# AB-2C — PO3 direction is accepted ONLY when its provenance is a valid
+# non-structure authoring source. Missing or structure-tainted provenance is
+# rejected (a PO3 direction with no source field is treated as untrusted).
+_VALID_PO3_SOURCES = frozenset({
+    "sweep_semantics", "liquidity_reclaim", "protected_swing",
+    "explicit_po3_transition",
+})
+
+
+def _po3_direction_trusted(po3_tf: dict, dir_field: str, src_field: str) -> "str | None":
+    """Return the PO3 direction only if its provenance is a valid non-structure
+    source. AB-2C: reject missing/tainted provenance."""
+    d = (po3_tf or {}).get(dir_field)
+    if d not in _DIRECTIONAL:
+        return None
+    src = (po3_tf or {}).get(src_field)
+    if src in _VALID_PO3_SOURCES:
+        return d
+    return None   # missing provenance or structure-tainted → rejected
+
+
 def nonstructure_direction(po3: dict, liquidity: dict) -> tuple:
-    """Direction from non-structure authoring evidence only. (dir|None, source|None)."""
+    """Direction from non-structure authoring evidence only. (dir|None, source|None).
+    AB-2C: PO3 directions must carry valid non-structure provenance to be used."""
     po3 = po3 or {}
     for tf in ("15m", "5m"):
-        d = (po3.get(tf, {}) or {}).get("distribution_direction")
-        if d in _DIRECTIONAL:
+        d = _po3_direction_trusted(po3.get(tf, {}), "distribution_direction",
+                                   "distribution_direction_source")
+        if d:
             return d, SOURCE_DELIVERY
     sweep = _sweep_semantic_direction(liquidity or {})
     if sweep in _DIRECTIONAL:
         return sweep, SOURCE_LIQUIDITY
     for tf in ("15m", "5m"):
-        m = (po3.get(tf, {}) or {}).get("manipulation_direction")
-        if m in _DIRECTIONAL:
+        m = _po3_direction_trusted(po3.get(tf, {}), "manipulation_direction",
+                                   "manipulation_direction_source")
+        if m:
             return m, SOURCE_DELIVERY
     return None, None
 

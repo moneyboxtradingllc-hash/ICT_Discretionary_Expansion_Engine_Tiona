@@ -187,3 +187,23 @@ directional delivery.
 **No "still dangerous" structure consumer remains.** Every directional-authorship
 and gate-support path is removed under the firewall; residual structure use is
 witness-only or permission-side magnitude/neutral, none of it directional.
+
+---
+
+## AB-2C — PO3 structure-bias fallback removed (SHIPPED)
+
+The PO3 Independence Audit found a live disguised path: `po3_engine._directions`
+set `distribution_direction = manipulation_direction OR structure_bias`, and the
+firewall reads `distribution_direction` first — so in a no-sweep distribution
+scan with a directional structure bias, AB-2A's firewall authored direction from
+structure mislabeled `delivery_protected`. A live hole in AB-2A.
+
+**Fix:** `_directions` returns `(manip_dir, manip_src, dist_dir, dist_src)`;
+`distribution_direction` = sweep-derived manipulation direction only (fallback
+removed). All PO3 directional outputs carry provenance ∈ {sweep_semantics,
+liquidity_reclaim, protected_swing, explicit_po3_transition, fallback_none}.
+The firewall (`nonstructure_direction`) rejects any PO3 direction whose source
+is missing or structure-tainted. Tests: `test_phase_ab2c_po3_provenance.py`
+(experiments A-E + June 11 provenance). Regression: 959 passed, 0 failed.
+Rollback: not flag-gated (this is a correctness fix; the removed fallback had no
+legitimate use). **AB-3 authorized.**

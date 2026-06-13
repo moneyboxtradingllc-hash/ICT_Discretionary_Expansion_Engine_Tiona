@@ -81,13 +81,25 @@ class TestStructureCannotAuthor(unittest.TestCase):
         self.assertNotIn(pb["direction"], _DIRECTIONAL)
 
     def test_nonstructure_sources_are_only_authors(self):
-        # delivery present → it authors
-        d, src = authored_direction("neutral", {"15m": {"distribution_direction": "bearish"}}, {})
+        # delivery present WITH valid AB-2C provenance → it authors
+        d, src = authored_direction("neutral", {"15m": {"distribution_direction": "bearish",
+                                    "distribution_direction_source": "sweep_semantics"}}, {})
         self.assertEqual((d, src), ("bearish", SOURCE_DELIVERY))
         # liquidity sweep present → it authors
         d, src = authored_direction("neutral", {}, {"15m": {"sweep_detected": True,
                                     "sweep_direction": "below_low", "reclaim_detected": True}})
         self.assertEqual((d, src), ("bullish", SOURCE_LIQUIDITY))
+
+    def test_po3_direction_without_provenance_is_rejected(self):
+        # AB-2C: a PO3 direction with NO source field must be rejected by the
+        # firewall (treated as untrusted), not authored.
+        d, src = authored_direction("neutral", {"15m": {"distribution_direction": "bearish"}}, {})
+        self.assertNotIn(d, _DIRECTIONAL)
+
+    def test_po3_direction_with_structure_source_is_rejected(self):
+        d, src = authored_direction("neutral", {"15m": {"distribution_direction": "bearish",
+                                    "distribution_direction_source": "structure_bias"}}, {})
+        self.assertNotIn(d, _DIRECTIONAL)
 
     def test_nothing_directional_is_neutral(self):
         d, src = authored_direction("neutral", {}, {})
@@ -113,12 +125,14 @@ class TestJune11Firewall(unittest.TestCase):
         # Proof: with bullish structure REMOVED (neutral), bearish delivery
         # authors bearish — i.e. nothing about a bearish read depends on
         # structure being bearish.
-        d_neutral, src = authored_direction("neutral", {"15m": {"manipulation_direction": "bearish"}}, {})
+        _po3 = {"15m": {"manipulation_direction": "bearish",
+                        "manipulation_direction_source": "sweep_semantics"}}
+        d_neutral, src = authored_direction("neutral", _po3, {})
         self.assertEqual(d_neutral, "bearish")
         self.assertEqual(src, SOURCE_DELIVERY)
         # And with bullish structure present it is conflicted (not a structure
         # block — the source is the conflict, structure is never the author)
-        d_bull, src2 = authored_direction("bullish", {"15m": {"manipulation_direction": "bearish"}}, {})
+        d_bull, src2 = authored_direction("bullish", _po3, {})
         self.assertNotEqual(src2, SOURCE_STRUCTURE_ONLY)
         self.assertNotEqual(d_bull, "bullish")
 

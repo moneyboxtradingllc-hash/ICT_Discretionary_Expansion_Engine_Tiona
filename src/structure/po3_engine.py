@@ -107,22 +107,37 @@ def _score_phases(struct: dict, liq: dict, vol: dict, exp: dict) -> dict:
 # ── Direction Inference ───────────────────────────────────────────────────────
 
 def _directions(phase: str, sweep_dir, bias: str) -> tuple:
-    """Returns (manipulation_direction, distribution_direction)."""
+    """
+    Returns (manipulation_direction, manip_source,
+             distribution_direction, dist_source).
+
+    Phase AB-2C — PO3 directional outputs derive ONLY from sweep/liquidity
+    semantics. The pre-AB-2C fallback
+        distribution_direction = manipulation_direction OR structure_bias
+    is REMOVED: when no sweep direction exists, distribution_direction is None
+    with source 'fallback_none'. Structure bias never authors a PO3 direction.
+    `bias` is accepted only to be ignored (kept for signature stability /
+    witness logging); it is intentionally unused.
+    """
     manip_dir = None
+    manip_src = "fallback_none"
     dist_dir  = None
+    dist_src  = "fallback_none"
 
     if sweep_dir == "below_low":
-        manip_dir = "bullish"   # swept sell stops → intent is bullish
+        manip_dir, manip_src = "bullish", "sweep_semantics"   # swept sell stops → bullish intent
     elif sweep_dir == "above_high":
-        manip_dir = "bearish"   # swept buy stops → intent is bearish
+        manip_dir, manip_src = "bearish", "sweep_semantics"   # swept buy stops → bearish intent
 
-    if phase == "distribution":
-        dist_dir = manip_dir or (bias if bias in ("bullish", "bearish") else None)
+    if phase == "distribution" and manip_dir is not None:
+        # Distribution direction inherits the SWEEP-derived manipulation
+        # direction only. No structure-bias fallback (AB-2C).
+        dist_dir, dist_src = manip_dir, "sweep_semantics"
 
     if phase not in ("manipulation", "transition", "distribution"):
-        manip_dir = None
+        manip_dir, manip_src = None, "fallback_none"
 
-    return manip_dir, dist_dir
+    return manip_dir, manip_src, dist_dir, dist_src
 
 
 # ── Notes ─────────────────────────────────────────────────────────────────────
@@ -183,13 +198,28 @@ def analyze_po3(struct: dict, liq: dict, vol: dict, exp: dict) -> dict:
     bias      = struct.get("bias", "neutral")
     exp_state = exp.get("state", "")
 
-    manip_dir, dist_dir = _directions(phase, sweep_dir, bias)
+    manip_dir, manip_src, dist_dir, dist_src = _directions(phase, sweep_dir, bias)
+
+    # AB-2C — delivery direction is the strongest available PO3 direction, with
+    # provenance. distribution preferred over manipulation; both sweep-derived.
+    if dist_dir is not None:
+        delivery_dir, delivery_src = dist_dir, dist_src
+    elif manip_dir is not None:
+        delivery_dir, delivery_src = manip_dir, manip_src
+    else:
+        delivery_dir, delivery_src = None, "fallback_none"
 
     return {
         "phase":                  phase,
         "phase_confidence":       phase_conf,
         "manipulation_direction": manip_dir,
         "distribution_direction": dist_dir,
+        # AB-2C — provenance for every PO3 directional output. Valid non-structure
+        # sources only; structure can never appear here.
+        "manipulation_direction_source": manip_src,
+        "distribution_direction_source": dist_src,
+        "delivery_direction":            delivery_dir,
+        "delivery_direction_source":     delivery_src,
         "compression_score":      comp,
         "sweep_involved":         sweep or failed_bo,
         "expansion_involved":     disp or exp_state in ("healthy_expansion", "mature_expansion"),
