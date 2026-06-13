@@ -52,8 +52,17 @@ Output ONLY valid JSON, exactly this schema, no prose, no markdown:
  "contradiction_flags": ["<string>", ...],
  "warnings": ["<string>", ...],
  "confidence_by_component": {"delivery": <int>, "liquidity": <int>, "structure": <int>},
- "memory_matches": ["<string>", ...],
  "current_action": "<string>",
  "reason": "<string>",
- "must_not_do": ["<string>", ...]
-}"""
+ "must_not_do": ["<string>", ...],
+ "protected_high_status": "approaching|rejecting|violating|below|none",
+ "protected_low_status": "approaching|rejecting|violating|above|none",
+ "dominant_reasoning": "<the single strongest reason for your direction>",
+ "recommended_playbook_family": "<string>",
+ "recommended_tool_family": ["<string>", ...]
+}
+
+Do NOT emit memory_matches, supporting_analogs, conflicting_analogs, or
+direction_provenance — those are attached by the system from retrieval. Use the
+provided memory_retrieval analogs in your reasoning (cite them in
+dominant_reasoning), but do not fabricate analog records."""

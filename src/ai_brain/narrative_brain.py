@@ -20,12 +20,17 @@ raises — any failure yields a degraded, schema-valid witness output.
 import json
 import os
 
+import logging
+
 from ai_brain.brain_input import build_brain_input
 from ai_brain.brain_prompt import BRAIN_SYSTEM_PROMPT
-from ai_brain.brain_schema import empty_brain_output, validate_brain_output
+from ai_brain.brain_schema import (
+    empty_brain_output, validate_brain_output, validate_llm_core,
+)
 from ai_brain.brain_persistence import persist_brain_call
 from narrative_authority.narrative_engine import build_narrative
 
+_log = logging.getLogger(__name__)
 _CONSUMED_FIELDS_AB1 = []   # AB-1 wires no consumers; populated as phases land
 
 
@@ -139,36 +144,64 @@ def _deterministic(snapshot: dict, brain_input: dict, analogs: list) -> dict:
 
 # ── LLM path ──────────────────────────────────────────────────────────────────
 
-def _call_llm(brain_input: dict) -> tuple:
-    """(parsed|None, source, error). Never raises."""
+def _call_llm(brain_input: dict) -> dict:
+    """
+    Real LLM Brain call. Returns a full call record (never raises):
+      {parsed, ok, model, prompt, user_content, raw_response, usage,
+       fallback_reason}
+    parsed is None + fallback_reason set on any failure (no silent success).
+    """
+    user_content = json.dumps(brain_input, default=str)
+    out = {"parsed": None, "ok": False, "model": None, "prompt": BRAIN_SYSTEM_PROMPT,
+           "user_content": user_content, "raw_response": None, "usage": None,
+           "fallback_reason": None}
     try:
         from ai_layer.ai_api_adapter import _openai, _OPENAI_AVAILABLE  # type: ignore
     except Exception:
-        return None, "deterministic", "adapter_unavailable"
-    if not _OPENAI_AVAILABLE or not os.getenv("OPENAI_API_KEY"):
-        return None, "deterministic", "no_llm"
+        out["fallback_reason"] = "adapter_import_failed"
+        return out
+    if not _OPENAI_AVAILABLE:
+        out["fallback_reason"] = "openai_package_unavailable"
+        return out
+    if not os.getenv("OPENAI_API_KEY"):
+        out["fallback_reason"] = "no_api_key"
+        return out
     try:
         model = os.getenv("AI_BRAIN_MODEL", os.getenv("AI_MODEL", "gpt-4o-mini"))
+        out["model"] = model
         timeout = float(os.getenv("AI_BRAIN_TIMEOUT_SECONDS", "25"))
         client = _openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"),
                                 timeout=timeout, max_retries=0)
         resp = client.chat.completions.create(
             model=model,
             messages=[{"role": "system", "content": BRAIN_SYSTEM_PROMPT},
-                      {"role": "user", "content": json.dumps(brain_input, default=str)}],
+                      {"role": "user", "content": user_content}],
             timeout=timeout,
         )
         content = resp.choices[0].message.content or ""
+        out["raw_response"] = content
+        try:
+            u = getattr(resp, "usage", None)
+            if u is not None:
+                out["usage"] = {"prompt_tokens": getattr(u, "prompt_tokens", None),
+                                "completion_tokens": getattr(u, "completion_tokens", None),
+                                "total_tokens": getattr(u, "total_tokens", None)}
+        except Exception:  # noqa: BLE001
+            pass
         start, end = content.find("{"), content.rfind("}")
         if start < 0 or end < 0:
-            return None, "deterministic", "no_json"
+            out["fallback_reason"] = "no_json_in_response"
+            return out
         parsed = json.loads(content[start:end + 1])
-        ok, reason = validate_brain_output(parsed)
+        ok, reason = validate_llm_core(parsed)   # lenient: LLM produces narrative fields only
         if not ok:
-            return None, "deterministic", f"invalid_schema:{reason}"
-        return parsed, "llm", None
+            out["fallback_reason"] = f"invalid_schema:{reason}"
+            return out
+        out["parsed"], out["ok"] = parsed, True
+        return out
     except Exception as exc:  # noqa: BLE001
-        return None, "deterministic", f"llm_error:{type(exc).__name__}"
+        out["fallback_reason"] = f"llm_error:{type(exc).__name__}:{exc}"
+        return out
 
 
 # ── Public entry point ────────────────────────────────────────────────────────
@@ -199,16 +232,41 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
         except Exception:  # noqa: BLE001
             analogs = []
 
-        parsed, source, err = (None, "deterministic", None)
+        # ── AI-BRAIN-L: real LLM path with EXPLICIT (logged) fallback ────────
+        llm_call = None
+        source, fallback_reason = "deterministic", None
         if _llm_enabled():
-            parsed, source, err = _call_llm(brain_input)
-        output = (parsed if (parsed is not None)
-                  else _deterministic(snapshot, brain_input, analogs))
-        if parsed is not None and not parsed.get("memory_matches"):
-            parsed["memory_matches"] = analogs   # ensure LLM path also carries analogs
+            llm_call = _call_llm(brain_input)
+            if llm_call["ok"]:
+                source = "llm"
+                # Merge LLM narrative onto a full template, then inject the
+                # code-owned fields (retrieval analogs + provenance) the LLM is
+                # not asked to produce.
+                output = empty_brain_output()
+                output.update(llm_call["parsed"])
+                direction = output.get("narrative_direction", "neutral")
+                support, conflict = _split_analogs(analogs, direction)
+                output["memory_matches"] = analogs
+                output["supporting_analogs"] = support
+                output["conflicting_analogs"] = conflict
+                output["direction_provenance"] = {
+                    "source": "ai_brain", "structure_derived": False,
+                    "retrieval_used": bool(analogs)}
+            else:
+                # NOT a silent fallback: distinct source + logged reason.
+                source = "llm_failed_fallback"
+                fallback_reason = llm_call["fallback_reason"]
+                _log.warning("AI_BRAIN_LLM enabled but call failed (%s) — "
+                             "explicit deterministic fallback at %s",
+                             fallback_reason, snapshot.get("timestamp"))
+                output = _deterministic(snapshot, brain_input, analogs)
+                output.setdefault("warnings", []).append(
+                    f"llm_fallback: {fallback_reason}")
+        else:
+            output = _deterministic(snapshot, brain_input, analogs)
 
         ok, vreason = validate_brain_output(output)
-        if not ok:   # deterministic core must always be valid; guard anyway
+        if not ok:   # output must always be schema-valid; guard anyway
             output = empty_brain_output()
             output["warnings"] = [f"schema fallback: {vreason}"]
             source = "degraded"
@@ -220,12 +278,17 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             "timestamp": snapshot.get("timestamp"),
             "symbol": symbol,
             "source": source,
-            "llm_error": err,
+            "llm_enabled": _llm_enabled(),
+            "llm_model": (llm_call or {}).get("model"),
+            "llm_prompt": (llm_call or {}).get("prompt"),
+            "llm_user_content": (llm_call or {}).get("user_content"),
+            "llm_raw_response": (llm_call or {}).get("raw_response"),
+            "llm_usage": (llm_call or {}).get("usage"),
+            "fallback_reason": fallback_reason,
             "input_degraded": brain_input.get("degraded", []),
             "input_payload": brain_input,
-            "raw_response": parsed,
             "parsed_output": output,
-            "fields_consumed": list(_CONSUMED_FIELDS_AB1),   # [] in AB-1 — observe only
+            "fields_consumed": list(_CONSUMED_FIELDS_AB1),   # [] — observe only
             "fields_persisted_not_yet_consumed": [k for k in output
                                                   if k not in _CONSUMED_FIELDS_AB1],
         }
@@ -234,7 +297,11 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
         return {
             "enabled": True,
             "authority": "observe_only",
-            "source": source,
+            "source": source,                                   # llm | deterministic | llm_failed_fallback | degraded
+            "llm_enabled": _llm_enabled(),
+            "llm_model": (llm_call or {}).get("model"),
+            "llm_usage": (llm_call or {}).get("usage"),
+            "fallback_reason": fallback_reason,
             "input_degraded": brain_input.get("degraded", []),
             "output": output,
             "persisted": persisted_path,

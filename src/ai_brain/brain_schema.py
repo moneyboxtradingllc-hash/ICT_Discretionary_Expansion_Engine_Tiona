@@ -91,6 +91,34 @@ def empty_brain_output() -> dict:
     }
 
 
+# Core narrative fields the LLM itself must produce (retrieval/provenance fields
+# are code-injected after parsing — the LLM is not asked for them).
+_CORE_LLM_FIELDS = {
+    "market_story": str, "narrative_direction": str, "narrative_phase": str,
+    "phase_confidence": int, "allowed_direction": str, "current_action": str,
+    "reason": str,
+}
+
+
+def validate_llm_core(resp: dict) -> tuple:
+    """Lenient gate for raw LLM output (before code-injected fields). Never raises."""
+    try:
+        if not isinstance(resp, dict):
+            return False, "response is not a dict"
+        for f, t in _CORE_LLM_FIELDS.items():
+            if f not in resp:
+                return False, f"missing core field: {f}"
+            if not isinstance(resp[f], t):
+                return False, f"{f} wrong type"
+        if resp["narrative_direction"] not in _DIRECTIONS:
+            return False, f"narrative_direction '{resp['narrative_direction']}' invalid"
+        if resp["narrative_phase"] not in _PHASES:
+            return False, f"narrative_phase '{resp['narrative_phase']}' invalid"
+        return True, None
+    except Exception as exc:  # noqa: BLE001
+        return False, f"core validation error: {exc}"
+
+
 def validate_brain_output(resp: dict) -> tuple:
     """(is_valid, reason). Never raises."""
     try:
