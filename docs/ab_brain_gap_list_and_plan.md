@@ -64,3 +64,60 @@ T14 knows long is open ✅ · T15 reasoning persists ✅ · T16 regression 911 p
 
 Rollback: `AI_BRAIN_ENABLED=false` (default) = zero behavior change. Old wrapper
 remains live and untouched until AB-4 cutover, so nothing is destabilized.
+
+---
+
+## AB-2A — Structure-Authorship Firewall (SHIPPED, default ON)
+
+Goal: make it structurally impossible for `structure_engine._bias` /
+`ai_context.directional_bias` to author trade direction. Firewall only — no AI
+Brain / narrative / delivery-as-outright-author / two-sided generation (AB-4/5).
+
+**Module:** `src/generation_firewall/authorship.py` — single source of truth for
+"what may author direction." Non-structure authoring sources only:
+`delivery_protected` (PO3 distribution→manipulation direction), `liquidity_draw`
+(sweep+reclaim semantics). Verdict: source present + structure agrees/silent →
+that direction; source present + structure DISAGREES → `conflicted`; no source +
+structure has a bias → `conflicted` (`structure_witness_only`, never bull/bear);
+nothing → `neutral` (`fallback_none`).
+
+**Wired at both authoring points:**
+- `qualification._direction_with_source()` — live `qualify_trade` path now
+  firewalled; emits `direction` + `direction_source`; structure conflict/vacuum
+  surfaced as a witness WARNING.
+- `playbook_classifier._direction()` — closed the step-3 structure re-entry
+  (`ai_context.directional_bias`); under firewall it may only originate from the
+  shared authoring rule. `direction_source` inherited into playbook output.
+- Toolbox inherits `playbook.direction` (never authors). Intent inherits
+  decision-authority direction (inherits qualification/playbook). Proven by test.
+
+**June 11 (firewall ON):** 10:13 bullish structure + above_high sweep →
+`conflicted` (not bullish); 13:17 bearish structure + below_low sweep →
+`conflicted` (not bearish); a bearish read does NOT depend on structure being
+bearish (delivery authors bearish with neutral structure) — so bullish structure
+never *blocks* a bearish opportunity, it merely fails to author.
+
+**Tests:** `tests/test_phase_ab2a_structure_firewall.py` (16) — requirements
+1-7. **Regression: 927 passed, 0 failed.** Rollback:
+`STRUCTURE_AUTHORSHIP_FIREWALL=false` restores the legacy structure-rooted path.
+
+### Remaining structure consumers — witness-only vs dangerous (final audit)
+
+| Consumer | Uses structure for | Verdict |
+|---|---|---|
+| `qualification._direction_with_source` | direction (firewalled) | **WAS dangerous → now witness-only** |
+| `playbook_classifier._direction` step 3 | direction (firewalled) | **WAS dangerous → now witness-only** |
+| `toolbox_engine` | inherits playbook direction | safe (never authored) |
+| `trade_intent`/`decision_engine` | inherits qual/playbook direction | safe (never authored) |
+| `narrative_engine._structure_lens` (NA-1) | witness lens, cannot override AI+Delivery | witness-only |
+| `ai_brain/brain_input` | tagged `structure_WITNESS` | witness-only |
+| `regime_features` | environmental feature, not direction | witness-only |
+| `confidence_engine` | structure *alignment* (not bias) → score | witness-only |
+| `ai_snapshot_formatter` | console display | witness-only |
+| `playbook` scorers (lines 65, 296) | which playbook *fits* (scoring), not direction | witness-only |
+| `shared_context._delivery` bias-fallback | `{bias}_bias_only` when PO3 absent | **witness-tainted, NOT read by the generation firewall** (firewall reads po3+liquidity directly). FLAG for AB-4: if narrative gains generation authority, its delivery lens must not inherit this fallback. |
+| `ai_debate_engine` / `discretionary_ai` per-TF bias counts | feed debate verdict → gate `ai_verdict_supports_trade` | **PERMISSION-side advisory** — structure still has a voice in the gate's debate check (not generation). Out of AB-2A scope; flagged for AB-4 authority review. |
+
+No remaining structure consumer can author generation direction. Two structure
+voices remain in the PERMISSION lane (debate verdict) and one tainted-but-unused
+delivery fallback — both flagged for AB-4, neither a generation-authorship leak.

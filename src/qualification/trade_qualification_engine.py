@@ -216,6 +216,22 @@ def _sweep_semantic_direction(liquidity: dict) -> "str | None":
     return None
 
 
+def _direction_with_source(ai_context: dict, structure: dict, po3: dict,
+                           liquidity: "dict | None" = None) -> tuple:
+    """
+    Phase AB-2A — returns (direction, direction_source).
+    Firewall ON (default): structure bias is a WITNESS; only non-structure
+    sources may author direction. Firewall OFF: legacy structure-rooted path.
+    """
+    from generation_firewall.authorship import (
+        firewall_enabled, authored_direction, SOURCE_LEGACY,
+    )
+    bias = ai_context.get("directional_bias", "neutral")
+    if firewall_enabled():
+        return authored_direction(bias, po3, liquidity or {})
+    return _direction(ai_context, structure, po3, liquidity), SOURCE_LEGACY
+
+
 def _direction(ai_context: dict, structure: dict, po3: dict,
                liquidity: "dict | None" = None) -> str:
     bias = ai_context.get("directional_bias", "neutral")
@@ -488,17 +504,27 @@ def qualify_trade(snapshot: dict) -> dict:
     opp_score       = 0 if disqualified else _opportunity_score(snapshot)
     status          = _status(opp_score, disqualified)
     grade           = _grade(opp_score, disqualified)
-    direction       = _direction(ai_context, structure, po3,
-                                 snapshot.get("liquidity", {}))
+    direction, direction_source = _direction_with_source(
+        ai_context, structure, po3, snapshot.get("liquidity", {}))
     trade_type      = _trade_type(ai_context)
     reasons         = _reasons(snapshot, direction)
     warnings        = _qual_warnings(snapshot, opp_score)
     primary_driver  = _primary_driver(snapshot, po3.get("alignment", ""))
 
+    # AB-2A — structure conflict/lag surfaced as a WITNESS warning (not authority)
+    structure_bias = ai_context.get("directional_bias", "neutral")
+    if (direction_source in ("delivery_vs_structure_conflict", "structure_witness_only")
+            and structure_bias in ("bullish", "bearish")):
+        warnings = list(warnings) + [
+            f"structure witness bias={structure_bias} did not author direction "
+            f"(source={direction_source})"
+        ]
+
     return {
         "status":            status,
         "grade":             grade,
         "direction":         direction,
+        "direction_source":  direction_source,   # AB-2A
         "trade_type":        trade_type,
         "opportunity_score": opp_score,
         "primary_driver":    primary_driver,

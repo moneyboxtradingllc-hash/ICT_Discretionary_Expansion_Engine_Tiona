@@ -17,6 +17,7 @@ _NO_PLAYBOOK_RESULT = {
     "selected_playbook":   "no_playbook",
     "playbook_confidence": 0,
     "direction":           "neutral",
+    "direction_source":    "fallback_none",   # AB-2A
     "eligible_tools":      [],
     "preferred_tools":     [],
     "status":              "no_playbook",
@@ -202,6 +203,18 @@ def _direction(snap: dict) -> str:
         return qual_dir
     if qual_dir == "conflicted":
         return "conflicted"
+
+    # AB-2A — Structure-Authorship Firewall:
+    # When the firewall is ON and qualification did not hand us a direction,
+    # the playbook may NOT re-author from structure (the ai_context bias step
+    # below). It may only originate from non-structure authoring evidence
+    # (delivery/sweep) via the shared firewall. This closes the structure
+    # re-entry leak MAP-0 found at playbook _direction step 3.
+    from generation_firewall.authorship import firewall_enabled, authored_direction
+    if firewall_enabled():
+        bias = snap.get("ai_context", {}).get("directional_bias", "neutral")
+        d, _src = authored_direction(bias, snap.get("po3", {}), snap.get("liquidity", {}))
+        return d
 
     # 2. Infer from sweep direction (most ICT-accurate inference)
     liq = snap.get("liquidity", {})
@@ -425,6 +438,8 @@ def classify_playbook(snapshot: dict) -> dict:
         "selected_playbook":   best,
         "playbook_confidence": best_score,
         "direction":           direction,
+        # AB-2A — inherits qualification's authoring source; never "structure"
+        "direction_source":    snapshot.get("qualification", {}).get("direction_source", "inherited"),
         "eligible_tools":      eligible_tools(best, direction),
         "preferred_tools":     preferred_tools(best, direction),
         "status":              _status(best_score),
