@@ -43,6 +43,10 @@ $env:PROMOTED_RULES                = "R-001"
 $env:THESIS_EXIT_MODE              = "live"
 $env:THESIS_EXIT_CONFIRM_SCANS     = "1"
 
+# ── AB-1/AB-3 — AI Brain + vector memory retrieval (OBSERVE-ONLY) ────────────
+$env:AI_BRAIN_ENABLED              = "true"
+$env:AI_RETRIEVAL_ENABLED          = "true"
+
 # ── NA-1 — Narrative Authority (the widest lens owns the story) ──────────────
 $env:NARRATIVE_AUTHORITY           = "enforce"
 $env:NARRATIVE_AI_MIN_CONF         = "55"

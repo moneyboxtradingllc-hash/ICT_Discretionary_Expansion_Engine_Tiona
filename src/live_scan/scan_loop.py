@@ -33,6 +33,7 @@ from narrative_authority.narrative_engine  import build_narrative
 from narrative_authority.protected_swings  import ProtectedSwingTracker
 from ai_brain.narrative_brain              import run_narrative_brain
 from ai_brain.stance_memory                import StanceMemory
+from ai_retrieval.retrieval                import retrieve_for_snapshot
 from rule_governance.shadow_evaluator      import evaluate_shadow_rules
 from rule_governance.divergence_ledger     import append_events, resolve_pending
 from paper_execution.trade_journal         import update_trade_management
@@ -907,6 +908,12 @@ def run_scan_loop():
             snapshot["narrative_authority"] = build_narrative(
                 snapshot, snapshot["protected_swings"],
             )
+
+            # ── Vector Memory Retrieval (Phase AB-3 — OBSERVE_ONLY) ────────
+            # "What have I seen that resembles this?" Nearest historical
+            # analogs by market-state similarity; authoritative-only (tainted
+            # provenance excluded). Consumes nothing; gated AI_RETRIEVAL_ENABLED.
+            snapshot["ai_retrieval"] = retrieve_for_snapshot(snapshot, symbol)
 
             # ── Narrative Brain (Phase AB-1 — OBSERVE_ONLY) ────────────────
             # Full two-sided context + self-memory; replacement for the old
