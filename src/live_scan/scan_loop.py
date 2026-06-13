@@ -31,6 +31,8 @@ from shared_context.shared_market_context  import build_shared_market_context
 from shared_context.council                import run_council
 from narrative_authority.narrative_engine  import build_narrative
 from narrative_authority.protected_swings  import ProtectedSwingTracker
+from ai_brain.narrative_brain              import run_narrative_brain
+from ai_brain.stance_memory                import StanceMemory
 from rule_governance.shadow_evaluator      import evaluate_shadow_rules
 from rule_governance.divergence_ledger     import append_events, resolve_pending
 from paper_execution.trade_journal         import update_trade_management
@@ -723,6 +725,7 @@ def run_scan_loop():
     bars_in_state            = 0
     setup_tracker            = SetupTracker()
     swing_tracker            = ProtectedSwingTracker()   # Phase NA-1
+    stance_memory            = StanceMemory()            # Phase AB-1 (brain self-memory)
     prev_experience_summary  = None   # Phase 3A: carry forward for AI input next scan
     # Phase 5E.3: carry 5C/5D/5E summaries forward so AI sees them on the next scan
     prev_memory_search       = None
@@ -904,6 +907,12 @@ def run_scan_loop():
             snapshot["narrative_authority"] = build_narrative(
                 snapshot, snapshot["protected_swings"],
             )
+
+            # ── Narrative Brain (Phase AB-1 — OBSERVE_ONLY) ────────────────
+            # Full two-sided context + self-memory; replacement for the old
+            # 2-field wrapper. No consumer wired yet — output is persisted and
+            # archived. Enable with AI_BRAIN_ENABLED=true.
+            snapshot["ai_brain"] = run_narrative_brain(snapshot, symbol, stance_memory)
 
             # ── Decision Authority ─────────────────────────────────────────
             snapshot["decision_authority"] = make_decision(snapshot)

@@ -62,6 +62,12 @@ def save_snapshot(snapshot: dict, symbol: str) -> str:
         # Phase NA-1 — narrative authority audit trail
         "narrative_authority": snapshot.get("narrative_authority"),
         "protected_swings":    snapshot.get("protected_swings"),
+        # Phase AB-1 — narrative brain (observe-only) compact record
+        "ai_brain":            (lambda b: {
+            "enabled": b.get("enabled"), "authority": b.get("authority"),
+            "source": b.get("source"), "input_degraded": b.get("input_degraded"),
+            "output": b.get("output"),
+        } if isinstance(b, dict) else None)(snapshot.get("ai_brain") or {}),
         "ai_debate":         snapshot.get("ai_debate"),
         "decision_authority": snapshot.get("decision_authority"),
         "execution_gate":    snapshot.get("execution_gate"),
