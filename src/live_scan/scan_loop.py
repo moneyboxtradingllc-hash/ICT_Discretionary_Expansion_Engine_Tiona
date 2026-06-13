@@ -33,6 +33,7 @@ from narrative_authority.narrative_engine  import build_narrative
 from narrative_authority.protected_swings  import ProtectedSwingTracker
 from ai_brain.narrative_brain              import run_narrative_brain
 from ai_brain.stance_memory                import StanceMemory
+from ai_brain.divergence                   import compute_divergence
 from ai_retrieval.retrieval                import retrieve_for_snapshot
 from rule_governance.shadow_evaluator      import evaluate_shadow_rules
 from rule_governance.divergence_ledger     import append_events, resolve_pending
@@ -920,6 +921,11 @@ def run_scan_loop():
             # 2-field wrapper. No consumer wired yet — output is persisted and
             # archived. Enable with AI_BRAIN_ENABLED=true.
             snapshot["ai_brain"] = run_narrative_brain(snapshot, symbol, stance_memory)
+
+            # ── AB-4 — Wrapper vs Brain divergence (OBSERVE_ONLY) ──────────
+            # Both AI paths observed the same scan; measure disagreement.
+            # Pure measurement — influences nothing downstream.
+            snapshot["ai_divergence"] = compute_divergence(snapshot, symbol)
 
             # ── Decision Authority ─────────────────────────────────────────
             snapshot["decision_authority"] = make_decision(snapshot)

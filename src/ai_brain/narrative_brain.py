@@ -39,7 +39,20 @@ def _llm_enabled() -> bool:
 
 # ── Deterministic synthesis core (NA-1 engine → 23-field schema) ──────────────
 
-def _deterministic(snapshot: dict, brain_input: dict) -> dict:
+def _split_analogs(analogs: list, direction: str) -> tuple:
+    """AB-4 — partition retrieved analogs into supporting vs conflicting the
+    brain's direction (by analog narrative_direction / delivery_direction)."""
+    support, conflict = [], []
+    for a in analogs or []:
+        ad = (a.get("narrative_direction") or a.get("delivery_direction") or "").lower()
+        if direction in ("bullish", "bearish") and ad in ("bullish", "bearish"):
+            (support if ad == direction else conflict).append(a)
+        else:
+            support.append(a)   # non-directional analog = neutral context
+    return support, conflict
+
+
+def _deterministic(snapshot: dict, brain_input: dict, analogs: list) -> dict:
     na = build_narrative(snapshot, snapshot.get("protected_swings", {}) or {})
     out = empty_brain_output()
     direction = na.get("narrative_direction", "neutral")
@@ -49,6 +62,28 @@ def _deterministic(snapshot: dict, brain_input: dict) -> dict:
     draw = (liq.get("active_draw") or {})
     inv = brain_input.get("playbook_toolbox", {})
     fav = direction if direction in ("bullish", "bearish") else None
+
+    # AB-4 — reason WITH retrieval, don't just archive it.
+    support, conflict = _split_analogs(analogs, direction)
+    analog_note = ""
+    if analogs:
+        wins = sum(1 for a in support if a.get("outcome") == "win")
+        losses = sum(1 for a in support if a.get("outcome") == "loss")
+        analog_note = (f" {len(analogs)} analog(s): {len(support)} support / "
+                       f"{len(conflict)} conflict; support outcomes {wins}W/{losses}L.")
+
+    # AB-4 — direction provenance (NA synthesis is delivery/liquidity/protected-led)
+    na_src = na.get("lenses", {}) or {}
+    structure_derived = (na_src.get("ai", {}).get("direction") is None
+                         and na_src.get("delivery", {}).get("direction") is None
+                         and direction in ("bullish", "bearish"))
+    provenance = {
+        "source": ("delivery_protected" if na_src.get("delivery", {}).get("direction")
+                   else ("ai_brain" if na_src.get("ai", {}).get("direction")
+                         else "fallback_none")),
+        "structure_derived": bool(structure_derived),
+        "retrieval_used": bool(analogs),
+    }
 
     out.update({
         "market_story": (f"{na.get('narrative_phase','transition')} phase; "
@@ -82,13 +117,22 @@ def _deterministic(snapshot: dict, brain_input: dict) -> dict:
             "liquidity": 60 if draw else 0,
             "structure": 40,
         },
-        "memory_matches": [],   # real retrieval is a later AB phase
+        "memory_matches": analogs or [],          # AB-4 — retrieval wired in
         "current_action": ("avoid_" + na["forbidden_trade_direction"]
                            if na.get("forbidden_trade_direction") else
                            ("prepare_" + direction if fav else "stand_down")),
-        "reason": "; ".join(na.get("reasons", [])) or "deterministic NA synthesis",
+        "reason": ("; ".join(na.get("reasons", [])) or "deterministic NA synthesis") + analog_note,
         "must_not_do": ([f"do not trade {na['forbidden_trade_direction']}"]
                         if na.get("forbidden_trade_direction") else []),
+        # AB-4 — expanded package
+        "protected_high_status": ps.get("protected_high_status", "none"),
+        "protected_low_status":  ps.get("protected_low_status", "none"),
+        "dominant_reasoning": ((na.get("reasons") or ["deterministic NA synthesis"])[0]) + analog_note,
+        "supporting_analogs": support,
+        "conflicting_analogs": conflict,
+        "recommended_playbook_family": (na.get("narrative_phase") or ""),
+        "recommended_tool_family": [t["tool"] for t in inv.get(fav, [])] if fav else [],
+        "direction_provenance": provenance,
     })
     return out
 
@@ -138,10 +182,30 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
         history = stance_memory.history_summary() if stance_memory else {"available": False}
         brain_input = build_brain_input(snapshot, history)
 
+        # AB-4 — retrieve historical analogs and reason WITH them. Prefer the
+        # analogs already computed in the scan (snapshot["ai_retrieval"]); else
+        # retrieve now. Observe-only; never authoritative for execution.
+        analogs = []
+        try:
+            retr = snapshot.get("ai_retrieval") or {}
+            if not retr.get("analogs"):
+                from ai_retrieval.retrieval import retrieve_analogs
+                # k-NN semantics: nearest authoritative analogs; similarity score
+                # is carried for downstream judgment (observe-only).
+                retr = retrieve_analogs(snapshot, k=5, authoritative_only=True,
+                                        min_similarity=0.0, persist_log=False)
+            analogs = retr.get("analogs", []) or []
+            brain_input["memory_retrieval"] = {"count": len(analogs), "analogs": analogs}
+        except Exception:  # noqa: BLE001
+            analogs = []
+
         parsed, source, err = (None, "deterministic", None)
         if _llm_enabled():
             parsed, source, err = _call_llm(brain_input)
-        output = parsed if (parsed is not None) else _deterministic(snapshot, brain_input)
+        output = (parsed if (parsed is not None)
+                  else _deterministic(snapshot, brain_input, analogs))
+        if parsed is not None and not parsed.get("memory_matches"):
+            parsed["memory_matches"] = analogs   # ensure LLM path also carries analogs
 
         ok, vreason = validate_brain_output(output)
         if not ok:   # deterministic core must always be valid; guard anyway

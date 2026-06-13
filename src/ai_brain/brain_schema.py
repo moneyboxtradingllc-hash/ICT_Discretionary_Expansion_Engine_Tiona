@@ -39,6 +39,15 @@ _REQUIRED = {
     "current_action":            str,
     "reason":                    str,
     "must_not_do":               list,
+    # Phase AB-4 — expanded narrative package
+    "protected_high_status":     str,
+    "protected_low_status":      str,
+    "dominant_reasoning":        str,
+    "supporting_analogs":        list,
+    "conflicting_analogs":       list,
+    "recommended_playbook_family": str,
+    "recommended_tool_family":   list,
+    "direction_provenance":      dict,
 }
 
 
@@ -68,6 +77,17 @@ def empty_brain_output() -> dict:
         "current_action":            "stand_down",
         "reason":                    "",
         "must_not_do":               [],
+        # Phase AB-4
+        "protected_high_status":     "none",
+        "protected_low_status":      "none",
+        "dominant_reasoning":        "",
+        "supporting_analogs":        [],
+        "conflicting_analogs":       [],
+        "recommended_playbook_family": "",
+        "recommended_tool_family":   [],
+        "direction_provenance":      {"source": "fallback_none",
+                                      "structure_derived": False,
+                                      "retrieval_used": False},
     }
 
 

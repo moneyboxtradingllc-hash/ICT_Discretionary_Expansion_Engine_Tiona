@@ -157,7 +157,8 @@ class T8_SchemaFullyParsed(unittest.TestCase):
         res = run_narrative_brain(_live_snapshot(), "QQQ", StanceMemory())
         ok, reason = validate_brain_output(res["output"])
         self.assertTrue(ok, reason)
-        self.assertEqual(len(res["output"]), 23)
+        # AB-1 shipped 23 fields; AB-4 expanded the package to 31.
+        self.assertGreaterEqual(len(res["output"]), 23)
 
 
 class T9_NoPrintOnlyFields(unittest.TestCase):

@@ -68,6 +68,7 @@ def save_snapshot(snapshot: dict, symbol: str) -> str:
             "source": b.get("source"), "input_degraded": b.get("input_degraded"),
             "output": b.get("output"),
         } if isinstance(b, dict) else None)(snapshot.get("ai_brain") or {}),
+        "ai_divergence":       snapshot.get("ai_divergence"),
         "ai_debate":         snapshot.get("ai_debate"),
         "decision_authority": snapshot.get("decision_authority"),
         "execution_gate":    snapshot.get("execution_gate"),
