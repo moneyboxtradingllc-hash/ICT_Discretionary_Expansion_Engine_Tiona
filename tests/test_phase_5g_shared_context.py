@@ -140,12 +140,15 @@ class TestSharedContextCreation(unittest.TestCase):
         ctx = build_shared_market_context(None, "QQQ")
         self.assertEqual(ctx["symbol"], "QQQ")
 
-    def test_missing_po3_falls_back_to_ai_bias(self):
+    def test_missing_po3_returns_insufficient_not_structure_bias(self):
+        # AB-2B: PO3 absent must NOT synthesize bullish/bearish delivery from
+        # structure bias (the old `{bias}_bias_only` leak). Honest absence.
         snap = _full_snapshot()
         del snap["po3"]
         ctx = build_shared_market_context(snap, "QQQ")
-        self.assertEqual(ctx["delivery_state"], "bullish_bias_only")
-        self.assertEqual(ctx["delivery_confidence"], 30)
+        self.assertEqual(ctx["delivery_state"], "insufficient_delivery_evidence")
+        self.assertEqual(ctx["delivery_confidence"], 0)
+        self.assertNotIn("bias_only", ctx["delivery_state"])
         self.assertFalse(ctx["continuation_intact"])
 
     def test_inactive_setup_age_is_zero(self):

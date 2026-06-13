@@ -92,10 +92,13 @@ def _delivery(snapshot: dict) -> tuple:
         confidence = _PO3_DELIVERY_CONFIDENCE[po3_align]
         state = f"{direction}_delivery" if direction else po3_align
     else:
-        # PO3 missing (e.g. trimmed historical snapshot) — degrade to AI bias
+        # AB-2B — PO3/delivery absent. Delivery must NOT be synthesized from
+        # structure bias (the old `{bias}_bias_only` fallback was a structure
+        # leak into delivery state). When a structure bias EXISTS we record the
+        # deliberate refusal; with nothing at all we degrade to "unknown".
         bias = (ai_ctx.get("directional_bias") or "neutral").lower()
         if bias in ("bullish", "bearish"):
-            state, confidence = f"{bias}_bias_only", 30
+            state, confidence = "insufficient_delivery_evidence", 0
         else:
             state, confidence = "unknown", 0
 

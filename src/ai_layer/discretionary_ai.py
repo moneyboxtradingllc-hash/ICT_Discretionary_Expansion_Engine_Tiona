@@ -131,18 +131,21 @@ def _ai_direction(snapshot: dict) -> str:
 
     votes = {"bullish": 0, "bearish": 0}
 
-    # Narrative engine directional bias (already synthesizes many signals)
-    bias = ai_ctx.get("directional_bias", "neutral")
-    if bias in ("bullish", "bearish"):
-        votes[bias] += 3
-
-    # MTF structure bias count
-    bull_s = sum(1 for tf in _TFS if struct.get(tf, {}).get("bias") == "bullish")
-    bear_s = sum(1 for tf in _TFS if struct.get(tf, {}).get("bias") == "bearish")
-    if bull_s > bear_s:
-        votes["bullish"] += 2
-    elif bear_s > bull_s:
-        votes["bearish"] += 2
+    # AB-2B — Structure-Authorship Firewall: directional_bias and MTF structure
+    # bias are structure-derived and may NOT vote on the deterministic AI's
+    # direction under the firewall (this output feeds the debate, fusion, and
+    # the NA-1 lens). Legacy votes preserved only when firewall is OFF.
+    from generation_firewall.authorship import firewall_enabled
+    if not firewall_enabled():
+        bias = ai_ctx.get("directional_bias", "neutral")
+        if bias in ("bullish", "bearish"):
+            votes[bias] += 3
+        bull_s = sum(1 for tf in _TFS if struct.get(tf, {}).get("bias") == "bullish")
+        bear_s = sum(1 for tf in _TFS if struct.get(tf, {}).get("bias") == "bearish")
+        if bull_s > bear_s:
+            votes["bullish"] += 2
+        elif bear_s > bull_s:
+            votes["bearish"] += 2
 
     # PO3 distribution direction (HTF weighted more)
     for tf, w in [("15m", 2), ("5m", 1)]:

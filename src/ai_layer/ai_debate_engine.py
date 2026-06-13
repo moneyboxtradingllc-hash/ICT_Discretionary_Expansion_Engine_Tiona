@@ -1,12 +1,27 @@
 """
 Phase 1S — Multi-Thesis AI Debate Engine.
+Phase AB-2B — Structure contamination cleanup (permission-side).
+
 Evaluates bullish, bearish, and neutral stances deterministically from
 the assembled snapshot + already-computed ai_discretionary output.
 
 No external AI call. No execution. No orders. No broker actions.
+
+AB-2B: when the Structure-Authorship Firewall is ON (default), structure bias
+adds NO directional score to the bullish/bearish cases and the structure-derived
+directional_bias is not counted. Structure appears only as witness commentary /
+conflict warning. The verdict (and therefore the gate's ai_verdict_supports_trade
+check) can no longer be moved by disguised structure bias.
 """
+from generation_firewall.authorship import firewall_enabled, nonstructure_direction
 
 _TFS = ["15m", "5m", "3m", "1m"]
+
+
+def _structure_scores() -> bool:
+    """AB-2B: structure may add directional debate score only when the firewall
+    is OFF (legacy rollback). Default (firewall ON) → witness-only."""
+    return not firewall_enabled()
 
 
 # ── Snapshot helpers ──────────────────────────────────────────────────────────
@@ -105,16 +120,22 @@ def _score_bullish(snapshot: dict, ai_disc: dict) -> tuple[int, list, list, str,
         else:
             evidence.append("Liquidity sweep below detected — reclaim pending")
 
-    # Structure alignment
+    # Structure alignment — AB-2B: WITNESS ONLY under firewall (no directional score)
     bull_s, bear_s = _struct_counts(snapshot)
-    if bull_s >= 3:
-        pts += 10
-        evidence.append(f"Bullish structure on {bull_s}/4 timeframes")
-    elif bull_s == 2:
-        pts += 5
-        evidence.append(f"Partial bullish structure ({bull_s}/4 timeframes)")
+    if _structure_scores():
+        if bull_s >= 3:
+            pts += 10
+            evidence.append(f"Bullish structure on {bull_s}/4 timeframes")
+        elif bull_s == 2:
+            pts += 5
+            evidence.append(f"Partial bullish structure ({bull_s}/4 timeframes)")
+        else:
+            weakness.append(f"Only {bull_s}/4 timeframes bullish structure")
     else:
-        weakness.append(f"Only {bull_s}/4 timeframes bullish structure")
+        if bull_s >= 2:
+            evidence.append(f"[witness] bullish structure {bull_s}/4 TFs (no score — AB-2B)")
+        elif bull_s == 0:
+            weakness.append(f"[witness] no bullish structure ({bull_s}/4)")
 
     # AI directional bias
     ai_dir = (ai_disc.get("ai_direction") or "neutral").lower()
@@ -125,10 +146,12 @@ def _score_bullish(snapshot: dict, ai_disc: dict) -> tuple[int, list, list, str,
     elif ai_dir == "bearish":
         weakness.append("AI direction is bearish — opposes this thesis")
 
-    ctx_bias = (ai_ctx.get("directional_bias") or "neutral").lower()
-    if ctx_bias == "bullish" and ai_dir != "bullish":
-        pts += 5
-        evidence.append("Narrative directional bias: bullish")
+    # AB-2B: directional_bias is structure-derived — no score under firewall
+    if _structure_scores():
+        ctx_bias = (ai_ctx.get("directional_bias") or "neutral").lower()
+        if ctx_bias == "bullish" and ai_dir != "bullish":
+            pts += 5
+            evidence.append("Narrative directional bias: bullish")
 
     # Confidence trend
     if mem and mem.get("available"):
@@ -264,16 +287,22 @@ def _score_bearish(snapshot: dict, ai_disc: dict) -> tuple[int, list, list, str,
         else:
             evidence.append("Liquidity sweep above detected — rejection pending")
 
-    # Structure alignment
+    # Structure alignment — AB-2B: WITNESS ONLY under firewall (no directional score)
     bull_s, bear_s = _struct_counts(snapshot)
-    if bear_s >= 3:
-        pts += 10
-        evidence.append(f"Bearish structure on {bear_s}/4 timeframes")
-    elif bear_s == 2:
-        pts += 5
-        evidence.append(f"Partial bearish structure ({bear_s}/4 timeframes)")
+    if _structure_scores():
+        if bear_s >= 3:
+            pts += 10
+            evidence.append(f"Bearish structure on {bear_s}/4 timeframes")
+        elif bear_s == 2:
+            pts += 5
+            evidence.append(f"Partial bearish structure ({bear_s}/4 timeframes)")
+        else:
+            weakness.append(f"Only {bear_s}/4 timeframes bearish structure")
     else:
-        weakness.append(f"Only {bear_s}/4 timeframes bearish structure")
+        if bear_s >= 2:
+            evidence.append(f"[witness] bearish structure {bear_s}/4 TFs (no score — AB-2B)")
+        elif bear_s == 0:
+            weakness.append(f"[witness] no bearish structure ({bear_s}/4)")
 
     # AI directional bias
     ai_dir  = (ai_disc.get("ai_direction") or "neutral").lower()
@@ -284,10 +313,12 @@ def _score_bearish(snapshot: dict, ai_disc: dict) -> tuple[int, list, list, str,
     elif ai_dir == "bullish":
         weakness.append("AI direction is bullish — opposes this thesis")
 
-    ctx_bias = (ai_ctx.get("directional_bias") or "neutral").lower()
-    if ctx_bias == "bearish" and ai_dir != "bearish":
-        pts += 5
-        evidence.append("Narrative directional bias: bearish")
+    # AB-2B: directional_bias is structure-derived — no score under firewall
+    if _structure_scores():
+        ctx_bias = (ai_ctx.get("directional_bias") or "neutral").lower()
+        if ctx_bias == "bearish" and ai_dir != "bearish":
+            pts += 5
+            evidence.append("Narrative directional bias: bearish")
 
     # Confidence trend
     if mem and mem.get("available"):
@@ -589,6 +620,49 @@ def _final_verdict(
     }
 
 
+# ── AB-2B: debate structure-contamination metadata ───────────────────────────
+
+_VALID_DEBATE_SOURCES = {"ai_brain", "delivery", "liquidity", "protected_swings",
+                         "narrative_authority", "fallback_none"}
+
+
+def _debate_direction_source(snapshot: dict, ai_disc: dict, dominant: str) -> str:
+    """
+    The non-structure source behind a directional verdict. Never returns a
+    structure-derived label; if none can be found, returns fallback_none.
+    """
+    if dominant not in ("bullish", "bearish"):
+        return "fallback_none"
+    # Prefer the firewalled qualification/playbook source (AB-2A).
+    src = ((snapshot.get("playbook", {}) or {}).get("direction_source")
+           or (snapshot.get("qualification", {}) or {}).get("direction_source"))
+    mapping = {"delivery_protected": "delivery", "liquidity_draw": "liquidity"}
+    if src in mapping:
+        return mapping[src]
+    # Direct non-structure evidence agreeing with the verdict.
+    nd, nsrc = nonstructure_direction(snapshot.get("po3", {}), snapshot.get("liquidity", {}))
+    if nd == dominant and nsrc in mapping:
+        return mapping[nsrc]
+    # External AI agreeing with the verdict.
+    if (ai_disc.get("ai_direction") or "").lower() == dominant:
+        return "ai_brain"
+    return "fallback_none"
+
+
+def _debate_structure_metadata(snapshot: dict, ai_disc: dict, verdict: dict) -> dict:
+    dominant = verdict.get("dominant_thesis", "neutral")
+    source   = _debate_direction_source(snapshot, ai_disc, dominant)
+    # Taint guard: a directional verdict must trace to a non-structure source.
+    if dominant in ("bullish", "bearish") and source not in _VALID_DEBATE_SOURCES:
+        source = "fallback_none"
+    return {
+        "structure_used_as_witness":                True,
+        "structure_contributed_to_direction_score": _structure_scores(),
+        "structure_contributed_to_gate_support":    _structure_scores(),
+        "debate_direction_source":                  source,
+    }
+
+
 # ── Public entry point ────────────────────────────────────────────────────────
 
 def build_debate(snapshot: dict, ai_disc: dict) -> dict:
@@ -603,11 +677,14 @@ def build_debate(snapshot: dict, ai_disc: dict) -> dict:
     neut_score, neut_ev, neut_wk, neut_arg, neut_inv = _score_neutral(snapshot, ai_disc)
 
     verdict = _final_verdict(snapshot, ai_disc, bull_score, bear_score, neut_score)
+    debate_meta = _debate_structure_metadata(snapshot, ai_disc, verdict)
 
     return {
         "enabled":          True,
         "mode":             "deterministic_internal_debate",
         "external_ai_used": False,
+        # AB-2B — structure contamination audit
+        **debate_meta,
         "bullish_thesis": {
             "case_strength":      bull_score,
             "argument":           bull_arg,

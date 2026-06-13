@@ -121,3 +121,69 @@ never *blocks* a bearish opportunity, it merely fails to author.
 No remaining structure consumer can author generation direction. Two structure
 voices remain in the PERMISSION lane (debate verdict) and one tainted-but-unused
 delivery fallback — both flagged for AB-4, neither a generation-authorship leak.
+
+---
+
+## AB-2B — Structure Contamination Cleanup (SHIPPED, default ON)
+
+Closed the two AB-2A-flagged side-door paths. All gated by the same
+`STRUCTURE_AUTHORSHIP_FIREWALL` flag (default ON).
+
+**1. AI debate verdict (`ai_debate_engine`).** Removed structure's directional
+score from both cases: the `_struct_counts` block (+10 / +5) and the
+`directional_bias` block (+5) no longer add points under the firewall —
+structure now appears as `[witness]` commentary only. Since the verdict feeds
+the gate's `ai_verdict_supports_trade` check, structure can no longer buy gate
+support. New debate metadata: `structure_used_as_witness=true`,
+`structure_contributed_to_direction_score=false`,
+`structure_contributed_to_gate_support=false`, `debate_direction_source`
+(∈ {ai_brain, delivery, liquidity, protected_swings, narrative_authority,
+fallback_none}; taint guard forces fallback_none if a directional verdict
+cannot trace to a non-structure source).
+
+**2. Deterministic AI direction (`discretionary_ai._ai_direction`).** Dropped
+the `directional_bias` (+3) and MTF-structure (+2) votes under the firewall.
+The fallback AI's direction — which feeds the debate, fusion, and the NA-1 lens
+— now derives only from PO3 / playbook / qualification / tool (all firewalled
+or non-structure). Confidence *magnitude* from structural alignment is retained
+(magnitude, not direction) and noted permission-side.
+
+**3. Delivery fallback (`shared_context._delivery`).** Removed the
+`{bias}_bias_only` synthesis. PO3 absent + structure bias present →
+`insufficient_delivery_evidence` (conf 0); nothing at all → `unknown`. Never
+bullish/bearish from structure. This also closes the NA-1 delivery-lens leak:
+its string fallback (`startswith bullish/bearish`) can no longer match a
+structure-tainted delivery state.
+
+**June 11 (firewall ON):** 10:13 bullish structure adds 0 to the bullish debate
+case; 10:29 structure-tainted bullish cannot produce prepare_long/bullish_bias;
+10:20–10:40 bearish delivery (PO3) scores without any structure confirmation;
+13:17 bearish structure adds 0 to the bearish case; PO3 absent never becomes
+directional delivery.
+
+**Tests:** `tests/test_phase_ab2b_contamination_cleanup.py` (16) + updated
+`test_phase_5g_shared_context`. **Regression: 943 passed, 0 failed.** Rollback:
+`STRUCTURE_AUTHORSHIP_FIREWALL=false` restores legacy structure scoring.
+
+### Final structure-consumer classification (post AB-2B)
+
+| Consumer | Classification |
+|---|---|
+| qualification `_direction` | **removed** from authorship (AB-2A) |
+| playbook `_direction` step 3 | **removed** from authorship (AB-2A) |
+| ai_debate `_struct_counts` directional score | **removed** under firewall (AB-2B) |
+| ai_debate `directional_bias` score | **removed** under firewall (AB-2B) |
+| discretionary_ai `_ai_direction` structure votes | **removed** under firewall (AB-2B) |
+| shared_context `{bias}_bias_only` delivery | **removed** (AB-2B) |
+| toolbox / trade_intent direction | witness-only safe (inherits firewalled direction) |
+| NA-1 `_structure_lens` | witness-only safe (cannot override AI+Delivery) |
+| ai_brain `structure_WITNESS` | witness-only safe (tagged) |
+| ai_debate neutral `_struct_counts` conflict detect | permission-side safe (adds to NEUTRAL/stand-down only, never bull/bear) |
+| discretionary_ai `_ai_confidence` structural alignment | permission-side safe (magnitude, not direction) |
+| regime_features bias | permission-side safe (environmental feature) |
+| confidence_engine alignment | permission-side safe (magnitude) |
+| ai_snapshot_formatter / journal / display | witness-only safe (presentation) |
+
+**No "still dangerous" structure consumer remains.** Every directional-authorship
+and gate-support path is removed under the firewall; residual structure use is
+witness-only or permission-side magnitude/neutral, none of it directional.
