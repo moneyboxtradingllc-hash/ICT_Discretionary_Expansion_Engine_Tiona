@@ -217,15 +217,26 @@ def _sweep_semantic_direction(liquidity: dict) -> "str | None":
 
 
 def _direction_with_source(ai_context: dict, structure: dict, po3: dict,
-                           liquidity: "dict | None" = None) -> tuple:
+                           liquidity: "dict | None" = None,
+                           brain_thesis: "dict | None" = None) -> tuple:
     """
     Phase AB-2A — returns (direction, direction_source).
     Firewall ON (default): structure bias is a WITNESS; only non-structure
     sources may author direction. Firewall OFF: legacy structure-rooted path.
+    Phase AB-5B — ECU: when a Brain thesis is present it OWNS direction.
     """
     from generation_firewall.authorship import (
         firewall_enabled, authored_direction, SOURCE_LEGACY,
     )
+    # Phase AB-5B — ECU: under BRAIN_ECU_MODE the Brain owns direction. The
+    # mechanical firewall path becomes witness/fallback (used only when the
+    # Brain thesis is non-directional).
+    bt = (brain_thesis or {})
+    if bt and bt.get("owner") == "ai_brain":
+        bdir = (bt.get("direction") or "neutral").lower()
+        if bdir in ("bullish", "bearish", "conflicted"):
+            return bdir, "ai_brain"
+        # Brain non-directional → fall through to mechanical witness below
     bias = ai_context.get("directional_bias", "neutral")
     if firewall_enabled():
         return authored_direction(bias, po3, liquidity or {})
@@ -505,7 +516,8 @@ def qualify_trade(snapshot: dict) -> dict:
     status          = _status(opp_score, disqualified)
     grade           = _grade(opp_score, disqualified)
     direction, direction_source = _direction_with_source(
-        ai_context, structure, po3, snapshot.get("liquidity", {}))
+        ai_context, structure, po3, snapshot.get("liquidity", {}),
+        snapshot.get("brain_thesis"))
     trade_type      = _trade_type(ai_context)
     reasons         = _reasons(snapshot, direction)
     warnings        = _qual_warnings(snapshot, opp_score)

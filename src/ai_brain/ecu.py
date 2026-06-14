@@ -1,0 +1,85 @@
+"""
+Phase AB-5B — ECU migration: Brain produces the thesis that the mechanical
+layer validates and executes.
+
+`BRAIN_ECU_MODE` (default false) gates the whole migration. When OFF, nothing
+here runs and the system is bit-for-bit the pre-AB-5B mechanical-owned pipeline.
+When ON:
+  - `produce_thesis(snapshot)` runs the Brain (LLM if AI_BRAIN_LLM else the
+    deterministic NA core) over the evidence available at qualification time
+    (po3 delivery, liquidity, structure-witness) and returns the canonical
+    thesis: direction, forbidden_direction, opportunity, playbook_family,
+    tool_family, source, confidence.
+  - qualification / playbook consume this thesis as the ORIGINATING direction;
+    mechanical direction generation becomes witness-only.
+
+The Brain runs as a pre-pass inside build_snapshot BEFORE qualification, so the
+intelligence consumers receive Brain output. Never raises — on any failure the
+thesis is non-directional and the mechanical witness path resumes (logged).
+"""
+import os
+
+_STANCE = None   # module-level chronological stance memory for the ECU pre-pass
+
+
+def ecu_enabled() -> bool:
+    return os.getenv("BRAIN_ECU_MODE", "false").lower().strip() == "true"
+
+
+def _stance():
+    global _STANCE
+    if _STANCE is None:
+        from ai_brain.stance_memory import StanceMemory
+        _STANCE = StanceMemory(persist=True)
+    return _STANCE
+
+
+def _family_token(value, direction):
+    """Compact a tool/playbook family to a directional token or neutral."""
+    items = value if isinstance(value, list) else [value]
+    toks = [str(i).lower() for i in items if i]
+    if any(t.startswith("bull") for t in toks):
+        return "bullish"
+    if any(t.startswith("bear") for t in toks):
+        return "bearish"
+    return direction if direction in ("bullish", "bearish") else "none"
+
+
+def produce_thesis(snapshot: dict) -> dict:
+    """
+    Run the Brain pre-pass and return the canonical thesis. Never raises.
+    Returns {owner, source, direction, forbidden_direction, opportunity,
+             opportunity_type, playbook_family, tool_family, confidence,
+             dominant_reasoning}.
+    """
+    try:
+        from ai_brain.narrative_brain import run_narrative_brain, enabled as brain_enabled
+        if not brain_enabled():
+            return _empty("brain_disabled")
+        res = run_narrative_brain(snapshot, snapshot.get("symbol", "QQQ"), _stance())
+        o = res.get("output") or {}
+        direction = (o.get("narrative_direction") or "neutral").lower()
+        opportunity = direction in ("bullish", "bearish")
+        return {
+            "owner": "ai_brain",
+            "source": res.get("source"),
+            "direction": direction,
+            "forbidden_direction": o.get("forbidden_direction"),
+            "opportunity": opportunity,
+            "opportunity_type": o.get("narrative_phase"),
+            "playbook_family": o.get("recommended_playbook_family"),
+            "tool_family": o.get("recommended_tool_family"),
+            "confidence": o.get("phase_confidence", 0),
+            "dominant_reasoning": o.get("dominant_reasoning", ""),
+            "brain_block": res,
+        }
+    except Exception as exc:  # noqa: BLE001
+        return _empty(f"ecu_error:{exc}")
+
+
+def _empty(reason: str) -> dict:
+    return {"owner": "ai_brain", "source": reason, "direction": "neutral",
+            "forbidden_direction": None, "opportunity": False,
+            "opportunity_type": None, "playbook_family": None,
+            "tool_family": None, "confidence": 0, "dominant_reasoning": "",
+            "brain_block": None}

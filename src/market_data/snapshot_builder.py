@@ -122,10 +122,19 @@ def build_snapshot(
     # Phase 5F.2 grants regime CONSTRAINT authority via the permission matrix below.
     snapshot["market_regime"] = classify_regime(snapshot, all_normalized)
 
-    # Qualification: reads full snapshot including ai_context + memory
+    # ── Phase AB-5B — ECU pre-pass (gated BRAIN_ECU_MODE, default off) ─────────
+    # When ON, the Brain runs BEFORE the intelligence consumers and produces the
+    # canonical thesis they validate. When OFF, this is skipped entirely and the
+    # mechanical-owned pipeline is unchanged (bit-for-bit).
+    from ai_brain.ecu import ecu_enabled, produce_thesis
+    if ecu_enabled():
+        snapshot["brain_thesis"] = produce_thesis(snapshot)
+
+    # Qualification: validator. Opportunity SCORE is mechanical; direction is
+    # owned by the Brain thesis under ECU mode (see _direction_with_source).
     snapshot["qualification"] = qualify_trade(snapshot)
 
-    # Playbook: reads qualification + all evidence to select tactical game plan
+    # Playbook: validator/ranker. Direction owned by Brain thesis under ECU mode.
     snapshot["playbook"] = classify_playbook(snapshot)
 
     # Regime Permission Matrix (Phase 5F.2): constraint authority.

@@ -405,12 +405,6 @@ def classify_playbook(snapshot: dict) -> dict:
     Selects the highest-scoring playbook from the assembled snapshot.
     Returns no_playbook when qualification blocks or no playbook meets threshold.
     """
-    # Hard block: no trade qualification
-    if snapshot.get("qualification", {}).get("status") == "no_trade":
-        result = _NO_PLAYBOOK_RESULT.copy()
-        result["warnings"] = ["Qualification status is no_trade — no playbook eligible"]
-        return result
-
     # Score every playbook
     scorers = {
         "liquidity_sweep_reversal":    _score_liquidity_sweep_reversal,
@@ -421,6 +415,44 @@ def classify_playbook(snapshot: dict) -> dict:
         "range_expansion":              _score_range_expansion,
     }
     scores = {name: fn(snapshot) for name, fn in scorers.items()}
+
+    # ── Phase AB-5B — ECU: the Brain ORIGINATES the playbook ─────────────────
+    # When the Brain asserts an opportunity and names a valid playbook family,
+    # it originates the selection; the classifier becomes validator/ranker
+    # (computes the score + eligible tools, but does not block on threshold or
+    # qualification no_trade). Mechanical scoring resumes only when the Brain
+    # does not name a valid playbook.
+    _PHASE_TO_PLAYBOOK = {
+        "manipulation": "liquidity_sweep_reversal",
+        "reversal": "liquidity_sweep_reversal",
+        "exhaustion": "liquidity_sweep_reversal",
+        "continuation": "trend_continuation",
+        "distribution": "manipulation_to_distribution",
+    }
+    bt = snapshot.get("brain_thesis") or {}
+    if bt.get("owner") == "ai_brain" and bt.get("opportunity"):
+        bfam = (bt.get("playbook_family") or "").lower().strip()
+        bdir = _direction(snapshot)
+        if bfam not in scorers:    # map the Brain's phase/family to a playbook key
+            bfam = _PHASE_TO_PLAYBOOK.get((bt.get("opportunity_type") or "").lower().strip(), bfam)
+        if bfam in scorers and bdir in ("bullish", "bearish"):
+            return {
+                "selected_playbook":   bfam,
+                "playbook_confidence": max(int(bt.get("confidence", 0)), scores.get(bfam, 0)),
+                "direction":           bdir,
+                "direction_source":    "ai_brain",
+                "eligible_tools":      eligible_tools(bfam, bdir),
+                "preferred_tools":     preferred_tools(bfam, bdir),
+                "status":              _status(max(int(bt.get("confidence", 0)), scores.get(bfam, 0))),
+                "reasons":             [f"Brain-originated playbook ({bfam})"],
+                "warnings":            ["AB-5B: classifier is validator/ranker; Brain owns selection"],
+            }
+
+    # Hard block: no trade qualification (validator rejection)
+    if snapshot.get("qualification", {}).get("status") == "no_trade":
+        result = _NO_PLAYBOOK_RESULT.copy()
+        result["warnings"] = ["Qualification status is no_trade — no playbook eligible"]
+        return result
 
     best      = max(scores, key=scores.get)
     best_score = scores[best]
