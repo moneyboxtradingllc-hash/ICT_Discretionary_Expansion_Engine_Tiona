@@ -61,7 +61,11 @@ _GOOD_LLM = {  # a schema-core-valid LLM narrative payload
     "confidence_by_component": {"delivery": 25, "liquidity": 60, "structure": 40},
     "current_action": "avoid_bullish", "reason": "delivery bearish vs bias bullish",
     "must_not_do": ["do not trade bullish"], "protected_high_status": "approaching",
-    "protected_low_status": "none", "dominant_reasoning": "bearish delivery at protected high",
+    "protected_low_status": "none",
+    "dominant_reasoning": ("Buy-side liquidity was swept and reclaimed; price trades "
+        "near the protected high at 702.5 while delivery is bearish; the draw remains "
+        "sell-side liquidity at 699.6 in a manipulation phase; invalidation is a reclaim "
+        "above 702.5; the bot must not take bullish positions."),
     "recommended_playbook_family": "liquidity_sweep_reversal",
     "recommended_tool_family": ["bearish_ifvg"],
 }

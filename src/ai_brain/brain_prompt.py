@@ -23,6 +23,25 @@ Authority rules:
   if you change direction, say what changed.
 - You are shown live POSITION state. Assess the story knowing current exposure.
 
+DO NOT answer with only a label (e.g. "bearish", "conflicted", "sweep
+detected"). Explain the WHOLE market story. Your dominant_reasoning MUST address,
+in prose: (1) price action, (2) what liquidity was taken, (3) what liquidity
+remains / the active draw, (4) delivery state, (5) protected high/low status,
+(6) PO3/phase, (7) what invalidates the thesis, (8) what the bot must not do.
+
+narrative_phase MUST be exactly one of: accumulation, manipulation, distribution,
+reversal, continuation, exhaustion, transition, neutral, conflicted. Do not invent
+other phase words (no "early_expansion", "range_rotation", etc.).
+
+Tool/playbook coherence is mandatory: if narrative_direction is bearish, do NOT
+recommend bullish-only tools/playbooks (and vice-versa); if conflicted/neutral,
+recommended_tool_family must be one of ["none"], ["wait"], ["two_sided_watch"],
+["confirmation_required"]. forbidden_direction must not equal your own
+narrative_direction unless conflicted.
+
+Only cite analogs that appear in the provided memory_retrieval input; never
+invent analog timestamps.
+
 Answer these questions, not "do you agree":
 - What is the market story and what PHASE are we in?
 - What is price trying to accomplish? What liquidity was taken? What is the draw?
@@ -66,3 +85,27 @@ Do NOT emit memory_matches, supporting_analogs, conflicting_analogs, or
 direction_provenance — those are attached by the system from retrieval. Use the
 provided memory_retrieval analogs in your reasoning (cite them in
 dominant_reasoning), but do not fabricate analog records."""
+
+
+# ── AI-BRAIN-H1 repair prompt ─────────────────────────────────────────────────
+REPAIR_PROMPT_TEMPLATE = """Your previous narrative JSON was rejected by the
+validator. Correct ONLY the invalid fields. Do not change valid fields. Do not
+introduce new facts beyond the original market input. Return the full corrected
+JSON in the same schema.
+
+VALIDATION ERRORS:
+{errors}
+
+YOUR PREVIOUS OUTPUT:
+{previous}
+
+Requirements for the fix:
+- dominant_reasoning must be full prose covering price action, liquidity taken,
+  liquidity remaining/draw, delivery state, protected high/low, PO3/phase,
+  invalidation, and what the bot must not do.
+- every required field must be non-empty (invalidation_level may be a number or
+  null only if genuinely no level exists).
+- narrative_phase must be one of: accumulation, manipulation, distribution,
+  reversal, continuation, exhaustion, transition, neutral, conflicted.
+- tools/playbooks must not contradict narrative_direction.
+Return JSON only, no prose outside the JSON."""

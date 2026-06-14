@@ -23,10 +23,11 @@ import os
 import logging
 
 from ai_brain.brain_input import build_brain_input
-from ai_brain.brain_prompt import BRAIN_SYSTEM_PROMPT
+from ai_brain.brain_prompt import BRAIN_SYSTEM_PROMPT, REPAIR_PROMPT_TEMPLATE
 from ai_brain.brain_schema import (
     empty_brain_output, validate_brain_output, validate_llm_core,
 )
+from ai_brain.brain_validation import normalize_output, needs_repair
 from ai_brain.brain_persistence import persist_brain_call
 from narrative_authority.narrative_engine import build_narrative
 
@@ -144,17 +145,18 @@ def _deterministic(snapshot: dict, brain_input: dict, analogs: list) -> dict:
 
 # ── LLM path ──────────────────────────────────────────────────────────────────
 
-def _call_llm(brain_input: dict) -> dict:
+def _call_llm(brain_input: dict, repair: "dict | None" = None) -> dict:
     """
     Real LLM Brain call. Returns a full call record (never raises):
       {parsed, ok, model, prompt, user_content, raw_response, usage,
        fallback_reason}
     parsed is None + fallback_reason set on any failure (no silent success).
+    `repair` (optional): {"previous": dict, "errors": [...]} adds a repair turn.
     """
     user_content = json.dumps(brain_input, default=str)
     out = {"parsed": None, "ok": False, "model": None, "prompt": BRAIN_SYSTEM_PROMPT,
            "user_content": user_content, "raw_response": None, "usage": None,
-           "fallback_reason": None}
+           "fallback_reason": None, "is_repair": bool(repair)}
     try:
         from ai_layer.ai_api_adapter import _openai, _OPENAI_AVAILABLE  # type: ignore
     except Exception:
@@ -172,12 +174,14 @@ def _call_llm(brain_input: dict) -> dict:
         timeout = float(os.getenv("AI_BRAIN_TIMEOUT_SECONDS", "25"))
         client = _openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"),
                                 timeout=timeout, max_retries=0)
+        messages = [{"role": "system", "content": BRAIN_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_content}]
+        if repair:
+            messages.append({"role": "user", "content": REPAIR_PROMPT_TEMPLATE.format(
+                errors="\n".join(str(e) for e in repair.get("errors", [])),
+                previous=json.dumps(repair.get("previous", {}), default=str))})
         resp = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "system", "content": BRAIN_SYSTEM_PROMPT},
-                      {"role": "user", "content": user_content}],
-            timeout=timeout,
-        )
+            model=model, messages=messages, timeout=timeout)
         content = resp.choices[0].message.content or ""
         out["raw_response"] = content
         try:
@@ -232,36 +236,62 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
         except Exception:  # noqa: BLE001
             analogs = []
 
-        # ── AI-BRAIN-L: real LLM path with EXPLICIT (logged) fallback ────────
+        # ── AI-BRAIN-H1: LLM path with normalize → repair → explicit fallback ─
         llm_call = None
         source, fallback_reason = "deterministic", None
+        norm_notes, repair_errors, repaired = [], [], False
         if _llm_enabled():
             llm_call = _call_llm(brain_input)
-            if llm_call["ok"]:
-                source = "llm"
-                # Merge LLM narrative onto a full template, then inject the
-                # code-owned fields (retrieval analogs + provenance) the LLM is
-                # not asked to produce.
-                output = empty_brain_output()
-                output.update(llm_call["parsed"])
-                direction = output.get("narrative_direction", "neutral")
-                support, conflict = _split_analogs(analogs, direction)
-                output["memory_matches"] = analogs
-                output["supporting_analogs"] = support
-                output["conflicting_analogs"] = conflict
-                output["direction_provenance"] = {
-                    "source": "ai_brain", "structure_derived": False,
-                    "retrieval_used": bool(analogs)}
-            else:
-                # NOT a silent fallback: distinct source + logged reason.
+            if not llm_call["ok"]:
                 source = "llm_failed_fallback"
                 fallback_reason = llm_call["fallback_reason"]
-                _log.warning("AI_BRAIN_LLM enabled but call failed (%s) — "
-                             "explicit deterministic fallback at %s",
+                _log.warning("AI_BRAIN_LLM call failed (%s) — explicit "
+                             "deterministic fallback at %s",
                              fallback_reason, snapshot.get("timestamp"))
                 output = _deterministic(snapshot, brain_input, analogs)
-                output.setdefault("warnings", []).append(
-                    f"llm_fallback: {fallback_reason}")
+                output.setdefault("warnings", []).append(f"llm_fallback: {fallback_reason}")
+            else:
+                parsed = llm_call["parsed"]
+                # 1) deterministic normalization (enum/tool/forbidden/citations)
+                parsed, norm_notes = normalize_output(parsed, analogs)
+                # 2) repair-detection (completeness + reasoning depth)
+                need, repair_errors = needs_repair(parsed)
+                if need:
+                    repaired = True
+                    rep = _call_llm(brain_input, repair={"previous": parsed,
+                                                         "errors": repair_errors})
+                    if rep["ok"]:
+                        llm_call["repair_usage"] = rep.get("usage")
+                        llm_call["repair_raw"] = rep.get("raw_response")
+                        parsed, more_notes = normalize_output(rep["parsed"], analogs)
+                        norm_notes += more_notes
+                        need, repair_errors = needs_repair(parsed)
+                    else:
+                        repair_errors.append(f"repair_call_failed:{rep['fallback_reason']}")
+                if need:
+                    # repair did not fix it → EXPLICIT fallback (logged)
+                    source = "llm_failed_fallback"
+                    fallback_reason = f"repair_incomplete:{repair_errors}"
+                    _log.warning("AI_BRAIN_LLM repair incomplete (%s) — explicit "
+                                 "deterministic fallback at %s",
+                                 repair_errors, snapshot.get("timestamp"))
+                    output = _deterministic(snapshot, brain_input, analogs)
+                    output.setdefault("warnings", []).append(f"llm_fallback: {fallback_reason}")
+                else:
+                    source = "llm"
+                    output = empty_brain_output()
+                    output.update(parsed)
+                    direction = output.get("narrative_direction", "neutral")
+                    support, conflict = _split_analogs(analogs, direction)
+                    output["memory_matches"] = analogs
+                    output["supporting_analogs"] = support
+                    output["conflicting_analogs"] = conflict
+                    output["direction_provenance"] = {
+                        "source": "ai_brain", "structure_derived": False,
+                        "retrieval_used": bool(analogs)}
+                    if norm_notes:
+                        output.setdefault("warnings", []).append(
+                            f"normalized:{len(norm_notes)} field(s)")
         else:
             output = _deterministic(snapshot, brain_input, analogs)
 
@@ -285,6 +315,11 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             "llm_raw_response": (llm_call or {}).get("raw_response"),
             "llm_usage": (llm_call or {}).get("usage"),
             "fallback_reason": fallback_reason,
+            # AI-BRAIN-H1 hardening audit trail
+            "normalization_notes": norm_notes,
+            "repair_attempted": repaired,
+            "repair_errors": repair_errors,
+            "repair_usage": (llm_call or {}).get("repair_usage"),
             "input_degraded": brain_input.get("degraded", []),
             "input_payload": brain_input,
             "parsed_output": output,
@@ -302,6 +337,8 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             "llm_model": (llm_call or {}).get("model"),
             "llm_usage": (llm_call or {}).get("usage"),
             "fallback_reason": fallback_reason,
+            "normalization_notes": norm_notes,
+            "repair_attempted": repaired,
             "input_degraded": brain_input.get("degraded", []),
             "output": output,
             "persisted": persisted_path,
