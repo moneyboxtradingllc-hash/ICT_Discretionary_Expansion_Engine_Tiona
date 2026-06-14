@@ -13,8 +13,18 @@ _EASTERN      = pytz.timezone("America/New_York")
 _PROJECT_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 )
+# Legacy defaults + test patch-points; INTENT_ARCHIVE_DIR / PAPER_TRADES_DIR
+# (set by an active InstanceContext) override them per-instance.
 _ARCHIVE_DIR = os.path.join(_PROJECT_ROOT, "data", "intent_archive")
 _TRADES_DIR  = os.path.join(_PROJECT_ROOT, "data", "paper_trades")
+
+
+def _archive_dir() -> str:
+    return os.getenv("INTENT_ARCHIVE_DIR") or _ARCHIVE_DIR
+
+
+def _trades_dir() -> str:
+    return os.getenv("PAPER_TRADES_DIR") or _TRADES_DIR
 
 
 def _date_range(days: int) -> list[str]:
@@ -26,7 +36,7 @@ def load_all_intent_records(symbol: str, days: int = 30) -> list[dict]:
     """Load all intent archive records for the past N days — flat list."""
     records: list[dict] = []
     for date_str in _date_range(days):
-        fp = os.path.join(_ARCHIVE_DIR, f"{date_str}_{symbol}_intents.json")
+        fp = os.path.join(_archive_dir(), f"{date_str}_{symbol}_intents.json")
         if not os.path.exists(fp):
             continue
         try:
@@ -45,7 +55,7 @@ def load_completed_trades(symbol: str, days: int = 30) -> list[dict]:
     """
     trades: list[dict] = []
     for date_str in _date_range(days):
-        fp = os.path.join(_TRADES_DIR, f"{date_str}_{symbol}_paper_trades.json")
+        fp = os.path.join(_trades_dir(), f"{date_str}_{symbol}_paper_trades.json")
         if not os.path.exists(fp):
             continue
         try:

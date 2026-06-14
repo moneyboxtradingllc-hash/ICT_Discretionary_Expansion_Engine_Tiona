@@ -1,0 +1,21 @@
+# DEPLOY-1 template — Topstep 50k evaluation profile (adapter is a stub; no live money)
+owner_name: ""
+broker: topstep
+account_type: evaluation
+account_id: ""
+symbol: QQQ
+contract_size: 1
+session_windows:
+  - "09:30-16:00"
+execution_mode: paper          # DEPLOY-1 stays paper/shadow; never live
+risk_profile:
+  max_daily_loss: 500
+  max_trades_per_day: 2
+  risk_per_trade: 500
+  risk_label: topstep_50k
+divergence:
+  confidence_calibration: 1.0
+  scan_cadence_seconds: 60
+  session_preference: rth
+  allowed_playbooks: null      # null = all
+  allowed_tools: null

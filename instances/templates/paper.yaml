@@ -1,0 +1,21 @@
+# DEPLOY-1 template — generic paper instance (Alpaca paper adapter)
+owner_name: ""
+broker: paper
+account_type: paper
+account_id: ""
+symbol: QQQ
+contract_size: 1
+session_windows:
+  - "09:30-16:00"
+execution_mode: paper
+risk_profile:
+  max_daily_loss: 500
+  max_trades_per_day: 2
+  risk_per_trade: 500
+  risk_label: standard
+divergence:
+  confidence_calibration: 1.0
+  scan_cadence_seconds: 60
+  session_preference: rth
+  allowed_playbooks: null
+  allowed_tools: null

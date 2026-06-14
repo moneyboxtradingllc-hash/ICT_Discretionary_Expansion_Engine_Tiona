@@ -18,7 +18,12 @@ _EASTERN      = pytz.timezone("America/New_York")
 _PROJECT_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 )
-_REPORTS_DIR  = os.path.join(_PROJECT_ROOT, "data", "activation_reports")
+# Legacy default + patch-point; ACTIVATION_REPORTS_DIR (InstanceContext) overrides.
+_REPORTS_DIR = os.path.join(_PROJECT_ROOT, "data", "activation_reports")
+
+
+def _reports_dir() -> str:
+    return os.getenv("ACTIVATION_REPORTS_DIR") or _REPORTS_DIR
 
 
 def format_report_line(plan: dict, runner: dict) -> str:
@@ -58,11 +63,11 @@ def log_activation_event(plan: dict, runner: dict, symbol: str) -> None:
         return   # no log entry for routine disabled state
 
     try:
-        os.makedirs(_REPORTS_DIR, exist_ok=True)
+        os.makedirs(_reports_dir(), exist_ok=True)
         now_et   = datetime.now(_EASTERN)
         date_str = now_et.strftime("%Y%m%d")
         filename = f"{date_str}_{symbol}_activation.json"
-        filepath = os.path.join(_REPORTS_DIR, filename)
+        filepath = os.path.join(_reports_dir(), filename)
 
         # Load existing log or start fresh
         if os.path.exists(filepath):

@@ -36,6 +36,10 @@ data/paper_trades/*
 data/activation_reports/*
 !data/activation_reports/.gitkeep
 
+# DEPLOY-1 — per-instance state is never committed (only templates are tracked)
+data/instances/
+data/global_memory/
+
 snapshots/*
 !snapshots/.gitkeep
 

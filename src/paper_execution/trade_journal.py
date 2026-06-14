@@ -15,18 +15,24 @@ _EASTERN      = pytz.timezone("America/New_York")
 _PROJECT_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 )
+# Legacy default + test patch-point. DEPLOY-1: PAPER_TRADES_DIR (set by an active
+# InstanceContext) overrides this to redirect the journal per-instance.
 _TRADES_DIR   = os.path.join(_PROJECT_ROOT, "data", "paper_trades")
+
+
+def _trades_dir() -> str:
+    return os.getenv("PAPER_TRADES_DIR") or _TRADES_DIR
 
 
 # ── File path helpers ─────────────────────────────────────────────────────────
 
 def _journal_filepath(symbol: str) -> str:
     date_str = datetime.now(_EASTERN).strftime("%Y%m%d")
-    return os.path.join(_TRADES_DIR, f"{date_str}_{symbol}_paper_trades.json")
+    return os.path.join(_trades_dir(), f"{date_str}_{symbol}_paper_trades.json")
 
 
 def _journal_filepath_for_date(symbol: str, date_str: str) -> str:
-    return os.path.join(_TRADES_DIR, f"{date_str}_{symbol}_paper_trades.json")
+    return os.path.join(_trades_dir(), f"{date_str}_{symbol}_paper_trades.json")
 
 
 def _load_file(filepath: str) -> dict:
@@ -42,7 +48,7 @@ def _load_file(filepath: str) -> dict:
 
 def _save_file(filepath: str, data: dict) -> bool:
     """Save journal data to filepath. Returns True on success."""
-    os.makedirs(_TRADES_DIR, exist_ok=True)
+    os.makedirs(_trades_dir(), exist_ok=True)
     try:
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, default=str)

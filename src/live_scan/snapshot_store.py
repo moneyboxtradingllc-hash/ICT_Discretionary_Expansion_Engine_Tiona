@@ -11,7 +11,12 @@ _EASTERN     = pytz.timezone("America/New_York")
 _PROJECT_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 )
+# Legacy default + test patch-point; LIVE_SNAPSHOTS_DIR (InstanceContext) overrides.
 STORE_DIR = os.path.join(_PROJECT_ROOT, "data", "live_snapshots")
+
+
+def _store_dir() -> str:
+    return os.getenv("LIVE_SNAPSHOTS_DIR") or STORE_DIR
 
 
 def save_snapshot(snapshot: dict, symbol: str) -> str:
@@ -19,11 +24,11 @@ def save_snapshot(snapshot: dict, symbol: str) -> str:
     Persist a compact scan snapshot to data/live_snapshots/.
     Returns the full filepath on success. Raises on I/O failure.
     """
-    os.makedirs(STORE_DIR, exist_ok=True)
+    os.makedirs(_store_dir(), exist_ok=True)
 
     now_et   = datetime.now(_EASTERN)
     filename = now_et.strftime("%Y%m%d_%H%M%S") + f"_{symbol}.json"
-    filepath = os.path.join(STORE_DIR, filename)
+    filepath = os.path.join(_store_dir(), filename)
 
     tb = snapshot.get("toolbox", {})
 

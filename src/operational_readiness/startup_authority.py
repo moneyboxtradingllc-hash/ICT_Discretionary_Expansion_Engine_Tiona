@@ -185,7 +185,9 @@ def _check_data_feed(symbol: str) -> tuple:
 
 
 def _check_journal_writable() -> tuple:
-    path = os.path.join("data", "paper_trades")
+    # DEPLOY-1 — probe the active instance's journal dir (PAPER_TRADES_DIR).
+    from deployment.data_paths import resolve
+    path = resolve("PAPER_TRADES_DIR", "data", "paper_trades", anchored=True)
     try:
         os.makedirs(path, exist_ok=True)
         probe = os.path.join(path, ".ops_probe")

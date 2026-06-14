@@ -18,8 +18,18 @@ import re
 from ai_retrieval.memory_schema import make_record, win_loss_be_from_r
 from ai_retrieval.vector_store import add_records
 
+# Legacy relative defaults + patch-points; LIVE_SNAPSHOTS_DIR / PAPER_TRADES_DIR
+# (set by an active InstanceContext) override them per-instance.
 _SNAP_DIR = os.path.join("data", "live_snapshots")
 _TRADE_DIR = os.path.join("data", "paper_trades")
+
+
+def _snap_dir() -> str:
+    return os.getenv("LIVE_SNAPSHOTS_DIR") or _SNAP_DIR
+
+
+def _trade_dir() -> str:
+    return os.getenv("PAPER_TRADES_DIR") or _TRADE_DIR
 
 
 def _sweep_from_summary(summary: str) -> tuple:
@@ -92,13 +102,13 @@ def backfill_dates(dates=("20260610", "20260611"), symbol="QQQ") -> dict:
     market_records, trade_records = [], []
 
     for date in dates:
-        for fp in sorted(glob.glob(os.path.join(_SNAP_DIR, f"{date}_*_{symbol}.json"))):
+        for fp in sorted(glob.glob(os.path.join(_snap_dir(), f"{date}_*_{symbol}.json"))):
             try:
                 snap = json.load(open(fp, encoding="utf-8"))
                 market_records.append(_market_record(snap))
             except Exception:  # noqa: BLE001
                 continue
-        tpath = os.path.join(_TRADE_DIR, f"{date}_{symbol}_paper_trades.json")
+        tpath = os.path.join(_trade_dir(), f"{date}_{symbol}_paper_trades.json")
         if os.path.exists(tpath):
             try:
                 trades = json.load(open(tpath, encoding="utf-8")).get("trades", [])
