@@ -89,9 +89,23 @@ Output ONLY valid JSON, exactly this schema, no prose, no markdown:
  "protected_high_status": "approaching|rejecting|violating|below|none",
  "protected_low_status": "approaching|rejecting|violating|above|none",
  "dominant_reasoning": "<the single strongest reason for your direction>",
- "recommended_playbook_family": "<string>",
- "recommended_tool_family": ["<string>", ...]
+ "recommended_playbook_family": "<one of: liquidity_sweep_reversal, trend_continuation, manipulation_to_distribution, failed_breakout_reversal, opening_drive, range_expansion, none>",
+ "recommended_tool_family": ["<one of: fvg, ifvg, order_block, breaker, rejection_block, ote_retracement, mss_retest, ote_after_reclaim, opening_fvg, opening_order_block, range_break_retest, none>"]
 }
+
+AB-5C: recommended_playbook_family MUST be one of the six canonical playbooks
+(or none). recommended_tool_family MUST be a single tool family token (or none)
+— do NOT prefix bullish/bearish; the direction is taken from narrative_direction.
+When narrative_direction is bullish or bearish you MUST choose a CONCRETE
+playbook and a CONCRETE tool family (NOT "none"/"wait"/"confirmation_required").
+Only conflicted/neutral narratives may use "none". Tool families that fit each
+playbook: liquidity_sweep_reversal → ifvg/breaker/rejection_block/mss_retest/
+ote_after_reclaim; trend_continuation → fvg/order_block/ote_retracement/mss_retest;
+manipulation_to_distribution → ifvg/breaker/rejection_block/fvg;
+failed_breakout_reversal → breaker/ifvg/rejection_block/mss_retest; opening_drive
+→ opening_fvg/opening_order_block/fvg/ote_retracement; range_expansion →
+range_break_retest/fvg/order_block/ote_retracement. Pick the tool that fits THIS
+story; the mechanical layer validates readiness and rejects ineligible choices.
 
 Do NOT emit memory_matches, supporting_analogs, conflicting_analogs, or
 direction_provenance — those are attached by the system from retrieval. Use the

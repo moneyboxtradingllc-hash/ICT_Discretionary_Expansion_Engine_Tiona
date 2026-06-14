@@ -4,12 +4,53 @@ Selects entry tools from existing snapshot evidence.
 No execution, no order placement, no indicator recalculation.
 """
 
-from toolbox.tool_library import eligible_tools, normalize_tool, VALID_TOOLS
+import os
+
+from toolbox.tool_library import eligible_tools, preferred_tools, normalize_tool, VALID_TOOLS
 from toolbox.tool_readiness import analyze_readiness
 from toolbox.price_levels import build_price_level
 from toolbox.entry_trigger_prep import build_trigger_prep
 
 _TFS = ["15m", "5m", "3m", "1m"]
+
+_NEUTRAL_TOOL_TOKENS = {"none", "wait", "two_sided_watch", "confirmation_required", ""}
+
+
+def _brain_preferred_tool(snapshot: dict, pb_dir: str, candidate_tools: list) -> tuple:
+    """
+    Phase AB-5C — resolve the Brain's recommended_tool_family to a canonical tool
+    and validate it is an eligible/ready candidate. Returns (tool|None, note).
+    Direction comes from the playbook direction (family tokens are direction-
+    agnostic). ECU-gated; never raises.
+    """
+    if os.getenv("BRAIN_ECU_MODE", "false").lower().strip() != "true":
+        return None, None
+    bt = snapshot.get("brain_thesis") or {}
+    fam = bt.get("tool_family")
+    if isinstance(fam, list):
+        fam = next((x for x in fam
+                    if str(x).lower().strip() not in _NEUTRAL_TOOL_TOKENS), None)
+    fam = (str(fam).lower().strip() if fam else "")
+    if pb_dir not in ("bullish", "bearish"):
+        return None, "non_directional"
+
+    # 1. explicit Brain tool family (preferred when the LLM names a concrete one)
+    if fam and fam not in _NEUTRAL_TOOL_TOKENS:
+        cand = fam if fam in VALID_TOOLS else f"{pb_dir}_{fam}"
+        if cand not in VALID_TOOLS:
+            cand = normalize_tool(cand) or normalize_tool(fam)
+        if cand and cand in candidate_tools:
+            return cand, "ai_brain_selected"
+        return None, f"brain_tool_{fam}_not_eligible_or_ready"
+
+    # 2. Brain emitted no concrete tool → derive from the Brain-chosen playbook's
+    #    canonical preferred tool (a deterministic consequence of the Brain's
+    #    playbook+direction). Still Brain-owned (not mechanical score-ranking).
+    pb = (snapshot.get("playbook", {}) or {}).get("selected_playbook")
+    for t in preferred_tools(pb, pb_dir):
+        if t in candidate_tools:
+            return t, "ai_brain_playbook_derived"
+    return None, "no_brain_tool_family"
 
 _NO_TOOLBOX = {
     "preferred_tool":                  None,
@@ -481,7 +522,18 @@ def run_toolbox(snapshot: dict) -> dict:
         result["warnings"] = ["no eligible tool scored above threshold (score < 40)"]
         return result
 
+    # ── Phase AB-5C — ECU: the Brain SELECTS the tool ────────────────────────
+    # Under BRAIN_ECU_MODE the Brain's recommended_tool_family designates the
+    # preferred tool; the toolbox is the validator (it scored readiness above and
+    # rejects the Brain's choice if it is not eligible/ready). Mechanical ranking
+    # (candidates[0]) is only the fallback when the Brain names no eligible tool.
     preferred = candidates[0]
+    preferred_source = "mechanical"
+    brain_pick, brain_note = _brain_preferred_tool(snapshot, pb_dir,
+                                                   [c["tool"] for c in candidates])
+    if brain_pick:
+        preferred = next(c for c in candidates if c["tool"] == brain_pick)
+        preferred_source = brain_note   # ai_brain_selected | ai_brain_playbook_derived
 
     near_tie = [
         c["tool"] for c in candidates[1:]
@@ -497,8 +549,12 @@ def run_toolbox(snapshot: dict) -> dict:
     best_raw = min(candidates, key=lambda c: _RAW_RANK.get(c["raw_status"], 99))["raw_status"]
     best_eff = min(candidates, key=lambda c: _EFF_RANK.get(c["effective_status"], 99))["effective_status"]
 
+    if brain_note and not brain_pick:
+        global_warnings.append(f"ECU: {brain_note} — validator fallback to mechanical rank")
+
     return {
         "preferred_tool":                  preferred["tool"],
+        "preferred_tool_source":           preferred_source,   # AB-5C: ai_brain | mechanical
         "toolbox_status":                  preferred["effective_status"],
         "tool_confidence":                 preferred["score"],
         "near_tie_tools":                  near_tie,
