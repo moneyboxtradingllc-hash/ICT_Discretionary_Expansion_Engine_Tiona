@@ -184,6 +184,11 @@ def build_brain_input(snapshot: dict, stance_history: dict) -> dict:
             },
             "conflicts": na.get("conflict_flags", []),
             "warnings":  na.get("warnings", []),
+            # NEWS-1 — non-directional market-awareness context (present only
+            # when NEWS_LAYER_ENABLED attached it upstream). Context only: it
+            # carries event-risk/awareness, never a direction or a trade.
+            **({"news_context": snapshot["news_context"]}
+               if isinstance(snapshot.get("news_context"), dict) else {}),
         }
     except Exception as exc:  # noqa: BLE001
         return {"timestamp": snapshot.get("timestamp"), "degraded": [f"input_error:{exc}"]}

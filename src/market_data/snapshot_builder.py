@@ -122,6 +122,15 @@ def build_snapshot(
     # Phase 5F.2 grants regime CONSTRAINT authority via the permission matrix below.
     snapshot["market_regime"] = classify_regime(snapshot, all_normalized)
 
+    # ── Phase NEWS-1 — News Intelligence pre-pass (gated NEWS_LAYER_ENABLED) ───
+    # Attaches non-directional market-awareness context (scheduled events,
+    # breaking news, event-risk state) so the Brain can weigh it. Runs BEFORE the
+    # ECU pre-pass so the Brain receives it. News never authors direction or
+    # trades. When OFF, skipped entirely — pipeline bit-for-bit unchanged.
+    from news.news_engine import news_enabled, build_news_context
+    if news_enabled():
+        snapshot["news_context"] = build_news_context(snapshot.get("timestamp"))
+
     # ── Phase AB-5B — ECU pre-pass (gated BRAIN_ECU_MODE, default off) ─────────
     # When ON, the Brain runs BEFORE the intelligence consumers and produces the
     # canonical thesis they validate. When OFF, this is skipped entirely and the

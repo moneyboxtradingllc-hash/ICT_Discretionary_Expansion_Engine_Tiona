@@ -23,7 +23,9 @@ import os
 import logging
 
 from ai_brain.brain_input import build_brain_input
-from ai_brain.brain_prompt import BRAIN_SYSTEM_PROMPT, REPAIR_PROMPT_TEMPLATE
+from ai_brain.brain_prompt import (
+    BRAIN_SYSTEM_PROMPT, REPAIR_PROMPT_TEMPLATE, NEWS_CONTEXT_ADDENDUM,
+)
 from ai_brain.brain_schema import (
     empty_brain_output, validate_brain_output, validate_llm_core,
 )
@@ -154,7 +156,12 @@ def _call_llm(brain_input: dict, repair: "dict | None" = None) -> dict:
     `repair` (optional): {"previous": dict, "errors": [...]} adds a repair turn.
     """
     user_content = json.dumps(brain_input, default=str)
-    out = {"parsed": None, "ok": False, "model": None, "prompt": BRAIN_SYSTEM_PROMPT,
+    # NEWS-1 — append the news-awareness clause ONLY when news_context is present
+    # (NEWS_LAYER_ENABLED). Base prompt is unchanged otherwise (regression-safe).
+    system_prompt = BRAIN_SYSTEM_PROMPT
+    if isinstance(brain_input.get("news_context"), dict):
+        system_prompt = BRAIN_SYSTEM_PROMPT + NEWS_CONTEXT_ADDENDUM
+    out = {"parsed": None, "ok": False, "model": None, "prompt": system_prompt,
            "user_content": user_content, "raw_response": None, "usage": None,
            "fallback_reason": None, "is_repair": bool(repair)}
     try:
@@ -174,7 +181,7 @@ def _call_llm(brain_input: dict, repair: "dict | None" = None) -> dict:
         timeout = float(os.getenv("AI_BRAIN_TIMEOUT_SECONDS", "25"))
         client = _openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"),
                                 timeout=timeout, max_retries=0)
-        messages = [{"role": "system", "content": BRAIN_SYSTEM_PROMPT},
+        messages = [{"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_content}]
         if repair:
             messages.append({"role": "user", "content": REPAIR_PROMPT_TEMPLATE.format(

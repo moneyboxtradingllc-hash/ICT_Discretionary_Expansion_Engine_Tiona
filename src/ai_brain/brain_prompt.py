@@ -113,6 +113,31 @@ provided memory_retrieval analogs in your reasoning (cite them in
 dominant_reasoning), but do not fabricate analog records."""
 
 
+# ── NEWS-1 news-awareness addendum ────────────────────────────────────────────
+# Appended to the system prompt ONLY when the payload carries news_context
+# (NEWS_LAYER_ENABLED). It does not alter the base prompt otherwise. News is
+# CONTEXT: it may temper certainty or stand the bot down, but it may NEVER
+# author direction or manufacture a trade. Price action remains primary.
+NEWS_CONTEXT_ADDENDUM = """
+
+MARKET INTELLIGENCE (news_context) — CONTEXT ONLY, NOT A DIRECTIONAL INPUT:
+The payload may include a `news_context` block (scheduled economic events,
+breaking news, an event-risk state). Treat it strictly as situational awareness:
+- You MAY reduce confidence, lower narrative certainty, advise waiting for
+  confirmation, or stand down when risk_state is high_risk / stand_down, or when
+  a high-impact event (CPI, FOMC, NFP, Powell) is imminent, or when relevant
+  breaking news is active.
+- You MUST NOT derive narrative_direction from news. News never makes a market
+  bullish or bearish for you; only price/delivery/liquidity/protected-swing
+  evidence does. A release "beating forecast" is NOT a reason to be bullish.
+- You MUST NOT create or justify a trade from a headline or a release alone.
+- Price action remains primary. If news_context and clean price evidence
+  disagree on urgency, note it in your reasoning; do not let news flip direction.
+Example of correct use: "Thesis bearish on delivery; CPI in 6 minutes
+(high_risk) — confidence reduced, await post-event confirmation."
+"""
+
+
 # ── AI-BRAIN-H1 repair prompt ─────────────────────────────────────────────────
 REPAIR_PROMPT_TEMPLATE = """Your previous narrative JSON was rejected by the
 validator. Correct ONLY the invalid fields. Do not change valid fields. Do not
