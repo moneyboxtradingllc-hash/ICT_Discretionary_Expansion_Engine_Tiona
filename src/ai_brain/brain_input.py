@@ -137,12 +137,20 @@ def build_brain_input(snapshot: dict, stance_history: dict) -> dict:
                 "volatility_state": mr.get("volatility_state"),
                 "expansion_state":  mr.get("expansion_state"),
             },
-            "structure_WITNESS": {
-                tf: {"bias": (struct.get(tf, {}) or {}).get("bias"),
-                     "state": (struct.get(tf, {}) or {}).get("state"),
-                     "bos": (struct.get(tf, {}) or {}).get("bos"),
-                     "mss": (struct.get(tf, {}) or {}).get("mss")}
-                for tf in _TFS
+            # AI-BRAIN-H2 — structure is WITNESS ONLY and NON-DIRECTIONAL here.
+            # The directional fields (bias, directional state) are removed from
+            # the LLM payload — they were the AB-5A-S leak that let structure
+            # override clean delivery. Only mechanical, non-directional facts
+            # (swing levels + break/shift event booleans) remain.
+            "STRUCTURE_WITNESS": {
+                "_disclaimer": ("STRUCTURE WITNESS ONLY — NOT DIRECTIONAL "
+                                "AUTHORITY. Do not use to choose direction; only "
+                                "to note possible lag/conflict."),
+                **{tf: {"last_swing_high": (struct.get(tf, {}) or {}).get("last_swing_high"),
+                        "last_swing_low":  (struct.get(tf, {}) or {}).get("last_swing_low"),
+                        "bos_event": bool((struct.get(tf, {}) or {}).get("bos")),
+                        "mss_event": bool((struct.get(tf, {}) or {}).get("mss"))}
+                   for tf in _TFS},
             },
             "delivery": {
                 "state":      sc.get("delivery_state"),
@@ -168,11 +176,11 @@ def build_brain_input(snapshot: dict, stance_history: dict) -> dict:
             "playbook_toolbox": _two_sided_inventory(snapshot),
             "position": _position(snapshot),
             "stance_history": stance_history,
+            # AI-BRAIN-H2 — environmental only. The directional NA/council
+            # "suggested side" fields are isolated OUT of the LLM payload so the
+            # Brain derives direction independently from clean evidence.
             "governance_context": {
                 "regime": mr.get("regime_label"),
-                "council_dominant": (snapshot.get("council", {}) or {}).get("report", {}).get("dominant_position"),
-                "narrative_authority_direction": na.get("narrative_direction"),
-                "narrative_forbidden": na.get("forbidden_trade_direction"),
             },
             "conflicts": na.get("conflict_flags", []),
             "warnings":  na.get("warnings", []),

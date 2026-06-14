@@ -27,7 +27,7 @@ from ai_brain.brain_prompt import BRAIN_SYSTEM_PROMPT, REPAIR_PROMPT_TEMPLATE
 from ai_brain.brain_schema import (
     empty_brain_output, validate_brain_output, validate_llm_core,
 )
-from ai_brain.brain_validation import normalize_output, needs_repair
+from ai_brain.brain_validation import normalize_output, needs_repair, scan_payload_taint
 from ai_brain.brain_persistence import persist_brain_call
 from narrative_authority.narrative_engine import build_narrative
 
@@ -240,7 +240,15 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
         llm_call = None
         source, fallback_reason = "deterministic", None
         norm_notes, repair_errors, repaired = [], [], False
-        if _llm_enabled():
+        taint_clean, taint_paths = scan_payload_taint(brain_input)
+        if _llm_enabled() and not taint_clean:
+            # AI-BRAIN-H2 — contaminated input: do NOT call the LLM.
+            source, fallback_reason = "contaminated_input", f"taint:{taint_paths}"
+            _log.warning("AI_BRAIN_LLM payload contaminated (%s) — no LLM call, "
+                         "deterministic fallback at %s", taint_paths, snapshot.get("timestamp"))
+            output = _deterministic(snapshot, brain_input, analogs)
+            output.setdefault("warnings", []).append(f"contaminated_input: {taint_paths}")
+        elif _llm_enabled():
             llm_call = _call_llm(brain_input)
             if not llm_call["ok"]:
                 source = "llm_failed_fallback"

@@ -233,3 +233,34 @@ def needs_repair(parsed: dict) -> tuple:
         if not ok:
             errors.append(f"shallow_reasoning:covered={covered}")
     return (len(errors) > 0), errors
+
+
+# ── AI-BRAIN-H2: prompt-input taint guard ─────────────────────────────────────
+import json as _json
+
+# Forbidden structure-direction terms that must never reach the LLM prompt
+# OUTSIDE the explicitly-labeled STRUCTURE_WITNESS block.
+_TAINT_TERMS = (
+    "directional_bias", "market_bias", "narrative_bias",
+    "bullish_bias", "bearish_bias", "bias_only", "structure_summary",
+)
+
+
+def scan_payload_taint(payload: dict) -> tuple:
+    """
+    (clean: bool, contamination_paths: list). Serializes the LLM payload MINUS
+    the STRUCTURE_WITNESS block and scans for forbidden structure-direction
+    keys/terms. STRUCTURE_WITNESS is allowed (it is explicitly labeled witness
+    and carries no directional fields). Never raises.
+    """
+    try:
+        scan = dict(payload or {})
+        scan.pop("STRUCTURE_WITNESS", None)   # labeled witness is exempt
+        blob = _json.dumps(scan, default=str).lower()
+        hits = [t for t in _TAINT_TERMS if t in blob]
+        # also catch a raw structure 'bias' key anywhere outside the witness block
+        if '"bias"' in blob:
+            hits.append("unlabeled_bias_key")
+        return (len(hits) == 0), hits
+    except Exception as exc:  # noqa: BLE001
+        return False, [f"taint_scan_error:{exc}"]
