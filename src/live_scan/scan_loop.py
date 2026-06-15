@@ -33,6 +33,7 @@ from narrative_authority.narrative_engine  import build_narrative
 from narrative_authority.protected_swings  import ProtectedSwingTracker
 from ai_brain.narrative_brain              import run_narrative_brain
 from ai_brain.stance_memory                import StanceMemory
+from ai_brain.thesis_lifecycle             import ThesisLifecycleEngine
 from ai_brain.divergence                   import compute_divergence
 from ai_retrieval.retrieval                import retrieve_for_snapshot
 from rule_governance.shadow_evaluator      import evaluate_shadow_rules
@@ -306,6 +307,22 @@ def _print_scan_summary(snapshot: dict, symbol: str, scan_num: int, saved_path: 
         )
         if na.get("conflict_flags"):
             print(f"Narr Conflict : {', '.join(na['conflict_flags'])}")
+
+    # Phase AB-7 — Persistent Thesis Lifecycle
+    tl = snapshot.get("thesis_lifecycle", {})
+    if tl.get("enabled"):
+        at = tl.get("active_thesis") or {}
+        if at:
+            print(
+                f"Thesis Life   : {tl.get('mode','?').upper()} | {tl.get('action','?')}"
+                f" | {at.get('thesis_type','?')} ({at.get('direction','?')})"
+                f" | {at.get('status','?')}"
+                f" | conf={at.get('confidence',0)}"
+                f" | age={at.get('age_scans',0)} scans"
+                f" | id={(at.get('thesis_id') or '')[-8:]}"
+            )
+        else:
+            print(f"Thesis Life   : {tl.get('mode','?').upper()} | {tl.get('action','?')} | no active thesis")
 
     da = snapshot.get("decision_authority", {})
     da_decision = (da.get("decision") or "stand_down").upper()
@@ -728,6 +745,7 @@ def run_scan_loop():
     setup_tracker            = SetupTracker()
     swing_tracker            = ProtectedSwingTracker()   # Phase NA-1
     stance_memory            = StanceMemory()            # Phase AB-1 (brain self-memory)
+    thesis_engine            = ThesisLifecycleEngine(symbol=symbol)   # Phase AB-7 (persistent thesis)
     prev_experience_summary  = None   # Phase 3A: carry forward for AI input next scan
     # Phase 5E.3: carry 5C/5D/5E summaries forward so AI sees them on the next scan
     prev_memory_search       = None
@@ -845,6 +863,7 @@ def run_scan_loop():
                     prior_memory_search=prev_memory_search,
                     prior_dashboard=prev_dashboard,
                     prior_recommendations=prev_recommendations,
+                    thesis_engine=thesis_engine,
                 )
             except Exception as exc:
                 print(f"  [SNAPSHOT ERROR scan #{scan_count}] {exc}")

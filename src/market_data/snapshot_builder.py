@@ -32,6 +32,7 @@ def build_snapshot(
     prior_memory_search: dict = None,
     prior_dashboard: dict = None,
     prior_recommendations: dict = None,
+    thesis_engine=None,
 ) -> dict:
     timeframes = {}
     all_normalized = {}
@@ -137,7 +138,27 @@ def build_snapshot(
     # mechanical-owned pipeline is unchanged (bit-for-bit).
     from ai_brain.ecu import ecu_enabled, produce_thesis
     if ecu_enabled():
-        snapshot["brain_thesis"] = produce_thesis(snapshot)
+        candidate = produce_thesis(snapshot)
+        snapshot["candidate_thesis"] = candidate
+        snapshot["brain_thesis"] = candidate   # shadow default: pipeline bit-for-bit unchanged
+
+        # ── Phase AB-7 — Persistent Thesis Lifecycle (gated THESIS_LIFECYCLE_MODE) ──
+        # The Brain produces a CANDIDATE every scan; the lifecycle engine maintains a
+        # persisted ACTIVE thesis (continue/strengthen/weaken/invalidate/replace). In
+        # shadow it only observes; in enforce it stabilizes brain_thesis so the
+        # consumers stop flickering on one-scan evidence noise.
+        from ai_brain.thesis_lifecycle import (
+            lifecycle_enabled, enforce_mode, extract_evidence, ThesisLifecycleEngine,
+        )
+        if lifecycle_enabled():
+            engine = thesis_engine or ThesisLifecycleEngine()
+            snapshot["thesis_lifecycle"] = engine.update(
+                candidate, extract_evidence(snapshot, candidate), snapshot.get("timestamp"),
+            )
+            if enforce_mode():
+                stabilized = engine.as_brain_thesis()
+                if stabilized is not None:
+                    snapshot["brain_thesis"] = stabilized
 
     # Qualification: validator. Opportunity SCORE is mechanical; direction is
     # owned by the Brain thesis under ECU mode (see _direction_with_source).
