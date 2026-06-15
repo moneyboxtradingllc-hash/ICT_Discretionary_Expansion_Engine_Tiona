@@ -15,6 +15,15 @@ promote / invalidate / replace. The active thesis survives across scans and rest
 CORE RULE: a thesis is replaced only by invalidation or overwhelming evidence —
 never by a single contrary candle or a one-scan no_playbook flicker.
 
+AB-7.2 — Playbook Lifecycle Integration. The playbook is now persisted *with* the
+thesis instead of being overwritten by the candidate every scan. A single
+no_playbook scan no longer wipes the active playbook (the brain emits the literal
+string "none" on ~66% of scans); the playbook carries its own lifecycle
+(FORMING/ACTIVE/EXECUTABLE/WEAKENING/THREATENED/INVALIDATED) and only dies on
+repeated absence or a sustained opposing playbook. Hardness ordering is enforced:
+DIRECTION is harder to change than PLAYBOOK, which is harder to change than TOOL.
+Conflicted / neutral theses also decay faster than directional ones.
+
 AUTHORITY (gated by THESIS_LIFECYCLE_MODE, default `shadow`):
   - shadow (default): compute + persist + journal the lifecycle; the live pipeline
     is bit-for-bit unchanged (the caller leaves `brain_thesis` = candidate).
@@ -109,6 +118,52 @@ def _exec_confidence() -> int:
         return 70
 
 
+# ── AB-7.2 — playbook lifecycle knobs ─────────────────────────────────────────
+
+# Candidate playbook values that carry NO actionable playbook this scan. The
+# brain emits the literal string "none" most of the time; treating these as a
+# real playbook is exactly the AB-7.1 bug that wiped the persisted playbook.
+_NO_PLAYBOOK_SENTINELS = ("", "none", "no_playbook", "null", "wait", "n/a")
+
+
+def _norm_playbook(v) -> "str | None":
+    """Canonical playbook signal: a real playbook-family string, or None when the
+    candidate carries no actionable playbook this scan."""
+    if isinstance(v, (list, tuple)):
+        v = v[0] if v else None
+    if v is None:
+        return None
+    s = str(v).strip().lower()
+    return None if s in _NO_PLAYBOOK_SENTINELS else s
+
+
+def _playbook_absent_invalidation() -> int:
+    """Consecutive no-playbook scans that retire an active playbook (Rule 3).
+    Must exceed 1 so a single no_playbook flicker never kills the playbook."""
+    try:
+        return max(2, int(os.getenv("PLAYBOOK_ABSENT_INVALIDATION", "4")))
+    except (TypeError, ValueError):
+        return 4
+
+
+def _playbook_switch_consecutive() -> int:
+    """Consecutive scans of a *different* playbook required before the active
+    playbook rotates. Keeps playbook harder to change than tool (instant)."""
+    try:
+        return max(1, int(os.getenv("PLAYBOOK_SWITCH_CONSECUTIVE", "2")))
+    except (TypeError, ValueError):
+        return 2
+
+
+def _max_age_nondirectional() -> int:
+    """Tighter age cap for conflicted / neutral (non-directional) theses so they
+    decay faster than directional ones. 0 disables the tighter cap."""
+    try:
+        return max(0, int(os.getenv("THESIS_MAX_AGE_NONDIRECTIONAL", "12")))
+    except (TypeError, ValueError):
+        return 12
+
+
 # ── Persistence paths ─────────────────────────────────────────────────────────
 
 def _ai_brain_dir() -> str:
@@ -180,6 +235,7 @@ def _candidate_fields(candidate: dict) -> dict:
 
 def _new_thesis(cf: dict, ts: str, snapshot_id: str, origin: str) -> dict:
     ttype = map_thesis_type(cf["direction"], cf["phase"], cf["opportunity"])
+    pb = _norm_playbook(cf["playbook_family"])
     return {
         "thesis_id":             f"TH_{uuid.uuid4().hex[:12]}",
         "created_at":            ts,
@@ -187,7 +243,9 @@ def _new_thesis(cf: dict, ts: str, snapshot_id: str, origin: str) -> dict:
         "age_scans":             1,
         "age_minutes":           0.0,
         "direction":             cf["direction"],
-        "playbook_family":       cf["playbook_family"],
+        "playbook_family":       pb,
+        "playbook_status":       (STATUS_FORMING if pb else None),
+        "playbook_age_scans":    (1 if pb else 0),
         "tool_family":           cf["tool_family"],
         "thesis_type":           ttype,
         "status":                STATUS_FORMING,
@@ -209,6 +267,9 @@ def _new_thesis(cf: dict, ts: str, snapshot_id: str, origin: str) -> dict:
         # internal counters (persisted)
         "_contrary_count":       0,
         "_no_playbook_count":    0,
+        "_playbook_absent_count": 0,
+        "_pending_playbook":     None,
+        "_pending_playbook_count": 0,
     }
 
 
@@ -287,6 +348,8 @@ class ThesisLifecycleEngine:
                    "direction": thesis.get("direction"),
                    "thesis_type": thesis.get("thesis_type"),
                    "playbook_family": thesis.get("playbook_family"),
+                   "playbook_status": thesis.get("playbook_status"),
+                   "playbook_age_scans": thesis.get("playbook_age_scans"),
                    "confidence": thesis.get("confidence"),
                    "age_scans": thesis.get("age_scans"),
                    "reason": thesis.get("last_update_reason")}
@@ -319,7 +382,13 @@ class ThesisLifecycleEngine:
         a = self._active
 
         # ── Expiry (hard age cap) ────────────────────────────────────────────────
+        # Conflicted / neutral (non-directional) theses decay faster than
+        # directional ones — they should not linger for dozens of scans (AB-7.1
+        # replay found conflicted theses persisting 52 scans in WEAKENING).
         cap = _max_age_scans()
+        nd_cap = _max_age_nondirectional()
+        if nd_cap and (a["direction"] not in _DIRECTIONAL or not _is_trade_type(a["thesis_type"])):
+            cap = min(cap, nd_cap) if cap else nd_cap
         if cap and a["age_scans"] >= cap:
             a["status"] = STATUS_EXPIRED
             a["last_update_reason"] = "max age reached"
@@ -360,11 +429,9 @@ class ThesisLifecycleEngine:
         a["last_updated_at"] = ts
         a["_contrary_count"] = 0
         a["_no_playbook_count"] = 0
-        # tool may rotate freely within a held direction/playbook
+        # tool may rotate freely within a held direction/playbook (easiest to change)
         if cf["tool_family"]:
             a["tool_family"] = cf["tool_family"]
-        if cf["playbook_family"]:
-            a["playbook_family"] = cf["playbook_family"]
         if cf["invalidation_level"] is not None:
             a["invalidation_level"] = cf["invalidation_level"]
 
@@ -386,6 +453,10 @@ class ThesisLifecycleEngine:
 
         # status progression
         a["status"] = self._progress_status(a, cf)
+        # playbook lifecycle runs AFTER the thesis status is known so an EXECUTABLE
+        # thesis can carry an EXECUTABLE playbook. Direction agreed; the playbook
+        # persists unless its own evidence says otherwise.
+        self._advance_playbook(a, cf, opposing=False)
         if a["status"] == STATUS_EXECUTABLE and prev_conf and action == ACT_CONTINUE:
             action = ACT_PROMOTE_TO_EXECUTABLE
         elif self._just_promoted(a, cf):
@@ -430,6 +501,10 @@ class ThesisLifecycleEngine:
         # survive: weaken (non-opposing) or threaten (opposing directional)
         a["status"] = STATUS_THREATENED if opposing else STATUS_WEAKENING
         action = ACT_THREATEN if opposing else ACT_WEAKEN
+        # The playbook is held while the thesis survives. An opposing-direction
+        # scan never rotates the playbook to the opposing side; it only threatens
+        # the held playbook (treated as no actionable signal for THIS thesis).
+        self._advance_playbook(a, cf, opposing=opposing)
         a["last_update_reason"] = (
             f"{note}; contrary {a['_contrary_count']}/{_consecutive_required()} "
             f"(age {a['age_scans']}, min {_min_age()}); conf {a['confidence']}")
@@ -477,6 +552,91 @@ class ThesisLifecycleEngine:
         return (a["status"] == STATUS_EXECUTABLE
                 and len(a["confidence_history"]) >= 2)
 
+    # ── AB-7.2 — playbook lifecycle ─────────────────────────────────────────────
+    def _advance_playbook(self, a: dict, cf: dict, opposing: bool = False) -> None:
+        """Advance the playbook's own lifecycle for one scan. The playbook is
+        persisted WITH the thesis: a single no_playbook scan never kills it
+        (Rule 1); it weakens/threatens first and only retires on repeated absence
+        or a sustained opposing playbook (Rule 3). Mutates `a` in place.
+
+        Hardness ordering: a playbook rotates only after
+        PLAYBOOK_SWITCH_CONSECUTIVE sustained scans of a different family, so it
+        is harder to change than the tool (which rotates every scan) and easier
+        than the direction (which also needs min-age + a confidence floor)."""
+        # An opposing-direction scan carries no actionable playbook for THIS
+        # thesis; treat it as absence so it threatens but never rotates.
+        incoming = None if opposing else _norm_playbook(cf.get("playbook_family"))
+        cur = a.get("playbook_family")
+
+        # ── No playbook signal this scan ───────────────────────────────────────
+        if incoming is None:
+            a["_pending_playbook"] = None
+            a["_pending_playbook_count"] = 0
+            if not cur:
+                return  # nothing to hold
+            a["_playbook_absent_count"] = int(a.get("_playbook_absent_count", 0)) + 1
+            if a["_playbook_absent_count"] >= _playbook_absent_invalidation():
+                # repeated absence is evidence — retire the playbook (Rule 3)
+                a["playbook_family"]    = None
+                a["playbook_status"]    = STATUS_INVALIDATED
+                a["playbook_age_scans"] = 0
+            else:
+                a["playbook_status"] = STATUS_THREATENED if opposing else STATUS_WEAKENING
+            return
+
+        # ── Same playbook as the active one: strengthen / age ─────────────────
+        if cur and incoming == cur:
+            a["_playbook_absent_count"]   = 0
+            a["_pending_playbook"]        = None
+            a["_pending_playbook_count"]  = 0
+            a["playbook_age_scans"]       = int(a.get("playbook_age_scans", 0)) + 1
+            a["playbook_status"]          = self._progress_playbook_status(a)
+            return
+
+        # ── A different, real playbook ─────────────────────────────────────────
+        if cur:
+            # opposing playbook evidence — confirm before rotating (Rule 3)
+            a["_playbook_absent_count"] = 0
+            if a.get("_pending_playbook") == incoming:
+                a["_pending_playbook_count"] = int(a.get("_pending_playbook_count", 0)) + 1
+            else:
+                a["_pending_playbook"]       = incoming
+                a["_pending_playbook_count"] = 1
+            if a["_pending_playbook_count"] >= _playbook_switch_consecutive():
+                a["playbook_family"]         = incoming   # rotate (old retired -> new forming)
+                a["playbook_age_scans"]      = 1
+                a["playbook_status"]         = STATUS_FORMING
+                a["_pending_playbook"]       = None
+                a["_pending_playbook_count"] = 0
+            else:
+                a["playbook_status"] = STATUS_THREATENED
+            return
+
+        # ── No active playbook yet: adopt immediately ─────────────────────────
+        a["playbook_family"]        = incoming
+        a["playbook_age_scans"]     = 1
+        a["playbook_status"]        = STATUS_FORMING
+        a["_playbook_absent_count"] = 0
+
+    def _progress_playbook_status(self, a: dict) -> str:
+        age = int(a.get("playbook_age_scans", 0))
+        # the playbook can only be EXECUTABLE while the thesis itself is
+        if a.get("status") == STATUS_EXECUTABLE and age >= 2:
+            return STATUS_EXECUTABLE
+        if age >= _min_age():
+            return STATUS_ACTIVE
+        return STATUS_FORMING
+
+    def _confidence_trend(self, a: dict) -> str:
+        h = a.get("confidence_history") or []
+        if len(h) < 2:
+            return "flat"
+        if h[-1] > h[-2]:
+            return "rising"
+        if h[-1] < h[-2]:
+            return "falling"
+        return "flat"
+
     def _retire_and_maybe_replace(self, cf: dict, ts: str, snap_id: str,
                                   base: dict = None) -> dict:
         """Archive the invalidated/expired thesis; seed a replacement from the
@@ -510,6 +670,11 @@ class ThesisLifecycleEngine:
             "confidence":     a.get("confidence") if a else None,
             "age_scans":      a.get("age_scans") if a else None,
             "is_trade_thesis": _is_trade_type(a["thesis_type"]) if a else False,
+            # AB-7.2 — playbook lifecycle + confidence trend (for R1 / qualification)
+            "playbook_family":    a.get("playbook_family") if a else None,
+            "playbook_status":    a.get("playbook_status") if a else None,
+            "playbook_age_scans": a.get("playbook_age_scans") if a else None,
+            "confidence_trend":   self._confidence_trend(a) if a else None,
         }
 
     def as_brain_thesis(self) -> "dict | None":
@@ -534,6 +699,11 @@ class ThesisLifecycleEngine:
             "thesis_id":         a.get("thesis_id"),
             "thesis_status":     a.get("status"),
             "thesis_age_scans":  a.get("age_scans"),
+            # AB-7.2 — the playbook now persists with the thesis; qualification in
+            # enforce mode consumes the stabilized playbook + its lifecycle state.
+            "playbook_status":    a.get("playbook_status"),
+            "playbook_age_scans": a.get("playbook_age_scans"),
+            "confidence_trend":   self._confidence_trend(a),
         }
 
 
