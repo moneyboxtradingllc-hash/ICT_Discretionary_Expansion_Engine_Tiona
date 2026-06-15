@@ -46,12 +46,15 @@ $env:THESIS_EXIT_CONFIRM_SCANS     = "1"
 # ── AB-1/AB-3/AI-BRAIN-L — AI Brain + LLM + vector retrieval (OBSERVE-ONLY) ──
 $env:AI_BRAIN_ENABLED              = "true"
 $env:AI_BRAIN_LLM                  = "true"      # real GPT narrative
-# AB-5B — ECU mode: Brain OWNS direction/playbook/toolbox (mechanical validates).
-# Default off; uncomment to run the Brain-as-ECU architecture.
-# $env:BRAIN_ECU_MODE              = "true"
+# AB-5B/5C — ECU mode: Brain OWNS direction/opportunity/playbook/tool;
+# mechanical layer becomes sensors/validators/executors. Enabled for the ECU test.
+$env:BRAIN_ECU_MODE                = "true"
 $env:AI_BRAIN_MODEL                = "gpt-4o-mini"
 $env:AI_BRAIN_TIMEOUT_SECONDS      = "25"
 $env:AI_RETRIEVAL_ENABLED          = "true"
+
+# ── NEWS-1 — Market Intelligence Layer (non-directional context into the Brain) ─
+$env:NEWS_LAYER_ENABLED            = "true"
 
 # ── NA-1 — Narrative Authority (the widest lens owns the story) ──────────────
 $env:NARRATIVE_AUTHORITY           = "enforce"
