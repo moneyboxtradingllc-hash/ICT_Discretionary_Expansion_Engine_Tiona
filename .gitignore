@@ -2,6 +2,7 @@
 .env
 *.env
 *.env.*
+!.env.topstep.example
 
 # ── Python bytecode ────────────────────────────────────────────────────────────
 __pycache__/

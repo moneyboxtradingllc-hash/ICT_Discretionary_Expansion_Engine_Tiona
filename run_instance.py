@@ -32,6 +32,8 @@ def main(argv=None):
     p.add_argument("--instances-root", default=os.path.join("data", "instances"))
     p.add_argument("--start", action="store_true",
                    help="start the paper scan loop (paper adapter only)")
+    p.add_argument("--dry-run", action="store_true",
+                   help="validate isolation/freshness/broker without starting anything")
     args = p.parse_args(argv)
 
     cfg_path = os.path.join(args.instances_root, args.instance, "config.yaml")
@@ -55,6 +57,30 @@ def main(argv=None):
     for var, val in ctx.env_map().items():
         print(f"    {var:<22} {val}")
     print(f"  broker adapter: {adapter.describe()}")
+
+    if args.dry_run:
+        print("\n=== DRY-RUN VALIDATION ===")
+        def _count(pth):
+            return sum(len(f) for _, _, f in os.walk(pth)) if os.path.isdir(pth) else 0
+        mem = _count(ctx.paths["brain"]) + _count(ctx.paths["intent_archive"])
+        vec = _count(ctx.paths["vector_store"])
+        jrn = _count(ctx.paths["journal"])
+        print(f"  instance loads          : yes ({ctx.instance_id})")
+        print(f"  memory empty            : {mem == 0} ({mem} files)")
+        print(f"  vector store empty      : {vec == 0} ({vec} files)")
+        print(f"  journal empty           : {jrn == 0} ({jrn} files)")
+        print(f"  broker                  : {ctx.config.broker}")
+        print(f"  account id              : {ctx.config.account_id!r}")
+        print(f"  execution disabled      : "
+              f"{os.getenv('EXECUTION_ENABLED', 'false').lower() != 'true'} "
+              f"(EXECUTION_ENABLED={os.getenv('EXECUTION_ENABLED', 'false')})")
+        # Maurice untouched: his legacy data paths are never under this instance dir
+        maurice_legacy = os.path.join("data", "paper_trades")
+        untouched = os.path.normpath(ctx.paths["journal"]) != os.path.normpath(maurice_legacy)
+        print(f"  Maurice Alpaca untouched: {untouched} "
+              f"(this journal != {maurice_legacy})")
+        print("\n  (dry-run only — nothing started, no broker writes)")
+        return 0
 
     if args.start:
         if adapter.name == "paper" and adapter.is_connected():
