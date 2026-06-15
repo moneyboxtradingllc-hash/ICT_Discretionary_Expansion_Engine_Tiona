@@ -732,3 +732,40 @@ def extract_evidence(snapshot: dict, candidate: dict) -> dict:
     except Exception:  # noqa: BLE001
         pass
     return ev
+
+
+# ── AB-7.3a — read-only thesis state projection ───────────────────────────────
+
+def thesis_state(lifecycle: "dict | None") -> dict:
+    """AB-7.3a — a read-only, mode-independent view of the persistent thesis for
+    downstream consumers (qualification, readiness, execution gate).
+
+    Pure projection of the lifecycle block produced by ThesisLifecycleEngine.update.
+    Consumers MAY read this; they MUST NOT mutate it and it carries NO authority of
+    its own — it only exposes the stabilized state so the validators can stop
+    flickering. `present` is False whenever there is no live, non-terminal thesis,
+    so a consumer that ignores it sees exactly the legacy (pre-AB-7.3) behavior."""
+    lc = lifecycle or {}
+    at = lc.get("active_thesis") or {}
+
+    def _pick(key):
+        v = lc.get(key)
+        return at.get(key) if v is None else v
+
+    status  = _pick("status")
+    enabled = bool(lc.get("enabled"))
+    present = bool(enabled and status not in
+                   (None, STATUS_INVALIDATED, STATUS_EXPIRED, STATUS_COMPLETED))
+    return {
+        "present":            present,
+        "enabled":            enabled,
+        "thesis_status":      status,
+        "thesis_age_scans":   int(_pick("age_scans") or 0),
+        "thesis_confidence":  int(_pick("confidence") or 0),
+        "confidence_trend":   lc.get("confidence_trend") or "flat",
+        "direction":          _pick("direction"),
+        "is_trade_thesis":    bool(lc.get("is_trade_thesis")),
+        "playbook_status":    _pick("playbook_status"),
+        "playbook_age_scans": int(_pick("playbook_age_scans") or 0),
+        "playbook_family":    _pick("playbook_family"),
+    }

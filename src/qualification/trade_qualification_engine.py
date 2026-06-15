@@ -63,6 +63,41 @@ GRADE_MAP = [
 
 _NO_TRADE_NARRATIVES = {"conflicted", "exhaustion_risk", "compression"}
 
+# ── Phase AB-7.3c — qualification stability floor ─────────────────────────────
+# Status tiers from weakest to strongest. A mature persistent thesis prevents a
+# single-scan mechanical dip from collapsing qualified->no_trade. The floor only
+# RAISES the status tier; it never fabricates the opportunity score and never
+# overrides a hard disqualification (true danger still forces no_trade).
+_STATUS_ORDER = ["no_trade", "watchlist", "candidate", "qualified", "elite"]
+_THESIS_STATUS_FLOOR = {"EXECUTABLE": "qualified", "ACTIVE": "candidate"}
+
+
+def _thesis_floor_enabled() -> bool:
+    """Default false: legacy behavior, qualification bit-for-bit unchanged."""
+    return os.getenv("QUALIFICATION_THESIS_FLOOR", "false").lower().strip() == "true"
+
+
+def _apply_thesis_floor(status: str, direction: str, disqualified: bool,
+                        thesis_state: dict) -> tuple:
+    """Return (status, floor_applied). Raises status to the thesis-implied floor
+    when a mature trade thesis is held and the mechanical status sits below it."""
+    if disqualified or not _thesis_floor_enabled():
+        return status, False
+    ts = thesis_state or {}
+    if not (ts.get("present") and ts.get("is_trade_thesis")):
+        return status, False
+    floor = _THESIS_STATUS_FLOOR.get(ts.get("thesis_status"))
+    if not floor:
+        return status, False   # THREATENED / WEAKENING / INVALIDATED → no floor
+    # Never floor against a hard directional contradiction with the thesis.
+    tdir = ts.get("direction")
+    if (direction in ("bullish", "bearish") and tdir in ("bullish", "bearish")
+            and direction != tdir):
+        return status, False
+    if _STATUS_ORDER.index(status) < _STATUS_ORDER.index(floor):
+        return floor, True
+    return status, False
+
 
 # ── Hard Disqualifiers ────────────────────────────────────────────────────────
 
@@ -518,6 +553,13 @@ def qualify_trade(snapshot: dict) -> dict:
     direction, direction_source = _direction_with_source(
         ai_context, structure, po3, snapshot.get("liquidity", {}),
         snapshot.get("brain_thesis"))
+
+    # ── Phase AB-7.3c — qualification inherits stability from the persistent thesis.
+    # The mechanical score above still computes every scan; the floor only prevents
+    # a one-scan dip from collapsing the status while the thesis remains valid.
+    mechanical_status = status
+    status, thesis_floor_applied = _apply_thesis_floor(
+        status, direction, disqualified, snapshot.get("thesis_state"))
     trade_type      = _trade_type(ai_context)
     reasons         = _reasons(snapshot, direction)
     warnings        = _qual_warnings(snapshot, opp_score)
@@ -542,4 +584,7 @@ def qualify_trade(snapshot: dict) -> dict:
         "primary_driver":    primary_driver,
         "reasons":           reasons,
         "warnings":          warnings,
+        # Phase AB-7.3c — thesis stability floor audit trail
+        "mechanical_status":     mechanical_status,
+        "thesis_floor_applied":  thesis_floor_applied,
     }

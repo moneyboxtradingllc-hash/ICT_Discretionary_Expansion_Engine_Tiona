@@ -40,6 +40,13 @@ from narrative_authority.narrative_engine import narrative_permits
 from rule_governance.promoted_rules import evaluate_promoted_rules
 
 
+def _thesis_feeds_readiness() -> bool:
+    """Phase AB-7.3b — when true, a mature persistent thesis lends its age to the
+    setup-age requirement so a flickering mechanical setup no longer makes a mature
+    thesis look immature. Default false: legacy behavior, bit-for-bit unchanged."""
+    return os.getenv("THESIS_FEEDS_READINESS", "false").lower().strip() == "true"
+
+
 def _preferred_candidate(snapshot: dict) -> dict:
     tb    = snapshot.get("toolbox", {})
     pref  = tb.get("preferred_tool", "") or ""
@@ -142,7 +149,23 @@ def evaluate_gate(snapshot: dict) -> dict:
 
     # 5F.5 — minimum setup age requirement
     setup_age_actual = int(sl.get("age_scans", 0) or 0) if sl.get("active") else 0
-    setup_age_met    = setup_age_actual >= min_setup_age
+    # ── Phase AB-7.3b — readiness inherits the persistent thesis age ──────────
+    # A mature ACTIVE/EXECUTABLE thesis keeps age continuity even when the
+    # mechanical setup lifecycle resets on one-scan flicker. THREATENED/
+    # INVALIDATED theses do NOT lend age — they reset normally. This is age
+    # continuity only; it changes no other authorization check.
+    ts_state           = snapshot.get("thesis_state") or {}
+    effective_setup_age = setup_age_actual
+    thesis_age_applied  = False
+    if (_thesis_feeds_readiness()
+            and ts_state.get("present")
+            and ts_state.get("is_trade_thesis")
+            and ts_state.get("thesis_status") in ("ACTIVE", "EXECUTABLE")):
+        thesis_age = int(ts_state.get("thesis_age_scans") or 0)
+        if thesis_age > setup_age_actual:
+            effective_setup_age = thesis_age
+            thesis_age_applied  = True
+    setup_age_met    = effective_setup_age >= min_setup_age
 
     # ── Phase FC-1: promoted authority (June 11) ─────────────────────────────
     council          = snapshot.get("council", {}) or {}
@@ -227,7 +250,7 @@ def evaluate_gate(snapshot: dict) -> dict:
     if not setup_age_met:
         blocking.append(
             f"setup age requirement not met "
-            f"(required={min_setup_age}, actual={setup_age_actual})"
+            f"(required={min_setup_age}, actual={effective_setup_age})"
         )
     # Phase FC-1 blocking factors
     if not council_permits:
@@ -289,6 +312,9 @@ def evaluate_gate(snapshot: dict) -> dict:
         "setup_age_requirement":      min_setup_age,
         "setup_age_actual":           setup_age_actual,
         "setup_age_requirement_met":  setup_age_met,
+        # Phase AB-7.3b — thesis age inheritance audit trail
+        "setup_age_effective":        effective_setup_age,
+        "thesis_age_applied":         thesis_age_applied,
         # Phase 5F — regime permission source
         "regime_permission_allowed":  regime_allowed,
         "regime_constraint_source":   regime_source,

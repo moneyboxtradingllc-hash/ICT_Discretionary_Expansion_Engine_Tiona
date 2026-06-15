@@ -149,12 +149,18 @@ def build_snapshot(
         # consumers stop flickering on one-scan evidence noise.
         from ai_brain.thesis_lifecycle import (
             lifecycle_enabled, enforce_mode, extract_evidence, ThesisLifecycleEngine,
+            thesis_state,
         )
         if lifecycle_enabled():
             engine = thesis_engine or ThesisLifecycleEngine()
             snapshot["thesis_lifecycle"] = engine.update(
                 candidate, extract_evidence(snapshot, candidate), snapshot.get("timestamp"),
             )
+            # ── Phase AB-7.3a — read-only thesis state for downstream consumers ──
+            # Exposes the stabilized thesis/playbook state (status, age, confidence
+            # trend) so qualification/readiness/gate can consume it. Read-only; no
+            # behavioral change on its own (consumers gate their own usage).
+            snapshot["thesis_state"] = thesis_state(snapshot["thesis_lifecycle"])
             if enforce_mode():
                 stabilized = engine.as_brain_thesis()
                 if stabilized is not None:
