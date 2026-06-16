@@ -25,6 +25,11 @@ import logging
 from ai_brain.brain_input import build_brain_input
 from ai_brain.brain_prompt import (
     BRAIN_SYSTEM_PROMPT, REPAIR_PROMPT_TEMPLATE, NEWS_CONTEXT_ADDENDUM,
+    ADAPTIVE_LEARNING_ADDENDUM,
+)
+# ADAPTIVE-1C — OBSERVE_ONLY adaptive-learning context injection + telemetry.
+from adaptive_learning.context_formatter import (
+    inject_adaptive_context, build_adaptive_telemetry,
 )
 from ai_brain.brain_schema import (
     empty_brain_output, validate_brain_output, validate_llm_core,
@@ -160,7 +165,11 @@ def _call_llm(brain_input: dict, repair: "dict | None" = None) -> dict:
     # (NEWS_LAYER_ENABLED). Base prompt is unchanged otherwise (regression-safe).
     system_prompt = BRAIN_SYSTEM_PROMPT
     if isinstance(brain_input.get("news_context"), dict):
-        system_prompt = BRAIN_SYSTEM_PROMPT + NEWS_CONTEXT_ADDENDUM
+        system_prompt = system_prompt + NEWS_CONTEXT_ADDENDUM
+    # ADAPTIVE-1C — append the OBSERVE_ONLY cognitive boundary when adaptive
+    # context is present (always once wired). Recommendation only; never applied.
+    if isinstance(brain_input.get("adaptive_learning_context"), dict):
+        system_prompt = system_prompt + ADAPTIVE_LEARNING_ADDENDUM
     out = {"parsed": None, "ok": False, "model": None, "prompt": system_prompt,
            "user_content": user_content, "raw_response": None, "usage": None,
            "fallback_reason": None, "is_repair": bool(repair)}
@@ -243,6 +252,12 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
         except Exception:  # noqa: BLE001
             analogs = []
 
+        # ── ADAPTIVE-1C — OBSERVE_ONLY: distill analogs into an adaptive-learning
+        # context the Brain can SEE (recommendation only). Hard-locked: nothing
+        # here is applied to confidence/qualification/risk/execution. Always sets
+        # brain_input["adaptive_learning_context"] (neutral when no analogs).
+        adaptive_signal = inject_adaptive_context(brain_input, analogs, snapshot)
+
         # ── AI-BRAIN-H1: LLM path with normalize → repair → explicit fallback ─
         llm_call = None
         source, fallback_reason = "deterministic", None
@@ -319,6 +334,11 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
         if stance_memory:
             stance_memory.record(snapshot.get("timestamp", ""), output)
 
+        # ADAPTIVE-1C — telemetry: RECOMMENDED vs APPLIED kept separate; applied is
+        # hard-locked 0, final_confidence == base_confidence (no behavioural change).
+        base_confidence = int(output.get("phase_confidence", 0) or 0)
+        adaptive_telemetry = build_adaptive_telemetry(base_confidence, adaptive_signal)
+
         record = {
             "timestamp": snapshot.get("timestamp"),
             "symbol": symbol,
@@ -337,6 +357,7 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             "repair_usage": (llm_call or {}).get("repair_usage"),
             "input_degraded": brain_input.get("degraded", []),
             "input_payload": brain_input,
+            "adaptive_telemetry": adaptive_telemetry,   # ADAPTIVE-1C (observe_only)
             "parsed_output": output,
             "fields_consumed": list(_CONSUMED_FIELDS_AB1),   # [] — observe only
             "fields_persisted_not_yet_consumed": [k for k in output
@@ -356,6 +377,7 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             "repair_attempted": repaired,
             "input_degraded": brain_input.get("degraded", []),
             "output": output,
+            "adaptive_telemetry": adaptive_telemetry,   # ADAPTIVE-1C (observe_only)
             "persisted": persisted_path,
         }
     except Exception as exc:  # noqa: BLE001

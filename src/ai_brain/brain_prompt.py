@@ -138,6 +138,33 @@ Example of correct use: "Thesis bearish on delivery; CPI in 6 minutes
 """
 
 
+# ── ADAPTIVE-1C adaptive-learning addendum ────────────────────────────────────
+# Appended to the system prompt ONLY when the payload carries
+# adaptive_learning_context (always, once 1C is wired). It draws a hard cognitive
+# boundary: historical analogs are OBSERVE_ONLY context. They may be named in
+# reasoning but may NEVER author direction, justify weak current evidence, alter
+# qualification, or be treated as an applied confidence adjustment. Current-
+# session evidence outranks historical analogs.
+ADAPTIVE_LEARNING_ADDENDUM = """
+
+COGNITIVE BOUNDARY: HISTORICAL RETRIEVAL CONTEXT
+Authority Level: OBSERVE_ONLY
+
+The payload may include an `adaptive_learning_context` block summarizing how
+similar historical setups resolved. Rules:
+1. Historical adaptive learning data is ADVISORY ONLY.
+2. Current-session market evidence OUTRANKS historical analogs.
+3. Do NOT use historical analogs to justify weak current evidence.
+4. Do NOT alter final qualification because of adaptive learning.
+5. If historical analogs conflict with your current thesis, explicitly document
+   the friction in your reasoning.
+6. If warning_tags include negative historical expectancy, lunch failure, or
+   regime underperformance, mention that risk in your reasoning.
+7. You are FORBIDDEN from treating confidence_adjustment_recommendation as an
+   applied adjustment — it is a recommendation only and is NOT applied.
+"""
+
+
 # ── AI-BRAIN-H1 repair prompt ─────────────────────────────────────────────────
 REPAIR_PROMPT_TEMPLATE = """Your previous narrative JSON was rejected by the
 validator. Correct ONLY the invalid fields. Do not change valid fields. Do not
