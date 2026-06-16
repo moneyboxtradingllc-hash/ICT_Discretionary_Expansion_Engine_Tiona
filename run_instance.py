@@ -26,6 +26,12 @@ from deployment.instance_context import InstanceContext        # noqa: E402
 from broker.factory import get_adapter                         # noqa: E402
 
 
+def resolve_start_params(ctx):
+    """(symbol, data_provider) for the scan loop, derived from the instance config.
+    DEPLOY-2A: topstep instances resolve to (MNQU-style symbol, 'topstep')."""
+    return ctx.config.symbol, ctx.config.resolved_data_provider()
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description="Launch a bot instance (isolated).")
     p.add_argument("--instance", required=True)
@@ -83,13 +89,25 @@ def main(argv=None):
         return 0
 
     if args.start:
+        symbol, data_provider = resolve_start_params(ctx)
         if adapter.name == "paper" and adapter.is_connected():
-            print("\n[paper] starting scan loop for this instance…")
+            print(f"\n[paper] starting scan loop (data_provider={data_provider}, "
+                  f"symbol={symbol})…")
             from live_scan.scan_loop import run_scan_loop  # deferred import
-            run_scan_loop(symbol=ctx.config.symbol)
+            run_scan_loop(symbol=symbol, data_provider=data_provider)
+        elif adapter.name == "topstep":
+            # DEPLOY-2A/2B — Topstep DATA path: scan loop runs against the Topstep
+            # (ProjectX) market-data feed for the configured instrument (e.g. MNQU).
+            # No Alpaca, no QQQ. If the Topstep feed is unavailable the provider
+            # raises a clear Topstep error (no fallback). NOTE: Topstep *execution*
+            # remains a stub/observe path (DEPLOY-2C); no live orders are placed.
+            print(f"\n[topstep] starting scan loop (data_provider={data_provider}, "
+                  f"symbol={symbol}) — execution stub/observe, no live orders…")
+            from live_scan.scan_loop import run_scan_loop  # deferred import
+            run_scan_loop(symbol=symbol, data_provider=data_provider)
         else:
-            print(f"\n[guard] --start refused: broker '{adapter.name}' is not a "
-                  f"connected paper adapter (DEPLOY-1 connects no live money).")
+            print(f"\n[guard] --start refused: broker '{adapter.name}' has no "
+                  f"supported runtime start path.")
             return 2
     else:
         print("\n(dry plan — re-run with --start to begin the paper scan loop)")

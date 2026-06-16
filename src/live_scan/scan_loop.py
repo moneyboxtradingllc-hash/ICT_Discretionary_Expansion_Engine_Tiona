@@ -718,8 +718,11 @@ def _print_loop_summary(
 
 # ── Main loop ────────────────────────────────────────────────────────────────
 
-def run_scan_loop():
-    symbol     = os.getenv("SCAN_SYMBOL",            "QQQ")
+def run_scan_loop(symbol: str = None, data_provider: str = None):
+    # DEPLOY-2A — symbol + data_provider may be injected (e.g. by run_instance for
+    # a Topstep instance: symbol=MNQU, data_provider=topstep). Falling back to the
+    # SCAN_SYMBOL/DATA_PROVIDER env only when not injected (Maurice's QQQ/alpaca).
+    symbol     = symbol or os.getenv("SCAN_SYMBOL",  "QQQ")
     lookback   = int(os.getenv("SCAN_LOOKBACK_BARS", "300"))
     start_t    = os.getenv("SCAN_START_TIME",        "08:30")
     end_t      = os.getenv("SCAN_END_TIME",          "15:00")
@@ -757,7 +760,7 @@ def run_scan_loop():
 
     # Initialise provider (fail fast before entering the loop)
     try:
-        provider = get_provider()
+        provider = get_provider(data_provider)   # DEPLOY-2A: injected provider wins
     except DataFeedError as exc:
         print(f"[SCAN LOOP ERROR] Cannot initialise data provider: {exc}")
         return

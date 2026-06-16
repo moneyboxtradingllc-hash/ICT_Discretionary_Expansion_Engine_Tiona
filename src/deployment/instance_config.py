@@ -42,6 +42,9 @@ class InstanceConfig:
     instance_id: str
     owner_name: str = ""
     broker: str = "paper"
+    # DEPLOY-2A — explicit market-data provider. Empty = derive from broker
+    # (topstep→topstep, else alpaca) via resolved_data_provider().
+    data_provider: str = ""
     account_type: str = "paper"
     account_id: str = ""
     symbol: str = "QQQ"
@@ -104,6 +107,14 @@ class InstanceConfig:
         with open(path, "w", encoding="utf-8") as fh:
             yaml.safe_dump(self.to_dict(), fh, sort_keys=False)
 
+    def resolved_data_provider(self) -> str:
+        """Explicit data_provider if set, else derived from broker. DEPLOY-2A:
+        topstep brokers default to the topstep feed; everything else to alpaca.
+        Never returns alpaca for a topstep broker unless explicitly configured."""
+        if self.data_provider:
+            return self.data_provider.lower().strip()
+        return "topstep" if self.broker == "topstep" else "alpaca"
+
     def validate(self) -> list:
         """Return a list of problems (empty = valid). Never raises."""
         problems = []
@@ -111,6 +122,11 @@ class InstanceConfig:
             problems.append("instance_id is required")
         if self.broker not in BROKERS:
             problems.append(f"broker must be one of {BROKERS}")
+        if self.data_provider and self.data_provider.lower() not in ("alpaca", "topstep"):
+            problems.append("data_provider must be one of ('', 'alpaca', 'topstep')")
+        # Cross-contamination guard: a topstep broker must never use the Alpaca feed.
+        if self.broker == "topstep" and self.resolved_data_provider() == "alpaca":
+            problems.append("topstep broker must not use the alpaca data_provider")
         if self.execution_mode not in EXECUTION_MODES:
             problems.append(f"execution_mode must be one of {EXECUTION_MODES}")
         if self.execution_mode == "live":

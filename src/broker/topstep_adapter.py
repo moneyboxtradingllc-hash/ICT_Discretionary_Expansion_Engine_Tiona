@@ -117,6 +117,28 @@ class TopstepClient:
         d = self._post("/Order/searchOpen", {"accountId": account_id})
         return d.get("orders") or d.get("data") or []
 
+    # ── market data (read-only; DEPLOY-2B) ────────────────────────────────────
+    # ProjectX Gateway market-data endpoints. Read-only: no order side effects.
+    #   POST /api/Contract/search   {searchText, live} -> [{id, name, ...}]
+    #   POST /api/History/retrieveBars {contractId, live, unit, unitNumber,
+    #        limit, startTime, endTime, includePartialBar} -> {bars:[{t,o,h,l,c,v}]}
+    def search_contract(self, symbol: str, live: bool = False) -> list:
+        d = self._post("/Contract/search", {"searchText": symbol, "live": live})
+        return d.get("contracts") or d.get("data") or (d if isinstance(d, list) else [])
+
+    def retrieve_bars(self, contract_id, *, unit: int = 2, unit_number: int = 1,
+                      limit: int = 300, live: bool = False,
+                      start: str = None, end: str = None) -> list:
+        # ProjectX unit enum: 1=Second 2=Minute 3=Hour 4=Day. (2,1) => 1-minute.
+        body = {"contractId": contract_id, "live": live, "unit": unit,
+                "unitNumber": unit_number, "limit": limit, "includePartialBar": False}
+        if start:
+            body["startTime"] = start
+        if end:
+            body["endTime"] = end
+        d = self._post("/History/retrieveBars", body)
+        return d.get("bars") or d.get("data") or []
+
     def place_order(self, body: dict) -> dict:
         return self._post("/Order/place", body)
 
