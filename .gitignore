@@ -37,6 +37,11 @@ data/paper_trades/*
 data/activation_reports/*
 !data/activation_reports/.gitkeep
 
+# Adaptive memory vector store + legacy archive — runtime state, never committed
+# (active store populated by ADAPTIVE-1A.5 scar collection; archive kept locally).
+data/ai_retrieval/*
+!data/ai_retrieval/.gitkeep
+
 # DEPLOY-1 — per-instance state is never committed (only templates are tracked)
 data/instances/
 data/global_memory/
