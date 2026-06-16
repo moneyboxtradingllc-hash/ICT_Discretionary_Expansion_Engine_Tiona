@@ -33,6 +33,7 @@ from narrative_authority.narrative_engine  import build_narrative
 from narrative_authority.protected_swings  import ProtectedSwingTracker
 from structure.po3_alignment_manager        import Po3StabilityManager   # VECTOR-3
 from ai_brain.narrative_brain              import run_narrative_brain
+from adaptive_learning.outcome_assembler    import record_closed_trade_scar   # ADAPTIVE-1A.5
 from ai_brain.stance_memory                import StanceMemory
 from ai_brain.thesis_lifecycle             import ThesisLifecycleEngine
 from ai_brain.divergence                   import compute_divergence
@@ -1227,6 +1228,18 @@ def run_scan_loop():
                 snapshot["ai_context"]["summary"] = (
                     snapshot["ai_context"].get("summary", "") + " " + recon_ai_line
                 ).strip()
+
+                # ── ADAPTIVE-1A.5 — Runtime Scar Collection (write-side only) ──
+                # The closed outcome becomes a retrievable scar in the existing
+                # vector store. Observe/record only: influences NO decision,
+                # confidence, risk, or permission. Deterministic memory_id dedups
+                # restarts / reconciliation reruns. Never raises into the loop.
+                snapshot["scar_writer"] = record_closed_trade_scar(
+                    recon, symbol, snapshot.get("ai_brain"))
+                _sw = snapshot["scar_writer"]
+                print(f"  Scar Writer  : written={_sw['memory_written']} "
+                      f"id={(_sw['memory_id'] or '')[:12]} "
+                      f"dup={_sw['duplicate_skipped']} errs={_sw['validation_errors']}")
 
             # ── Trade Management (Phase 5E.8) ─────────────────────────────
             snapshot["trade_management"] = manage_open_trade(snapshot, symbol)
