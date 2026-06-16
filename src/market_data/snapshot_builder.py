@@ -17,6 +17,12 @@ from toolbox.toolbox_engine import run_toolbox
 from ai_layer.discretionary_ai import run_discretionary_ai
 from regime_classification.regime_classifier import classify_regime
 from regime_authority.regime_permission_matrix import evaluate_regime_permissions
+# ── Phase PIPE-1 — evidence layers the canonical Brain authors from. These were
+# previously built in scan_loop AFTER build_snapshot, starving the consumed ECU
+# thesis. They are now assembled inside build_snapshot BEFORE the single Brain call.
+from narrative_authority.narrative_engine import build_narrative as build_narrative_authority
+from narrative_authority.protected_swings import ProtectedSwingTracker
+from shared_context.shared_market_context import build_shared_market_context
 
 TIMEFRAMES = ["15m", "5m", "3m", "1m"]
 
@@ -33,6 +39,8 @@ def build_snapshot(
     prior_dashboard: dict = None,
     prior_recommendations: dict = None,
     thesis_engine=None,
+    symbol: str = None,
+    swing_tracker=None,
 ) -> dict:
     timeframes = {}
     all_normalized = {}
@@ -104,6 +112,7 @@ def build_snapshot(
     snapshot = {
         "timestamp":  snap_time,
         "session":    session,
+        "symbol":     symbol,
         "timeframes": timeframes,
         "structure":  structure,
         "volatility": volatility,
@@ -132,9 +141,30 @@ def build_snapshot(
     if news_enabled():
         snapshot["news_context"] = build_news_context(snapshot.get("timestamp"))
 
-    # ── Phase AB-5B — ECU pre-pass (gated BRAIN_ECU_MODE, default off) ─────────
-    # When ON, the Brain runs BEFORE the intelligence consumers and produces the
-    # canonical thesis they validate. When OFF, this is skipped entirely and the
+    # ── Phase PIPE-1 — assemble the load-bearing evidence the Brain authors from
+    # BEFORE the single canonical Brain call. Previously protected_swings,
+    # narrative_authority and shared_context were built in scan_loop AFTER this
+    # function returned, so the consumed ECU thesis saw delivery.state=None,
+    # protected_swings=none and active_draw=None (the upstream ordering inversion).
+    # The protected-swing tracker is stateful: the live loop passes its persistent
+    # instance; one-shot callers get a transient tracker. This is the ONLY place
+    # the tracker is advanced per scan.
+    #
+    # NOTE: shared_context here carries the qualification-INDEPENDENT delivery view
+    # the Brain needs (delivery_state / exhaustion_present / po3). Its opportunity
+    # view (qualification / playbook / setup_age) is necessarily still default at
+    # this point and is rebuilt downstream once qualification + setup_lifecycle
+    # exist; nothing reads that view before the rebuild.
+    _swings = swing_tracker if swing_tracker is not None else ProtectedSwingTracker()
+    snapshot["protected_swings"]    = _swings.update(snapshot)
+    snapshot["narrative_authority"] = build_narrative_authority(
+        snapshot, snapshot["protected_swings"])
+    snapshot["shared_context"]      = build_shared_market_context(
+        snapshot, symbol or snapshot.get("symbol"))
+
+    # ── Phase AB-5B — canonical ECU Brain call (gated BRAIN_ECU_MODE, default off)
+    # Runs AFTER the evidence above and BEFORE the intelligence consumers, so the
+    # consumed thesis is fully-fed. When OFF, skipped entirely and the
     # mechanical-owned pipeline is unchanged (bit-for-bit).
     from ai_brain.ecu import ecu_enabled, produce_thesis
     if ecu_enabled():

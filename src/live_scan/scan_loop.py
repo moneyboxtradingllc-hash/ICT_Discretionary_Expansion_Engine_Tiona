@@ -864,6 +864,8 @@ def run_scan_loop():
                     prior_dashboard=prev_dashboard,
                     prior_recommendations=prev_recommendations,
                     thesis_engine=thesis_engine,
+                    symbol=symbol,
+                    swing_tracker=swing_tracker,   # PIPE-1: tracker advanced inside build_snapshot
                 )
             except Exception as exc:
                 print(f"  [SNAPSHOT ERROR scan #{scan_count}] {exc}")
@@ -919,15 +921,12 @@ def run_scan_loop():
             # failure leaves live trading unaffected. Evidence before authority.
             snapshot["ai_shadow"] = evaluate_shadow_ai(snapshot, symbol)
 
-            # ── Narrative Authority (Phase NA-1) ───────────────────────────
-            # The widest lens owns the market story: AI + Delivery agreement
-            # outranks structure bias; protected swings and the liquidity
-            # draw are persistent memory. Enforced by the gate only when
-            # NARRATIVE_AUTHORITY=enforce.
-            snapshot["protected_swings"]   = swing_tracker.update(snapshot)
-            snapshot["narrative_authority"] = build_narrative(
-                snapshot, snapshot["protected_swings"],
-            )
+            # ── Narrative Authority (Phase NA-1) — built upstream in PIPE-1 ─
+            # protected_swings + narrative_authority are now assembled inside
+            # build_snapshot BEFORE the canonical Brain call (so the consumed
+            # thesis is fed the protected swings + active liquidity draw). The
+            # swing tracker is advanced exactly once per scan, in build_snapshot;
+            # rebuilding it here would double-advance the stateful tracker.
 
             # ── Vector Memory Retrieval (Phase AB-3 — OBSERVE_ONLY) ────────
             # "What have I seen that resembles this?" Nearest historical
@@ -935,11 +934,18 @@ def run_scan_loop():
             # provenance excluded). Consumes nothing; gated AI_RETRIEVAL_ENABLED.
             snapshot["ai_retrieval"] = retrieve_for_snapshot(snapshot, symbol)
 
-            # ── Narrative Brain (Phase AB-1 — OBSERVE_ONLY) ────────────────
-            # Full two-sided context + self-memory; replacement for the old
-            # 2-field wrapper. No consumer wired yet — output is persisted and
-            # archived. Enable with AI_BRAIN_ENABLED=true.
-            snapshot["ai_brain"] = run_narrative_brain(snapshot, symbol, stance_memory)
+            # ── Narrative Brain (Phase AB-1 / PIPE-1) ──────────────────────
+            # PIPE-1: under BRAIN_ECU_MODE the SINGLE canonical Brain call already
+            # ran inside build_snapshot (fully-fed, AFTER evidence assembly) and is
+            # the consumed thesis. Reuse its block here — do NOT make a second LLM
+            # call (that was the discarded, fully-fed duplicate). When ECU is OFF,
+            # this remains the one observe-only Brain call (legacy path, unchanged).
+            from ai_brain.ecu import ecu_enabled as _ecu_on
+            _canonical = (snapshot.get("candidate_thesis") or {}).get("brain_block")
+            if _ecu_on() and _canonical is not None:
+                snapshot["ai_brain"] = _canonical
+            else:
+                snapshot["ai_brain"] = run_narrative_brain(snapshot, symbol, stance_memory)
 
             # ── AB-4 — Wrapper vs Brain divergence (OBSERVE_ONLY) ──────────
             # Both AI paths observed the same scan; measure disagreement.
