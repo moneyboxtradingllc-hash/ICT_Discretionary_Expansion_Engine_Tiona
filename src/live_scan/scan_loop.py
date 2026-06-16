@@ -31,6 +31,7 @@ from shared_context.shared_market_context  import build_shared_market_context
 from shared_context.council                import run_council
 from narrative_authority.narrative_engine  import build_narrative
 from narrative_authority.protected_swings  import ProtectedSwingTracker
+from structure.po3_alignment_manager        import Po3StabilityManager   # VECTOR-3
 from ai_brain.narrative_brain              import run_narrative_brain
 from ai_brain.stance_memory                import StanceMemory
 from ai_brain.thesis_lifecycle             import ThesisLifecycleEngine
@@ -746,6 +747,7 @@ def run_scan_loop():
     swing_tracker            = ProtectedSwingTracker()   # Phase NA-1
     stance_memory            = StanceMemory()            # Phase AB-1 (brain self-memory)
     thesis_engine            = ThesisLifecycleEngine(symbol=symbol)   # Phase AB-7 (persistent thesis)
+    po3_stability            = Po3StabilityManager()     # VECTOR-3 (PO3 alignment hysteresis)
     prev_experience_summary  = None   # Phase 3A: carry forward for AI input next scan
     # Phase 5E.3: carry 5C/5D/5E summaries forward so AI sees them on the next scan
     prev_memory_search       = None
@@ -866,6 +868,7 @@ def run_scan_loop():
                     thesis_engine=thesis_engine,
                     symbol=symbol,
                     swing_tracker=swing_tracker,   # PIPE-1: tracker advanced inside build_snapshot
+                    po3_stability=po3_stability,   # VECTOR-3: persistent alignment hysteresis
                 )
             except Exception as exc:
                 print(f"  [SNAPSHOT ERROR scan #{scan_count}] {exc}")

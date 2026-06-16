@@ -41,6 +41,7 @@ def build_snapshot(
     thesis_engine=None,
     symbol: str = None,
     swing_tracker=None,
+    po3_stability=None,
 ) -> dict:
     timeframes = {}
     all_normalized = {}
@@ -73,7 +74,7 @@ def build_snapshot(
         candles = all_normalized.get(tf, [])
         atr_result = calculate_atr(candles)
         volatility[tf] = classify_volatility(candles, atr_result)
-        expansion[tf] = detect_expansion(candles, atr_result)
+        expansion[tf] = detect_expansion(candles, atr_result, tf)   # VECTOR-3: tf enables magnitude gate
 
     # Anchor snapshot to the most granular available last candle
     anchor = None
@@ -89,6 +90,14 @@ def build_snapshot(
 
     # PO3 phase analysis — runs on already-computed mechanical evidence
     po3 = analyze_po3_snapshot(structure, liquidity, volatility, expansion)
+
+    # VECTOR-3 — stateful stability layer. The pure engine above re-derives phases
+    # and alignment from scratch each scan; the manager (when the live loop passes
+    # its persistent instance) applies the phase dead-band + alignment hysteresis
+    # so a single sub-floor 1m flip can no longer rewrite global alignment. When no
+    # instance is passed, po3 is unchanged (pure pass-through).
+    if po3_stability is not None:
+        po3 = po3_stability.update(po3)
 
     # Memory modifiers from prior snapshots — read BEFORE building narrative/confidence
     memory_mods = memory.get_modifiers() if memory else {}

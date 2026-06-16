@@ -46,6 +46,13 @@ def _score_phases(struct: dict, liq: dict, vol: dict, exp: dict) -> dict:
     struct_s   = struct.get("state", "")
     bias       = struct.get("bias", "neutral")
 
+    # VECTOR-3 — when the expansion read was magnitude-gated (sub-floor physical
+    # travel), suppress the bonuses that derive conviction from the now-neutralised
+    # ratio metrics. disp is already forced False upstream; this additionally stops
+    # the attenuated dir_eff (~0.5) from leaking the dir_eff>=0.40 distribution
+    # bonus. Volatility/structure/liquidity-sourced bonuses are unaffected.
+    gated      = exp.get("magnitude_gated", False)
+
     comp       = _compression_score(dir_eff, body_dom, exp_score)
     clean_disp = disp and dir_eff >= 0.30   # displacement with at least some direction
 
@@ -78,9 +85,9 @@ def _score_phases(struct: dict, liq: dict, vol: dict, exp: dict) -> dict:
     # ── Distribution ──────────────────────────────────────────────────────────
     distrib = 0
     distrib += 30 if clean_disp else (10 if disp else 0)
-    if exp_state in ("healthy_expansion", "mature_expansion"):
+    if not gated and exp_state in ("healthy_expansion", "mature_expansion"):
         distrib += 25
-    if dir_eff >= 0.40:
+    if not gated and dir_eff >= 0.40:
         distrib += 20
     if vol_state in ("expanding", "stable"):
         distrib += 10
@@ -99,6 +106,19 @@ def _score_phases(struct: dict, liq: dict, vol: dict, exp: dict) -> dict:
         trans += 25
     if struct_s in ("bullish_reversal", "bearish_reversal"):
         trans += 20
+
+    # VECTOR-3 — sub-floor physical movement cannot author HIGH-CONVICTION phases.
+    # The mission: "tiny clean candles on flat tape must not produce expansion,
+    # distribution, MANIPULATION, or delivery-state labels." A sweep that crosses an
+    # equal high by a cent on a 0.6pt window is noise, not an institutional raid; a
+    # micro "MSS" on dead tape is not a structural shift. When this timeframe is
+    # magnitude-gated, only accumulation/no_phase may score — manipulation,
+    # distribution and transition are zeroed. Real raids/breaks move price above the
+    # window floor (kappa>0, not gated) and are unaffected.
+    if gated:
+        manip = 0
+        distrib = 0
+        trans = 0
 
     return {"accumulation": accum, "manipulation": manip,
             "distribution": distrib, "transition": trans}
@@ -200,6 +220,21 @@ def analyze_po3(struct: dict, liq: dict, vol: dict, exp: dict) -> dict:
 
     manip_dir, manip_src, dist_dir, dist_src = _directions(phase, sweep_dir, bias)
 
+    # VECTOR-3 — additive evidence the stability manager (po3_alignment_manager)
+    # consumes for phase dead-band + alignment hysteresis. Pure: derived only from
+    # this scan's inputs. A material event permits immediate (non-hysteretic)
+    # phase/alignment change because it reflects real structural displacement.
+    runner_up = sorted(scores.values(), reverse=True)[1] if len(scores) > 1 else 0
+    # A material event must clear the magnitude floor — a sweep/break on sub-floor
+    # tape is noise and must NOT grant an immediate (non-hysteretic) alignment move.
+    gated_tf = exp.get("magnitude_gated", False)
+    material_event = (not gated_tf) and bool(
+        mss
+        or sweep                                  # genuine raid (price moved above floor)
+        or disp                                   # displacement is floor-gated upstream
+        or exp_state in ("healthy_expansion", "mature_expansion")
+    )
+
     # AB-2C — delivery direction is the strongest available PO3 direction, with
     # provenance. distribution preferred over manipulation; both sweep-derived.
     if dist_dir is not None:
@@ -221,6 +256,13 @@ def analyze_po3(struct: dict, liq: dict, vol: dict, exp: dict) -> dict:
         "delivery_direction":            delivery_dir,
         "delivery_direction_source":     delivery_src,
         "compression_score":      comp,
+        # VECTOR-3 additive fields (consumed by po3_alignment_manager; ignored by
+        # all legacy consumers).
+        "phase_scores":           scores,
+        "winner_score":           best_s,
+        "runner_up_score":        runner_up,
+        "material_event":         material_event,
+        "magnitude_gated":        exp.get("magnitude_gated", False),
         "sweep_involved":         sweep or failed_bo,
         "expansion_involved":     disp or exp_state in ("healthy_expansion", "mature_expansion"),
         "notes":                  _notes(phase, comp, dir_eff, sweep, reclaim,
