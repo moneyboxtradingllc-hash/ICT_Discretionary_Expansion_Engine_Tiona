@@ -42,6 +42,10 @@ data/activation_reports/*
 data/ai_retrieval/*
 !data/ai_retrieval/.gitkeep
 
+# AI Brain per-scan logs/records — per-instance runtime state, never committed.
+data/ai_brain/*
+!data/ai_brain/.gitkeep
+
 # DEPLOY-1 — per-instance state is never committed (only templates are tracked)
 data/instances/
 data/global_memory/
