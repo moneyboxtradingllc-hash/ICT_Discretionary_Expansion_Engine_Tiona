@@ -139,6 +139,28 @@ class TopstepClient:
         d = self._post("/History/retrieveBars", body)
         return d.get("bars") or d.get("data") or []
 
+    # ── execution history (read-only; DEPLOY-2D reconciliation) ───────────────
+    #   POST /api/Trade/search {accountId, startTimestamp, endTimestamp?}
+    #        -> trades [{id, accountId, contractId, creationTimestamp, price,
+    #                    profitAndLoss(nullable=half-turn), fees, side, size,
+    #                    voided, orderId}]
+    #   POST /api/Order/search {accountId, startTimestamp, endTimestamp?}
+    #        -> orders [{id, ..., status, type, side, size, limitPrice, stopPrice,
+    #                    fillVolume, filledPrice, creationTimestamp, ...}]
+    def search_trades(self, account_id, start: str, end: str = None) -> list:
+        body = {"accountId": account_id, "startTimestamp": start}
+        if end:
+            body["endTimestamp"] = end
+        d = self._post("/Trade/search", body)
+        return d.get("trades") or d.get("data") or []
+
+    def search_orders(self, account_id, start: str, end: str = None) -> list:
+        body = {"accountId": account_id, "startTimestamp": start}
+        if end:
+            body["endTimestamp"] = end
+        d = self._post("/Order/search", body)
+        return d.get("orders") or d.get("data") or []
+
     def place_order(self, body: dict) -> dict:
         return self._post("/Order/place", body)
 
@@ -287,9 +309,15 @@ class TopstepBrokerAdapter(BrokerAdapter):
                 "type": otype, "side": side,
                 "size": int(order.get("size") or order.get("qty") or 0)}
         for k_src, k_dst in (("limitPrice", "limitPrice"), ("limit_price", "limitPrice"),
-                             ("stopPrice", "stopPrice"), ("stop_price", "stopPrice")):
+                             ("stopPrice", "stopPrice"), ("stop_price", "stopPrice"),
+                             ("trailPrice", "trailPrice")):
             if order.get(k_src) is not None:
                 body[k_dst] = order[k_src]
+        # DEPLOY-2D — native ProjectX bracket legs (stop loss + take profit).
+        # Forwarded verbatim from the caller's trade plan; no synthetic brackets.
+        for bk in ("stopLossBracket", "takeProfitBracket"):
+            if isinstance(order.get(bk), dict):
+                body[bk] = order[bk]
         return self.client.place_order(body)
 
     def cancel_order(self, order_id) -> dict:

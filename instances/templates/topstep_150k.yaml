@@ -1,10 +1,13 @@
 # DEPLOY-1/2 template — Topstep 150k practice profile (adapter is a stub; no live money)
 owner_name: ""
 broker: topstep
-data_provider: topstep      # DEPLOY-2A — Topstep/ProjectX market data (NEVER Alpaca)
+data_provider: topstep        # DEPLOY-2A — Topstep/ProjectX market data (NEVER Alpaca)
+execution_provider: topstep   # DEPLOY-2C — Topstep runtime (NEVER alpaca_paper)
+practice_only: true           # refuse live/funded routing
+execution_enabled: false      # SAFE default: observe, place no orders
 account_type: practice_150k
 account_id: ""
-symbol: MNQU                # DEPLOY-2B — Topstep instrument (Micro E-mini Nasdaq); never QQQ
+symbol: MNQU                  # DEPLOY-2B — Topstep instrument (Micro E-mini Nasdaq); never QQQ
 contract_size: 1
 session_windows:
   - "09:30-16:00"

@@ -1,6 +1,8 @@
 # DEPLOY-1 template — generic paper instance (Alpaca paper adapter)
 owner_name: ""
 broker: paper
+data_provider: alpaca         # DEPLOY-2A
+execution_provider: alpaca_paper   # DEPLOY-2C — Maurice routes execution to Alpaca paper
 account_type: paper
 account_id: ""
 symbol: QQQ

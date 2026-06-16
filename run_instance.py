@@ -96,15 +96,17 @@ def main(argv=None):
             from live_scan.scan_loop import run_scan_loop  # deferred import
             run_scan_loop(symbol=symbol, data_provider=data_provider)
         elif adapter.name == "topstep":
-            # DEPLOY-2A/2B — Topstep DATA path: scan loop runs against the Topstep
-            # (ProjectX) market-data feed for the configured instrument (e.g. MNQU).
-            # No Alpaca, no QQQ. If the Topstep feed is unavailable the provider
-            # raises a clear Topstep error (no fallback). NOTE: Topstep *execution*
-            # remains a stub/observe path (DEPLOY-2C); no live orders are placed.
-            print(f"\n[topstep] starting scan loop (data_provider={data_provider}, "
-                  f"symbol={symbol}) — execution stub/observe, no live orders…")
-            from live_scan.scan_loop import run_scan_loop  # deferred import
-            run_scan_loop(symbol=symbol, data_provider=data_provider)
+            # DEPLOY-2C — Topstep runtime path: a dedicated, Alpaca-free loop
+            # (fetch MNQU via Topstep feed -> build_snapshot -> TopstepRuntime cycle).
+            # Execution is OBSERVE by default; practice orders require explicit opt-in
+            # (TOPSTEP_EXECUTION_ENABLED + practice account + bracket allowance).
+            ep = ctx.config.resolved_execution_provider()
+            print(f"\n[topstep] starting Topstep runtime loop "
+                  f"(data_provider={data_provider}, execution_provider={ep}, "
+                  f"symbol={symbol}) — no Alpaca; execution off unless explicitly enabled…")
+            from live_scan.topstep_scan_loop import run_topstep_scan_loop  # deferred
+            run_topstep_scan_loop(symbol=symbol, data_provider=data_provider,
+                                  config=ctx.config)
         else:
             print(f"\n[guard] --start refused: broker '{adapter.name}' has no "
                   f"supported runtime start path.")

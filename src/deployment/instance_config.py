@@ -45,6 +45,11 @@ class InstanceConfig:
     # DEPLOY-2A — explicit market-data provider. Empty = derive from broker
     # (topstep→topstep, else alpaca) via resolved_data_provider().
     data_provider: str = ""
+    # DEPLOY-2C — execution runtime. Empty = derive from broker
+    # (topstep→topstep, else alpaca_paper) via resolved_execution_provider().
+    execution_provider: str = ""
+    practice_only: bool = True          # Topstep: refuse live/funded routing
+    execution_enabled: bool = False     # safe default: observe, place no orders
     account_type: str = "paper"
     account_id: str = ""
     symbol: str = "QQQ"
@@ -115,6 +120,14 @@ class InstanceConfig:
             return self.data_provider.lower().strip()
         return "topstep" if self.broker == "topstep" else "alpaca"
 
+    def resolved_execution_provider(self) -> str:
+        """Explicit execution_provider if set, else derived from broker. DEPLOY-2C:
+        topstep brokers route execution to the Topstep runtime; everything else to
+        the Alpaca paper runtime. Never returns alpaca_paper for a topstep broker."""
+        if self.execution_provider:
+            return self.execution_provider.lower().strip()
+        return "topstep" if self.broker == "topstep" else "alpaca_paper"
+
     def validate(self) -> list:
         """Return a list of problems (empty = valid). Never raises."""
         problems = []
@@ -127,6 +140,11 @@ class InstanceConfig:
         # Cross-contamination guard: a topstep broker must never use the Alpaca feed.
         if self.broker == "topstep" and self.resolved_data_provider() == "alpaca":
             problems.append("topstep broker must not use the alpaca data_provider")
+        if self.execution_provider and self.execution_provider.lower() not in ("alpaca_paper", "topstep"):
+            problems.append("execution_provider must be one of ('', 'alpaca_paper', 'topstep')")
+        # A topstep broker must never route execution through Alpaca paper.
+        if self.broker == "topstep" and self.resolved_execution_provider() == "alpaca_paper":
+            problems.append("topstep broker must not use the alpaca_paper execution_provider")
         if self.execution_mode not in EXECUTION_MODES:
             problems.append(f"execution_mode must be one of {EXECUTION_MODES}")
         if self.execution_mode == "live":
