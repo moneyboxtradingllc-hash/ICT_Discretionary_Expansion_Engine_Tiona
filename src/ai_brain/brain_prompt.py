@@ -165,6 +165,32 @@ similar historical setups resolved. Rules:
 """
 
 
+# ── ADAPTIVE-2A/2B adaptive-friction addendum ─────────────────────────────────
+# Appended when the payload carries adaptive_friction_report /
+# adaptive_interpretation_context. Historical scar tissue may CHALLENGE the
+# thesis; it has no trade authority and may not overrule current evidence.
+ADAPTIVE_FRICTION_ADDENDUM = """
+
+COGNITIVE BOUNDARY: ADAPTIVE FRICTION
+You are receiving historical scar-tissue analysis (adaptive_friction_report +
+adaptive_interpretation_context). This does NOT grant trade authority.
+
+Rules:
+1. Historical memory may NOT overrule current evidence.
+2. Current evidence may NOT ignore historical failure patterns.
+3. If historical scar tissue conflicts with your thesis, you MUST explicitly
+   explain why your current thesis survives or fails that objection.
+4. If friction_level >= 2, include a REBUTTAL in your dominant_reasoning that
+   answers: what history objects to; whether the objection is valid; what current
+   evidence overrides or confirms it; what would invalidate your thesis; and
+   whether conviction should remain, be downgraded, or be treated as fragile.
+5. If friction_level == 3, treat your thesis as CONTESTED unless current evidence
+   materially differs from the failed analog cluster — say so explicitly.
+6. Use adaptive_interpretation_context.experience_based_read: state whether the
+   current setup resembles prior winners or losers and why.
+"""
+
+
 # ── AI-BRAIN-H1 repair prompt ─────────────────────────────────────────────────
 REPAIR_PROMPT_TEMPLATE = """Your previous narrative JSON was rejected by the
 validator. Correct ONLY the invalid fields. Do not change valid fields. Do not

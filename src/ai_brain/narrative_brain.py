@@ -25,11 +25,13 @@ import logging
 from ai_brain.brain_input import build_brain_input
 from ai_brain.brain_prompt import (
     BRAIN_SYSTEM_PROMPT, REPAIR_PROMPT_TEMPLATE, NEWS_CONTEXT_ADDENDUM,
-    ADAPTIVE_LEARNING_ADDENDUM,
+    ADAPTIVE_LEARNING_ADDENDUM, ADAPTIVE_FRICTION_ADDENDUM,
 )
-# ADAPTIVE-1C — OBSERVE_ONLY adaptive-learning context injection + telemetry.
+# ADAPTIVE-1C/2A/2B — OBSERVE_ONLY adaptive context, friction + interpretation,
+# and telemetry injection.
 from adaptive_learning.context_formatter import (
-    inject_adaptive_context, build_adaptive_telemetry,
+    inject_adaptive_context, inject_friction_and_interpretation,
+    build_adaptive_telemetry,
 )
 from ai_brain.brain_schema import (
     empty_brain_output, validate_brain_output, validate_llm_core,
@@ -170,6 +172,9 @@ def _call_llm(brain_input: dict, repair: "dict | None" = None) -> dict:
     # context is present (always once wired). Recommendation only; never applied.
     if isinstance(brain_input.get("adaptive_learning_context"), dict):
         system_prompt = system_prompt + ADAPTIVE_LEARNING_ADDENDUM
+    # ADAPTIVE-2A/2B — friction/interpretation rebuttal directive when present.
+    if isinstance(brain_input.get("adaptive_friction_report"), dict):
+        system_prompt = system_prompt + ADAPTIVE_FRICTION_ADDENDUM
     out = {"parsed": None, "ok": False, "model": None, "prompt": system_prompt,
            "user_content": user_content, "raw_response": None, "usage": None,
            "fallback_reason": None, "is_repair": bool(repair)}
@@ -258,6 +263,13 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
         # brain_input["adaptive_learning_context"] (neutral when no analogs).
         adaptive_signal = inject_adaptive_context(brain_input, analogs, snapshot)
 
+        # ── ADAPTIVE-2A/2B — Adaptive Friction + Interpretation (OBSERVE_ONLY).
+        # History's objection + experience-based read are attached to the payload
+        # so the Brain can rebut them. No authority: influences NO decision,
+        # confidence, risk, direction, or permission.
+        adaptive_friction, adaptive_interp = inject_friction_and_interpretation(
+            brain_input, adaptive_signal, snapshot)
+
         # ── AI-BRAIN-H1: LLM path with normalize → repair → explicit fallback ─
         llm_call = None
         source, fallback_reason = "deterministic", None
@@ -337,7 +349,9 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
         # ADAPTIVE-1C — telemetry: RECOMMENDED vs APPLIED kept separate; applied is
         # hard-locked 0, final_confidence == base_confidence (no behavioural change).
         base_confidence = int(output.get("phase_confidence", 0) or 0)
-        adaptive_telemetry = build_adaptive_telemetry(base_confidence, adaptive_signal)
+        adaptive_telemetry = build_adaptive_telemetry(
+            base_confidence, adaptive_signal,
+            friction=adaptive_friction, interpretation=adaptive_interp, output=output)
 
         record = {
             "timestamp": snapshot.get("timestamp"),

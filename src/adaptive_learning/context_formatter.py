@@ -58,12 +58,14 @@ def neutral_adaptive_context(reason: str = "no adaptive learning signal") -> dic
     }
 
 
-def build_adaptive_telemetry(base_confidence, signal: "LearningSignal | None") -> dict:
+def build_adaptive_telemetry(base_confidence, signal: "LearningSignal | None",
+                             friction=None, interpretation=None, output=None) -> dict:
     """Scan-telemetry block separating the RECOMMENDED adjustment from the APPLIED
-    (always 0). final_confidence ALWAYS equals base_confidence."""
+    (always 0). final_confidence ALWAYS equals base_confidence. ADAPTIVE-2A/2B:
+    also records friction + interpretation + rebuttal status (observe-only)."""
     base = _to_int(base_confidence)
     recommended = signal.confidence_adjustment if signal is not None else 0
-    return {
+    tel = {
         "base_confidence": base,
         "adaptive_recommended_adjustment": recommended,
         "adaptive_confidence_adjustment": 0,               # HARD-LOCK — never applied
@@ -74,6 +76,59 @@ def build_adaptive_telemetry(base_confidence, signal: "LearningSignal | None") -
                               else ["no_adaptive_learning_signal"]),
         "adaptive_reason": signal.reason if signal is not None else "no adaptive learning signal",
     }
+    tel.update(_friction_telemetry(friction, interpretation, output))
+    return tel
+
+
+def _friction_telemetry(friction, interpretation, output) -> dict:
+    """ADAPTIVE-2A/2B telemetry: objection + interpretation + rebuttal presence."""
+    interp = interpretation or {}
+    required = bool(getattr(friction, "required_rebuttal", False)) if friction else False
+    present, resolution = _rebuttal_status(required, output or {})
+    return {
+        "friction_level": getattr(friction, "friction_level", 0) if friction else 0,
+        "friction_label": getattr(friction, "friction_label", "none") if friction else "none",
+        "historical_objection": getattr(friction, "historical_objection", "") if friction else "",
+        "required_rebuttal": required,
+        "brain_rebuttal_present": present,
+        "disagreement_resolution": resolution,
+        "interpretation_bias": interp.get("interpretation_bias", "insufficient_history"),
+        "confidence_posture": interp.get("confidence_posture", "stable"),
+        "fragility_flags": interp.get("fragility_flags", []),
+    }
+
+
+_REBUTTAL_KEYWORDS = ("history", "historical", "objection", "analog", "scar",
+                      "prior", "previously", "failed before", "friction")
+
+
+def _rebuttal_status(required: bool, output: dict):
+    """Heuristic (observe-only): did the Brain answer the objection? Detects whether
+    the narrative reasoning references history/objection when a rebuttal was
+    required. Never affects behavior."""
+    if not required:
+        return False, "n/a"
+    text = " ".join(str(output.get(k, "")) for k in
+                    ("dominant_reasoning", "market_story", "reason")).lower()
+    present = any(k in text for k in _REBUTTAL_KEYWORDS)
+    return present, ("rebuttal_present" if present else "rebuttal_missing")
+
+
+def inject_friction_and_interpretation(brain_input: dict, signal, snapshot: dict = None):
+    """Build the friction report + interpretation context from the (advisory)
+    LearningSignal and attach BOTH to the Brain payload. Visibility only — sets
+    brain_input["adaptive_friction_report"] and ["adaptive_interpretation_context"].
+    Returns (friction_report, interpretation_dict). Never raises."""
+    try:
+        from adaptive_learning.friction_engine import build_friction_report, friction_to_dict
+        from adaptive_learning.interpretation_engine import build_adaptive_interpretation
+        friction = build_friction_report(signal, snapshot or {})
+        interp = build_adaptive_interpretation(signal, friction, snapshot or {})
+        brain_input["adaptive_friction_report"] = friction_to_dict(friction)
+        brain_input["adaptive_interpretation_context"] = interp
+        return friction, interp
+    except Exception:  # noqa: BLE001
+        return None, {}
 
 
 def inject_adaptive_context(brain_input: dict, analogs, snapshot: dict = None):
