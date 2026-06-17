@@ -152,6 +152,95 @@ class TestExecutionGates(_EnvSandbox):
             self.assertNotIn("TOPSTEP_ALLOW_UNBRACKETED_ENTRY", fh.read())
 
 
+def _toolbox_snapshot(entry=None, stop=None, pref="fvg",
+                      with_tool=True, with_candidate=True, with_price_level=True):
+    """Build a snapshot whose toolbox plan source is selectively incomplete, to
+    drive each precise no_trade_plan reason."""
+    cand = {"tool": pref}
+    if with_price_level:
+        pl = {}
+        if entry is not None:
+            pl["midpoint"] = entry
+        if stop is not None:
+            pl["invalidation_level"] = stop
+        cand["price_level"] = pl
+    tb = {"preferred_tool": pref if with_tool else None,
+          "tool_candidates": [cand] if with_candidate else []}
+    return {"toolbox": tb}
+
+
+class TestTradePlanDiagnostics(_EnvSandbox):
+    """Every block names the EXACT missing field; no broker call on incomplete plan;
+    a complete plan routes a native bracket with positive ticks. No synthetic stop."""
+
+    def _rt(self):
+        os.environ["TOPSTEP_EXECUTION_ENABLED"] = "true"
+        adapter = FakeAdapter(practice=True, simulated=True)
+        rt = _topstep_runtime(adapter, SimpleNamespace(execution_enabled=True, contract_size=1))
+        return rt, adapter
+
+    def _buy(self):
+        return {"side": "buy", "qty": 1}
+
+    def test_missing_stop_blocks_and_names_invalidation(self):
+        rt, adapter = self._rt()
+        res = rt.submit_order(self._buy(), _toolbox_snapshot(entry=20000.0, stop=None))
+        self.assertFalse(res["placed"])
+        self.assertIn("no_trade_plan", res["reason"])
+        self.assertIn("stop", res["reason"])
+        self.assertIn("invalidation_level", res["reason"])
+        self.assertEqual(adapter.submitted, [])          # no broker call
+
+    def test_missing_entry_blocks_and_names_entry(self):
+        rt, adapter = self._rt()
+        res = rt.submit_order(self._buy(), _toolbox_snapshot(entry=None, stop=19990.0))
+        self.assertFalse(res["placed"])
+        self.assertIn("entry unavailable", res["reason"])
+        self.assertEqual(adapter.submitted, [])
+
+    def test_no_preferred_tool_blocks_and_names_it(self):
+        rt, adapter = self._rt()
+        res = rt.submit_order(self._buy(),
+                              _toolbox_snapshot(entry=20000.0, stop=19990.0, with_tool=False))
+        self.assertFalse(res["placed"])
+        self.assertIn("preferred_tool", res["reason"])
+        self.assertEqual(adapter.submitted, [])
+
+    def test_no_toolbox_blocks(self):
+        rt, adapter = self._rt()
+        res = rt.submit_order(self._buy(), {})
+        self.assertIn("toolbox absent", res["reason"])
+        self.assertEqual(adapter.submitted, [])
+
+    def test_zero_risk_distance_blocks(self):
+        rt, adapter = self._rt()
+        res = rt.submit_order(self._buy(), _toolbox_snapshot(entry=20000.0, stop=20000.0))
+        self.assertFalse(res["placed"])
+        self.assertIn("zero risk distance", res["reason"])
+        self.assertEqual(adapter.submitted, [])
+
+    def test_complete_plan_routes_native_bracket_positive_ticks(self):
+        rt, adapter = self._rt()
+        res = rt.submit_order(self._buy(), _toolbox_snapshot(entry=20000.0, stop=19990.0))
+        self.assertTrue(res["placed"])
+        self.assertEqual(len(adapter.submitted), 1)       # broker called once
+        order = adapter.submitted[0]
+        self.assertIn("stopLossBracket", order)
+        self.assertIn("takeProfitBracket", order)
+        self.assertGreater(order["stopLossBracket"]["ticks"], 0)
+        self.assertGreater(order["takeProfitBracket"]["ticks"], 0)
+        self.assertEqual(order["stopLossBracket"]["type"], 4)   # Stop
+        self.assertEqual(order["takeProfitBracket"]["type"], 1)  # Limit
+
+    def test_complete_plan_only_after_execution_and_practice_gates(self):
+        # gates still precede the plan: execution off → observe, not a plan error
+        rt = _topstep_runtime(FakeAdapter(practice=True),
+                              SimpleNamespace(execution_enabled=False, contract_size=1))
+        res = rt.submit_order(self._buy(), _toolbox_snapshot(entry=20000.0, stop=19990.0))
+        self.assertEqual(res["action"], "observe")
+        self.assertFalse(res["placed"])
+
+
 class TestReconciliation(_EnvSandbox):
     def test_9_reconcile_reads_account_positions_orders(self):
         adapter = FakeAdapter(positions=[{"id": 1}, {"id": 2}], orders=[{"id": 9}])

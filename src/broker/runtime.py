@@ -156,27 +156,42 @@ class TopstepRuntime(BrokerRuntime):
 
     def _trade_plan(self, snapshot: dict, decision: dict):
         """Entry/stop/target from the bot's EXISTING plan (toolbox price level).
-        Returns None when stop is absent — no synthetic stop is invented."""
+        Returns (plan, None) on success, or (None, reason) naming the EXACT missing
+        field. No synthetic stop is EVER invented — an absent invalidation level
+        blocks the trade. Every failure carries the 'no_trade_plan' tag plus the
+        precise cause so the block is self-diagnosing in the live log."""
         tb = snapshot.get("toolbox", {}) or {}
+        if not tb:
+            return None, "no_trade_plan: toolbox absent from snapshot"
         pref = tb.get("preferred_tool")
-        cand = next((c for c in tb.get("tool_candidates", []) if c.get("tool") == pref), {}) or {}
+        if not pref:
+            return None, "no_trade_plan: no preferred_tool selected (no tool to price)"
+        cand = next((c for c in tb.get("tool_candidates", []) if c.get("tool") == pref), None)
+        if not cand:
+            return None, f"no_trade_plan: preferred_tool '{pref}' has no scored candidate"
         pl = cand.get("price_level", {}) or {}
+        if not pl:
+            return None, f"no_trade_plan: preferred_tool '{pref}' has no price_level"
         entry = pl.get("midpoint") if pl.get("midpoint") is not None else pl.get("current_price")
         stop = pl.get("invalidation_level")
-        if entry is None or stop is None:
-            return None
+        if entry is None:
+            return None, (f"no_trade_plan: entry unavailable for '{pref}' "
+                          "(price_level.midpoint and current_price both absent)")
+        if stop is None:
+            return None, (f"no_trade_plan: stop unavailable for '{pref}' "
+                          "(price_level.invalidation_level absent) — no synthetic stop invented")
         try:
             entry, stop = float(entry), float(stop)
         except (TypeError, ValueError):
-            return None
+            return None, f"no_trade_plan: entry/stop not numeric for '{pref}'"
         if entry == stop:
-            return None
+            return None, f"no_trade_plan: entry == stop (zero risk distance) for '{pref}'"
         risk_pts = abs(entry - stop)
         rmult = float(os.getenv("TAKE_PROFIT_R", "2.0"))
         side = decision.get("side")
         target = entry + risk_pts * rmult if side == "buy" else entry - risk_pts * rmult
-        return {"entry": entry, "stop": stop, "target": target,
-                "risk_points": risk_pts, "target_points": risk_pts * rmult, "rmult": rmult}
+        return ({"entry": entry, "stop": stop, "target": target,
+                 "risk_points": risk_pts, "target_points": risk_pts * rmult, "rmult": rmult}, None)
 
     def _bracket_legs(self, plan: dict):
         """Convert the plan's stop/target distances to native ProjectX bracket
@@ -205,10 +220,10 @@ class TopstepRuntime(BrokerRuntime):
 
         # DOCTRINE: no bracket, no trade. The plan (entry+stop+target) and the
         # native ProjectX bracket legs MUST both resolve, or the order is blocked.
-        plan = self._trade_plan(snapshot or {}, decision)
+        plan, plan_reason = self._trade_plan(snapshot or {}, decision)
         if plan is None:
             return {"action": "blocked", "placed": False,
-                    "reason": "no_trade_plan — entry/stop unavailable; no bracket, no trade"}
+                    "reason": f"{plan_reason}; no bracket, no trade"}
         legs = self._bracket_legs(plan)
         if legs is None:
             return {"action": "blocked", "placed": False,
