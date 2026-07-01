@@ -224,6 +224,23 @@ def build_snapshot(
     # Toolbox: reads playbook + risk + all evidence to select entry tools
     snapshot["toolbox"] = run_toolbox(snapshot)
 
+    # ── ADAPTIVE-3 — Adaptive Policy Report (OBSERVE_ONLY / DEFENSIVE_ONLY) ────
+    # Reads the symbol-native performance tables for the CURRENT candidate
+    # (playbook/tool/session/regime/volatility) and reports expectancy grades +
+    # recommendation flags. Recommendation-only: it authorizes/blocks/overrides
+    # NOTHING (authority_level=observe_only). Built AFTER toolbox so all five
+    # candidate dimensions exist. Never raises.
+    from adaptive_learning.adaptive_policy_engine import generate_adaptive_policy_report
+    _regime = snapshot.get("market_regime", {}) or {}
+    snapshot["adaptive_policy"] = generate_adaptive_policy_report({
+        "symbol":     symbol or snapshot.get("symbol"),
+        "playbook":   (snapshot.get("playbook", {}) or {}).get("selected_playbook"),
+        "tool":       (snapshot.get("toolbox", {}) or {}).get("preferred_tool"),
+        "session":    snapshot.get("session"),
+        "regime":     _regime.get("regime_family"),
+        "volatility": _regime.get("volatility_state"),
+    })
+
     # Experience Intelligence (Phase 3A): OBSERVE_ONLY context from previous scan.
     # confidence_modifier is always 0 and must never influence toolbox or decisions.
     if experience_summary:

@@ -279,6 +279,30 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
         adaptive_friction, adaptive_interp = inject_friction_and_interpretation(
             brain_input, adaptive_signal, snapshot)
 
+        # ── ADAPTIVE-3 — Adaptive Policy context (OBSERVE_ONLY / DEFENSIVE_ONLY).
+        # The performance-table policy report for this candidate, attached so the
+        # Brain can SEE expectancy grades + defensive recommendations. Prefer the
+        # snapshot's post-toolbox report; during the ECU pre-pass (before toolbox)
+        # derive an environment-level view from the dims already known. Nothing
+        # here is applied to confidence/qualification/risk/execution. Never raises.
+        try:
+            _policy = snapshot.get("adaptive_policy")
+            if not isinstance(_policy, dict):
+                from adaptive_learning.adaptive_policy_engine import (
+                    generate_adaptive_policy_report)
+                _regime = snapshot.get("market_regime", {}) or {}
+                _policy = generate_adaptive_policy_report({
+                    "symbol":     symbol or snapshot.get("symbol"),
+                    "playbook":   (snapshot.get("playbook", {}) or {}).get("selected_playbook"),
+                    "tool":       (snapshot.get("toolbox", {}) or {}).get("preferred_tool"),
+                    "session":    snapshot.get("session"),
+                    "regime":     _regime.get("regime_family"),
+                    "volatility": _regime.get("volatility_state"),
+                })
+            brain_input["adaptive_policy_context"] = _policy
+        except Exception:  # noqa: BLE001
+            pass
+
         # ── AI-BRAIN-H1: LLM path with normalize → repair → explicit fallback ─
         llm_call = None
         ai_market_commander = None   # MARKET COMMANDER B2 (observe-only side output)

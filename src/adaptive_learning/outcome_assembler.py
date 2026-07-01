@@ -159,6 +159,15 @@ def record_closed_trade_scar(reconciliation: dict, symbol: str,
             return _telemetry(written=False, errors=["entry_record_not_found"])
         outcome = assemble_closed_trade_outcome(recon, entry, ai_brain_state)
         result = write_outcome(outcome, source_type="closed_trade")
+        # ── ADAPTIVE-3 — fold the closed outcome into the symbol's performance
+        # tables (playbook/tool/session/regime/volatility). Observe/record only:
+        # influences NO decision, confidence, risk, or permission. Isolated in its
+        # own guard so a table error can never affect the scar write. Never raises.
+        try:
+            from adaptive_learning.performance_tables import update_performance_tables
+            update_performance_tables(outcome, entry)
+        except Exception:  # noqa: BLE001
+            pass
         return build_scar_telemetry(result)
     except Exception as exc:  # noqa: BLE001
         return _telemetry(written=False, errors=[f"scar_writer_error:{type(exc).__name__}"])
