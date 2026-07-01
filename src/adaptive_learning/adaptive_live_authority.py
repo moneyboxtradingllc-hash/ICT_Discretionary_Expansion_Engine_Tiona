@@ -151,20 +151,76 @@ def resolve_final_confidence(original_confidence, snapshot: dict):
 
 
 def resolve_final_qty(original_qty, snapshot: dict):
-    """DEFENSIVE size resolver for a legal sizing consumer. Returns the adaptive
-    final qty when it indicates a reduction and is below the caller's original,
-    else the original. Capped with min() so it can only ever LOWER — never raise,
-    never invent, never exceed the caller's risk-derived original. Never raises."""
+    """DEFENSIVE size resolver for a legal sizing consumer (ADAPTIVE-7).
+
+    Returns a qty that may ONLY be lower than the caller's original (the caller's
+    risk/buying-power-capped size). Resolution order:
+      1. a pre-computed ``adaptive_size`` overlay (final < original), or
+      2. else — at the live sizing site where a real qty finally exists — derive
+         the reduction from ``adaptive_policy.risk_reduction_recommended`` via the
+         single halving rule in the mutation engine (floor, min 1).
+    Always ``min()``-capped to the caller's original: never raises, never invents,
+    never exceeds the risk max. Never raises."""
     try:
-        if not _is_num(original_qty):
+        if not _is_num(original_qty) or original_qty <= 0:
             return original_qty
+
+        # 1) explicit pre-computed overlay wins
         asz = (snapshot or {}).get("adaptive_size") or {}
         f, o = asz.get("final"), asz.get("original")
         if _is_num(f) and _is_num(o) and f < o:
             return min(original_qty, f)
+
+        # 2) live derivation from policy over the real qty (single source of the
+        #    halving rule = the mutation engine; keeps DEFENSIVE_ONLY downward-only)
+        policy = (snapshot or {}).get("adaptive_policy") or {}
+        if policy.get("risk_reduction_recommended"):
+            from adaptive_learning.adaptive_mutation_engine import mutate_candidate
+            nq = mutate_candidate({"qty": original_qty}, policy).get("new_qty")
+            if _is_num(nq) and nq < original_qty:
+                return min(original_qty, nq)
+
         return original_qty
     except Exception:  # noqa: BLE001
         return original_qty
+
+
+def record_live_size_consumption(snapshot: dict, original_qty, final_qty,
+                                 reason=None) -> dict:
+    """Persist the ADAPTIVE-7 size-consumption forensics onto
+    ``snapshot['adaptive_live_consumption']`` (created if absent, updated if the
+    ADAPTIVE-6 consumption pass already ran). Records only a genuine reduction.
+    Never raises; returns the consumption record."""
+    try:
+        snap = snapshot if isinstance(snapshot, dict) else {}
+        rec = snap.get("adaptive_live_consumption")
+        if not isinstance(rec, dict):
+            rec = {
+                "adaptive_confidence_consumed": False,
+                "adaptive_size_consumed":       False,
+                "original_live_confidence":     None,
+                "final_live_confidence":        None,
+                "original_live_qty":            None,
+                "final_live_qty":               None,
+                "source":                       SOURCE,
+                "posture":                      POSTURE,
+                "notes":                        [],
+            }
+        reduced = _is_num(original_qty) and _is_num(final_qty) and final_qty < original_qty
+        rec["adaptive_size_consumed"] = bool(reduced)
+        rec["original_live_qty"]      = original_qty
+        rec["final_live_qty"]         = final_qty
+        rec["adaptive_final_qty"]     = final_qty
+        rec["adaptive_size_source"]   = SOURCE
+        rec["adaptive_size_reason"]   = (
+            reason or (f"qty {original_qty} -> {final_qty} (adaptive defensive)"
+                       if reduced else "no size reduction"))
+        if reduced:
+            rec.setdefault("notes", []).append(rec["adaptive_size_reason"])
+        snap["adaptive_live_consumption"] = rec
+        return rec
+    except Exception:  # noqa: BLE001
+        return snapshot.get("adaptive_live_consumption", {}) if isinstance(snapshot, dict) else {}
 
 
 def consume_adaptive_overlays(snapshot: dict) -> dict:

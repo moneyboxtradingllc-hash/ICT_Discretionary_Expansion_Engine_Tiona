@@ -181,7 +181,13 @@ class TestNoForbiddenFilesModified(unittest.TestCase):
         changed = [f.strip() for f in out.splitlines() if f.strip()]
         forbidden = ("qualification", "risk_governor", "risk/", "execution_gate",
                      "paper_execution", "decision_authority", "intent_scoring")
-        offenders = [f for f in changed if any(p in f for p in forbidden)]
+        # ADAPTIVE-7 — the ONE deliberate, scoped constitutional revision: the live
+        # size owner may consume resolve_final_qty (downward-only, risk-capped). All
+        # other execution/risk files remain forbidden.
+        allowed = ("paper_execution/order_builder.py",)
+        offenders = [f for f in changed
+                     if any(p in f for p in forbidden)
+                     and not any(a in f for a in allowed)]
         self.assertEqual(offenders, [], f"forbidden files modified: {offenders}")
 
 

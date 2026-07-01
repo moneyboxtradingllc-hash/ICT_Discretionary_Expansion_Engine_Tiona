@@ -241,6 +241,19 @@ def build_order(snapshot: dict, symbol: str) -> dict:
 
     qty = min(risk_qty, max_affordable)
 
+    # ── ADAPTIVE-7 — live defensive size overlay (DEFENSIVE_ONLY, downward-only) ──
+    # The risk- and buying-power-capped qty above is the HARD ceiling (risk max).
+    # The adaptive overlay may ONLY lower it: resolve_final_qty() is min()-capped to
+    # this qty, so final_qty <= risk max always, never raises size, never invents.
+    # Recorded forensically. Order-build logic is otherwise unchanged.
+    from adaptive_learning.adaptive_live_authority import (
+        resolve_final_qty, record_live_size_consumption,
+    )
+    _risk_max_qty = qty
+    qty = resolve_final_qty(_risk_max_qty, snapshot)
+    if qty != _risk_max_qty:
+        record_live_size_consumption(snapshot, _risk_max_qty, qty)
+
     _log.info(
         "Sizing: risk_qty=%d affordable_qty=%d final_qty=%d "
         "buying_power=%.2f entry_price=%.2f",
