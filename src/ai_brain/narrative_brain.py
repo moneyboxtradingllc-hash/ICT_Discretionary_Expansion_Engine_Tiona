@@ -25,8 +25,14 @@ import logging
 from ai_brain.brain_input import build_brain_input
 from ai_brain.brain_prompt import (
     BRAIN_SYSTEM_PROMPT, REPAIR_PROMPT_TEMPLATE, NEWS_CONTEXT_ADDENDUM,
-    ADAPTIVE_LEARNING_ADDENDUM, ADAPTIVE_FRICTION_ADDENDUM,
+    ADAPTIVE_LEARNING_ADDENDUM, ADAPTIVE_FRICTION_ADDENDUM, MARKET_COMMANDER_ADDENDUM,
 )
+
+
+def _market_commander_mode() -> bool:
+    # MARKET COMMANDER B2 — env-gated; default off (no firewall coupling to the
+    # market_commander module; just an env check).
+    return (os.getenv("MARKET_COMMANDER_MODE", "false") or "").strip().lower() == "true"
 # ADAPTIVE-1C/2A/2B — OBSERVE_ONLY adaptive context, friction + interpretation,
 # and telemetry injection.
 from adaptive_learning.context_formatter import (
@@ -175,6 +181,9 @@ def _call_llm(brain_input: dict, repair: "dict | None" = None) -> dict:
     # ADAPTIVE-2A/2B — friction/interpretation rebuttal directive when present.
     if isinstance(brain_input.get("adaptive_friction_report"), dict):
         system_prompt = system_prompt + ADAPTIVE_FRICTION_ADDENDUM
+    # MARKET COMMANDER B2 — environment-first sequential reasoning (gated).
+    if _market_commander_mode():
+        system_prompt = system_prompt + MARKET_COMMANDER_ADDENDUM
     out = {"parsed": None, "ok": False, "model": None, "prompt": system_prompt,
            "user_content": user_content, "raw_response": None, "usage": None,
            "fallback_reason": None, "is_repair": bool(repair)}
@@ -272,6 +281,7 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
 
         # ── AI-BRAIN-H1: LLM path with normalize → repair → explicit fallback ─
         llm_call = None
+        ai_market_commander = None   # MARKET COMMANDER B2 (observe-only side output)
         source, fallback_reason = "deterministic", None
         norm_notes, repair_errors, repaired = [], [], False
         taint_clean, taint_paths = scan_payload_taint(brain_input)
@@ -321,6 +331,13 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
                     output.setdefault("warnings", []).append(f"llm_fallback: {fallback_reason}")
                 else:
                     source = "llm"
+                    # MARKET COMMANDER B2 — capture the Brain-authored matrix from
+                    # the RAW parse (observe-only side output; validated/coerced by
+                    # market_commander, never consumed as authority here).
+                    if _market_commander_mode():
+                        _raw = (llm_call or {}).get("parsed") or {}
+                        if isinstance(_raw.get("market_commander"), dict):
+                            ai_market_commander = _raw["market_commander"]
                     output = empty_brain_output()
                     output.update(parsed)
                     direction = output.get("narrative_direction", "neutral")
@@ -372,6 +389,7 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             "input_degraded": brain_input.get("degraded", []),
             "input_payload": brain_input,
             "adaptive_telemetry": adaptive_telemetry,   # ADAPTIVE-1C (observe_only)
+            "ai_market_commander": ai_market_commander, # MARKET COMMANDER B2 (observe_only)
             "parsed_output": output,
             "fields_consumed": list(_CONSUMED_FIELDS_AB1),   # [] — observe only
             "fields_persisted_not_yet_consumed": [k for k in output
@@ -392,6 +410,7 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             "input_degraded": brain_input.get("degraded", []),
             "output": output,
             "adaptive_telemetry": adaptive_telemetry,   # ADAPTIVE-1C (observe_only)
+            "ai_market_commander": ai_market_commander, # MARKET COMMANDER B2 (observe_only)
             "persisted": persisted_path,
         }
     except Exception as exc:  # noqa: BLE001

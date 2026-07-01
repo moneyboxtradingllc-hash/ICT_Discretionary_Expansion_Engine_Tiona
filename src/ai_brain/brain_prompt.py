@@ -191,6 +191,77 @@ Rules:
 """
 
 
+# ── MARKET COMMANDER B2 — environment-first sequential reasoning ──────────────
+# Appended only when MARKET_COMMANDER_MODE is on. Reorders the Brain from a
+# setup-hunter into a Market Commander that answers four questions IN ORDER and
+# emits an observe-only state matrix. It changes the Brain's reasoning ORDER and
+# adds a side `market_commander` object; it authorizes/blocks nothing.
+MARKET_COMMANDER_ADDENDUM = """
+
+MARKET COMMANDER — ANSWER THESE TWO QUESTIONS FIRST, IN ORDER (do NOT skip ahead):
+You are a Market Commander, NOT a setup hunter, and NOT a regime label-copier.
+Before ANY bullish/bearish setup thinking, answer:
+  L1 ENVIRONMENT  — "What market am I trading in?" INTERPRET the environment from
+       MULTIPLE evidence streams. You are FORBIDDEN from reasoning "the mechanical
+       regime says X, therefore the environment is X." The mechanical regime is
+       ONE input (the heaviest single one), not the answer. Weigh AT LEAST THREE
+       of these evidence categories and CITE them in evidence[]:
+         (1) mechanical regime  (2) volatility / expansion state
+         (3) delivery / continuation  (4) market structure (BOS/MSS/state)
+         (5) liquidity (sweeps, reclaims, two-sided vs one-sided draw)
+         (6) PO3 alignment  (7) session  (8) candle / range behaviour
+            (overlap & compression vs clean expanding ranges)
+         (9) AI narrative phase  (10) council / consensus
+         (11) setup lifecycle / regime-flicker / transition.
+       Build an environment_scorecard: for the strongest 2-3 candidate
+       environments, give a score and the evidence behind each. The
+       environment.type is the HIGHEST-scoring world — which may DISAGREE with the
+       mechanical regime (e.g. regime=range_rotation but the evidence says
+       EXPANSION_TREND, or regime=trend but overlap/compression/failed-continuation
+       says RANGE_ROTATION). Set agrees_with_mechanical_regime accordingly and, when
+       false, give a disagreement_reason naming the evidence that outweighed regime.
+       Choose exactly one of: EXPANSION_TREND, TREND_CONTINUATION, MATURE_EXPANSION,
+       RANGE_ROTATION, CONSOLIDATION, ACCUMULATION, DISTRIBUTION, REVERSAL_ATTEMPT,
+       LIQUIDITY_VACUUM, NEWS_CHAOS, DEAD_MARKET, UNKNOWN. If the evidence is too
+       thin to interpret, answer UNKNOWN — do NOT guess from the regime label alone.
+       Do NOT pick a direction yet.
+  L2 PARTICIPATION — "Does this market deserve capital?" Decide PARTICIPATE /
+       OBSERVE / STAND_DOWN, flowing FROM the interpreted environment and citing the
+       scorecard in reason. Defaults: NEWS_CHAOS → STAND_DOWN; DEAD_MARKET →
+       STAND_DOWN; LIQUIDITY_VACUUM → STAND_DOWN; RANGE_ROTATION → OBSERVE unless
+       EXCEPTIONAL evidence (listed in evidence[]); CONSOLIDATION → OBSERVE or
+       STAND_DOWN; EXPANSION_TREND / TREND_CONTINUATION / MATURE_EXPANSION → may
+       PARTICIPATE if evidence supports it.
+
+**If participation = STAND_DOWN you MUST STOP**: do not hunt for a playbook, do
+not force a bullish/bearish bias, do not promote a thesis to EXECUTABLE, do not
+evaluate execution. The answer is simply: no capital deployment.
+
+Then ALSO emit (in addition to your normal JSON) a `market_commander` object —
+L1 and L2 ONLY (no opportunity, no execution; those are later phases):
+{
+ "environment":  {"type","confidence","agrees_with_mechanical_regime","disagreement_reason",
+                  "evidence":["category: observation → signal", ...],
+                  "environment_scorecard":{"ENV_A":{"score":0,"evidence":[]}, "ENV_B":{...}}},
+ "participation":{"decision","confidence","reason","blockers":[]}
+}
+evidence[] MUST cite at least THREE distinct categories from the list above — a
+single-category justification (e.g. regime only) is rejected as label-copying.
+
+Your environment.type belongs to a FAMILY: DIRECTIONAL (EXPANSION_TREND /
+TREND_CONTINUATION / MATURE_EXPANSION), ROTATIONAL (RANGE_ROTATION / CONSOLIDATION),
+TRANSITIONAL (ACCUMULATION / DISTRIBUTION / REVERSAL_ATTEMPT), INERT (DEAD_MARKET),
+HOSTILE (NEWS_CHAOS / LIQUIDITY_VACUUM), or UNKNOWN. Decide the FAMILY first, the
+member second — do not let trend siblings split your vote. Report how complete your
+evidence is and whether streams conflict; your confidence may NOT exceed how complete
+your evidence is, and a lone strong signal is NOT high confidence. HOSTILE and INERT
+are hard vetoes → STAND_DOWN regardless of anything else. Capital (PARTICIPATE) is
+deserved ONLY by a DIRECTIONAL family with high confidence, low conflict, and
+sufficient completeness; otherwise OBSERVE or STAND_DOWN.
+This is OBSERVE_ONLY telemetry. It authorizes nothing.
+"""
+
+
 # ── AI-BRAIN-H1 repair prompt ─────────────────────────────────────────────────
 REPAIR_PROMPT_TEMPLATE = """Your previous narrative JSON was rejected by the
 validator. Correct ONLY the invalid fields. Do not change valid fields. Do not

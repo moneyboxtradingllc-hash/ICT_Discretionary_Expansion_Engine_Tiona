@@ -7,6 +7,7 @@ from volatility.atr_engine import calculate_atr
 from volatility.volatility_classifier import classify_volatility
 from volatility.expansion_detector import detect_expansion
 from structure.po3_engine import analyze_po3_snapshot
+from market_commander.market_commander import build_market_commander_matrix  # MC Phase B1 (observe-only)
 from ai_layer.narrative_builder import build_narrative
 from ai_layer.confidence_engine import score_confidence
 from ai_layer.ai_snapshot_formatter import format_for_ai
@@ -246,5 +247,12 @@ def build_snapshot(
 
     # Summary generated last so it sees everything
     ai_context["summary"] = format_for_ai(snapshot)
+
+    # ── MARKET COMMANDER (Phase B1) — OBSERVE-ONLY telemetry ──────────────────
+    # Built LAST, after every evidence layer + Brain/thesis/qualification/risk/
+    # playbook/toolbox exist, so the matrix reflects the full picture. It
+    # authorizes/blocks/overrides NOTHING (authority_level=observe_only); it only
+    # unifies the scan into one state matrix and flags contradictions.
+    snapshot["market_commander"] = build_market_commander_matrix(snapshot)
 
     return snapshot

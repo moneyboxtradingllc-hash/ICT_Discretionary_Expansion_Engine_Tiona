@@ -34,6 +34,9 @@ from narrative_authority.protected_swings  import ProtectedSwingTracker
 from structure.po3_alignment_manager        import Po3StabilityManager   # VECTOR-3
 from ai_brain.narrative_brain              import run_narrative_brain
 from adaptive_learning.outcome_assembler    import record_closed_trade_scar   # ADAPTIVE-1A.5
+from market_commander.market_commander      import (   # MARKET COMMANDER B1 (observe-only)
+    build_market_commander_matrix, format_market_commander_summary,
+)
 from ai_brain.stance_memory                import StanceMemory
 from ai_brain.thesis_lifecycle             import ThesisLifecycleEngine
 from ai_brain.divergence                   import compute_divergence
@@ -974,6 +977,14 @@ def run_scan_loop(symbol: str = None, data_provider: str = None):
                 snapshot["ai_context"]["summary"] = (
                     snapshot["ai_context"].get("summary", "") + " " + gate_line
                 ).strip()
+
+            # ── MARKET COMMANDER (Phase B1) — OBSERVE-ONLY telemetry/print ──
+            # Refresh the matrix now that the execution_gate exists so the
+            # unified picture includes the final safety layer. Display-only:
+            # changes no decision, gate, risk, or routing.
+            snapshot["market_commander"] = build_market_commander_matrix(snapshot)
+            for _mc_line in format_market_commander_summary(snapshot["market_commander"]):
+                print("  " + _mc_line)
 
             # ── Trade Intent (Phase 1V) ────────────────────────────────────
             snapshot["trade_intent"] = build_intent(snapshot, symbol)
