@@ -328,6 +328,23 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
         except Exception:  # noqa: BLE001
             pass
 
+        # ── ADAPTIVE-5 — Live Mutation Authority context (LIVE / DEFENSIVE_ONLY).
+        # The final defensive overlay the Brain must SEE (final confidence, soft
+        # block, applied rules, authority level). The Brain may NOT override it.
+        # Observability only here; downstream layers own consumption. Never raises.
+        try:
+            from adaptive_learning.adaptive_live_authority import (
+                apply_adaptive_live_authority)
+            _live = snapshot.get("adaptive_live_authority")
+            if not isinstance(_live, dict):
+                _live = apply_adaptive_live_authority({
+                    "adaptive_policy":   brain_input.get("adaptive_policy_context"),
+                    "adaptive_mutation": brain_input.get("adaptive_mutation_context"),
+                })
+            brain_input["adaptive_live_authority_context"] = _live
+        except Exception:  # noqa: BLE001
+            pass
+
         # ── AI-BRAIN-H1: LLM path with normalize → repair → explicit fallback ─
         llm_call = None
         ai_market_commander = None   # MARKET COMMANDER B2 (observe-only side output)

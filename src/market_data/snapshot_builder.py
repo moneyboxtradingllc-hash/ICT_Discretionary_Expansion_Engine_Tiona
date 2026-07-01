@@ -261,6 +261,16 @@ def build_snapshot(
         snapshot["adaptive_policy"],
     )
 
+    # ── ADAPTIVE-5 — Live Mutation Authority (LIVE / DEFENSIVE_ONLY) ───────────
+    # Promotes the shadow mutation to a LIVE defensive OVERLAY: exposes
+    # adaptive_live_authority / adaptive_confidence / adaptive_block / adaptive_size
+    # WITHOUT overwriting ai_context, qualification, playbook, tool, direction, the
+    # Brain confidence, or the risk governor. Downstream layers may READ these to
+    # become STRICTER only (confidence never raised, size never invented, block can
+    # only add a no-trade reason). Never raises.
+    from adaptive_learning.adaptive_live_authority import apply_adaptive_live_authority
+    apply_adaptive_live_authority(snapshot)
+
     # Experience Intelligence (Phase 3A): OBSERVE_ONLY context from previous scan.
     # confidence_modifier is always 0 and must never influence toolbox or decisions.
     if experience_summary:

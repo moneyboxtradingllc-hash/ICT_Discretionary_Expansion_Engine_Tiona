@@ -1,0 +1,153 @@
+"""
+Adaptive Learning — Phase 5: Live Mutation Authority (LIVE, DEFENSIVE_ONLY).
+
+Promotes the ADAPTIVE-4 shadow mutation into a LIVE defensive overlay. It reads
+the policy + mutation already on the snapshot and exposes defensive-adjusted
+candidate fields that downstream layers MAY consume to become STRICTER — never
+more aggressive.
+
+CONSTITUTION — DEFENSIVE_ONLY, and it exposes OVERLAYS; it does NOT overwrite
+authoritative fields:
+  * it writes NEW snapshot keys (adaptive_live_authority / adaptive_confidence /
+    adaptive_block / adaptive_size)
+  * it NEVER overwrites ai_context, qualification, playbook, tool, direction, the
+    Brain confidence, or the risk governor.
+  * confidence overlay is exposed ONLY when final < original (never upward).
+  * size overlay is exposed ONLY when a real qty exists and final < original
+    (size is never invented).
+  * the soft block can only ADD a no-trade reason; it can never approve a trade
+    or override any safety/ops/risk/broker mechanism.
+
+Never raises.
+"""
+from __future__ import annotations
+
+AUTHORITY_LEVEL = "live_defensive"
+POSTURE         = "DEFENSIVE_ONLY"
+SOURCE          = "adaptive_live_authority"
+
+
+def _is_num(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def apply_adaptive_live_authority(snapshot: dict) -> dict:
+    """Read snapshot['adaptive_policy'] + ['adaptive_mutation'], write the live
+    defensive overlays onto the snapshot, and return the adaptive_live_authority
+    record. Never raises; never overwrites forbidden categories."""
+    try:
+        snap = snapshot if isinstance(snapshot, dict) else {}
+        mutation = snap.get("adaptive_mutation")
+        mutation = mutation if isinstance(mutation, dict) else {}
+
+        orig_conf = mutation.get("original_confidence")
+        new_conf  = mutation.get("new_confidence")
+        orig_qty  = mutation.get("original_qty")
+        new_qty   = mutation.get("new_qty")
+        trade_blocked = bool(mutation.get("trade_blocked"))
+        reasons = list(mutation.get("mutation_reasoning") or [])
+        applied_rules = list(mutation.get("mutation_types") or [])
+
+        # ── Confidence: DOWNWARD ONLY. Exposed only when strictly reduced. ──
+        confidence_adjusted = (
+            _is_num(orig_conf) and _is_num(new_conf) and new_conf < orig_conf
+        )
+        final_conf = new_conf if confidence_adjusted else orig_conf
+
+        # ── Size: real qty only, DOWNWARD ONLY. Never invented. ──
+        size_adjusted = (
+            _is_num(orig_qty) and _is_num(new_qty) and new_qty < orig_qty
+        )
+        final_qty = new_qty if size_adjusted else orig_qty
+
+        trade_soft_blocked = trade_blocked
+        applied = bool(confidence_adjusted or size_adjusted or trade_soft_blocked)
+
+        # forbidden-action verification: post-condition on the EXPOSED final
+        # values — they may only ever be <= the originals (never upward). Computed
+        # from final (not raw mutation) so a malformed upward mutation is simply
+        # not exposed, and this stays True.
+        forbidden_ok = (
+            (not _is_num(orig_conf) or not _is_num(final_conf) or final_conf <= orig_conf)
+            and (not _is_num(orig_qty) or not _is_num(final_qty) or final_qty <= orig_qty)
+        )
+
+        live = {
+            "authority_level":            AUTHORITY_LEVEL,
+            "posture":                    POSTURE,
+            "applied":                    applied,
+            "confidence_adjusted":        confidence_adjusted,
+            "size_adjusted":              size_adjusted,
+            "trade_soft_blocked":         trade_soft_blocked,
+            "original_confidence":        orig_conf,
+            "final_confidence":           final_conf,
+            "confidence_source":          SOURCE,
+            "original_qty":               orig_qty,
+            "final_qty":                  final_qty,
+            "block_reason":               (reasons if trade_soft_blocked else None),
+            "applied_rules":              applied_rules,
+            "forbidden_actions_verified": bool(forbidden_ok),
+        }
+        snap["adaptive_live_authority"] = live
+
+        # ── Confidence overlay (defensive; never overwrites raw confidence) ──
+        if confidence_adjusted:
+            snap["adaptive_confidence"] = {
+                "original": orig_conf,
+                "final":    final_conf,
+                "source":   SOURCE,
+                "reason":   reasons,
+            }
+
+        # ── Soft-block overlay (stable field; blocked flag always present) ──
+        snap["adaptive_block"] = {
+            "blocked": trade_soft_blocked,
+            "source":  SOURCE,
+            "reason":  (reasons if trade_soft_blocked else []),
+        }
+
+        # ── Size overlay (only when a real qty was reduced) ──
+        if size_adjusted:
+            snap["adaptive_size"] = {
+                "original": orig_qty,
+                "final":    final_qty,
+                "source":   SOURCE,
+            }
+
+        return live
+    except Exception as exc:  # noqa: BLE001
+        return _neutral(reason=f"live_authority_error:{type(exc).__name__}")
+
+
+def adaptive_entry_block_reason(snapshot: dict) -> "str | None":
+    """Central consumer helper for entry gates. Returns a DEFENSIVE no-trade
+    reason string when the adaptive soft block is active, else None. It can ONLY
+    block — it never approves, never overrides safety/ops/risk. Never raises."""
+    try:
+        ab = (snapshot or {}).get("adaptive_block") or {}
+        if ab.get("blocked"):
+            reasons = ab.get("reason") or ["defensive block"]
+            return "adaptive: soft veto — " + "; ".join(str(r) for r in reasons)
+        return None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _neutral(reason: str = "no adaptive live authority") -> dict:
+    return {
+        "authority_level":            AUTHORITY_LEVEL,
+        "posture":                    POSTURE,
+        "applied":                    False,
+        "confidence_adjusted":        False,
+        "size_adjusted":              False,
+        "trade_soft_blocked":         False,
+        "original_confidence":        None,
+        "final_confidence":           None,
+        "confidence_source":          SOURCE,
+        "original_qty":               None,
+        "final_qty":                  None,
+        "block_reason":               None,
+        "applied_rules":              [],
+        "forbidden_actions_verified": True,
+        "explanation":                reason,
+    }

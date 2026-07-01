@@ -34,6 +34,7 @@ from narrative_authority.protected_swings  import ProtectedSwingTracker
 from structure.po3_alignment_manager        import Po3StabilityManager   # VECTOR-3
 from ai_brain.narrative_brain              import run_narrative_brain
 from adaptive_learning.outcome_assembler    import record_closed_trade_scar   # ADAPTIVE-1A.5
+from adaptive_learning.adaptive_live_authority import adaptive_entry_block_reason  # ADAPTIVE-5
 from market_commander.market_commander      import (   # MARKET COMMANDER B1 (observe-only)
     build_market_commander_matrix, format_market_commander_summary,
 )
@@ -1147,6 +1148,11 @@ def run_scan_loop(symbol: str = None, data_provider: str = None):
                 entry_denied_reason = "ops: entry authority revoked (feed instability)"
             elif not eod["entries_allowed"]:
                 entry_denied_reason = f"ops: EOD entry cutoff ({eod['no_entry_after']} ET)"
+            elif adaptive_entry_block_reason(snapshot) is not None:
+                # ADAPTIVE-5 — live DEFENSIVE_ONLY soft veto. Adaptive history can
+                # make entry STRICTER only; every safety/ops reason above takes
+                # precedence. It can never approve a trade or override safety.
+                entry_denied_reason = adaptive_entry_block_reason(snapshot)
 
             # ── Paper Execution (Phase 2A — gated by activation) ──────────
             if entry_denied_reason is not None:
