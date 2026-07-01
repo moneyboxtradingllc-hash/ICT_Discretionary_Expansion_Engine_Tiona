@@ -133,6 +133,108 @@ def adaptive_entry_block_reason(snapshot: dict) -> "str | None":
         return None
 
 
+def resolve_final_confidence(original_confidence, snapshot: dict):
+    """DEFENSIVE confidence resolver for a legal consumer. Returns the adaptive
+    final confidence when it is LOWER than the caller's original, else the
+    original. Capped with min() so it can only ever LOWER — never raise, never
+    invent (returns original untouched when no overlay). Never raises."""
+    try:
+        if not _is_num(original_confidence):
+            return original_confidence
+        ac = (snapshot or {}).get("adaptive_confidence") or {}
+        f, o = ac.get("final"), ac.get("original")
+        if _is_num(f) and _is_num(o) and f < o:
+            return min(original_confidence, f)
+        return original_confidence
+    except Exception:  # noqa: BLE001
+        return original_confidence
+
+
+def resolve_final_qty(original_qty, snapshot: dict):
+    """DEFENSIVE size resolver for a legal sizing consumer. Returns the adaptive
+    final qty when it indicates a reduction and is below the caller's original,
+    else the original. Capped with min() so it can only ever LOWER — never raise,
+    never invent, never exceed the caller's risk-derived original. Never raises."""
+    try:
+        if not _is_num(original_qty):
+            return original_qty
+        asz = (snapshot or {}).get("adaptive_size") or {}
+        f, o = asz.get("final"), asz.get("original")
+        if _is_num(f) and _is_num(o) and f < o:
+            return min(original_qty, f)
+        return original_qty
+    except Exception:  # noqa: BLE001
+        return original_qty
+
+
+def consume_adaptive_overlays(snapshot: dict) -> dict:
+    """LIVE, DEFENSIVE_ONLY consumption of the exposed overlays.
+
+    Confidence: lowers ``confidence_fusion.combined_confidence`` to the adaptive
+    final when that is lower (never raises). Size: recorded when a live qty
+    overlay is present (the mainline qty owner is order_builder, a guarded layer,
+    so size is resolved via ``resolve_final_qty`` at the legal sizing site, not
+    forced here). Soft-block supremacy and every safety layer are untouched — this
+    only lowers a derived value. Writes forensics to
+    ``snapshot['adaptive_live_consumption']`` and returns that record. Never raises.
+    """
+    try:
+        snap = snapshot if isinstance(snapshot, dict) else {}
+        fusion = snap.get("confidence_fusion")
+        notes = []
+
+        # ── Confidence consumption (defensive, downward-only) ──
+        consumed_conf = False
+        orig_conf = final_conf = None
+        if isinstance(fusion, dict):
+            orig_conf = fusion.get("combined_confidence")
+            final_conf = resolve_final_confidence(orig_conf, snap)
+            if _is_num(orig_conf) and _is_num(final_conf) and final_conf < orig_conf:
+                fusion["combined_confidence"] = final_conf
+                consumed_conf = True
+                notes.append(
+                    f"combined_confidence {orig_conf} -> {final_conf} (adaptive defensive)")
+
+        # ── Size consumption (recorded; enforced at the legal sizing site) ──
+        asz = snap.get("adaptive_size") or {}
+        consumed_size = False
+        orig_qty = asz.get("original") if isinstance(asz, dict) else None
+        final_qty = orig_qty
+        if _is_num(asz.get("final")) and _is_num(orig_qty) and asz["final"] < orig_qty:
+            final_qty = asz["final"]
+            consumed_size = True
+            notes.append(f"qty {orig_qty} -> {final_qty} (adaptive defensive)")
+
+        record = {
+            "adaptive_confidence_consumed": consumed_conf,
+            "adaptive_size_consumed":       consumed_size,
+            "original_live_confidence":     orig_conf,
+            "final_live_confidence":        final_conf,
+            "original_live_qty":            orig_qty,
+            "final_live_qty":               final_qty,
+            "source":                       SOURCE,
+            "posture":                      POSTURE,
+            "notes":                        notes,
+        }
+        snap["adaptive_live_consumption"] = record
+        return record
+    except Exception as exc:  # noqa: BLE001
+        rec = {
+            "adaptive_confidence_consumed": False,
+            "adaptive_size_consumed":       False,
+            "original_live_confidence":     None,
+            "final_live_confidence":        None,
+            "original_live_qty":            None,
+            "final_live_qty":               None,
+            "source":                       SOURCE,
+            "posture":                      POSTURE,
+            "notes":                        [f"consume_error:{type(exc).__name__}"],
+        }
+        if isinstance(snapshot, dict):
+            snapshot["adaptive_live_consumption"] = rec
+        return rec
+
+
 def _neutral(reason: str = "no adaptive live authority") -> dict:
     return {
         "authority_level":            AUTHORITY_LEVEL,

@@ -34,7 +34,9 @@ from narrative_authority.protected_swings  import ProtectedSwingTracker
 from structure.po3_alignment_manager        import Po3StabilityManager   # VECTOR-3
 from ai_brain.narrative_brain              import run_narrative_brain
 from adaptive_learning.outcome_assembler    import record_closed_trade_scar   # ADAPTIVE-1A.5
-from adaptive_learning.adaptive_live_authority import adaptive_entry_block_reason  # ADAPTIVE-5
+from adaptive_learning.adaptive_live_authority import (   # ADAPTIVE-5 / ADAPTIVE-6
+    adaptive_entry_block_reason, consume_adaptive_overlays,
+)
 from market_commander.market_commander      import (   # MARKET COMMANDER B1 (observe-only)
     build_market_commander_matrix, format_market_commander_summary,
 )
@@ -962,6 +964,14 @@ def run_scan_loop(symbol: str = None, data_provider: str = None):
             # Both AI paths observed the same scan; measure disagreement.
             # Pure measurement — influences nothing downstream.
             snapshot["ai_divergence"] = compute_divergence(snapshot, symbol)
+
+            # ── ADAPTIVE-6 — Live overlay consumption (DEFENSIVE_ONLY) ─────
+            # Consume the adaptive_confidence overlay by LOWERING
+            # confidence_fusion.combined_confidence (never raising) BEFORE the
+            # decision/gate layers read it. Runs after any AI-reuse fusion rebuild.
+            # Soft-block supremacy (ADAPTIVE-5) and all safety layers are untouched.
+            # Forensics recorded on snapshot["adaptive_live_consumption"].
+            consume_adaptive_overlays(snapshot)
 
             # ── Decision Authority ─────────────────────────────────────────
             snapshot["decision_authority"] = make_decision(snapshot)
