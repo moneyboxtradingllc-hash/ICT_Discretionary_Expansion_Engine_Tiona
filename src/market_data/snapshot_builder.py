@@ -241,6 +241,26 @@ def build_snapshot(
         "volatility": _regime.get("volatility_state"),
     })
 
+    # ── ADAPTIVE-4 — Bounded Mutation Engine (SHADOW MODE / DEFENSIVE_ONLY) ────
+    # Computes the DEFENSIVE_ONLY mutations the policy WOULD apply to the live
+    # candidate (confidence penalty / size halving / soft veto). SHADOW: computed,
+    # visible, and persisted with the snapshot, but NOT enforced — execution reads
+    # the original authority. Boosts are ignored. Never raises. qty is None here
+    # (sizing happens at execution); the size rule therefore no-ops in-snapshot.
+    from adaptive_learning.adaptive_mutation_engine import mutate_candidate
+    _qual = snapshot.get("qualification", {}) or {}
+    snapshot["adaptive_mutation"] = mutate_candidate(
+        {
+            "confidence":           (snapshot.get("ai_context", {}) or {}).get("confidence_score"),
+            "qty":                  None,
+            "playbook":             (snapshot.get("playbook", {}) or {}).get("selected_playbook"),
+            "tool":                 (snapshot.get("toolbox", {}) or {}).get("preferred_tool"),
+            "qualification_status": _qual.get("status"),
+            "direction":            _qual.get("direction"),
+        },
+        snapshot["adaptive_policy"],
+    )
+
     # Experience Intelligence (Phase 3A): OBSERVE_ONLY context from previous scan.
     # confidence_modifier is always 0 and must never influence toolbox or decisions.
     if experience_summary:

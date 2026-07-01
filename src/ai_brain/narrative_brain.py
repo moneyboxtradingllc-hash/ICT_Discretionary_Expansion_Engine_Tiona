@@ -303,6 +303,31 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
         except Exception:  # noqa: BLE001
             pass
 
+        # ── ADAPTIVE-4 — Bounded Mutation context (SHADOW / DEFENSIVE_ONLY).
+        # The mutation the policy WOULD apply (confidence penalty / size halving /
+        # soft veto) so the Brain can SEE that history is reducing conviction.
+        # Observability only — computed, never enforced. Boosts ignored. Never
+        # raises. Prefer the snapshot's mutation; else compute over brain-time dims.
+        try:
+            _mutation = snapshot.get("adaptive_mutation")
+            if not isinstance(_mutation, dict):
+                from adaptive_learning.adaptive_mutation_engine import mutate_candidate
+                _q = snapshot.get("qualification", {}) or {}
+                _mutation = mutate_candidate(
+                    {
+                        "confidence":           (snapshot.get("ai_context", {}) or {}).get("confidence_score"),
+                        "qty":                  None,
+                        "playbook":             (snapshot.get("playbook", {}) or {}).get("selected_playbook"),
+                        "tool":                 (snapshot.get("toolbox", {}) or {}).get("preferred_tool"),
+                        "qualification_status": _q.get("status"),
+                        "direction":            _q.get("direction"),
+                    },
+                    brain_input.get("adaptive_policy_context") or _policy,
+                )
+            brain_input["adaptive_mutation_context"] = _mutation
+        except Exception:  # noqa: BLE001
+            pass
+
         # ── AI-BRAIN-H1: LLM path with normalize → repair → explicit fallback ─
         llm_call = None
         ai_market_commander = None   # MARKET COMMANDER B2 (observe-only side output)
