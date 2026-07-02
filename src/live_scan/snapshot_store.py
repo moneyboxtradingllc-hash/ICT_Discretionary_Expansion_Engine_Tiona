@@ -1,6 +1,15 @@
 """
 Snapshot persistence for the live scan loop.
 Saves compact JSON to data/live_snapshots/ — no raw candles, no readiness verbosity.
+
+DECON-3 — the forensic truth record. Every scan persists the complete
+post-runtime story: what the organism saw (core context), believed (brain /
+thesis / commander), chose (decision / gate / intent), what blocked it
+(block_trace — layer + owner + exact reason), what mutated it (mutation_trace),
+what sized it (authority_trace), and what the broker received and returned
+(broker_trace). Writes are POST-RUNTIME ONLY: save_snapshot refuses to persist
+a scan whose runtime has not resolved (missing decision/gate/execution/
+reconciliation blocks) — no partial snapshots.
 """
 import os
 import json
@@ -14,16 +23,157 @@ _PROJECT_ROOT = os.path.dirname(
 # Legacy default + test patch-point; LIVE_SNAPSHOTS_DIR (InstanceContext) overrides.
 STORE_DIR = os.path.join(_PROJECT_ROOT, "data", "live_snapshots")
 
+# DECON-3 — a forensic record may only be written AFTER the runtime resolved.
+# These keys are attached by the scan loop strictly before save_snapshot();
+# their absence means the scan died mid-cycle and there is no truth to record.
+_REQUIRED_POST_RUNTIME = (
+    "decision_authority", "execution_gate", "paper_execution",
+    "position_monitor", "trade_reconciliation",
+)
+
 
 def _store_dir() -> str:
     return os.getenv("LIVE_SNAPSHOTS_DIR") or STORE_DIR
+
+
+# ── DECON-3 — forensic trace builders (pure derivations; no authority) ────────
+
+_NO_BROKER_TRACE = {
+    "broker_called": False, "adapter": None, "request": None,
+    "response": None, "error": None, "latency_ms": None,
+    "not_called_reason": "execution layer not reached",
+}
+
+
+def build_block_trace(snapshot: dict) -> list:
+    """Structured veto record: every layer that blocked this scan, with the
+    owning layer and its exact reason. Empty list = nothing blocked. Pure."""
+    s = snapshot or {}
+    trace = []
+
+    def _add(layer, reason, field=None):
+        if reason:
+            trace.append({"layer": layer, "reason": str(reason)[:200],
+                          "field": field})
+
+    risk = s.get("risk") or {}
+    for b in risk.get("blocks") or []:
+        _add("risk_governor", b, "risk.blocks")
+
+    rp = s.get("regime_permissions") or {}
+    if rp.get("enabled") and not rp.get("allowed", True):
+        for b in rp.get("blocking_reasons") or ["regime permission blocked"]:
+            _add("regime_authority", b, "regime_permissions.blocking_reasons")
+
+    da = s.get("decision_authority") or {}
+    for b in da.get("blocking_factors") or []:
+        _add("decision_authority", b, "decision_authority.blocking_factors")
+
+    eg = s.get("execution_gate") or {}
+    checks = eg.get("authorization_checks") or {}
+    for name, passed in checks.items():
+        # decision_trade_authorized is False BY CONSTITUTION pre-gate — not a veto
+        if not passed and name != "decision_trade_authorized":
+            _add("execution_gate", f"check failed: {name}", name)
+    if not eg.get("narrative_permits_trade", True):
+        _add("narrative_authority", eg.get("narrative_reason"),
+             "execution_gate.narrative_permits_trade")
+    if not eg.get("council_permits_trade", True):
+        veto = (s.get("council") or {}).get("veto") or {}
+        _add("council", veto.get("veto_reason") or "council veto",
+             "execution_gate.council_permits_trade")
+    if not eg.get("no_promoted_rule_block", True):
+        fired = ", ".join(f"{f.get('rule_id')}: {f.get('reason')}"
+                          for f in eg.get("promoted_rules_fired") or [])
+        _add("rule_governance", fired or "promoted rule fired",
+             "execution_gate.promoted_rules_fired")
+
+    ab = s.get("adaptive_block") or {}
+    if ab.get("blocked"):
+        _add("adaptive_live_authority",
+             "; ".join(str(r) for r in ab.get("reason") or ["defensive soft veto"]),
+             "adaptive_block")
+
+    ps = s.get("position_supremacy") or {}
+    if ps.get("block_entries"):
+        _add("position_supremacy",
+             f"POSITION_STATE_MISMATCH case={ps.get('case')}", "block_entries")
+
+    iscr = s.get("intent_score") or {}
+    if iscr.get("gating_applied"):
+        _add("intent_score", iscr.get("gating_reason"), "gating_applied")
+
+    pe = s.get("paper_execution") or {}
+    if (pe.get("status") or "").lower() in ("skipped", "disabled"):
+        _add("execution_engine", pe.get("reason"), "paper_execution.reason")
+
+    return trace
+
+
+def build_mutation_trace(snapshot: dict) -> dict:
+    """Full adaptive mutation chain for this scan. Pure."""
+    m = (snapshot or {}).get("adaptive_mutation") or {}
+    c = (snapshot or {}).get("adaptive_live_consumption") or {}
+    return {
+        "original_confidence": m.get("original_confidence"),
+        "new_confidence":      m.get("new_confidence"),
+        "original_qty":        m.get("original_qty"),
+        "new_qty":             m.get("new_qty"),
+        "mutation_types":      m.get("mutation_types") or [],
+        "mutation_reasoning":  m.get("mutation_reasoning") or [],
+        "trade_blocked":       bool(m.get("trade_blocked")),
+        "authority_level":     m.get("authority_level"),
+        "posture":             m.get("posture"),
+        "consumed_live":       {
+            "confidence_consumed": c.get("adaptive_confidence_consumed"),
+            "size_consumed":       c.get("adaptive_size_consumed"),
+            "notes":               c.get("notes") or [],
+        },
+    }
+
+
+def build_authority_trace(snapshot: dict) -> dict:
+    """Who owns confidence and qty this scan, with original -> final values."""
+    s = snapshot or {}
+    c = s.get("adaptive_live_consumption") or {}
+    fus = s.get("confidence_fusion") or {}
+    pe = s.get("paper_execution") or {}
+    conf_orig = c.get("original_live_confidence")
+    conf_final = c.get("final_live_confidence")
+    if conf_orig is None:
+        conf_orig = conf_final = fus.get("combined_confidence")
+    qty_orig = c.get("original_live_qty")
+    qty_final = c.get("final_live_qty")
+    if qty_final is None:
+        qty_final = pe.get("qty")
+        qty_orig = qty_orig if qty_orig is not None else pe.get("qty")
+    return {
+        "confidence_owner":    "confidence_fusion.combined_confidence"
+                               " (adaptive defensive overlay may lower)",
+        "confidence_original": conf_orig,
+        "confidence_final":    conf_final,
+        "qty_owner":           "paper_execution.order_builder"
+                               " (risk budget x multiplier caps; adaptive may lower)",
+        "qty_original":        qty_orig,
+        "qty_final":           qty_final,
+    }
 
 
 def save_snapshot(snapshot: dict, symbol: str) -> str:
     """
     Persist a compact scan snapshot to data/live_snapshots/.
     Returns the full filepath on success. Raises on I/O failure.
+
+    DECON-3: POST-RUNTIME ONLY — raises ValueError when the runtime has not
+    resolved (required layer outputs absent). No partial snapshots.
     """
+    missing = [k for k in _REQUIRED_POST_RUNTIME if k not in (snapshot or {})]
+    if missing:
+        raise ValueError(
+            "forensic write refused — runtime incomplete, missing: "
+            + ", ".join(missing)
+        )
+
     os.makedirs(_store_dir(), exist_ok=True)
 
     now_et   = datetime.now(_EASTERN)
@@ -252,6 +402,129 @@ def save_snapshot(snapshot: dict, symbol: str) -> str:
             "confidence_tier":  snapshot.get("ai_context", {}).get("confidence_tier"),
             "summary":          snapshot.get("ai_context", {}).get("summary"),
         },
+
+        # ── DECON-3 — A. core context completions ─────────────────────────────
+        "volatility_states": {
+            tf: (snapshot.get("volatility", {}).get(tf, {}) or {}).get("state")
+            for tf in ("15m", "5m", "3m", "1m")
+        },
+        "structure_alignment": (snapshot.get("structure", {}) or {}).get("alignment"),
+
+        # ── DECON-3 — B/C. decision + authority stack completions ─────────────
+        "regime_permissions": (lambda rp: {
+            "enabled":                 rp.get("enabled"),
+            "allowed":                 rp.get("allowed"),
+            "permission_status":       rp.get("permission_status"),
+            "risk_multiplier_cap":     rp.get("risk_multiplier_cap"),
+            "required_trigger_status": rp.get("required_trigger_status"),
+            "min_setup_age_scans":     rp.get("min_setup_age_scans"),
+            "management_profile":      rp.get("management_profile"),
+            "blocking_reasons":        rp.get("blocking_reasons", []),
+        })(snapshot.get("regime_permissions") or {}),
+        "rule_governance": (lambda rg: {
+            "enabled":     rg.get("enabled"),
+            "fired":       rg.get("fired", []),
+            "opportunity": rg.get("opportunity"),
+            "event_count": len(rg.get("events") or []),
+            "warning":     rg.get("warning"),
+        })(snapshot.get("rule_governance") or {}),
+        "council": (lambda co: {
+            "enabled":         co.get("enabled"),
+            "authority_level": co.get("authority_level"),
+            "votes":           [{"member": m.get("member"), "vote": m.get("vote"),
+                                 "confidence": m.get("confidence")}
+                                for m in co.get("members") or []],
+            "dominant_position":  (co.get("report") or {}).get("dominant_position"),
+            "consensus_strength": (co.get("report") or {}).get("consensus_strength"),
+            "veto":            co.get("veto"),
+        })(snapshot.get("council") or {}),
+        "thesis_lifecycle": (lambda tl: {
+            "enabled":       tl.get("enabled"),
+            "mode":          tl.get("mode"),
+            "action":        tl.get("action"),
+            "active_thesis": (lambda at: {
+                "thesis_id":   at.get("thesis_id"),
+                "thesis_type": at.get("thesis_type"),
+                "direction":   at.get("direction"),
+                "status":      at.get("status"),
+                "confidence":  at.get("confidence"),
+                "age_scans":   at.get("age_scans"),
+            } if at else None)(tl.get("active_thesis")),
+        })(snapshot.get("thesis_lifecycle") or {}),
+        "thesis_state":       snapshot.get("thesis_state"),
+        "position_supremacy": (lambda ps: {
+            "mismatch":      ps.get("mismatch"),
+            "case":          ps.get("case"),
+            "block_entries": ps.get("block_entries"),
+            "emergency":     ps.get("emergency"),
+            "actions":       ps.get("actions", []),
+        })(snapshot.get("position_supremacy") or {}),
+        "trade_management": (lambda tm: {
+            "action":              tm.get("action"),
+            "reason":              tm.get("reason"),
+            "details":             tm.get("details"),
+            "management_profile":  tm.get("management_profile"),
+            "unrealized_r":        tm.get("unrealized_r"),
+            "invariant_violation": tm.get("invariant_violation"),
+        })(snapshot.get("trade_management") or {}),
+        "thesis_monitor": (lambda thm: {
+            "would_exit":  thm.get("would_exit"),
+            "reason":      thm.get("reason"),
+            "r_at_signal": thm.get("r_at_signal"),
+            "profile":     thm.get("profile"),
+        })(snapshot.get("thesis_monitor") or {}),
+        "pending_entry_order": snapshot.get("pending_entry_order"),
+        "eod_authority":       snapshot.get("eod_authority"),
+        "scar_writer":         snapshot.get("scar_writer"),
+        "ai_shadow": (lambda sh: {
+            "enabled":          sh.get("enabled"),
+            "success":          sh.get("success"),
+            "stance":           sh.get("stance"),
+            "confidence":       sh.get("confidence"),
+            "agrees_with_live": sh.get("agrees_with_live"),
+            "latency_ms":       sh.get("latency_ms"),
+        })(snapshot.get("ai_shadow") or {}),
+
+        # ── DECON-3 — D. adaptive stack (verbatim; these blocks are small) ────
+        "adaptive_policy":           snapshot.get("adaptive_policy"),
+        "adaptive_mutation": (lambda m: {
+            k: v for k, v in m.items() if k != "mutated_candidate"
+        } if isinstance(m, dict) else None)(snapshot.get("adaptive_mutation")),
+        "adaptive_live_authority":   snapshot.get("adaptive_live_authority"),
+        "adaptive_block":            snapshot.get("adaptive_block"),
+        "adaptive_confidence":       snapshot.get("adaptive_confidence"),
+        "adaptive_size":             snapshot.get("adaptive_size"),
+        "adaptive_live_consumption": snapshot.get("adaptive_live_consumption"),
+
+        # ── DECON-3 — E. commander stack (observe-only verdict, compact) ──────
+        "market_commander": (lambda mc: {
+            "authority_level": mc.get("authority_level"),
+            "source":          mc.get("source"),
+            "final_state":     mc.get("final_state"),
+            "environment": (lambda e: {
+                "family":         e.get("family"),
+                "type":           e.get("type"),
+                "confidence":     e.get("confidence"),
+                "completeness":   e.get("completeness"),
+                "conflict_index": e.get("conflict_index"),
+            })(mc.get("environment") or {}),
+            "participation": (lambda p: {
+                "decision":   p.get("decision"),
+                "confidence": p.get("confidence"),
+                "reason":     p.get("reason"),
+                "gates":      [{"name": g.get("name"), "passed": g.get("passed")}
+                               for g in (p.get("gates") or [])
+                               if isinstance(g, dict)],
+            })(mc.get("participation") or {}),
+            "contradictions": (mc.get("consistency") or {}).get("contradictions", []),
+        })(snapshot.get("market_commander") or {}),
+
+        # ── DECON-3 — F. execution stack + unified truth traces ───────────────
+        "broker_trace": (snapshot.get("paper_execution", {}) or {}).get(
+            "broker_trace") or dict(_NO_BROKER_TRACE),
+        "block_trace":     build_block_trace(snapshot),
+        "mutation_trace":  build_mutation_trace(snapshot),
+        "authority_trace": build_authority_trace(snapshot),
     }
 
     with open(filepath, "w", encoding="utf-8") as f:

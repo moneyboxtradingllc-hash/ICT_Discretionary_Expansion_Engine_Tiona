@@ -457,6 +457,7 @@ class TestSnapshotStore(unittest.TestCase):
             "intent_score":     {},
             "intent_archive":   {},
             "paper_execution":  {},
+            "trade_reconciliation": {},
             "position_monitor": {},
             "stop_enforcer":    {},
             "experience_summary": {

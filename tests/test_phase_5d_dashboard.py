@@ -325,6 +325,10 @@ class TestIntegration(unittest.TestCase):
     def test_15_snapshot_store_contains_dashboard(self):
         import live_scan.snapshot_store as ss_mod
         snap = _snapshot()
+        # DECON-3: save_snapshot is post-runtime-only — model a resolved runtime
+        snap.update({"decision_authority": {}, "execution_gate": {},
+                     "paper_execution": {}, "position_monitor": {},
+                     "trade_reconciliation": {}})
         snap["performance_dashboard"] = build_dashboard_summary(
             build_dashboard_from_records(_make_sample_records(6, 4))
         )

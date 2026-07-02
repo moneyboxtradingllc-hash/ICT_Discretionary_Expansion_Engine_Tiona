@@ -288,6 +288,10 @@ class TestIntegration(unittest.TestCase):
     def test_09_snapshot_includes_recommendations(self):
         import live_scan.snapshot_store as ss_mod
         snap = self._snap_with_recs()
+        # DECON-3: save_snapshot is post-runtime-only — model a resolved runtime
+        snap.update({"decision_authority": {}, "execution_gate": {},
+                     "paper_execution": {}, "position_monitor": {},
+                     "trade_reconciliation": {}})
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.object(ss_mod, "STORE_DIR", tmpdir):
                 fpath = save_snapshot(snap, "QQQ")

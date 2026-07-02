@@ -382,6 +382,10 @@ class TestSnapshotStoreIntegration(unittest.TestCase):
     def test_16_snapshot_store_includes_memory_search(self):
         import live_scan.snapshot_store as ss_mod
         snap = _snapshot()
+        # DECON-3: save_snapshot is post-runtime-only — model a resolved runtime
+        snap.update({"decision_authority": {}, "execution_gate": {},
+                     "paper_execution": {}, "position_monitor": {},
+                     "trade_reconciliation": {}})
         snap["memory_search"] = {
             "enabled":             True,
             "authority_level":     "observe_only",

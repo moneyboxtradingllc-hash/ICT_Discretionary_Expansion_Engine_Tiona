@@ -15,6 +15,7 @@ PAPER TRADING ONLY. No live money. No live endpoint. No execution unless
 EXECUTION_ENABLED=true AND PAPER_TRADING_ONLY=true AND ALLOW_PAPER_ORDERS=true.
 """
 import os
+import time
 from datetime import datetime
 import pytz
 
@@ -68,6 +69,19 @@ def _snapshot_summary(snapshot: dict) -> dict:
     }
 
 
+def _no_broker_trace(reason: str) -> dict:
+    """DECON-3 — broker trace for paths that never reached the broker."""
+    return {
+        "broker_called": False,
+        "adapter":       "alpaca_paper",
+        "request":       None,
+        "response":      None,
+        "error":         None,
+        "latency_ms":    None,
+        "not_called_reason": reason,
+    }
+
+
 def _disabled_result(reason: str) -> dict:
     return {
         "status":            "disabled",
@@ -78,6 +92,7 @@ def _disabled_result(reason: str) -> dict:
         "allow_paper_orders": False,
         "execution_enabled": False,
         "position_guard":    {},
+        "broker_trace":      _no_broker_trace(reason),
     }
 
 
@@ -91,6 +106,7 @@ def _skipped_result(reason: str, guard: dict | None = None) -> dict:
         "allow_paper_orders": True,
         "execution_enabled": True,
         "position_guard":    guard or {},
+        "broker_trace":      _no_broker_trace(reason),
     }
 
 
@@ -233,8 +249,23 @@ def _attempt(snapshot: dict, symbol: str) -> dict:
         else:
             broker_stop_notes = f"bracket_fallback: {bracket.get('reason','unsupported')}"
 
+    # DECON-3 — broker trace: the exact request, response/error, and latency of
+    # the broker call are preserved so every trade attempt is reconstructable.
+    broker_request = {
+        "symbol":          symbol,
+        "side":            order_result["side"],
+        "qty":             order_result["qty"],
+        "order_type":      order_type,
+        "entry_reference": order_result["entry_reference"],
+        "stop_reference":  order_result["stop_reference"],
+        "decision_price":  order_result.get("decision_price"),
+        "time_in_force":   "day",
+        "bracket_used":    broker_stop_notes or None,
+    }
+    _t0 = time.monotonic()
     try:
         submission = submit_paper_order(order_to_submit)
+        _latency_ms = round((time.monotonic() - _t0) * 1000)
         alpaca_id  = submission.get("alpaca_order_id")
         order_status = "submitted"
         side_str = order_result["side"]
@@ -244,11 +275,28 @@ def _attempt(snapshot: dict, symbol: str) -> dict:
         reason = "paper order submitted successfully"
         if broker_stop_notes:
             reason += f" ({broker_stop_notes})"
+        broker_trace = {
+            "broker_called": True,
+            "adapter":       "alpaca_paper",
+            "request":       broker_request,
+            "response":      submission,
+            "error":         None,
+            "latency_ms":    _latency_ms,
+        }
     except RuntimeError as exc:
+        _latency_ms  = round((time.monotonic() - _t0) * 1000)
         alpaca_id    = None
         order_status = "rejected"
         order_summary = ""
         reason = str(exc)
+        broker_trace = {
+            "broker_called": True,
+            "adapter":       "alpaca_paper",
+            "request":       broker_request,
+            "response":      None,
+            "error":         str(exc),
+            "latency_ms":    _latency_ms,
+        }
 
     # ── Layer 11: journal ─────────────────────────────────────────────────────
     record = make_record(
@@ -272,6 +320,11 @@ def _attempt(snapshot: dict, symbol: str) -> dict:
         risk_multiplier_applied = order_result.get("risk_multiplier_applied", 1.0),
         base_risk_budget        = order_result.get("base_risk_budget", 0.0),
         effective_risk_budget   = order_result.get("effective_risk_budget", 0.0),
+        # DECON-3 — symmetry with the guard-rejected record: submitted trades
+        # keep the FC-0B doctrine audit trail and narrative-at-entry too.
+        execution_mode          = order_result.get("order_type", "limit"),
+        decision_price          = order_result.get("decision_price"),
+        narrative               = snapshot.get("narrative_authority"),
     )
     append_trade(record, symbol)
 
@@ -289,4 +342,5 @@ def _attempt(snapshot: dict, symbol: str) -> dict:
         "stop_reference":    order_result["stop_reference"],
         "risk_per_share":    order_result["risk_per_share"],
         "risk_dollars":      order_result["risk_dollars"],
+        "broker_trace":      broker_trace,
     }
