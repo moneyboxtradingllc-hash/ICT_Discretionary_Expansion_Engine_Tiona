@@ -7,6 +7,7 @@ and expectancy math are correct, loss streaks increment and reset, and there is
 ZERO symbol contamination (a write for one instrument never touches another).
 All writes are redirected to a temp dir so the real store is untouched.
 """
+import itertools
 import os
 import sys
 import tempfile
@@ -20,21 +21,34 @@ from adaptive_learning.performance_tables import (   # noqa: E402
     TABLE_FILES,
 )
 
+# DECON-2: the strict write gate requires reconciled-closed status, a real
+# execution id, entry+exit timestamps, and numeric pnl. Fixtures model a real
+# reconciled trade; the counter makes each fixture a distinct trade so the
+# idempotency ledger does not fold repeated writes into one.
+_SEQ = itertools.count(1)
+
 
 def _outcome(result=None, r=None, symbol="MNQ", playbook="strong", tool="breaker",
              session="new_york", regime="trend", volatility="high") -> tuple:
     """Return (outcome_dict, entry_record) shaped like the scar-writer inputs."""
+    n = next(_SEQ)
     outcome = {
         "instrument":       symbol,
+        "status":           "closed",
         "playbook":         playbook,
         "session":          session,
         "regime":           regime,
         "volatility_state": volatility,
         "realized_r":       r,
+        "realized_pnl":     (r or 0.0) * 100.0,
         "result":           result,
     }
     entry = {
         "symbol":               symbol,
+        "trade_id":             f"PT_{symbol}_{n:04d}",
+        "alpaca_order_id":      f"real-oid-{symbol}-{n:04d}",
+        "timestamp":            f"20260615T10{n:04d}",
+        "closed_at":            f"20260615T11{n:04d}",
         "market_regime_family": regime,
         "volatility_state":     volatility,
         "snapshot_summary":     {"tool": tool, "playbook": playbook, "session": session},

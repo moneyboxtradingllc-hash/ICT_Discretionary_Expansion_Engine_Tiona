@@ -58,9 +58,15 @@ def _recon(**over) -> dict:
 class _Isolated(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.mkdtemp()
-        self._prev = {k: os.environ.get(k) for k in ("AI_RETRIEVAL_DIR", "PAPER_TRADES_DIR")}
+        # DECON-2: PERFORMANCE_TABLES_DIR is part of the isolation set. This file
+        # was the live-table contamination vector — record_closed_trade_scar()
+        # folds performance tables, and without this redirect every run wrote
+        # 12 synthetic +2.3R wins into data/performance/QQQ.
+        self._prev = {k: os.environ.get(k) for k in
+                      ("AI_RETRIEVAL_DIR", "PAPER_TRADES_DIR", "PERFORMANCE_TABLES_DIR")}
         os.environ["AI_RETRIEVAL_DIR"] = self._tmp
         os.environ["PAPER_TRADES_DIR"] = self._tmp
+        os.environ["PERFORMANCE_TABLES_DIR"] = self._tmp
 
     def tearDown(self):
         for k, v in self._prev.items():

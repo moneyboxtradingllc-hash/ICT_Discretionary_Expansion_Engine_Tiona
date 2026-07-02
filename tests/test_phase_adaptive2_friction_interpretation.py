@@ -134,7 +134,11 @@ class TestAuthoritySafety(unittest.TestCase):
         # ADAPTIVE-7 — the ONE deliberate, scoped constitutional revision: the live
         # size owner may consume resolve_final_qty (downward-only, risk-capped). All
         # other execution/risk files remain forbidden.
-        allowed = ("paper_execution/order_builder.py",)
+        # DECON-2 — second deliberate, scoped revision: execution_engine's journal
+        # snapshot_summary captures the executed tool (data integrity for the
+        # performance tables' tool dimension; no authority/behavior change).
+        allowed = ("paper_execution/order_builder.py",
+                   "paper_execution/execution_engine.py")
         offenders = [f for f in changed
                      if any(p in f for p in forbidden)
                      and not any(a in f for a in allowed)]

@@ -52,6 +52,7 @@ def _snapshot_summary(snapshot: dict) -> dict:
     eg   = snapshot.get("execution_gate", {})
     da   = snapshot.get("decision_authority", {})
     pb   = snapshot.get("playbook", {})
+    tb   = snapshot.get("toolbox", {})
     return {
         "decision":      da.get("decision"),
         "intent_type":   ti.get("intent_type"),
@@ -60,6 +61,10 @@ def _snapshot_summary(snapshot: dict) -> dict:
         "gate_status":   eg.get("gate_status"),
         "playbook":      pb.get("selected_playbook"),
         "session":       snapshot.get("session"),
+        # DECON-2 — capture the executed tool so the performance tables' tool
+        # dimension is written under the real tool key instead of "unknown"
+        # (the write/read key mismatch found in the constitutional audit).
+        "tool":          tb.get("preferred_tool"),
     }
 
 

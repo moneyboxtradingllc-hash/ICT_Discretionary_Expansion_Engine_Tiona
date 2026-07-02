@@ -10,6 +10,17 @@ DOCTRINE (3A): this layer STORES outcomes and REPORTS aggregates. It authors no
 decision, confidence, risk, or permission. It never mutates a trade. Writing is
 driven by the existing scar-writer close event; reading is observe-only.
 
+DOCTRINE (DECON-2 — truth before memory): the tables may ONLY learn from real,
+reconciled, forward-trade executions. update_performance_tables() enforces:
+  * STRICT WRITE GATE — a write requires a reconciled closed trade with a real
+    (non-synthetic) execution id, entry + exit timestamps, numeric realized pnl,
+    and a valid symbol, playbook, and session. Test fixtures, replays, studies,
+    manual inserts, and null-execution records are rejected by construction.
+  * IDEMPOTENCY — every applied write is recorded in the symbol's
+    applied_writes.json ledger under sha256(symbol|entry_ts|exit_ts|execution_id).
+    The same trade folding twice (restart, re-reconciliation, test rerun) is
+    ignored safely; double-counting is impossible.
+
 Storage layout (symbol-native — one folder per instrument):
 
     data/performance/<SYMBOL>/playbook_performance.json
@@ -28,8 +39,10 @@ symbol's folder. Never raises out of update_performance_tables().
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+from datetime import datetime, timezone
 
 from deployment.data_paths import resolve
 from ai_retrieval.memory_schema import win_loss_be_from_r
@@ -44,6 +57,10 @@ TABLE_FILES = {
 }
 
 DIMENSIONS = tuple(TABLE_FILES.keys())
+
+# DECON-2 — per-symbol idempotency ledger (applied write keys live next to the
+# five tables; a key present here means that trade has already been folded).
+LEDGER_FILE = "applied_writes.json"
 
 
 # ── path resolution ─────────────────────────────────────────────────────────
@@ -171,6 +188,71 @@ def record_result(symbol: str, dimension: str, key, result: str, realized_r,
     return bucket
 
 
+# ── DECON-2 — strict write gate + idempotency ────────────────────────────────
+
+def _is_num(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def compute_write_key(symbol, entry_ts, exit_ts, execution_id) -> str:
+    """Idempotency key: sha256(symbol|entry_ts|exit_ts|execution_id)."""
+    raw = f"{_norm_symbol(symbol)}|{entry_ts}|{exit_ts}|{execution_id}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _ledger_path(symbol: str, base_dir: "str | None" = None) -> str:
+    return os.path.join(_symbol_dir(symbol, base_dir), LEDGER_FILE)
+
+
+def validate_performance_write(outcome: dict, entry_record: "dict | None") -> tuple:
+    """DECON-2 STRICT WRITE GATE. Returns (ok, reason, evidence).
+
+    A performance write is permitted ONLY for a real, reconciled, forward-trade
+    execution: status closed, a real (non-synthetic) execution id, entry + exit
+    timestamps, numeric realized pnl, and a valid symbol/playbook/session.
+    Everything else — test fixtures, replays, studies, manual inserts,
+    null-execution records — is rejected. Pure; never raises."""
+    o = outcome or {}
+    e = entry_record or {}
+    ss = e.get("snapshot_summary") or {}
+
+    if str(o.get("status") or "").lower() != "closed":
+        return False, "not_a_reconciled_closed_trade", None
+
+    execution_id = e.get("alpaca_order_id") or e.get("execution_id") or e.get("order_id")
+    if not execution_id:
+        return False, "missing_execution_id", None
+    if "synthetic" in str(execution_id).lower():
+        return False, "synthetic_execution_id", None
+
+    entry_ts = e.get("timestamp") or o.get("entry_timestamp")
+    if not entry_ts:
+        return False, "missing_entry_timestamp", None
+    exit_ts = e.get("closed_at") or o.get("exit_timestamp")
+    if not exit_ts:
+        return False, "missing_exit_timestamp", None
+
+    pnl = o.get("realized_pnl") if o.get("realized_pnl") is not None else e.get("realized_pnl")
+    if not _is_num(pnl):
+        return False, "invalid_realized_pnl", None
+
+    symbol = _norm_symbol(o.get("instrument") or e.get("symbol"))
+    if symbol == "UNKNOWN":
+        return False, "invalid_symbol", None
+    if _norm_key(o.get("playbook") or ss.get("playbook")) == "unknown":
+        return False, "invalid_playbook", None
+    if _norm_key(o.get("session") or ss.get("session")) == "unknown":
+        return False, "invalid_session", None
+
+    return True, "ok", {
+        "symbol":       symbol,
+        "entry_ts":     str(entry_ts),
+        "exit_ts":      str(exit_ts),
+        "execution_id": str(execution_id),
+        "trade_id":     e.get("trade_id"),
+    }
+
+
 def _dimensions_from(outcome: dict, entry_record: "dict | None") -> dict:
     """Pull the five dimension VALUES from the assembled close-outcome + the
     entry-time journal record. These mirror exactly the values the live snapshot
@@ -191,25 +273,62 @@ def update_performance_tables(outcome: dict, entry_record: "dict | None" = None,
     """Fold one closed trade into the correct symbol's five tables. Driven by the
     scar-writer close event. Observe/record only — never raises.
 
-    Returns telemetry: {symbol, result, realized_r, updated:[dims], skipped, reason}.
+    DECON-2: the STRICT WRITE GATE runs first (only real, reconciled, forward
+    trades may write); then the idempotency ledger (the same trade can never be
+    folded twice). Returns telemetry:
+    {symbol, result, realized_r, updated:[dims], skipped, reason, write_key}.
     """
     try:
         outcome = outcome or {}
         symbol = _norm_symbol(outcome.get("instrument") or (entry_record or {}).get("symbol"))
+
+        # ── DECON-2 strict write gate ──
+        ok, gate_reason, evidence = validate_performance_write(outcome, entry_record)
+        if not ok:
+            return {"symbol": symbol, "result": None,
+                    "realized_r": outcome.get("realized_r"), "updated": [],
+                    "skipped": True, "reason": f"write_gate:{gate_reason}",
+                    "write_key": None}
+
         realized_r = outcome.get("realized_r")
         result = outcome.get("result") or win_loss_be_from_r(realized_r)
         if result is None:
             return {"symbol": symbol, "result": None, "realized_r": realized_r,
-                    "updated": [], "skipped": True, "reason": "unclassifiable_outcome"}
+                    "updated": [], "skipped": True,
+                    "reason": "unclassifiable_outcome", "write_key": None}
+
+        # ── DECON-2 idempotency: the same trade never folds twice ──
+        write_key = compute_write_key(evidence["symbol"], evidence["entry_ts"],
+                                      evidence["exit_ts"], evidence["execution_id"])
+        ledger_file = _ledger_path(symbol, base_dir)
+        ledger = _load(ledger_file)
+        if write_key in ledger:
+            return {"symbol": symbol, "result": result, "realized_r": realized_r,
+                    "updated": [], "skipped": True, "reason": "duplicate_write",
+                    "write_key": write_key}
 
         dims = _dimensions_from(outcome, entry_record)
         updated = []
         for dimension, key in dims.items():
             record_result(symbol, dimension, key, result, realized_r, base_dir)
             updated.append(dimension)
+
+        ledger[write_key] = {
+            "trade_id":     evidence.get("trade_id"),
+            "entry_ts":     evidence["entry_ts"],
+            "exit_ts":      evidence["exit_ts"],
+            "execution_id": evidence["execution_id"],
+            "result":       result,
+            "realized_r":   realized_r,
+            "applied_at":   datetime.now(timezone.utc).isoformat(),
+        }
+        _save(ledger_file, ledger)
+
         return {"symbol": symbol, "result": result, "realized_r": realized_r,
-                "updated": updated, "skipped": False, "reason": None}
+                "updated": updated, "skipped": False, "reason": None,
+                "write_key": write_key}
     except Exception as exc:  # noqa: BLE001
         return {"symbol": _norm_symbol((outcome or {}).get("instrument")),
                 "result": None, "realized_r": None, "updated": [],
-                "skipped": True, "reason": f"error:{type(exc).__name__}"}
+                "skipped": True, "reason": f"error:{type(exc).__name__}",
+                "write_key": None}
