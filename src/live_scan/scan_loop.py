@@ -725,9 +725,9 @@ def _print_loop_summary(
 # ── Main loop ────────────────────────────────────────────────────────────────
 
 def run_scan_loop(symbol: str = None, data_provider: str = None):
-    # DEPLOY-2A — symbol + data_provider may be injected (e.g. by run_instance for
-    # a Topstep instance: symbol=MNQU, data_provider=topstep). Falling back to the
-    # SCAN_SYMBOL/DATA_PROVIDER env only when not injected (Maurice's QQQ/alpaca).
+    # DEPLOY-2A — symbol + data_provider may be injected (e.g. by run_instance).
+    # Falling back to the SCAN_SYMBOL/DATA_PROVIDER env only when not injected
+    # (Maurice's QQQ/alpaca).
     symbol     = symbol or os.getenv("SCAN_SYMBOL",  "QQQ")
     lookback   = int(os.getenv("SCAN_LOOKBACK_BARS", "300"))
     start_t    = os.getenv("SCAN_START_TIME",        "08:30")

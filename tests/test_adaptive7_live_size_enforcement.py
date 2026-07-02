@@ -5,7 +5,7 @@ Closes the final adaptive actuator: the live size owner (order_builder) now
 consumes resolve_final_qty over the risk/buying-power-capped qty. Proves size can
 only be reduced (4->2, 3->1, floor 1), never increased, the risk max is always the
 ceiling, missing/malformed overlays fall back, forensics are written, order-build
-logic is otherwise unchanged, and broker/runtime was not touched.
+logic is otherwise unchanged.
 """
 import os
 import sys
@@ -167,16 +167,6 @@ class TestEndToEndBuildOrder(unittest.TestCase):
         off_qty, snap_off = self._qty(off)
         self.assertEqual(off_qty, base_qty)
         self.assertNotIn("adaptive_live_consumption", snap_off)
-
-
-class TestBrokerRuntimeUntouched(unittest.TestCase):
-    def test_12_no_broker_runtime_touched(self):
-        path = os.path.join(os.path.dirname(__file__), "..", "src", "broker", "runtime.py")
-        with open(path, encoding="utf-8") as fh:
-            content = fh.read()
-        self.assertNotIn("resolve_final_qty", content)
-        self.assertNotIn("adaptive_size", content)
-        self.assertNotIn("adaptive_live_authority", content)
 
 
 if __name__ == "__main__":

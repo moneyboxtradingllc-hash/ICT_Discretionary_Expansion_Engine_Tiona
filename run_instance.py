@@ -1,6 +1,6 @@
 """DEPLOY-1 Phase 9 — Instance launch command.
 
-  python run_instance.py --instance maurice_topstep
+  python run_instance.py --instance maurice_alpaca
 
 Loads ONLY that instance's config + state, activates its InstanceContext (so all
 memory/journal/vector/logs/state writes are redirected into the instance
@@ -8,7 +8,7 @@ folder), selects its broker adapter, and reports the isolation map + readiness.
 
 SAFETY (DEPLOY-1 scope): this launcher activates and validates an instance and
 prints its launch plan. It does NOT connect live money or start a client-facing
-trading loop — Topstep/TradeStation adapters are stubs. The paper scan loop is
+trading loop — the TradeStation adapter is a stub. The paper scan loop is
 invoked only with --start and only when the broker resolves to a connected
 paper adapter.
 """
@@ -27,8 +27,7 @@ from broker.factory import get_adapter                         # noqa: E402
 
 
 def resolve_start_params(ctx):
-    """(symbol, data_provider) for the scan loop, derived from the instance config.
-    DEPLOY-2A: topstep instances resolve to (MNQU-style symbol, 'topstep')."""
+    """(symbol, data_provider) for the scan loop, derived from the instance config."""
     return ctx.config.symbol, ctx.config.resolved_data_provider()
 
 
@@ -95,18 +94,6 @@ def main(argv=None):
                   f"symbol={symbol})…")
             from live_scan.scan_loop import run_scan_loop  # deferred import
             run_scan_loop(symbol=symbol, data_provider=data_provider)
-        elif adapter.name == "topstep":
-            # DEPLOY-2C — Topstep runtime path: a dedicated, Alpaca-free loop
-            # (fetch MNQU via Topstep feed -> build_snapshot -> TopstepRuntime cycle).
-            # Execution is OBSERVE by default; practice orders require explicit opt-in
-            # (TOPSTEP_EXECUTION_ENABLED + practice account + bracket allowance).
-            ep = ctx.config.resolved_execution_provider()
-            print(f"\n[topstep] starting Topstep runtime loop "
-                  f"(data_provider={data_provider}, execution_provider={ep}, "
-                  f"symbol={symbol}) — no Alpaca; execution off unless explicitly enabled…")
-            from live_scan.topstep_scan_loop import run_topstep_scan_loop  # deferred
-            run_topstep_scan_loop(symbol=symbol, data_provider=data_provider,
-                                  config=ctx.config)
         else:
             print(f"\n[guard] --start refused: broker '{adapter.name}' has no "
                   f"supported runtime start path.")

@@ -13,7 +13,7 @@ from typing import Optional
 
 import yaml
 
-BROKERS = ("paper", "topstep", "tradestation")
+BROKERS = ("paper", "tradestation")
 EXECUTION_MODES = ("paper", "shadow", "live")   # 'live' is reserved; DEPLOY-1 stays paper/shadow
 
 
@@ -42,13 +42,13 @@ class InstanceConfig:
     instance_id: str
     owner_name: str = ""
     broker: str = "paper"
-    # DEPLOY-2A — explicit market-data provider. Empty = derive from broker
-    # (topstep→topstep, else alpaca) via resolved_data_provider().
+    # DEPLOY-2A — explicit market-data provider. Empty = alpaca via
+    # resolved_data_provider().
     data_provider: str = ""
-    # DEPLOY-2C — execution runtime. Empty = derive from broker
-    # (topstep→topstep, else alpaca_paper) via resolved_execution_provider().
+    # DEPLOY-2C — execution runtime. Empty = alpaca_paper via
+    # resolved_execution_provider().
     execution_provider: str = ""
-    practice_only: bool = True          # Topstep: refuse live/funded routing
+    practice_only: bool = True          # refuse live/funded routing
     execution_enabled: bool = False     # safe default: observe, place no orders
     account_type: str = "paper"
     account_id: str = ""
@@ -113,20 +113,16 @@ class InstanceConfig:
             yaml.safe_dump(self.to_dict(), fh, sort_keys=False)
 
     def resolved_data_provider(self) -> str:
-        """Explicit data_provider if set, else derived from broker. DEPLOY-2A:
-        topstep brokers default to the topstep feed; everything else to alpaca.
-        Never returns alpaca for a topstep broker unless explicitly configured."""
+        """Explicit data_provider if set, else alpaca (the mainline feed)."""
         if self.data_provider:
             return self.data_provider.lower().strip()
-        return "topstep" if self.broker == "topstep" else "alpaca"
+        return "alpaca"
 
     def resolved_execution_provider(self) -> str:
-        """Explicit execution_provider if set, else derived from broker. DEPLOY-2C:
-        topstep brokers route execution to the Topstep runtime; everything else to
-        the Alpaca paper runtime. Never returns alpaca_paper for a topstep broker."""
+        """Explicit execution_provider if set, else the Alpaca paper runtime."""
         if self.execution_provider:
             return self.execution_provider.lower().strip()
-        return "topstep" if self.broker == "topstep" else "alpaca_paper"
+        return "alpaca_paper"
 
     def validate(self) -> list:
         """Return a list of problems (empty = valid). Never raises."""
@@ -135,16 +131,10 @@ class InstanceConfig:
             problems.append("instance_id is required")
         if self.broker not in BROKERS:
             problems.append(f"broker must be one of {BROKERS}")
-        if self.data_provider and self.data_provider.lower() not in ("alpaca", "topstep"):
-            problems.append("data_provider must be one of ('', 'alpaca', 'topstep')")
-        # Cross-contamination guard: a topstep broker must never use the Alpaca feed.
-        if self.broker == "topstep" and self.resolved_data_provider() == "alpaca":
-            problems.append("topstep broker must not use the alpaca data_provider")
-        if self.execution_provider and self.execution_provider.lower() not in ("alpaca_paper", "topstep"):
-            problems.append("execution_provider must be one of ('', 'alpaca_paper', 'topstep')")
-        # A topstep broker must never route execution through Alpaca paper.
-        if self.broker == "topstep" and self.resolved_execution_provider() == "alpaca_paper":
-            problems.append("topstep broker must not use the alpaca_paper execution_provider")
+        if self.data_provider and self.data_provider.lower() != "alpaca":
+            problems.append("data_provider must be one of ('', 'alpaca')")
+        if self.execution_provider and self.execution_provider.lower() != "alpaca_paper":
+            problems.append("execution_provider must be one of ('', 'alpaca_paper')")
         if self.execution_mode not in EXECUTION_MODES:
             problems.append(f"execution_mode must be one of {EXECUTION_MODES}")
         if self.execution_mode == "live":

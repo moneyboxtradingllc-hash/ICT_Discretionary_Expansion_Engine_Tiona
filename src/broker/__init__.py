@@ -3,7 +3,6 @@
 Abstracts execution so the bot core does not care which broker is active; the
 instance config selects the adapter. DEPLOY-1 ships:
   • paper       — wraps the existing Alpaca PAPER broker (real, paper-only)
-  • topstep     — stub (interface only; not connected — no live money)
   • tradestation— stub (interface only; not connected — no live money)
 """
 from broker.factory import get_adapter   # noqa: F401

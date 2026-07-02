@@ -2,8 +2,8 @@
 
 Create a new, fully-isolated bot instance from a template:
 
-  python tools/create_instance.py --template topstep_50k --instance maurice_topstep \
-      --owner "Maurice" --account-id TS-50K-001
+  python tools/create_instance.py --template tradestation --instance maurice_tradestation \
+      --owner "Maurice" --account-id TS-001
 
 Creates data/instances/<instance>/ with config.yaml + isolated memory/,
 vector_store/, journal/, logs/, state/, news_memory/ folders. Shared code is

@@ -52,13 +52,13 @@ class TestInstanceConfig(unittest.TestCase):
 
     def test_roundtrip_yaml(self):
         d = tempfile.mkdtemp()
-        cfg = InstanceConfig(instance_id="rt", owner_name="Maurice", broker="topstep")
+        cfg = InstanceConfig(instance_id="rt", owner_name="Maurice", broker="tradestation")
         cfg.risk_profile.max_daily_loss = 750
         path = os.path.join(d, "config.yaml")
         cfg.save(path)
         loaded = InstanceConfig.load(path)
         self.assertEqual(loaded.owner_name, "Maurice")
-        self.assertEqual(loaded.broker, "topstep")
+        self.assertEqual(loaded.broker, "tradestation")
         self.assertEqual(loaded.risk_profile.max_daily_loss, 750)
 
     def test_live_mode_rejected(self):
@@ -104,22 +104,21 @@ class TestInstanceContext(unittest.TestCase):
 class TestBrokerAdapters(unittest.TestCase):
     def test_factory_maps_brokers(self):
         self.assertEqual(get_adapter(broker="paper").name, "paper")
-        self.assertEqual(get_adapter(broker="topstep").name, "topstep")
         self.assertEqual(get_adapter(broker="tradestation").name, "tradestation")
         self.assertEqual(get_adapter(broker="unknown").name, "paper")  # safe default
 
     def test_available(self):
-        self.assertEqual(set(available_brokers()), {"paper", "topstep", "tradestation"})
+        self.assertEqual(set(available_brokers()), {"paper", "tradestation"})
 
     def test_stub_adapters_not_connected_and_refuse(self):
-        for b in ("topstep", "tradestation"):
+        for b in ("tradestation",):
             a = get_adapter(broker=b)
             self.assertFalse(a.is_connected())
             with self.assertRaises(NotConnectedError):
                 a.submit_order({"symbol": "QQQ", "qty": 1})
 
     def test_core_is_broker_agnostic(self):
-        cfg = InstanceConfig(instance_id="z", broker="topstep", account_id="TS1")
+        cfg = InstanceConfig(instance_id="z", broker="tradestation", account_id="TS1")
         a = get_adapter(cfg)
         self.assertEqual(a.account_id, "TS1")
         self.assertIn("name", a.describe())

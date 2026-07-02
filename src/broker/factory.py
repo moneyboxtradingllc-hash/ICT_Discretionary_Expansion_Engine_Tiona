@@ -13,11 +13,9 @@ _REGISTRY = {}
 def _registry():
     if not _REGISTRY:
         from broker.paper_adapter import PaperBrokerAdapter
-        from broker.topstep_adapter import TopstepBrokerAdapter
         from broker.tradestation_adapter import TradeStationBrokerAdapter
         _REGISTRY.update({
             "paper": PaperBrokerAdapter,
-            "topstep": TopstepBrokerAdapter,
             "tradestation": TradeStationBrokerAdapter,
         })
     return _REGISTRY
