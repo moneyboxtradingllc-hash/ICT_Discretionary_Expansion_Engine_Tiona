@@ -1202,6 +1202,23 @@ def run_scan_loop(symbol: str = None, data_provider: str = None):
                     snapshot["ai_context"].get("summary", "") + " " + pe_line
                 ).strip()
 
+            # ── SUPPRESS-1 — Suppression Cost Engine (SHADOW / OBSERVE_ONLY) ──
+            # Every blocked real opportunity is registered as a shadow trade and
+            # tracked forward against live price: did the block save us (stop) or
+            # cost us (target)? Influences nothing; the live scan loop is the
+            # ONLY writer (persist contract). Never raises.
+            from adaptive_learning.suppression_cost_engine import track_suppression
+            snapshot["suppression"] = track_suppression(snapshot, symbol)
+            _sup = snapshot["suppression"]
+            if _sup.get("registered"):
+                print(f"  Suppression  : REGISTERED {_sup['register_detail'].get('suppression_id','')}"
+                      f" owners={','.join(_sup['register_detail'].get('block_owners', []))}")
+            for _r in _sup.get("resolved_this_scan", []):
+                print(f"  Suppression  : RESOLVED {_r.get('shadow_outcome')}"
+                      f" cost={_r.get('suppression_cost')}R"
+                      f" owners={','.join(_r.get('block_owners') or [])}"
+                      f" | SHADOW (no authority)")
+
             # ── Stop Enforcer (Phase 2B) ───────────────────────────────────
             snapshot["stop_enforcer"] = enforce_stop(
                 snapshot, symbol, snapshot["position_monitor"]

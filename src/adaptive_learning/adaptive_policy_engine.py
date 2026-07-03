@@ -116,9 +116,14 @@ def generate_adaptive_policy_report(candidate: dict,
                                           block_threshold=BLOCK_LOSS_STREAK,
                                           today=today, base_dir=base_dir,
                                           persist=decay_persist)
+            # ── SUPPRESS-1: read-only suppression evidence (adaptive memory
+            # feed). OBSERVATION ONLY — no policy flag reads these numbers;
+            # repeated false suppressions become a FUTURE tuning signal.
+            from adaptive_learning.suppression_cost_engine import get_suppression_stats
+            suppression = get_suppression_stats(symbol, dim, key, base_dir)
             detail[dim] = {"key": key, "expectancy": exp, "trades": trades,
                            "loss_streak": streak, "grade": grade,
-                           "decay": decay}
+                           "decay": decay, "suppression": suppression}
 
             # ── DEFENSIVE flags (require sample) ──
             if trades >= MIN_SAMPLE:

@@ -519,6 +519,9 @@ def save_snapshot(snapshot: dict, symbol: str) -> str:
             "contradictions": (mc.get("consistency") or {}).get("contradictions", []),
         })(snapshot.get("market_commander") or {}),
 
+        # ── SUPPRESS-1 — shadow suppression telemetry (observe-only) ─────────
+        "suppression": snapshot.get("suppression"),
+
         # ── DECON-3 — F. execution stack + unified truth traces ───────────────
         "broker_trace": (snapshot.get("paper_execution", {}) or {}).get(
             "broker_trace") or dict(_NO_BROKER_TRACE),
