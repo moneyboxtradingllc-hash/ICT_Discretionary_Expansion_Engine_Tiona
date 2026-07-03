@@ -291,7 +291,9 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
                 from adaptive_learning.adaptive_policy_engine import (
                     generate_adaptive_policy_report)
                 _regime = snapshot.get("market_regime", {}) or {}
-                _policy = generate_adaptive_policy_report({
+                # MEM-DECAY-1: context view only — must NOT advance scar
+                # state (the snapshot_builder policy pass owns persistence).
+                _policy = generate_adaptive_policy_report(decay_persist=False, candidate={
                     "symbol":     symbol or snapshot.get("symbol"),
                     "playbook":   (snapshot.get("playbook", {}) or {}).get("selected_playbook"),
                     "tool":       (snapshot.get("toolbox", {}) or {}).get("preferred_tool"),

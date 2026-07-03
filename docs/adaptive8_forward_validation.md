@@ -51,6 +51,11 @@ From the real tables, the DEFENSIVE_ONLY policy should currently:
 - No reachable bucket at trade_block. **One more loss in a
   morning_continuation-session bucket → loss_streak 4 → first live adaptive
   soft veto.** Watch for it; it is correct behavior, not a bug.
+- MEM-DECAY-1 (2026-07-03): the veto is no longer permanent. Expected healing
+  sequence after a lock: 2 clean sessions with matching suppressed candidates
+  → PROBATION (one reduced-size, reduced-confidence test trade) → win reopens
+  / loss re-locks with a 4-session cooldown. Validate the scar_state.json
+  history events against this exactly.
 
 Any deviation from the above = mutation drift / size drift / suppression
 signal — record it, do NOT patch mid-campaign.

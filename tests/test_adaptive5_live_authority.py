@@ -16,6 +16,29 @@ from datetime import datetime, timezone, timedelta
 sys.stdout.reconfigure(encoding="utf-8")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+# MEM-DECAY-1 — build_snapshot runs the adaptive policy engine, which now also
+# advances scar-decay state. Isolate PERFORMANCE_TABLES_DIR so these
+# integration tests can never write into live adaptive memory (DECON-2 rule).
+import tempfile as _tempfile
+
+_PREV_PERF_DIR = None
+_TMP_PERF_DIR = None
+
+
+def setUpModule():
+    global _PREV_PERF_DIR, _TMP_PERF_DIR
+    _PREV_PERF_DIR = os.environ.get("PERFORMANCE_TABLES_DIR")
+    _TMP_PERF_DIR = _tempfile.mkdtemp()
+    os.environ["PERFORMANCE_TABLES_DIR"] = _TMP_PERF_DIR
+
+
+def tearDownModule():
+    if _PREV_PERF_DIR is None:
+        os.environ.pop("PERFORMANCE_TABLES_DIR", None)
+    else:
+        os.environ["PERFORMANCE_TABLES_DIR"] = _PREV_PERF_DIR
+
+
 from adaptive_learning.adaptive_live_authority import (   # noqa: E402
     apply_adaptive_live_authority, adaptive_entry_block_reason,
     AUTHORITY_LEVEL, POSTURE,
