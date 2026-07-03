@@ -251,20 +251,24 @@ class TestPhase5E4TriggerActiveAlignment(unittest.TestCase):
         self.assertEqual(stance, "prepare_long",
             f"confirmed regression broken — expected prepare_long, got {stance!r}")
 
-    # 06 — strong_disagreement still blocks execution gate (even when debate says prepare_long)
-    def test_06_strong_disagreement_blocks_execution_gate(self):
+    # 06 — AI-AUTH-1: strong_disagreement is OBSERVED, never a veto. The legacy
+    # wrapper's fusion status must not change the gate outcome; it is recorded
+    # as shadow telemetry only.
+    def test_06_strong_disagreement_is_observability_not_a_veto(self):
         from execution_gate.execution_gate import evaluate_gate
         snap = _scan59_snapshot()
-        # Simulate post-fix debate engine returning prepare_long
         snap["ai_debate"] = {"enabled": True, "final_verdict": {"recommended_stance": "prepare_long"}}
         snap["confidence_fusion"] = {"fusion_status": "strong_disagreement", "combined_confidence": 45}
         with patch.dict(os.environ, {"EXECUTION_ENABLED": "true"}):
-            gate = evaluate_gate(snap)
-        self.assertFalse(gate["allow_execution"],
-            "strong_disagreement must block allow_execution")
-        self.assertFalse(gate["would_authorize_if_enabled"],
-            "strong_disagreement must block would_authorize_if_enabled")
-        self.assertIn("confidence fusion: strong disagreement", gate["blocking_factors"])
+            hostile = evaluate_gate(snap)
+            snap["confidence_fusion"] = {"fusion_status": "agreement", "combined_confidence": 85}
+            friendly = evaluate_gate(snap)
+        self.assertEqual(hostile["would_authorize_if_enabled"],
+                         friendly["would_authorize_if_enabled"],
+            "fusion status must not change the gate outcome (wrapper is shadow)")
+        self.assertNotIn("confidence fusion: strong disagreement",
+                         hostile["blocking_factors"])
+        self.assertEqual(hostile["fusion_status_observed"], "strong_disagreement")
 
     # 07 — risk blocked still prevents prepare_long/short
     def test_07_risk_blocked_prevents_prepare_long(self):

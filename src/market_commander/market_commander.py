@@ -128,8 +128,14 @@ def _clamp(v, lo, hi):
 
 
 def _thesis_executable(s: dict) -> bool:
-    t = s.get("thesis_state") or s.get("thesis_lifecycle") or {}
-    return (t.get("status") or "").upper() == "EXECUTABLE"
+    """AI-AUTH-1 — reconnected dead witness. thesis_state exposes
+    'thesis_status' (not 'status'); the lifecycle block nests the status under
+    active_thesis. The old read matched neither key and could never fire."""
+    ts = s.get("thesis_state") or {}
+    if (ts.get("thesis_status") or "").upper() == "EXECUTABLE":
+        return True
+    at = (s.get("thesis_lifecycle") or {}).get("active_thesis") or {}
+    return (at.get("status") or "").upper() == "EXECUTABLE"
 
 
 # ── Stage 0: domain isolation ──────────────────────────────────────────────────

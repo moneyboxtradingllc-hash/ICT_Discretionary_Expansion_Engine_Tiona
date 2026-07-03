@@ -80,9 +80,16 @@ def _opposite(direction: str) -> str:
 # ── Lens extraction ───────────────────────────────────────────────────────────
 
 def _ai_lens(snapshot: dict) -> tuple:
-    ai   = snapshot.get("ai_discretionary", {}) or {}
-    d    = (ai.get("ai_direction") or "neutral").lower()
-    conf = int(ai.get("ai_confidence") or 0)
+    """AI-AUTH-1 — the AI lens is sourced from the ECU BRAIN, never the legacy
+    wrapper. (Under PIPE-1 ordering narrative_authority is assembled BEFORE the
+    Brain's canonical call, so this lens is empty on the live scan — exactly as
+    it was when it read the wrapper, which also ran later. The re-source kills
+    the LATENT wrapper wire: if assembly order ever changes, the enforce-mode
+    narrative veto can only ever be Brain-fed.)"""
+    ai  = snapshot.get("ai_brain", {}) or {}
+    out = ai.get("output") if isinstance(ai.get("output"), dict) else {}
+    d    = (out.get("narrative_direction") or "neutral").lower()
+    conf = int(out.get("phase_confidence") or 0)
     if d in _DIRECTIONAL and conf >= _ai_min_conf():
         return d, conf
     return None, conf

@@ -72,12 +72,10 @@ def _collect_warnings(snapshot: dict, eg: dict) -> list[str]:
     return warns[:3]
 
 
-def _stand_down_reason(decision: str, direction: str, debate_stance: str,
+def _stand_down_reason(decision: str, direction: str,
                         qual_status: str, risk: dict) -> str:
     if qual_status == "no_trade":
         return "Qualification no_trade -- standing down."
-    if debate_stance == "stand_down":
-        return "AI debate recommends stand_down -- no trade intent."
     if not risk.get("trade_allowed", False):
         return (
             f"{direction.capitalize()} setup present but Risk Governor blocked "
@@ -151,7 +149,6 @@ def build_intent(snapshot: dict, symbol: str) -> dict:
     qual  = snapshot.get("qualification", {})
     risk  = snapshot.get("risk", {})
     tb    = snapshot.get("toolbox", {})
-    debate = snapshot.get("ai_debate", {})
 
     # Phase 5F.4: normalize legacy 'trade_authorized_false' to 'ready_for_execution'
     from decision_authority.decision_engine import normalize_decision
@@ -164,9 +161,9 @@ def build_intent(snapshot: dict, symbol: str) -> dict:
     setup_active   = bool(sl.get("active"))
     lc_phase       = (sl.get("current_phase") or "dormant").lower() if setup_active else "dormant"
     setup_inv      = setup_active and lc_phase == "invalidated"
-    debate_stance  = (
-        debate.get("final_verdict", {}).get("recommended_stance") or "stand_down"
-    ).lower()
+    # AI-AUTH-1: the legacy debate stance no longer vetoes intent creation —
+    # the wrapper observes only. Sovereign vetoes remain: decision authority,
+    # qualification, risk governor, setup lifecycle, execution gate.
 
     pref_c     = _preferred_candidate(snapshot)
     trig       = _trigger_status(pref_c)
@@ -205,11 +202,10 @@ def build_intent(snapshot: dict, symbol: str) -> dict:
     # ── Stand-down intent (setup exists but blocked) ──────────────────────────
     is_stand_down = (
         (decision == "monitor" and not risk.get("trade_allowed", False))
-        or debate_stance == "stand_down"
         or qual_status == "no_trade"
     )
     if is_stand_down:
-        reason = _stand_down_reason(decision, direction, debate_stance, qual_status, risk)
+        reason = _stand_down_reason(decision, direction, qual_status, risk)
         return _make_result(
             False, "stand_down", symbol, direction, playbook,
             preferred_tool, entry_zone, trig, decision, eg,

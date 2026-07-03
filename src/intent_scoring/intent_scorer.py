@@ -137,24 +137,25 @@ def _score_trigger(snapshot: dict) -> int:
 
 
 def _score_ai_alignment(snapshot: dict, direction: str) -> int:
+    """AI-AUTH-1 — sovereign source only. The AI-alignment component is scored
+    from the ECU Brain thesis (the ONE live AI): direction agreement (7 pts) +
+    thesis conviction >= 55 (3 pts). The legacy wrapper (ai_discretionary /
+    ai_debate / confidence_fusion) contributes ZERO points to the gated
+    execution threshold — it observes, it does not score. With no Brain thesis
+    (ECU off or non-directional scan) the component is 0."""
+    bt = snapshot.get("brain_thesis") or {}
+    if bt.get("owner") != "ai_brain":
+        return 0
+
     pts = 0
-    dom = (
-        snapshot.get("ai_debate", {})
-               .get("final_verdict", {})
-               .get("dominant_thesis", "neutral")
-    ).lower()
-    if dom == direction:
-        pts += 4
-
-    ai_dir = (snapshot.get("ai_discretionary", {}).get("ai_direction") or "neutral").lower()
-    if ai_dir == direction:
-        pts += 3
-
-    fstatus = (snapshot.get("confidence_fusion", {}).get("fusion_status") or "").lower()
-    if fstatus == "agreement":
-        pts += 3
-    elif fstatus == "mild_disagreement":
-        pts += 1
+    bt_dir = (bt.get("direction") or "neutral").lower()
+    if bt_dir == direction and bt_dir in ("bullish", "bearish"):
+        pts += 7
+        try:
+            if float(bt.get("confidence") or 0) >= 55:
+                pts += 3
+        except (TypeError, ValueError):
+            pass
 
     return min(pts, 10)
 

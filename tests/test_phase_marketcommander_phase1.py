@@ -360,7 +360,7 @@ class TestLayer2Governor(unittest.TestCase):
     def test_stand_down_flags_executable_thesis(self):
         m = build_market_commander_matrix(rich_directional(
             news_context={"risk_state": "high_risk"},
-            thesis_state={"status": "EXECUTABLE"}))
+            thesis_state={"thesis_status": "EXECUTABLE"}))
         self.assertEqual(m["participation"]["decision"], "STAND_DOWN")
         self.assertFalse(m["consistency"]["logical_state_valid"])
         self.assertIn("STAND_DOWN_WITH_EXECUTABLE_THESIS", m["consistency"]["contradictions"])

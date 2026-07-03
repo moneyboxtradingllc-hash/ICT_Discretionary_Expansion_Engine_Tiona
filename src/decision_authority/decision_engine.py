@@ -65,17 +65,12 @@ def _lifecycle_phase(snapshot: dict) -> str:
     return "dormant"
 
 
-def _debate_stance(snapshot: dict) -> str:
-    return (
-        snapshot.get("ai_debate", {})
-               .get("final_verdict", {})
-               .get("recommended_stance", "stand_down")
-    ).lower()
-
-
 def _determine_direction(snapshot: dict) -> str:
     """
-    Direction priority: active setup > playbook > AI discretionary > debate dominant.
+    AI-AUTH-1 — sovereign direction chain: active setup > playbook > neutral.
+    The playbook direction is Brain-owned under ECU mode, so the single live AI
+    authority flows through it. The legacy wrapper (ai_discretionary) and the
+    debate verdict may NOT author direction — they observe only.
     Returns "bullish", "bearish", or "neutral".
     """
     sl = snapshot.get("setup_lifecycle", {})
@@ -88,22 +83,13 @@ def _determine_direction(snapshot: dict) -> str:
     if pb_dir in ("bullish", "bearish"):
         return pb_dir
 
-    ai_dir = (snapshot.get("ai_discretionary", {}).get("ai_direction") or "neutral").lower()
-    if ai_dir in ("bullish", "bearish"):
-        return ai_dir
-
-    dom = (
-        snapshot.get("ai_debate", {})
-               .get("final_verdict", {})
-               .get("dominant_thesis", "neutral")
-    ).lower()
-    if dom in ("bullish", "bearish"):
-        return dom
-
     return "neutral"
 
 
 def _confidence(snapshot: dict) -> int:
+    # Reporting-only value: combined_confidence is the ADAPTIVE-6 defensive
+    # consumption target (already lowered when the adaptive overlay fired).
+    # It gates nothing — no authorization path reads decision.confidence.
     return snapshot.get("confidence_fusion", {}).get("combined_confidence") or 0
 
 
@@ -115,20 +101,19 @@ def _select_decision(snapshot: dict, direction: str) -> str:
     trade_allowed  = snapshot.get("risk", {}).get("trade_allowed", False)
     st_invalidated = snapshot.get("state_transition", {}).get("invalidated", False)
     lc_phase       = _lifecycle_phase(snapshot)
-    debate         = _debate_stance(snapshot)
     raw_tool       = _raw_tool_status(snapshot)
     trig_raw       = _trigger_raw(snapshot)
     exec_rdy       = _execution_ready(snapshot)
 
     # ── Hard stand_down conditions ─────────────────────────────────────────
+    # AI-AUTH-1: the legacy debate's stand_down push on weak qualification is
+    # REMOVED — watchlist quals already cannot trade (risk governor hard-blocks
+    # watchlist); the wrapper holds no decision authority.
     if st_invalidated or lc_phase == "invalidated":
         return "stand_down"
     if qual_status == "no_trade":
         return "stand_down"
     if pb_name == "no_playbook":
-        return "stand_down"
-    # Debate pushes to stand_down on weak qualification
-    if debate == "stand_down" and qual_status in _QUAL_WEAK:
         return "stand_down"
 
     # ── Risk blocked → monitor (setup exists but gated) ────────────────────
@@ -161,8 +146,6 @@ def _build_reason(snapshot: dict, decision: str, direction: str) -> str:
     trade_allowed = snapshot.get("risk", {}).get("trade_allowed", False)
     st_inv        = snapshot.get("state_transition", {}).get("invalidated", False)
     lc_phase      = _lifecycle_phase(snapshot)
-    fv            = snapshot.get("ai_debate", {}).get("final_verdict", {})
-    dom_score     = fv.get("verdict_confidence", 0)
 
     if decision == "stand_down":
         if st_inv or lc_phase == "invalidated":
@@ -176,7 +159,7 @@ def _build_reason(snapshot: dict, decision: str, direction: str) -> str:
     if decision == "monitor":
         if not trade_allowed:
             return (
-                f"{direction.capitalize()} thesis dominant at {dom_score} "
+                f"{direction.capitalize()} setup present "
                 "but Risk Governor remains blocked."
             )
         return (
@@ -245,19 +228,14 @@ def _collect_supporting(snapshot: dict) -> list[str]:
     pb       = snapshot.get("playbook", {})
     tb       = snapshot.get("toolbox", {})
     sl       = snapshot.get("setup_lifecycle", {})
-    fv       = snapshot.get("ai_debate", {}).get("final_verdict", {})
     pref_c   = _preferred_candidate(snapshot)
 
     qs       = (qual.get("status") or "no_trade").lower()
     pb_name  = (pb.get("selected_playbook") or "no_playbook").lower()
     pb_conf  = pb.get("playbook_confidence", 0)
-    dom      = (fv.get("dominant_thesis") or "neutral").lower()
-    dom_conf = fv.get("verdict_confidence", 0)
     raw_tool = _raw_tool_status(snapshot)
     trig_raw = _trigger_raw(snapshot)
 
-    if dom in ("bullish", "bearish"):
-        factors.append(f"{dom} thesis dominant at {dom_conf}")
     if qs in _QUAL_ACTIVE:
         factors.append(f"qualification {qs}")
     if pb_name not in ("no_playbook", ""):
@@ -318,12 +296,6 @@ def _collect_warnings(snapshot: dict) -> list[str]:
         for w in sl.get("warnings", []):
             if w not in warns:
                 warns.append(w)
-
-    ai_conf = snapshot.get("ai_discretionary", {}).get("ai_confidence", 0)
-    if ai_conf < 25:
-        msg = f"AI confidence very low ({ai_conf}) — minimal conviction"
-        if msg not in warns:
-            warns.append(msg)
 
     return warns[:4]
 

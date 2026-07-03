@@ -137,8 +137,15 @@ class TestAuthoritySafety(unittest.TestCase):
         # DECON-2 — second deliberate, scoped revision: execution_engine's journal
         # snapshot_summary captures the executed tool (data integrity for the
         # performance tables' tool dimension; no authority/behavior change).
+        # AI-AUTH-1 — third deliberate, scoped revision: legacy-wrapper authority
+        # purge (decision_engine, execution_gate, intent_scorer become wrapper-
+        # free; ECU Brain is the sole live AI). Locked by
+        # tests/test_ai_auth1_sovereignty.py.
         allowed = ("paper_execution/order_builder.py",
-                   "paper_execution/execution_engine.py")
+                   "paper_execution/execution_engine.py",
+                   "decision_authority/decision_engine.py",
+                   "execution_gate/execution_gate.py",
+                   "intent_scoring/intent_scorer.py")
         offenders = [f for f in changed
                      if any(p in f for p in forbidden)
                      and not any(a in f for a in allowed)]

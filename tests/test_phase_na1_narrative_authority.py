@@ -72,7 +72,7 @@ def _june11_1029_snapshot(swings):
     """
     return {
         "timestamp": "20260611T102955",
-        "ai_discretionary": {"ai_direction": "bullish", "ai_confidence": 65},
+        "ai_brain": {"output": {"narrative_direction": "bullish", "phase_confidence": 65}},
         "shared_context": {"delivery_state": "bearish_delivery",
                            "delivery_confidence": 25,
                            "exhaustion_present": True},
@@ -131,7 +131,7 @@ class T2_BearishResponseConfirmsBearishDelivery(unittest.TestCase):
 
     def test_ai_plus_delivery_bearish_yields_bearish_narrative(self):
         snap = _june11_1029_snapshot({})
-        snap["ai_discretionary"] = {"ai_direction": "bearish", "ai_confidence": 60}
+        snap["ai_brain"] = {"output": {"narrative_direction": "bearish", "phase_confidence": 60}}
         na = build_narrative(snap, {})
         self.assertEqual(na["narrative_direction"], "bearish")
         self.assertIn("structure_overruled", na["conflict_flags"])
@@ -167,7 +167,7 @@ class T4_AIBearishVsStructureBullish(unittest.TestCase):
 
     def test_single_wide_lens_vs_structure_is_conflicted(self):
         snap = _june11_1029_snapshot({})
-        snap["ai_discretionary"] = {"ai_direction": "bearish", "ai_confidence": 60}
+        snap["ai_brain"] = {"output": {"narrative_direction": "bearish", "phase_confidence": 60}}
         snap["po3"] = {}    # delivery silent -> AI alone vs structure
         snap["shared_context"] = {"delivery_state": "mixed",
                                   "delivery_confidence": 10}
@@ -245,7 +245,7 @@ class T7_ShortIntoProtectedLowBlocked(unittest.TestCase):
         # price 698.59 — 9 cents above the protected low.
         snap = {
             "timestamp": "20260611T131741",
-            "ai_discretionary": {"ai_direction": "bearish", "ai_confidence": 74},
+            "ai_brain": {"output": {"narrative_direction": "bearish", "phase_confidence": 74}},
             "shared_context": {"delivery_state": "accumulation_building",
                                "delivery_confidence": 45},
             "po3": {"15m": {"phase": "accumulation"}, "alignment": "accumulation_building"},
@@ -272,7 +272,7 @@ class T8_StructureCannotOverrideAgreement(unittest.TestCase):
 
     def test_bullish_structure_cannot_force_long_against_bear_agreement(self):
         snap = _june11_1029_snapshot({})
-        snap["ai_discretionary"] = {"ai_direction": "bearish", "ai_confidence": 70}
+        snap["ai_brain"] = {"output": {"narrative_direction": "bearish", "phase_confidence": 70}}
         na = build_narrative(snap, {})    # delivery bearish@25 + AI bearish
         self.assertEqual(na["narrative_direction"], "bearish")
         permits, _ = narrative_permits(na, "bullish")
@@ -282,7 +282,7 @@ class T8_StructureCannotOverrideAgreement(unittest.TestCase):
 
     def test_bearish_structure_cannot_force_short_against_bull_agreement(self):
         snap = _june11_1029_snapshot({})
-        snap["ai_discretionary"] = {"ai_direction": "bullish", "ai_confidence": 70}
+        snap["ai_brain"] = {"output": {"narrative_direction": "bullish", "phase_confidence": 70}}
         snap["po3"] = {"15m": {"phase": "manipulation",
                                "manipulation_direction": "bullish"}}
         snap["shared_context"] = {"delivery_state": "bullish_delivery",
