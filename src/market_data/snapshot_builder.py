@@ -44,6 +44,7 @@ def build_snapshot(
     swing_tracker=None,
     po3_stability=None,
     capital_report=None,
+    htf_context=None,
 ) -> dict:
     timeframes = {}
     all_normalized = {}
@@ -152,6 +153,14 @@ def build_snapshot(
     if news_enabled():
         snapshot["news_context"] = build_news_context(snapshot.get("timestamp"))
 
+    # ── HTF-MEM-1 — higher-timeframe memory (CONTEXT ONLY) ─────────────────────
+    # Multi-day context (previous day/session, weekly direction, gap, untapped
+    # liquidity) computed by the scan loop's HtfMemoryEngine and attached BEFORE
+    # the ECU pre-pass so the Brain can weigh it. It informs thesis quality and
+    # warns about conflict; it may NOT execute, veto, or force direction.
+    if isinstance(htf_context, dict):
+        snapshot["htf_memory"] = htf_context
+
     # ── Phase PIPE-1 — assemble the load-bearing evidence the Brain authors from
     # BEFORE the single canonical Brain call. Previously protected_swings,
     # narrative_authority and shared_context were built in scan_loop AFTER this
@@ -170,6 +179,18 @@ def build_snapshot(
     snapshot["protected_swings"]    = _swings.update(snapshot)
     snapshot["narrative_authority"] = build_narrative_authority(
         snapshot, snapshot["protected_swings"])
+
+    # HTF-MEM-1: conflict WARNING flags (context, not veto) — HTF bias vs the
+    # narrative direction, computed pre-Brain so the Brain sees the warning too.
+    if isinstance(htf_context, dict) and htf_context.get("htf_bias") in ("bullish", "bearish"):
+        _na_dir = (snapshot["narrative_authority"] or {}).get("narrative_direction")
+        flags = []
+        if _na_dir in ("bullish", "bearish") and _na_dir != htf_context["htf_bias"]:
+            flags.append(f"htf_bias_{htf_context['htf_bias']}_vs_narrative_{_na_dir}")
+        _gap = (htf_context.get("gap_context") or {})
+        if _gap.get("side") in ("gap_up", "gap_down") and not _gap.get("filled"):
+            flags.append(f"unfilled_{_gap['side']}")
+        htf_context["htf_conflict_flags"] = flags
     snapshot["shared_context"]      = build_shared_market_context(
         snapshot, symbol or snapshot.get("symbol"))
 

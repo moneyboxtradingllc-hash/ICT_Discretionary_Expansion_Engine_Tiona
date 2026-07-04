@@ -39,23 +39,26 @@ Replay and synthetic price action are forbidden — forward market truth only.
 
 ## EXPECTED adaptive behavior (validate against, don't assume)
 
-From the real tables, the DEFENSIVE_ONLY policy should currently:
+REWRITTEN by HTF-MEM-1 / LINEAGE PURIFICATION (2026-07-04): the five pre-AI
+June trades were classified STALE_PRE_AI (+MANUAL_CLOSE_STOP_FAILURE for the
+June-9 batch) and quarantined to `data/performance_quarantine_PREAI_20260704/`.
+The ORGANISM_EPOCH gate (20260706) keeps them out of adaptive/capital memory
+permanently.
 
-- session `morning_continuation` (4 trades, exp −1.58, streak 3):
-  confidence_penalty + risk_reduction recommended → mutation −10% confidence,
-  qty halved (floor 1) at order_builder. NOT blocked (streak 3 < 4).
-- regime `trend` / volatility `normal` (3 trades, exp −1.65): same
-  penalty + risk_reduction for matching candidates.
-- session `lunch`, regime `range`, volatility `unstable`, playbook
-  `liquidity_sweep_reversal` (< 3 trades): insufficient_data → no adjustment.
-- No reachable bucket at trade_block. **One more loss in a
-  morning_continuation-session bucket → loss_streak 4 → first live adaptive
-  soft veto.** Watch for it; it is correct behavior, not a bug.
-- MEM-DECAY-1 (2026-07-03): the veto is no longer permanent. Expected healing
-  sequence after a lock: 2 clean sessions with matching suppressed candidates
-  → PROBATION (one reduced-size, reduced-confidence test trade) → win reopens
-  / loss re-locks with a 4-session cooldown. Validate the scar_state.json
-  history events against this exactly.
+**Monday opens from ZERO honest evidence:**
+
+- every adaptive dimension: insufficient_data — NO penalties, NO size
+  reductions, NO blocks at the open (the old morning_continuation/trend
+  contractions are gone);
+- capital: probation (0 closed trades) — contributes nothing;
+- scar memory, suppression memory, HTF memory: empty, current-organism-only,
+  accumulating from scan #1;
+- first adaptive flags appear only after ≥3 real closed trades in a bucket
+  (expectancy) or a real 4-loss streak (block → MEM-DECAY healing:
+  2 clean sessions → probation trade → win reopens / loss re-locks at 4).
+- HTF memory: memory_age 0→1 during session 1 (lookback seeds the prior
+  session); htf_confidence stays low until multiple sessions accumulate —
+  thin memory that claims confidence is a bug.
 
 Any deviation from the above = mutation drift / size drift / suppression
 signal — record it, do NOT patch mid-campaign.

@@ -26,11 +26,11 @@ from adaptive_learning.performance_tables import (   # noqa: E402
 
 def _real_trade(**over) -> tuple:
     """(outcome, entry) mirroring a REAL reconciled Alpaca paper trade
-    (modeled on PT_QQQ_20260610T115837 from the live journal)."""
+    (modeled on PT_QQQ_20260710T115837 from the live journal)."""
     outcome = {
         "instrument":       "QQQ",
         "status":           "closed",
-        "entry_timestamp":  "20260610T115838",
+        "entry_timestamp":  "20260710T115838",
         "session":          "lunch",
         "regime":           "range_bound",
         "volatility_state": "unstable",
@@ -41,10 +41,10 @@ def _real_trade(**over) -> tuple:
     }
     entry = {
         "symbol":               "QQQ",
-        "trade_id":             "PT_QQQ_20260610T115837",
+        "trade_id":             "PT_QQQ_20260710T115837",
         "alpaca_order_id":      "60dd2291-e100-4b73-a001-000000000000",
-        "timestamp":            "20260610T115838",
-        "closed_at":            "20260610T145032",
+        "timestamp":            "20260710T115838",
+        "closed_at":            "20260710T145032",
         "market_regime_family": "range",
         "volatility_state":     "unstable",
         "snapshot_summary":     {"tool": "bearish_ifvg",
@@ -199,9 +199,9 @@ class TestIdempotency(_Sandboxed):
         o1, e1 = _real_trade()
         o2, e2 = _real_trade()
         e2["alpaca_order_id"] = "c2adfa47-0000-4b73-a001-000000000000"
-        e2["timestamp"] = "20260611T102954"
-        e2["closed_at"] = "20260611T104549"
-        o2["entry_timestamp"] = "20260611T102954"
+        e2["timestamp"] = "20260711T102954"
+        e2["closed_at"] = "20260711T104549"
+        o2["entry_timestamp"] = "20260711T102954"
         self.assertFalse(self._write(o1, e1)["skipped"])
         self.assertFalse(self._write(o2, e2)["skipped"])
         b = get_bucket("QQQ", "playbook", "liquidity_sweep_reversal", base_dir=self._tmp)
@@ -232,8 +232,8 @@ class TestGateIsPure(unittest.TestCase):
         ok, reason, ev = validate_performance_write(o, e)
         self.assertTrue(ok)
         self.assertEqual(ev["symbol"], "QQQ")
-        self.assertEqual(ev["entry_ts"], "20260610T115838")
-        self.assertEqual(ev["exit_ts"], "20260610T145032")
+        self.assertEqual(ev["entry_ts"], "20260710T115838")
+        self.assertEqual(ev["exit_ts"], "20260710T145032")
         self.assertIn("60dd2291", ev["execution_id"])
 
 

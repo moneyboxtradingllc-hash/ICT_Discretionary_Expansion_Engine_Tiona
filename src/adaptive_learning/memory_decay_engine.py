@@ -54,9 +54,11 @@ AUTHORITY_NOTE = "decay_can_only_soften"
 
 # ── persistence ───────────────────────────────────────────────────────────────
 
-def _state_path(symbol: str, base_dir: "str | None" = None) -> str:
+def _state_path(symbol: str, base_dir: "str | None" = None,
+                create: bool = False) -> str:
     d = os.path.join(performance_root(base_dir), _norm_symbol(symbol))
-    os.makedirs(d, exist_ok=True)
+    if create:                      # writers only — readers never create dirs
+        os.makedirs(d, exist_ok=True)
     return os.path.join(d, SCAR_STATE_FILE)
 
 
@@ -70,7 +72,7 @@ def _load_state(symbol: str, base_dir: "str | None" = None) -> dict:
 
 
 def _save_state(symbol: str, state: dict, base_dir: "str | None" = None) -> None:
-    path = _state_path(symbol, base_dir)
+    path = _state_path(symbol, base_dir, create=True)
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(state, fh, indent=2, sort_keys=True)

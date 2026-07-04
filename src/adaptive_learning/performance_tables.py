@@ -62,6 +62,18 @@ DIMENSIONS = tuple(TABLE_FILES.keys())
 # five tables; a key present here means that trade has already been folded).
 LEDGER_FILE = "applied_writes.json"
 
+# HTF-MEM-1 / LINEAGE — the ORGANISM EPOCH. Trades whose entry predates the
+# current sovereign organism (pre-AI-Brain / pre-FC / manual-close era) are
+# HISTORY, not evidence: the write gate rejects them from adaptive memory.
+# Default = 2026-07-06 (ADAPTIVE-8 forward-validation session 1).
+ORGANISM_EPOCH_DEFAULT = "20260706"
+
+
+def organism_epoch() -> str:
+    """YYYYMMDD lineage boundary (env ORGANISM_EPOCH_DATE overrides)."""
+    raw = (os.getenv("ORGANISM_EPOCH_DATE") or ORGANISM_EPOCH_DEFAULT)
+    return raw.replace("-", "")[:8]
+
 
 # ── path resolution ─────────────────────────────────────────────────────────
 
@@ -228,6 +240,9 @@ def validate_performance_write(outcome: dict, entry_record: "dict | None") -> tu
     entry_ts = e.get("timestamp") or o.get("entry_timestamp")
     if not entry_ts:
         return False, "missing_entry_timestamp", None
+    # LINEAGE: pre-epoch trades are historical evidence, never adaptive memory
+    if str(entry_ts).replace("-", "")[:8] < organism_epoch():
+        return False, "pre_epoch_lineage", None
     exit_ts = e.get("closed_at") or o.get("exit_timestamp")
     if not exit_ts:
         return False, "missing_exit_timestamp", None

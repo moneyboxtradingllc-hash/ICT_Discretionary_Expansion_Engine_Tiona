@@ -745,6 +745,9 @@ def run_scan_loop(symbol: str = None, data_provider: str = None):
     # META-1 — organ self-observation (OBSERVE_ONLY; rolling window per session)
     from adaptive_learning.meta_awareness_engine import MetaAwarenessEngine
     meta_engine = MetaAwarenessEngine(symbol=symbol)
+    # HTF-MEM-1 — multi-day memory (CONTEXT ONLY; scan loop is the only writer)
+    from market_data.htf_memory_engine import HtfMemoryEngine
+    htf_engine = HtfMemoryEngine(symbol=symbol)
 
     scan_count   = 0
     save_count   = 0
@@ -860,6 +863,10 @@ def run_scan_loop(symbol: str = None, data_provider: str = None):
 
             raw_data = build_timeframes(candles_1m)
 
+            # ── HTF-MEM-1 — fold this scan's real candles into multi-day
+            # memory; context (not authority) is passed into the snapshot.
+            htf_context = htf_engine.update(candles_1m)
+
             # ── Decide AI mode for this iteration ─────────────────────────
             if use_refresh_ctrl:
                 refresh_ai    = ai_ctrl.should_refresh()
@@ -895,6 +902,7 @@ def run_scan_loop(symbol: str = None, data_provider: str = None):
                     swing_tracker=swing_tracker,   # PIPE-1: tracker advanced inside build_snapshot
                     po3_stability=po3_stability,   # VECTOR-3: persistent alignment hysteresis
                     capital_report=capital_report, # CAPITAL-1: equity awareness
+                    htf_context=htf_context,       # HTF-MEM-1: multi-day context
                 )
             except Exception as exc:
                 print(f"  [SNAPSHOT ERROR scan #{scan_count}] {exc}")

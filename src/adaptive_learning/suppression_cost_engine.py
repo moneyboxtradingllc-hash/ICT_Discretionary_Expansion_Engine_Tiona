@@ -70,9 +70,11 @@ def _tp_r() -> float:
 
 # ── persistence (performance-root co-located; isolation inherited) ────────────
 
-def _sym_dir(symbol: str, base_dir: "str | None" = None) -> str:
+def _sym_dir(symbol: str, base_dir: "str | None" = None,
+             create: bool = False) -> str:
     d = os.path.join(performance_root(base_dir), _norm_symbol(symbol))
-    os.makedirs(d, exist_ok=True)
+    if create:                      # writers only — readers never create dirs
+        os.makedirs(d, exist_ok=True)
     return d
 
 
@@ -230,7 +232,7 @@ _OUTCOME_FIELD = {
 
 def _fold_metrics(symbol: str, record: dict, outcome: str,
                   base_dir: "str | None" = None) -> None:
-    path = os.path.join(_sym_dir(symbol, base_dir), METRICS_FILE)
+    path = os.path.join(_sym_dir(symbol, base_dir, create=True), METRICS_FILE)
     metrics = _load_json(path)
     for dim in DIMENSIONS:
         key = _norm_key((record.get("dimensions") or {}).get(dim))
@@ -268,7 +270,7 @@ def register_blocked_candidate(snapshot: dict, symbol: str,
             return {"registered": False, "reason": "no_complete_price_plan"}
 
         sym = _norm_symbol(symbol)
-        open_path = os.path.join(_sym_dir(sym, base_dir), OPEN_FILE)
+        open_path = os.path.join(_sym_dir(sym, base_dir, create=True), OPEN_FILE)
         open_recs = _load_json(open_path)
         owners = sorted({str(b.get("layer")) for b in block_trace if b.get("layer")})
         reasons = [f"{b.get('layer')}: {b.get('reason')}" for b in block_trace][:6]
@@ -359,7 +361,7 @@ def resolve_shadow_outcome(snapshot: dict, symbol: str,
     outcomes; expire on session change. Returns resolved records. Never raises."""
     try:
         sym = _norm_symbol(symbol)
-        d = _sym_dir(sym, base_dir)
+        d = _sym_dir(sym, base_dir, create=True)
         open_path = os.path.join(d, OPEN_FILE)
         open_recs = _load_json(open_path)
         if not open_recs:

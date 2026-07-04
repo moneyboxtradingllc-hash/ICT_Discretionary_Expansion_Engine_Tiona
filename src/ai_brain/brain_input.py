@@ -189,6 +189,10 @@ def build_brain_input(snapshot: dict, stance_history: dict) -> dict:
             # carries event-risk/awareness, never a direction or a trade.
             **({"news_context": snapshot["news_context"]}
                if isinstance(snapshot.get("news_context"), dict) else {}),
+            # HTF-MEM-1 — multi-day context for thesis quality (context only;
+            # the Brain may weigh it, it can never be forced by it).
+            **({"htf_memory": snapshot["htf_memory"]}
+               if isinstance(snapshot.get("htf_memory"), dict) else {}),
         }
     except Exception as exc:  # noqa: BLE001
         return {"timestamp": snapshot.get("timestamp"), "degraded": [f"input_error:{exc}"]}

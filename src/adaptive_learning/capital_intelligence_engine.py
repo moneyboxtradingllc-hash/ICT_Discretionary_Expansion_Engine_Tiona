@@ -107,9 +107,10 @@ def _daily_limit() -> float:
 
 # ── persistence (scan loop is the only writer) ────────────────────────────────
 
-def _history_path(base_dir: "str | None" = None) -> str:
+def _history_path(base_dir: "str | None" = None, create: bool = False) -> str:
     d = os.path.join(performance_root(base_dir), ACCOUNT_KEY)
-    os.makedirs(d, exist_ok=True)
+    if create:                      # writers only — readers never create dirs
+        os.makedirs(d, exist_ok=True)
     return os.path.join(d, HISTORY_FILE)
 
 
@@ -123,7 +124,7 @@ def _load_history(base_dir=None) -> dict:
 
 
 def _save_history(hist: dict, base_dir=None) -> None:
-    path = _history_path(base_dir)
+    path = _history_path(base_dir, create=True)
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(hist, fh, indent=2, sort_keys=True)
@@ -137,7 +138,11 @@ def _journal_dir() -> str:
 
 
 def _closed_trades_by_date() -> dict:
-    """{date: [closed trade dicts]} from the day journals. Read-only."""
+    """{date: [closed trade dicts]} from the day journals — CURRENT ORGANISM
+    ONLY. Pre-epoch trades (pre-AI-Brain / manual-close era) are historical
+    evidence and never reach capital interpretation. Read-only."""
+    from adaptive_learning.performance_tables import organism_epoch
+    epoch = organism_epoch()
     out = {}
     for path in sorted(glob.glob(os.path.join(_journal_dir(),
                                               "*_paper_trades.json"))):
@@ -147,6 +152,8 @@ def _closed_trades_by_date() -> dict:
         except (OSError, ValueError):
             continue
         date = str(day.get("date") or os.path.basename(path)[:8])
+        if date.replace("-", "")[:8] < epoch:
+            continue
         closed = [t for t in day.get("trades", [])
                   if (t.get("order_status") or "") == "closed"]
         if closed:

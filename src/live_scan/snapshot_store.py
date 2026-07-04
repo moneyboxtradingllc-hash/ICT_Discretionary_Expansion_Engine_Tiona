@@ -528,6 +528,9 @@ def save_snapshot(snapshot: dict, symbol: str) -> str:
         # ── CAPITAL-1 — capital intelligence (contract/lock/permit only) ─────
         "capital_intelligence": snapshot.get("capital_intelligence"),
 
+        # ── HTF-MEM-1 — higher-timeframe memory (context only) ───────────────
+        "htf_memory": snapshot.get("htf_memory"),
+
         # ── DECON-3 — F. execution stack + unified truth traces ───────────────
         "broker_trace": (snapshot.get("paper_execution", {}) or {}).get(
             "broker_trace") or dict(_NO_BROKER_TRACE),
