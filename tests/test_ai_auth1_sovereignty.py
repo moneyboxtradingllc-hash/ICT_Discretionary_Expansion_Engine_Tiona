@@ -204,6 +204,9 @@ class TestE_MarketCommanderShadow(unittest.TestCase):
             os.path.join("live_scan", "snapshot_store.py"),       # persists
             os.path.join("ai_brain", "narrative_brain.py"),       # AUTHORS B2 block
             os.path.join("ai_brain", "brain_prompt.py"),          # B2 prompt text
+            # META-1 — observe-only self-observation reads MC contradictions
+            # as a health WITNESS (no authority; locked by test_meta1_awareness)
+            os.path.join("adaptive_learning", "meta_awareness_engine.py"),
         }
         offenders = []
         for root, _dirs, files in os.walk(_SRC):

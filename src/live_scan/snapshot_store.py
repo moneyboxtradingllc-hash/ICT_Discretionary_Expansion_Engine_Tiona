@@ -522,6 +522,9 @@ def save_snapshot(snapshot: dict, symbol: str) -> str:
         # ── SUPPRESS-1 — shadow suppression telemetry (observe-only) ─────────
         "suppression": snapshot.get("suppression"),
 
+        # ── META-1 — organ self-observation (observe-only) ───────────────────
+        "meta_awareness": snapshot.get("meta_awareness"),
+
         # ── DECON-3 — F. execution stack + unified truth traces ───────────────
         "broker_trace": (snapshot.get("paper_execution", {}) or {}).get(
             "broker_trace") or dict(_NO_BROKER_TRACE),

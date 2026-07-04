@@ -742,6 +742,9 @@ def run_scan_loop(symbol: str = None, data_provider: str = None):
 
     memory     = MarketMemory(max_snapshots=20)
     ai_ctrl    = AIRefreshController(ai_refresh)
+    # META-1 — organ self-observation (OBSERVE_ONLY; rolling window per session)
+    from adaptive_learning.meta_awareness_engine import MetaAwarenessEngine
+    meta_engine = MetaAwarenessEngine(symbol=symbol)
 
     scan_count   = 0
     save_count   = 0
@@ -1374,6 +1377,21 @@ def run_scan_loop(symbol: str = None, data_provider: str = None):
                         symbol,
                     )
             resolve_pending(symbol)
+
+            # ── META-1 — organ self-observation (OBSERVE_ONLY) ────────────
+            # The organism inspects its own organs every scan: brain drift,
+            # authority contradictions, adaptive/suppression instability,
+            # execution denial clusters, data-integrity drift. NO authority:
+            # blocks nothing, changes nothing. Runs LAST before persistence so
+            # it sees the fully settled scan. Never raises.
+            snapshot["meta_awareness"] = meta_engine.observe(snapshot, symbol)
+            _meta = snapshot["meta_awareness"]
+            if _meta.get("health_state") != "healthy":
+                _flags = (_meta.get("critical_flags") or []) + (_meta.get("watch_flags") or [])
+                print(f"  Meta Health  : {_meta.get('health_state','?').upper()}"
+                      f" score={_meta.get('instability_score')}"
+                      f" | {', '.join(_flags[:3]) if _flags else 'see drift_signals'}"
+                      f" | OBSERVE_ONLY")
 
             # ── Persist snapshot ───────────────────────────────────────────
             saved_path = None
