@@ -43,6 +43,7 @@ def build_snapshot(
     symbol: str = None,
     swing_tracker=None,
     po3_stability=None,
+    capital_report=None,
 ) -> dict:
     timeframes = {}
     all_normalized = {}
@@ -232,6 +233,9 @@ def build_snapshot(
     # candidate dimensions exist. Never raises.
     from adaptive_learning.adaptive_policy_engine import generate_adaptive_policy_report
     _regime = snapshot.get("market_regime", {}) or {}
+    # CAPITAL-1: the scan loop computes the capital report once per scan and
+    # passes it here; capital rides the policy as a DEFENSIVE evidence source.
+    snapshot["capital_intelligence"] = capital_report
     snapshot["adaptive_policy"] = generate_adaptive_policy_report({
         "symbol":     symbol or snapshot.get("symbol"),
         "playbook":   (snapshot.get("playbook", {}) or {}).get("selected_playbook"),
@@ -239,7 +243,7 @@ def build_snapshot(
         "session":    snapshot.get("session"),
         "regime":     _regime.get("regime_family"),
         "volatility": _regime.get("volatility_state"),
-    })
+    }, capital=capital_report)
 
     # ── ADAPTIVE-4 — Bounded Mutation Engine (SHADOW MODE / DEFENSIVE_ONLY) ────
     # Computes the DEFENSIVE_ONLY mutations the policy WOULD apply to the live

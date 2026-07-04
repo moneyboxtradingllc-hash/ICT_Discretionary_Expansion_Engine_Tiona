@@ -868,6 +868,18 @@ def run_scan_loop(symbol: str = None, data_provider: str = None):
                 refresh_ai    = True
                 mode_override = None   # honour AI_MODE env var directly
 
+            # ── CAPITAL-1 — capital condition (DEFENSIVE evidence; scan loop
+            # is the only writer of capital history per the persist contract).
+            # Fail-safe: on any error capital contributes NOTHING this scan.
+            from adaptive_learning.capital_intelligence_engine import track_capital
+            capital_report = track_capital(symbol)
+            if capital_report.get("capital_state") not in ("stable", "probation",
+                                                           "growth", None):
+                print(f"  Capital      : {capital_report.get('capital_state','?').upper()}"
+                      f" tier={capital_report.get('aggression_tier')}"
+                      f" dd_pressure={capital_report.get('drawdown_pressure')}"
+                      f" | {'; '.join((capital_report.get('capital_actions') or ['no action'])[:2])}")
+
             # ── Build snapshot ─────────────────────────────────────────────
             try:
                 snapshot = build_snapshot(
@@ -882,6 +894,7 @@ def run_scan_loop(symbol: str = None, data_provider: str = None):
                     symbol=symbol,
                     swing_tracker=swing_tracker,   # PIPE-1: tracker advanced inside build_snapshot
                     po3_stability=po3_stability,   # VECTOR-3: persistent alignment hysteresis
+                    capital_report=capital_report, # CAPITAL-1: equity awareness
                 )
             except Exception as exc:
                 print(f"  [SNAPSHOT ERROR scan #{scan_count}] {exc}")

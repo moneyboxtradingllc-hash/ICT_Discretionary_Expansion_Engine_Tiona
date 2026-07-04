@@ -66,6 +66,7 @@ def neutral_policy_report(symbol: str = "unknown",
     grades = {f"{d}_grade": "insufficient_data" for d in DIMENSIONS}
     return {
         "symbol": symbol,
+        "capital": None,
         **grades,
         "confidence_boost_recommended": False,
         "confidence_penalty_recommended": False,
@@ -83,7 +84,8 @@ def neutral_policy_report(symbol: str = "unknown",
 def generate_adaptive_policy_report(candidate: dict,
                                     base_dir: "str | None" = None,
                                     today: "str | None" = None,
-                                    decay_persist: bool = True) -> dict:
+                                    decay_persist: bool = True,
+                                    capital: "dict | None" = None) -> dict:
     """Build the DEFENSIVE_ONLY policy report for a candidate.
 
     candidate = {symbol, playbook, tool, session, regime, volatility}. Any dim may
@@ -158,12 +160,37 @@ def generate_adaptive_policy_report(candidate: dict,
                         f"-> trade_block [{decay.get('decay_status')} "
                         f"{decay.get('scar_age_sessions')}/{decay.get('cooldown_required')}]")
 
+        # ── CAPITAL-1: capital condition as a DEFENSIVE evidence source ──
+        # Capital may CONTRACT (penalty/size), LOCK (block), or PERMIT — it can
+        # never boost, never exceed the risk ceiling, never author direction.
+        # Its influence rides the same existing actuators as everything else.
+        capital_summary = None
+        if isinstance(capital, dict) and capital.get("capital_state"):
+            cflags = capital.get("capital_mutation") or {}
+            if cflags.get("confidence_penalty"):
+                penalty = True
+            if cflags.get("risk_reduction"):
+                risk_reduction = True
+            if cflags.get("trade_block"):
+                trade_block = True
+            adjustments.extend(capital.get("capital_actions") or [])
+            capital_summary = {
+                "capital_state":       capital.get("capital_state"),
+                "aggression_tier":     capital.get("aggression_tier"),
+                "equity_health_score": capital.get("equity_health_score"),
+                "drawdown_pressure":   capital.get("drawdown_pressure"),
+                "growth_strength":     capital.get("growth_strength"),
+                "risk_efficiency":     capital.get("risk_efficiency"),
+                "capital_mutation":    cflags,
+            }
+
         # DEFENSIVE precedence: any defensive signal suppresses a boost recommendation.
         if penalty or risk_reduction or trade_block:
             boost = False
 
         return {
             "symbol": symbol,
+            "capital": capital_summary,
             **grades,
             "confidence_boost_recommended": boost,
             "confidence_penalty_recommended": penalty,

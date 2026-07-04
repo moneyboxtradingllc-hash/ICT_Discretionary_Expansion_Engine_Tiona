@@ -525,6 +525,9 @@ def save_snapshot(snapshot: dict, symbol: str) -> str:
         # ── META-1 — organ self-observation (observe-only) ───────────────────
         "meta_awareness": snapshot.get("meta_awareness"),
 
+        # ── CAPITAL-1 — capital intelligence (contract/lock/permit only) ─────
+        "capital_intelligence": snapshot.get("capital_intelligence"),
+
         # ── DECON-3 — F. execution stack + unified truth traces ───────────────
         "broker_trace": (snapshot.get("paper_execution", {}) or {}).get(
             "broker_trace") or dict(_NO_BROKER_TRACE),
