@@ -26,8 +26,19 @@ _FAMILY_TF_PRIORITY: dict[str, list] = {
 _OTE_LOW_PCT  = 0.62
 _OTE_HIGH_PCT = 0.79
 
-# Price within this many points of a zone edge is classified "touching_zone"
-_TOUCH_TOLERANCE = 1.5
+# RELATION-TRUTH (2026-07-06) — the old absolute constant is RETIRED.
+# `_TOUCH_TOLERANCE = 1.5` dated from the Phase-1L mock era (NQ-scale ~19,500
+# prices) and classified QQQ prices up to 1.5 points beyond a 0.06-0.66 pt
+# zone as "touching_zone". Every downstream authority trusted that field
+# (FC-0B's in-zone guard, trigger prep, intent builder, the Brain payload),
+# so all four fully-authorized trades on 2026-07-06 entered the
+# guaranteed-kill band: relation guard passed on false adjacency, chase cap
+# (the honest backstop) refused 4/4. "Touching" now means genuinely adjacent
+# at the instrument's LIVE volatility — see _touch_tolerance(). Do not
+# reintroduce an absolute here.
+_TOUCH_TOLERANCE_FRACTION = 0.35   # of average recent candle range — the
+                                   # file's established adjacency fraction
+                                   # (same 0.35 used by range_break_retest)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -55,14 +66,27 @@ def _avg_range(candles: list) -> float:
     return round(sum(vals) / len(vals), 4) if vals else 2.0
 
 
-def _price_relation(current: float | None, zl: float, zh: float) -> str:
+def _touch_tolerance(candles: list) -> float:
+    """RELATION-TRUTH — adaptive touch tolerance: a fraction of the average
+    recent candle range, so "touching_zone" means genuinely adjacent at the
+    instrument's live volatility (QQQ 1m ≈ a few cents; mock-era NQ-scale
+    candles stay proportionally sane). With NO real range data the tolerance
+    is 0.0 — unknown volatility must never manufacture adjacency."""
+    has_range = any(c.get("range", 0) > 0 for c in (candles or [])[-5:])
+    if not has_range:
+        return 0.0
+    return round(_avg_range(candles) * _TOUCH_TOLERANCE_FRACTION, 4)
+
+
+def _price_relation(current: float | None, zl: float, zh: float,
+                    touch_tol: float = 0.0) -> str:
     if current is None:
         return "unknown"
     if zl <= current <= zh:
         return "inside_zone"
-    if zl - _TOUCH_TOLERANCE <= current < zl:
+    if zl - touch_tol <= current < zl:
         return "touching_zone"
-    if zh < current <= zh + _TOUCH_TOLERANCE:
+    if zh < current <= zh + touch_tol:
         return "touching_zone"
     return "below_zone" if current < zl else "above_zone"
 
@@ -82,13 +106,14 @@ def _is_invalidated(direction: str, current: float | None, inv_level: float | No
 
 
 def _make_zone(level_type: str, direction: str, zl: float, zh: float,
-               inv_level: float | None, current: float | None, source_tf: str) -> dict:
+               inv_level: float | None, current: float | None, source_tf: str,
+               touch_tol: float = 0.0) -> dict:
     zl = round(zl, 2)
     zh = round(zh, 2)
     if zl > zh:
         zl, zh = zh, zl  # guard inverted zone
 
-    relation  = _price_relation(current, zl, zh)
+    relation  = _price_relation(current, zl, zh, touch_tol)
     dist      = _distance(current, zl, zh)
     entered   = relation in ("inside_zone", "touching_zone")
     inval     = _is_invalidated(direction, current, inv_level)
@@ -279,43 +304,46 @@ def _build_zone_for_family(
     struct: dict, liq: dict, candles: list,
     source_tf: str, current: float | None
 ) -> dict:
+    # RELATION-TRUTH: one adaptive touch tolerance per evaluation, derived
+    # from the same candles the zones themselves are built from.
+    touch_tol = _touch_tolerance(candles)
 
     if fam in ("fvg", "ifvg", "opening_fvg"):
         result = _find_fvg(candles, direction)
         if result:
             zl, zh = result
             inv = zl if direction == "bullish" else zh
-            return _make_zone(f"{fam}_zone", direction, zl, zh, inv, current, source_tf)
+            return _make_zone(f"{fam}_zone", direction, zl, zh, inv, current, source_tf, touch_tol)
 
     if fam in ("order_block", "opening_order_block"):
         result = _find_ob(candles, direction)
         if result:
             zl, zh, inv = result
-            return _make_zone(f"{fam}_zone", direction, zl, zh, inv, current, source_tf)
+            return _make_zone(f"{fam}_zone", direction, zl, zh, inv, current, source_tf, touch_tol)
 
     if fam == "breaker":
         result = _find_breaker_zone(candles, struct, direction)
         if result:
             zl, zh, inv = result
-            return _make_zone("breaker_zone", direction, zl, zh, inv, current, source_tf)
+            return _make_zone("breaker_zone", direction, zl, zh, inv, current, source_tf, touch_tol)
 
     if fam == "rejection_block":
         result = _find_rejection_zone(struct, candles, direction)
         if result:
             zl, zh, inv = result
-            return _make_zone("rejection_block_zone", direction, zl, zh, inv, current, source_tf)
+            return _make_zone("rejection_block_zone", direction, zl, zh, inv, current, source_tf, touch_tol)
 
     if fam in ("ote_retracement", "ote_after_reclaim"):
         result = _find_ote(struct, direction)
         if result:
             zl, zh, inv = result
-            return _make_zone("ote_zone", direction, zl, zh, inv, current, source_tf)
+            return _make_zone("ote_zone", direction, zl, zh, inv, current, source_tf, touch_tol)
 
     if fam == "mss_retest":
         result = _find_mss_level_zone(struct, candles, direction)
         if result:
             zl, zh, inv = result
-            return _make_zone("mss_retest_zone", direction, zl, zh, inv, current, source_tf)
+            return _make_zone("mss_retest_zone", direction, zl, zh, inv, current, source_tf, touch_tol)
 
     if fam == "range_break_retest":
         buy_side  = liq.get("nearest_buy_side_liquidity")
@@ -326,12 +354,12 @@ def _build_zone_for_family(
             zl  = ref - tol
             zh  = ref + tol
             inv = (ref - tol * 2.5) if direction == "bullish" else (ref + tol * 2.5)
-            return _make_zone("range_break_retest_zone", direction, zl, zh, inv, current, source_tf)
+            return _make_zone("range_break_retest_zone", direction, zl, zh, inv, current, source_tf, touch_tol)
         # Fallback to swing zone if no liquidity level available
         result = _find_swing_zone(struct, candles, direction)
         if result:
             zl, zh, inv = result
-            return _make_zone("range_break_retest_zone", direction, zl, zh, inv, current, source_tf)
+            return _make_zone("range_break_retest_zone", direction, zl, zh, inv, current, source_tf, touch_tol)
 
     return _no_zone(direction, current)
 
