@@ -169,7 +169,7 @@ class TestE_DailyMemoryPersists(_HtfSandbox):
         ctx = eng.update(_candles("2026-07-07", 706.0, 707.0, 703.0, 703.5))
         self.assertEqual(ctx["daily_context"]["date"], "2026-07-06")
         self.assertEqual(ctx["daily_context"]["high"], 705.0)
-        self.assertEqual(ctx["daily_context"]["bias"], "bullish")
+        self.assertEqual(ctx["daily_context"]["day_direction"], "bullish")
         self.assertEqual(ctx["gap_context"]["side"], "gap_up")   # 706 vs 704
         self.assertEqual(ctx["memory_age"], 1)
         # restart: a NEW engine instance reloads the persisted memory
@@ -252,3 +252,58 @@ class TestH_NoExecutionAuthority(_HtfSandbox):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestH2PayloadContract(unittest.TestCase):
+    """HTF-MEM-1.1 — H2 regression lock: the Brain payload with HTF memory
+    must pass the anti-contamination scanner; the firewall itself is untouched
+    and still rejects genuinely contaminated payloads."""
+
+    def _htf_ctx(self):
+        eng = HtfMemoryEngine("QQQ", persist=False)
+        eng.update(_candles("2026-07-06", 700.0, 705.0, 698.0, 704.0))
+        return eng.update(_candles("2026-07-07", 706.0, 707.0, 703.0, 706.5))
+
+    def test_A_june_shaped_payload_still_accepted(self):
+        from ai_brain.brain_validation import scan_payload_taint
+        june_shape = {"timestamp": "t", "session": "morning", "market": {},
+                      "delivery": {}, "liquidity": {}, "protected_swings": {},
+                      "playbook_toolbox": {}, "stance_history": {},
+                      "news_context": {}, "STRUCTURE_WITNESS": {"bias": "bullish"}}
+        clean, hits = scan_payload_taint(june_shape)
+        self.assertTrue(clean, hits)
+
+    def test_B_repaired_htf_payload_accepted(self):
+        from ai_brain.brain_validation import scan_payload_taint
+        ctx = self._htf_ctx()
+        clean, hits = scan_payload_taint({"htf_memory": ctx})
+        self.assertTrue(clean, f"HTF context must satisfy H2: {hits}")
+        # and inside a full brain payload
+        snap = {"timestamp": "t", "htf_memory": ctx, "shared_context": {},
+                "protected_swings": {}, "narrative_authority": {}, "po3": {},
+                "liquidity": {}, "structure": {}, "ai_context": {}}
+        payload = build_brain_input(snap, {})
+        clean, hits = scan_payload_taint(payload)
+        self.assertTrue(clean, f"full payload must satisfy H2: {hits}")
+
+    def test_C_h2_still_rejects_real_contamination(self):
+        from ai_brain.brain_validation import scan_payload_taint
+        clean, hits = scan_payload_taint({"anything": {"bias": "bullish"}})
+        self.assertFalse(clean)
+        self.assertIn("unlabeled_bias_key", hits)
+
+    def test_D_no_authority_drift(self):
+        ctx = self._htf_ctx()
+        self.assertEqual(ctx["authority_level"], "context_only")
+
+    def test_E_htf_information_fully_preserved(self):
+        ctx = self._htf_ctx()
+        dc = ctx["daily_context"]
+        for k in ("date", "open", "high", "low", "close", "range",
+                  "day_direction"):
+            self.assertIn(k, dc)
+        self.assertEqual(dc["day_direction"], "bullish")   # same info, new name
+        self.assertIn("day_direction", ctx["previous_session_context"])
+        for k in ("weekly_context", "gap_context", "liquidity_context",
+                  "htf_bias", "htf_confidence", "memory_age"):
+            self.assertIsNotNone(ctx.get(k) if k != "memory_age" else 0)

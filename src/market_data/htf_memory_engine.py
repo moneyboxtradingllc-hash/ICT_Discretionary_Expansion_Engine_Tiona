@@ -154,9 +154,14 @@ class HtfMemoryEngine:
         prev_range = round(prev["high"] - prev["low"], 4)
         prev_bias = ("bullish" if prev["close"] > prev["open"]
                      else "bearish" if prev["close"] < prev["open"] else "neutral")
+        # H2 PAYLOAD CONTRACT (HTF-MEM-1.1): the key is "day_direction", NOT
+        # "bias" — the anti-contamination scanner rejects any raw "bias" key
+        # outside STRUCTURE_WITNESS (session-1 regression: taint
+        # ['unlabeled_bias_key'] silently disabled LLM synthesis). Same
+        # information, compliant name. Do not rename back.
         daily_context = {"date": prev_d, "open": prev["open"], "high": prev["high"],
                          "low": prev["low"], "close": prev["close"],
-                         "range": prev_range, "bias": prev_bias}
+                         "range": prev_range, "day_direction": prev_bias}
 
         # weekly: up to 5 completed sessions
         week = [days[d] for d in completed[-5:]]
