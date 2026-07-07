@@ -115,8 +115,16 @@ def _family_present(value) -> bool:
     )
 
 
-def sovereign_conversion(snapshot: dict) -> tuple:
-    """(sovereign: bool, detail: str). Never raises; fails CLOSED (False)."""
+def healthy_directional_thesis(snapshot: dict) -> tuple:
+    """FINAL-SHOT — (healthy_directional: bool, detail: str).
+
+    THE single owner of Brain-health semantics, shared by sovereign_conversion
+    (which additionally requires a family) and the playbook classifier's
+    directional-discovery path (which does not). True only when the HEALTHY
+    LLM path authored a directional opportunity; every degraded source
+    (llm_failed_fallback, deterministic, contaminated_input, degraded,
+    ecu_error, brain_disabled) fails CLOSED. Never raises.
+    """
     try:
         thesis = snapshot.get("brain_thesis")
         if not isinstance(thesis, dict):
@@ -132,9 +140,19 @@ def sovereign_conversion(snapshot: dict) -> tuple:
         direction = thesis.get("direction")
         if direction not in ("bullish", "bearish") or not thesis.get("opportunity"):
             return False, f"no_directional_opportunity({direction})"
-        if not (_family_present(thesis.get("playbook_family"))
-                or _family_present(thesis.get("tool_family"))):
-            return False, "no_family_conversion"
-        return True, f"llm_conversion:{direction}:{thesis.get('playbook_family')}"
+        return True, f"healthy_directional:{direction}"
     except Exception as exc:  # noqa: BLE001
-        return False, f"sovereignty_check_error:{exc}"
+        return False, f"health_check_error:{exc}"
+
+
+def sovereign_conversion(snapshot: dict) -> tuple:
+    """(sovereign: bool, detail: str). Never raises; fails CLOSED (False)."""
+    ok, detail = healthy_directional_thesis(snapshot)
+    if not ok:
+        return False, detail
+    thesis = snapshot.get("brain_thesis") or {}
+    if not (_family_present(thesis.get("playbook_family"))
+            or _family_present(thesis.get("tool_family"))):
+        return False, "no_family_conversion"
+    return True, (f"llm_conversion:{thesis.get('direction')}:"
+                  f"{thesis.get('playbook_family')}")

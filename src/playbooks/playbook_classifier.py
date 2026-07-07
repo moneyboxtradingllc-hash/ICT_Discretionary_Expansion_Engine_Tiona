@@ -18,6 +18,7 @@ _NO_PLAYBOOK_RESULT = {
     "playbook_confidence": 0,
     "direction":           "neutral",
     "direction_source":    "fallback_none",   # AB-2A
+    "origination":         "none",            # FINAL-SHOT audit
     "eligible_tools":      [],
     "preferred_tools":     [],
     "status":              "no_playbook",
@@ -441,12 +442,70 @@ def classify_playbook(snapshot: dict) -> dict:
                 "playbook_confidence": max(int(bt.get("confidence", 0)), scores.get(bfam, 0)),
                 "direction":           bdir,
                 "direction_source":    "ai_brain",
+                "origination":         "ai_brain_family",   # FINAL-SHOT audit
                 "eligible_tools":      eligible_tools(bfam, bdir),
                 "preferred_tools":     preferred_tools(bfam, bdir),
                 "status":              _status(max(int(bt.get("confidence", 0)), scores.get(bfam, 0))),
                 "reasons":             [f"Brain-originated playbook ({bfam})"],
                 "warnings":            ["AB-5B: classifier is validator/ranker; Brain owns selection"],
             }
+
+        # ── FINAL-SHOT — directional discovery ───────────────────────────────
+        # 2026-07-07 14:32 defect: a HEALTHY LLM thesis (bearish@45, phase
+        # "accumulation", family "none") fell through here into the
+        # qualification hard block below, which returned no_playbook with a
+        # MISLEADING warning and shut off the toolbox sensors — the real
+        # bearish FVG retest was never scored, and no downstream authority
+        # ever evaluated the thesis. Repair: when the healthy Brain authors
+        # direction without a mappable family, attempt MECHANICAL DISCOVERY
+        # using the scores already computed above at the EXISTING >=45
+        # threshold (unchanged). A discovered playbook opens the toolbox
+        # sensors so governance can evaluate real structure; it grants NO
+        # sovereignty (AI-AUTH-2 still requires a Brain family conversion —
+        # the mechanical layer may not author opportunity). Degraded/fallback
+        # Brain sources fail closed via healthy_directional_thesis and keep
+        # the legacy path below byte-identical.
+        try:
+            from ai_brain.ecu import healthy_directional_thesis
+            _healthy, _hd_detail = healthy_directional_thesis(snapshot)
+        except Exception:  # noqa: BLE001
+            _healthy = False
+        _tdir = bt.get("direction")
+        if _healthy and _tdir in ("bullish", "bearish"):
+            _phase = (bt.get("opportunity_type") or "none")
+            _best = max(scores, key=scores.get)
+            _best_score = scores[_best]
+            if _best_score >= 45:   # existing mechanical threshold — unchanged
+                return {
+                    "selected_playbook":   _best,
+                    "playbook_confidence": _best_score,
+                    "direction":           _tdir,
+                    "direction_source":    "ai_brain",
+                    "origination":         "brain_directional_discovery",
+                    "eligible_tools":      eligible_tools(_best, _tdir),
+                    "preferred_tools":     preferred_tools(_best, _tdir),
+                    "status":              _status(_best_score),
+                    "reasons": [
+                        f"Brain directional thesis ({_tdir}@{bt.get('confidence')}, "
+                        f"phase='{_phase}') named no family — mechanical discovery "
+                        f"selected {_best} at {_best_score}"],
+                    "warnings": [
+                        "FINAL-SHOT: playbook discovered mechanically for a "
+                        "family-less Brain thesis; no sovereignty granted — "
+                        "qualification/AI-AUTH-2 still require a Brain family "
+                        "conversion"],
+                }
+            # discovery found nothing — return the TRUTHFUL audit trail
+            result = _NO_PLAYBOOK_RESULT.copy()
+            result["direction"]        = _tdir
+            result["direction_source"] = "ai_brain"
+            result["origination"]      = "brain_directional_discovery_failed"
+            result["warnings"] = [
+                f"FINAL-SHOT: Brain directional thesis ({_tdir}@"
+                f"{bt.get('confidence')}, phase='{_phase}', family='none') — "
+                f"phase unmapped and mechanical discovery found no playbook "
+                f">= 45 (best: {_best} at {_best_score})"]
+            return result
 
     # Hard block: no trade qualification (validator rejection)
     if snapshot.get("qualification", {}).get("status") == "no_trade":
@@ -472,6 +531,7 @@ def classify_playbook(snapshot: dict) -> dict:
         "direction":           direction,
         # AB-2A — inherits qualification's authoring source; never "structure"
         "direction_source":    snapshot.get("qualification", {}).get("direction_source", "inherited"),
+        "origination":         "mechanical",   # FINAL-SHOT audit
         "eligible_tools":      eligible_tools(best, direction),
         "preferred_tools":     preferred_tools(best, direction),
         "status":              _status(best_score),
