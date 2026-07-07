@@ -151,13 +151,28 @@ def _market_narrative(bias: str, market_state: str, structure: dict,
 
 def _trade_personality(narrative: str, market_state: str, bias: str,
                         liquidity: dict, session: str) -> str:
+    # SCAR-TISSUE (2026-07-07): "distribution_in_progress" — ACTIVE directional
+    # delivery, and the SECOND-HIGHEST tradeable narrative in the qualification
+    # scoring tables (22 pts) — was on this no-trade blacklist (pre-AI scar;
+    # the same category error found in Tiona's bot). The personality fed
+    # confidence_engine._apply_caps, which hard-capped confidence at 49 (one
+    # point below the observe tier) -> confidence_tier "no_trade" ->
+    # qualification disqualified -> risk hard block -> toolbox demoted, and it
+    # ALSO labeled active distribution "no_trade_context" inside the Brain's
+    # own input payload. Live proof: 2026-07-07 10:43 carried full MTF
+    # alignment + 15m BOS + PO3 full distribution + confirmed displacement and
+    # scored EXACTLY 49. Distribution in progress is delivery continuation —
+    # it now carries the trend_continuation personality. The genuine no-trade
+    # environments below keep the blacklist and the cap; no threshold changed.
     _no_trade = (
         "conflicted", "exhaustion_risk", "compression", "neutral",
         "manipulation_without_distribution", "accumulation_before_expansion",
-        "distribution_in_progress",
     )
     if narrative in _no_trade:
         return "no_trade_context"
+
+    if narrative == "distribution_in_progress":
+        return "trend_continuation"
 
     if narrative in ("liquidity_sweep_reversal",
                      "bullish_continuation_after_manipulation",
