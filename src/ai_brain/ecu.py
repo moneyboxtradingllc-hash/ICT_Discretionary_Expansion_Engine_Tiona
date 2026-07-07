@@ -83,3 +83,58 @@ def _empty(reason: str) -> dict:
             "opportunity_type": None, "playbook_family": None,
             "tool_family": None, "confidence": 0, "dominant_reasoning": "",
             "brain_block": None}
+
+
+# ── AI-AUTH-2 — Brain opportunity sovereignty ─────────────────────────────────
+# THE single definition of "the healthy Brain authored a complete conversion".
+# Consumed by qualification (conf-tier demotion + conversion floor) and by the
+# risk governor (its duplicated legacy conf-tier hard block). One owner.
+#
+# Sovereignty requires ALL of:
+#   1. a brain_thesis produced by the HEALTHY LLM path (source == "llm";
+#      every degraded source — llm_failed_fallback, deterministic,
+#      contaminated_input, degraded, ecu_error, brain_disabled — fails closed
+#      and restores full legacy mechanical authority, byte-for-byte)
+#   2. a directional opportunity (direction bullish/bearish, opportunity True)
+#   3. a structural conversion: a real playbook or tool family (hedge tokens
+#      like "none"/"confirmation_required" are NOT conversions)
+#
+# 2026-07-07 calibration truth: the 10:59 bullish read (playbook_family=
+# "continuation") IS sovereign; the 11:14 read (families all "none") is NOT —
+# the Brain never converted it, and sovereignty must not manufacture
+# conversions the Brain didn't make.
+
+_NON_FAMILIES = {"", "none", "unknown", "confirmation_required", "n/a", "null"}
+
+
+def _family_present(value) -> bool:
+    items = value if isinstance(value, list) else [value]
+    return any(
+        str(i).lower().strip() not in _NON_FAMILIES
+        for i in items if i is not None
+    )
+
+
+def sovereign_conversion(snapshot: dict) -> tuple:
+    """(sovereign: bool, detail: str). Never raises; fails CLOSED (False)."""
+    try:
+        thesis = snapshot.get("brain_thesis")
+        if not isinstance(thesis, dict):
+            return False, "no_brain_thesis"
+        source = thesis.get("source")
+        if source == "ab7_active_thesis":
+            # lifecycle-stabilized shape carries no raw Brain source — read the
+            # scan's own candidate to confirm the LLM is actually healthy NOW
+            cand = snapshot.get("candidate_thesis")
+            source = cand.get("source") if isinstance(cand, dict) else None
+        if source != "llm":
+            return False, f"source={source}"
+        direction = thesis.get("direction")
+        if direction not in ("bullish", "bearish") or not thesis.get("opportunity"):
+            return False, f"no_directional_opportunity({direction})"
+        if not (_family_present(thesis.get("playbook_family"))
+                or _family_present(thesis.get("tool_family"))):
+            return False, "no_family_conversion"
+        return True, f"llm_conversion:{direction}:{thesis.get('playbook_family')}"
+    except Exception as exc:  # noqa: BLE001
+        return False, f"sovereignty_check_error:{exc}"

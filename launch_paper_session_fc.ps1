@@ -53,6 +53,12 @@ $env:AI_BRAIN_MODEL                = "gpt-4o-mini"
 $env:AI_BRAIN_TIMEOUT_SECONDS      = "25"
 $env:AI_RETRIEVAL_ENABLED          = "true"
 
+# ── AI-AUTH-2 — qualification stability floor (AB-7.3c, implemented + tested).
+# A mature persistent thesis prevents a one-scan mechanical dip from collapsing
+# qualified->no_trade. Complements the Brain-sovereignty repair; never overrides
+# a hard disqualification.
+$env:QUALIFICATION_THESIS_FLOOR    = "true"
+
 # ── NEWS-1 — Market Intelligence Layer (non-directional context into the Brain) ─
 $env:NEWS_LAYER_ENABLED            = "true"
 

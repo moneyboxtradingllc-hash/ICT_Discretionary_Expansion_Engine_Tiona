@@ -99,13 +99,60 @@ def _apply_thesis_floor(status: str, direction: str, disqualified: bool,
     return status, False
 
 
+# ── AI-AUTH-2 — Brain conversion floor ───────────────────────────────────────
+# When the HEALTHY LLM Brain authored a complete conversion (direction +
+# playbook/tool family — see ai_brain.ecu.sovereign_conversion, the single
+# owner of that definition), the Brain is the constitutional opportunity
+# authority: the legacy mechanical confidence tier becomes witness evidence
+# (warning + telemetry) instead of a binary kill, and the qualification status
+# floors at "candidate" so downstream authorities (council, regime, risk,
+# trigger, FC-0B) finally get to EVALUATE the thesis instead of never seeing
+# it. Bounded like AB-7.3c: the floor only raises the status tier, never
+# fabricates the opportunity score, never touches environment-danger
+# disqualifiers, and requires the qualification direction to be the Brain's.
+# On ANY degraded Brain source the predicate fails closed and this whole block
+# is inert — today's legacy behavior, byte-for-byte.
+_BRAIN_CONVERSION_FLOOR = "candidate"
+
+
+def _brain_sovereignty(snapshot: dict) -> tuple:
+    """(sovereign, detail) via the ECU-owned predicate. Fails CLOSED."""
+    try:
+        from ai_brain.ecu import sovereign_conversion
+        return sovereign_conversion(snapshot)
+    except Exception as exc:  # noqa: BLE001
+        return False, f"sovereignty_unavailable:{exc}"
+
+
+def _apply_brain_conversion_floor(status: str, direction: str,
+                                  disqualified: bool, thesis: dict,
+                                  sovereign: bool) -> tuple:
+    """Return (status, floor_applied). Floors a sovereign Brain conversion at
+    candidate so it survives to the downstream authorities. Never floors a
+    hard-disqualified environment or a direction the Brain didn't author."""
+    if not sovereign or disqualified:
+        return status, False
+    if direction != (thesis or {}).get("direction"):
+        return status, False
+    if _STATUS_ORDER.index(status) < _STATUS_ORDER.index(_BRAIN_CONVERSION_FLOOR):
+        return _BRAIN_CONVERSION_FLOOR, True
+    return status, False
+
+
 # ── Hard Disqualifiers ────────────────────────────────────────────────────────
 
-def _is_disqualified(ai_context: dict, volatility: dict) -> bool:
+def _is_disqualified(ai_context: dict, volatility: dict,
+                     demote_conf_tier: bool = False) -> bool:
     """
     Returns True if the environment is fundamentally unsuitable for any trade.
     The exception clause prevents auto-disqualification when only 15m is toxic
     and lower timeframes remain healthy.
+
+    AI-AUTH-2: `demote_conf_tier` is True only when the healthy LLM Brain
+    authored a complete conversion — the legacy confidence tier then becomes
+    witness evidence instead of a binary kill. Environment-danger checks
+    (no-trade narratives, dangerous state, multi-TF toxicity) keep full
+    authority regardless: they judge safety, not opportunity.
     """
     market_state = ai_context.get("market_state", "")
     conf_tier    = ai_context.get("confidence_tier", "")
@@ -114,7 +161,7 @@ def _is_disqualified(ai_context: dict, volatility: dict) -> bool:
     if narrative in _NO_TRADE_NARRATIVES:
         return True
 
-    if conf_tier == "no_trade":
+    if conf_tier == "no_trade" and not demote_conf_tier:
         return True
 
     if market_state == "dangerous":
@@ -546,7 +593,12 @@ def qualify_trade(snapshot: dict) -> dict:
     volatility = snapshot.get("volatility", {})
     po3        = snapshot.get("po3", {})
 
-    disqualified    = _is_disqualified(ai_context, volatility)
+    # AI-AUTH-2 — Brain opportunity sovereignty (healthy LLM + full conversion
+    # only; fails closed to legacy on every degraded source).
+    brain_sovereign, sovereignty_detail = _brain_sovereignty(snapshot)
+
+    disqualified    = _is_disqualified(ai_context, volatility,
+                                       demote_conf_tier=brain_sovereign)
     opp_score       = 0 if disqualified else _opportunity_score(snapshot)
     status          = _status(opp_score, disqualified)
     grade           = _grade(opp_score, disqualified)
@@ -560,10 +612,28 @@ def qualify_trade(snapshot: dict) -> dict:
     mechanical_status = status
     status, thesis_floor_applied = _apply_thesis_floor(
         status, direction, disqualified, snapshot.get("thesis_state"))
+    # AI-AUTH-2 — a sovereign Brain conversion survives qualification at
+    # >= candidate; the mechanical verdict stays recorded above.
+    status, brain_floor_applied = _apply_brain_conversion_floor(
+        status, direction, disqualified, snapshot.get("brain_thesis"),
+        brain_sovereign)
     trade_type      = _trade_type(ai_context)
     reasons         = _reasons(snapshot, direction)
     warnings        = _qual_warnings(snapshot, opp_score)
     primary_driver  = _primary_driver(snapshot, po3.get("alignment", ""))
+
+    # AI-AUTH-2 — the demoted legacy tier is surfaced as WITNESS evidence.
+    if brain_sovereign and ai_context.get("confidence_tier") == "no_trade":
+        warnings = list(warnings) + [
+            "AI-AUTH-2: legacy confidence tier no_trade (score="
+            f"{ai_context.get('confidence_score')}) demoted to witness — "
+            f"Brain conversion holds opportunity authority ({sovereignty_detail})"
+        ]
+    if brain_floor_applied:
+        warnings = list(warnings) + [
+            "AI-AUTH-2: qualification floored at candidate by sovereign Brain "
+            f"conversion (mechanical status was {mechanical_status})"
+        ]
 
     # AB-2A — structure conflict/lag surfaced as a WITNESS warning (not authority)
     structure_bias = ai_context.get("directional_bias", "neutral")
@@ -587,4 +657,8 @@ def qualify_trade(snapshot: dict) -> dict:
         # Phase AB-7.3c — thesis stability floor audit trail
         "mechanical_status":     mechanical_status,
         "thesis_floor_applied":  thesis_floor_applied,
+        # AI-AUTH-2 — Brain opportunity sovereignty audit trail
+        "brain_sovereign":               brain_sovereign,
+        "brain_sovereignty_detail":      sovereignty_detail,
+        "brain_conversion_floor_applied": brain_floor_applied,
     }

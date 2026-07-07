@@ -50,8 +50,21 @@ def _hard_blocks(snapshot: dict) -> list:
     if qual.get("status") == "watchlist":
         blocks.append("blocked: qualification is watchlist — environment has not cleared")
 
+    # AI-AUTH-2 — this line duplicated the legacy qualification-sovereignty
+    # kill (an OPPORTUNITY opinion, not a risk ceiling). When the healthy LLM
+    # Brain authored a complete conversion the tier is witness evidence only;
+    # on any degraded Brain source the predicate fails closed and this block
+    # keeps today's full authority. Risk doctrine (ceilings, tiers, sizing,
+    # loss limits) is untouched — a floored candidate still caps at MINIMAL
+    # risk tier via _QUAL_MAX_TIER below.
     if ai.get("confidence_tier") == "no_trade":
-        blocks.append("confidence tier is no_trade — environment not tradeable")
+        try:
+            from ai_brain.ecu import sovereign_conversion
+            sovereign, _detail = sovereign_conversion(snapshot)
+        except Exception:  # noqa: BLE001
+            sovereign = False
+        if not sovereign:
+            blocks.append("confidence tier is no_trade — environment not tradeable")
 
     narrative = ai.get("market_narrative", "")
     if narrative in _HARD_BLOCK_NARRATIVES:
@@ -276,6 +289,23 @@ def evaluate_risk(snapshot: dict) -> dict:
     """
     blocks                = _hard_blocks(snapshot)
     restrictions, penalty = _soft_restrictions(snapshot)
+
+    # AI-AUTH-2 — when the legacy conf-tier hard block was demoted (sovereign
+    # Brain conversion), the disagreement stays visible as a WITNESS
+    # restriction. No penalty: the floored candidate status already caps the
+    # risk tier at minimal via _QUAL_MAX_TIER below.
+    if (snapshot.get("ai_context", {}).get("confidence_tier") == "no_trade"
+            and not any("confidence tier is no_trade" in b for b in blocks)):
+        try:
+            from ai_brain.ecu import sovereign_conversion
+            if sovereign_conversion(snapshot)[0]:
+                restrictions = list(restrictions) + [
+                    "confidence tier no_trade — witness only "
+                    "(AI-AUTH-2: Brain conversion sovereign)"
+                ]
+        except Exception:  # noqa: BLE001
+            pass
+
     tier                  = _risk_tier(blocks, penalty)
 
     # Apply qualification-based tier ceiling when not already hard-blocked.

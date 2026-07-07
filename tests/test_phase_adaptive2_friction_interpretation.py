@@ -141,11 +141,19 @@ class TestAuthoritySafety(unittest.TestCase):
         # purge (decision_engine, execution_gate, intent_scorer become wrapper-
         # free; ECU Brain is the sole live AI). Locked by
         # tests/test_ai_auth1_sovereignty.py.
+        # AI-AUTH-2 — fourth deliberate, scoped revision: Brain opportunity
+        # sovereignty — the legacy conf-tier binary kill in qualification and
+        # its duplicate in the risk governor become witness evidence when the
+        # HEALTHY LLM Brain authors a complete conversion; fails closed to
+        # legacy on every degraded source. Locked by
+        # tests/test_ai_auth2_sovereignty.py.
         allowed = ("paper_execution/order_builder.py",
                    "paper_execution/execution_engine.py",
                    "decision_authority/decision_engine.py",
                    "execution_gate/execution_gate.py",
-                   "intent_scoring/intent_scorer.py")
+                   "intent_scoring/intent_scorer.py",
+                   "qualification/trade_qualification_engine.py",
+                   "risk/risk_governor.py")
         offenders = [f for f in changed
                      if any(p in f for p in forbidden)
                      and not any(a in f for a in allowed)]
