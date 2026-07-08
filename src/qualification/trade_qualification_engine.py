@@ -142,7 +142,8 @@ def _apply_brain_conversion_floor(status: str, direction: str,
 # ── Hard Disqualifiers ────────────────────────────────────────────────────────
 
 def _is_disqualified(ai_context: dict, volatility: dict,
-                     demote_conf_tier: bool = False) -> "tuple[bool, str | None]":
+                     demote_conf_tier: bool = False,
+                     demote_volatility: bool = False) -> "tuple[bool, str | None]":
     """
     Returns (disqualified, reason). The boolean is byte-identical to the prior
     behavior; the reason NAMES the specific hard disqualifier so a READY setup
@@ -175,21 +176,29 @@ def _is_disqualified(ai_context: dict, volatility: dict,
     if conf_tier == "no_trade" and not demote_conf_tier:
         return True, _tier_no_trade_root_reason(market_state, volatility)
 
+    # ── VOL-AUTH-1 — volatility disqualifiers (dangerous state, multi-TF toxic)
+    # In observe_only mode these are DEMOTED: volatility may not zero
+    # qualification. The would_have_vetoed telemetry is recorded by qualify_trade
+    # via the shared volatility oracle. Default 'enforce' keeps them byte-
+    # identical. Non-volatility disqualifiers above (no_trade narrative,
+    # confidence tier) are unaffected — they judge opportunity, not volatility.
     if market_state == "dangerous":
         vol_5m = volatility.get("5m", {}).get("state", "")
         vol_3m = volatility.get("3m", {}).get("state", "")
         # Bypass disqualification if only 15m is toxic
         if vol_5m in ("stable", "expanding") and vol_3m in ("stable", "expanding"):
             return False, None
-        return True, "dangerous_market_state_no_lower_tf_safe_harbor"
+        if not demote_volatility:
+            return True, "dangerous_market_state_no_lower_tf_safe_harbor"
 
     # Multiple HTFs toxic (15m + 5m)
-    toxic = sum(
-        1 for tf in ["15m", "5m"]
-        if volatility.get(tf, {}).get("state") in ("toxic", "explosive")
-    )
-    if toxic >= 2:
-        return True, "multi_timeframe_toxic_volatility(15m+5m)"
+    if not demote_volatility:
+        toxic = sum(
+            1 for tf in ["15m", "5m"]
+            if volatility.get(tf, {}).get("state") in ("toxic", "explosive")
+        )
+        if toxic >= 2:
+            return True, "multi_timeframe_toxic_volatility(15m+5m)"
 
     return False, None
 
@@ -624,8 +633,16 @@ def qualify_trade(snapshot: dict) -> dict:
     # only; fails closed to legacy on every degraded source).
     brain_sovereign, sovereignty_detail = _brain_sovereignty(snapshot)
 
+    # VOL-AUTH-1 — volatility veto authority (observe_only demotes it to advisory)
+    from volatility_authority.volatility_authority import (
+        observe_only as _vol_observe_only, volatility_telemetry,
+    )
+    _vol_observe = _vol_observe_only()
+    _vol_tel = volatility_telemetry(ai_context, volatility)
+
     disqualified, disqualifier_reason = _is_disqualified(
-        ai_context, volatility, demote_conf_tier=brain_sovereign)
+        ai_context, volatility, demote_conf_tier=brain_sovereign,
+        demote_volatility=_vol_observe)
     opp_score       = 0 if disqualified else _opportunity_score(snapshot)
     status          = _status(opp_score, disqualified)
     grade           = _grade(opp_score, disqualified)
@@ -682,6 +699,22 @@ def qualify_trade(snapshot: dict) -> dict:
     if disqualified and disqualifier_reason:
         warnings = list(warnings) + [f"hard disqualifier: {disqualifier_reason}"]
 
+    # ── VOL-AUTH-1 — volatility authority audit + would_have_vetoed telemetry ──
+    # In observe_only mode volatility never zeroes qualification; the warning
+    # still shows and the veto it WOULD have cast is recorded. The raw
+    # volatility warnings from _qual_warnings above are untouched (still visible).
+    qualification_zeroed_by_volatility = bool(
+        disqualified and not _vol_observe and _vol_tel["volatility_would_have_vetoed"]
+        and disqualifier_reason and (
+            "toxic" in disqualifier_reason or "dangerous" in disqualifier_reason)
+    )
+    if _vol_observe and _vol_tel["volatility_would_have_vetoed"]:
+        warnings = list(warnings) + [
+            "VOL-AUTH-1 observe_only: volatility WOULD have vetoed "
+            f"({_vol_tel['volatility_veto_reason']}) — recorded, not enforced; "
+            "qualification scored by non-volatility authorities"
+        ]
+
     return {
         "status":            status,
         "grade":             grade,
@@ -701,4 +734,10 @@ def qualify_trade(snapshot: dict) -> dict:
         "brain_sovereign":               brain_sovereign,
         "brain_sovereignty_detail":      sovereignty_detail,
         "brain_conversion_floor_applied": brain_floor_applied,
+        # VOL-AUTH-1 — volatility authority audit block
+        "volatility_authority":              _vol_tel["volatility_authority"],
+        "volatility_would_have_vetoed":      _vol_tel["volatility_would_have_vetoed"],
+        "volatility_veto_reason":            _vol_tel["volatility_veto_reason"],
+        "volatility_effect_on_score":        _vol_tel["volatility_effect_on_score"],
+        "qualification_zeroed_by_volatility": qualification_zeroed_by_volatility,
     }

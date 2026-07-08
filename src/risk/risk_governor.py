@@ -77,18 +77,27 @@ def _hard_blocks(snapshot: dict) -> list:
     if narrative in _HARD_BLOCK_NARRATIVES:
         blocks.append(f"market narrative '{narrative}' — engagement prohibited")
 
-    if ai.get("market_state") == "dangerous":
+    # ── VOL-AUTH-1 — volatility hard blocks (dangerous state, multi-TF toxic).
+    # In observe_only mode these are DEMOTED to would_have_vetoed telemetry
+    # (surfaced as a restriction in evaluate_risk) — risk does not hard-block
+    # SOLELY because of volatility. Risk ceilings, tiers, sizing, and daily-loss
+    # limits are untouched. Default 'enforce' keeps both blocks byte-identical.
+    from volatility_authority.volatility_authority import observe_only as _vobs
+    _vol_enforce = not _vobs()
+
+    if _vol_enforce and ai.get("market_state") == "dangerous":
         vol_5m = vol.get("5m", {}).get("state", "")
         vol_3m = vol.get("3m", {}).get("state", "")
         if vol_5m not in _SAFE_HARBOR_STATES or vol_3m not in _SAFE_HARBOR_STATES:
             blocks.append("dangerous market state — no lower-timeframe safe harbor")
 
-    toxic = sum(
-        1 for tf in ["15m", "5m"]
-        if vol.get(tf, {}).get("state") in ("toxic", "explosive")
-    )
-    if toxic >= 2:
-        blocks.append("15m and 5m both toxic/explosive — multi-timeframe volatility failure")
+    if _vol_enforce:
+        toxic = sum(
+            1 for tf in ["15m", "5m"]
+            if vol.get(tf, {}).get("state") in ("toxic", "explosive")
+        )
+        if toxic >= 2:
+            blocks.append("15m and 5m both toxic/explosive — multi-timeframe volatility failure")
 
     return blocks
 
@@ -329,7 +338,11 @@ def evaluate_risk(snapshot: dict) -> dict:
     authority_reason = _authority_reason(tier, blocks, restrictions, snapshot)
     warnings         = _governor_warnings(snapshot)
 
-    return {
+    # VOL-AUTH-1 — record the volatility veto that was demoted in observe_only
+    # so the risk report still shows what volatility WOULD have blocked. This is
+    # telemetry only; it does not change trade_allowed, tier, multiplier, or any
+    # sizing/loss-limit logic above.
+    result = {
         "trade_allowed":    trade_allowed,
         "governor_status":  governor_status,
         "risk_tier":        tier,
@@ -339,3 +352,18 @@ def evaluate_risk(snapshot: dict) -> dict:
         "blocks":           blocks,
         "warnings":         warnings,
     }
+    try:
+        from volatility_authority.volatility_authority import (
+            observe_only, volatility_telemetry,
+        )
+        vt = volatility_telemetry(snapshot.get("ai_context", {}),
+                                  snapshot.get("volatility", {}))
+        result.update(vt)
+        if observe_only() and vt["volatility_would_have_vetoed"]:
+            result["restrictions"] = list(restrictions) + [
+                f"VOL-AUTH-1 observe_only: volatility would_have_vetoed "
+                f"({vt['volatility_veto_reason']}) — advisory, not enforced"
+            ]
+    except Exception:  # noqa: BLE001
+        pass
+    return result

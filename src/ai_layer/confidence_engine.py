@@ -205,7 +205,15 @@ def _apply_caps(total: int, narrative: dict, volatility: dict) -> int:
         vol_3m = volatility.get("3m", {}).get("state", "")
         only_15m_toxic = vol_5m in ("stable", "expanding") and vol_3m in ("stable", "expanding")
         if not only_15m_toxic:
-            return min(total, 49)
+            # VOL-AUTH-1: this is a volatility-derived cap. In observe_only mode
+            # volatility is advisory — the cap is lifted so confidence reflects
+            # the true, non-volatility evidence (the would_have_vetoed telemetry
+            # is recorded downstream in qualification). Default 'enforce' keeps
+            # the cap byte-identical. The conflicted / no_trade_context caps
+            # above are NOT volatility and always apply.
+            from volatility_authority.volatility_authority import observe_only
+            if not observe_only():
+                return min(total, 49)
 
     return total
 

@@ -59,6 +59,13 @@ $env:AI_RETRIEVAL_ENABLED          = "true"
 # a hard disqualification.
 $env:QUALIFICATION_THESIS_FLOOR    = "true"
 
+# ── VOL-AUTH-1 — volatility authority demoted to OBSERVE-ONLY for validation.
+# Volatility still calculates, logs, and records would_have_vetoed, but during
+# the campaign it may NOT zero qualification, block risk, or prevent execution.
+# Rollback to full veto authority: set this to "enforce". FC-0B, stops, sizing,
+# max-trades/risk/daily-loss and broker safety are UNAFFECTED by this flag.
+$env:VOLATILITY_AUTHORITY_MODE     = "observe_only"
+
 # ── NEWS-1 — Market Intelligence Layer (non-directional context into the Brain) ─
 $env:NEWS_LAYER_ENABLED            = "true"
 
