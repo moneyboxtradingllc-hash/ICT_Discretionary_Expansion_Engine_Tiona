@@ -5,10 +5,33 @@ Pure observation only. No execution. No orders. No broker actions.
 """
 from __future__ import annotations
 
+import os
+
 _QUAL_ORDER = {
     "elite": 4, "qualified": 3, "candidate": 2,
     "watchlist": 1, "no_trade": 0, "decay": -1, "invalidated": -2,
 }
+
+# SETUP-PERSIST (2026-07-08) — transient-flicker grace window.
+# The 2026-07-08 lifecycle assassination proved the primary setup killer:
+# "Playbook dropped to no_playbook" (15 of 20 invalidation deaths) fired on a
+# SINGLE scan of no_playbook, while qualification flickered to no_trade on
+# 123/163 scans (75%) — so setups died at age 1 (71%), avg lifespan 1.45 scans,
+# never surviving a confirmation window. This grace lets a setup remain DORMANT
+# (age/lifecycle preserved, but NOT traded — the scan is still no_trade) for a
+# bounded number of consecutive no_playbook scans before it is killed, so a
+# transient qualification dip no longer destroys and resets the setup. Genuine
+# invalidations (state-transition, entry-trigger invalidated, toxic risk, or
+# SUSTAINED no_playbook past the window) still kill immediately. Default 0 =
+# legacy immediate-kill (byte-identical). Rollback = SETUP_NO_PLAYBOOK_GRACE=0.
+_NO_PLAYBOOK_REASON = "Playbook dropped to no_playbook"
+
+
+def _no_playbook_grace() -> int:
+    try:
+        return max(0, int(os.getenv("SETUP_NO_PLAYBOOK_GRACE", "0")))
+    except ValueError:
+        return 0
 
 # Path arrays are capped so memory stays bounded during long sessions.
 _PATH_CAP = 20
@@ -206,6 +229,7 @@ class SetupTracker:
     def __init__(self):
         self._active:    dict | None = None
         self._setup_key: str | None  = None
+        self._dormant:   int         = 0   # SETUP-PERSIST — consecutive dormant scans
 
     def update(self, snapshot: dict, symbol: str) -> dict:
         """
@@ -216,6 +240,24 @@ class SetupTracker:
         if self._active is not None and not self._active["invalidated"]:
             reason = _check_invalidation(snapshot, has_active=True)
             if reason:
+                # SETUP-PERSIST — a TRANSIENT no_playbook (qualification flicker)
+                # does not kill: the setup goes dormant (age/lifecycle preserved,
+                # NOT tradeable this scan) for up to the grace window, then dies
+                # if no_playbook persists. All other invalidation reasons, and a
+                # sustained no_playbook past the window, kill immediately.
+                grace = _no_playbook_grace()
+                if (reason == _NO_PLAYBOOK_REASON and grace > 0
+                        and self._dormant < grace):
+                    self._dormant += 1
+                    self._active["current_phase"] = "dormant"
+                    self._active["last_seen_at"]  = snapshot.get("timestamp", "")
+                    self._active["reason"] = (
+                        f"Transient no_playbook — setup preserved "
+                        f"(dormant {self._dormant}/{grace})")
+                    out = self._build_output()
+                    out["dormant"]       = True
+                    out["dormant_scans"] = self._dormant
+                    return out
                 self._active["invalidated"]   = True
                 self._active["reason"]        = reason
                 self._active["current_phase"] = "invalidated"
@@ -223,6 +265,7 @@ class SetupTracker:
                 out = self._build_output()
                 self._active    = None
                 self._setup_key = None
+                self._dormant   = 0
                 return out
 
         # ── Determine identity for this scan ──────────────────────────────
@@ -252,6 +295,7 @@ class SetupTracker:
         ts   = snap.get("timestamp", "")
         qual = _qual_status(snap)
         self._setup_key = setup_key
+        self._dormant   = 0   # SETUP-PERSIST — fresh setup, no dormancy
         self._active = {
             "setup_id":               setup_id,
             "symbol":                 symbol,
@@ -279,6 +323,10 @@ class SetupTracker:
     def _update_existing(self, snap: dict, new_id: str):
         a    = self._active
         qual = _qual_status(snap)
+
+        # SETUP-PERSIST — the setup recovered a valid playbook this scan; clear
+        # dormancy so the grace window is available again for a future dip.
+        self._dormant = 0
 
         # Update mutable identity fields (zone may drift slightly)
         a["setup_id"]       = new_id

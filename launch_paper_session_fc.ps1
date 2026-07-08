@@ -59,6 +59,14 @@ $env:AI_RETRIEVAL_ENABLED          = "true"
 # a hard disqualification.
 $env:QUALIFICATION_THESIS_FLOOR    = "true"
 
+# ── SETUP-PERSIST — setup lifecycle transient-flicker grace window.
+# A single-scan qualification dip (no_trade -> no_playbook) previously killed
+# the active setup at age 1 (71% of setups died at age 1). This lets a setup
+# stay DORMANT (age/lifecycle preserved, NOT traded that scan) across up to 2
+# consecutive no_playbook scans so it can survive a confirmation window.
+# Genuine invalidations still kill immediately. Rollback: set to "0".
+$env:SETUP_NO_PLAYBOOK_GRACE        = "2"
+
 # ── VOL-AUTH-1 — volatility authority demoted to OBSERVE-ONLY for validation.
 # Volatility still calculates, logs, and records would_have_vetoed, but during
 # the campaign it may NOT zero qualification, block risk, or prevent execution.
