@@ -151,6 +151,19 @@ def _build_reason(snapshot: dict, decision: str, direction: str) -> str:
         if st_inv or lc_phase == "invalidated":
             return "Setup lifecycle is invalidated — standing down."
         if qual_status == "no_trade":
+            # HOSTILE-AUDIT (2026-07-08) — when a hard ENVIRONMENTAL disqualifier
+            # zeroed qualification, name it. If a tool was actually READY, say
+            # the setup was seen and the environment refused — never the
+            # misleading "no opportunity identified". Decision authority is
+            # unchanged; this is truthful reporting only.
+            disq = snapshot.get("qualification", {}).get("disqualifier_reason")
+            if disq:
+                tb = snapshot.get("toolbox", {}) or {}
+                if tb.get("best_available_raw_status") in ("ready", "actionable"):
+                    return (f"Environment refused ({disq}) — a READY "
+                            f"{tb.get('preferred_tool')} setup was seen but the "
+                            f"environment is not tradeable; standing down.")
+                return f"Environment not tradeable ({disq}) — standing down."
             return "Qualification is no_trade — no opportunity identified."
         if pb_name == "no_playbook":
             return "No active playbook — standing down."

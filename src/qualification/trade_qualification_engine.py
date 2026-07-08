@@ -142,9 +142,13 @@ def _apply_brain_conversion_floor(status: str, direction: str,
 # ── Hard Disqualifiers ────────────────────────────────────────────────────────
 
 def _is_disqualified(ai_context: dict, volatility: dict,
-                     demote_conf_tier: bool = False) -> bool:
+                     demote_conf_tier: bool = False) -> "tuple[bool, str | None]":
     """
-    Returns True if the environment is fundamentally unsuitable for any trade.
+    Returns (disqualified, reason). The boolean is byte-identical to the prior
+    behavior; the reason NAMES the specific hard disqualifier so a READY setup
+    is never silently reported as "no opportunity identified" when the true
+    cause is an environmental danger refusal (HOSTILE-AUDIT, 2026-07-08).
+
     The exception clause prevents auto-disqualification when only 15m is toxic
     and lower timeframes remain healthy.
 
@@ -159,18 +163,25 @@ def _is_disqualified(ai_context: dict, volatility: dict,
     narrative    = ai_context.get("market_narrative", "")
 
     if narrative in _NO_TRADE_NARRATIVES:
-        return True
+        return True, f"no_trade_narrative:{narrative}"
 
+    # NOTE: control flow below is byte-identical to the pre-HOSTILE-AUDIT
+    # version — the conf_tier check stays FIRST so no verdict changes (moving
+    # the danger checks ahead would flip one input: conf_tier=no_trade with a
+    # dangerous state + healthy 5m/3m safe harbor, which must stay disqualified).
+    # We only ENRICH the reason: when the tier is no_trade, name the underlying
+    # environmental danger if present, since a dangerous state caps confidence
+    # at 49 (_apply_caps) and thus makes the tier a downstream echo.
     if conf_tier == "no_trade" and not demote_conf_tier:
-        return True
+        return True, _tier_no_trade_root_reason(market_state, volatility)
 
     if market_state == "dangerous":
         vol_5m = volatility.get("5m", {}).get("state", "")
         vol_3m = volatility.get("3m", {}).get("state", "")
         # Bypass disqualification if only 15m is toxic
         if vol_5m in ("stable", "expanding") and vol_3m in ("stable", "expanding"):
-            return False
-        return True
+            return False, None
+        return True, "dangerous_market_state_no_lower_tf_safe_harbor"
 
     # Multiple HTFs toxic (15m + 5m)
     toxic = sum(
@@ -178,9 +189,25 @@ def _is_disqualified(ai_context: dict, volatility: dict,
         if volatility.get(tf, {}).get("state") in ("toxic", "explosive")
     )
     if toxic >= 2:
-        return True
+        return True, "multi_timeframe_toxic_volatility(15m+5m)"
 
-    return False
+    return False, None
+
+
+def _tier_no_trade_root_reason(market_state: str, volatility: dict) -> str:
+    """Name the ROOT cause behind a no_trade confidence tier: a dangerous state
+    or multi-TF toxicity caps confidence at 49, so the tier is an echo. Reports
+    the environmental danger when present; otherwise the tier itself (a
+    genuinely weak-confidence environment)."""
+    toxic = sum(
+        1 for tf in ["15m", "5m"]
+        if (volatility.get(tf, {}) or {}).get("state") in ("toxic", "explosive")
+    )
+    if market_state == "dangerous":
+        return "confidence_tier_no_trade(dangerous_market_state)"
+    if toxic >= 2:
+        return "confidence_tier_no_trade(multi_timeframe_toxic_volatility)"
+    return "confidence_tier_no_trade"
 
 
 # ── Opportunity Score Components ──────────────────────────────────────────────
@@ -597,8 +624,8 @@ def qualify_trade(snapshot: dict) -> dict:
     # only; fails closed to legacy on every degraded source).
     brain_sovereign, sovereignty_detail = _brain_sovereignty(snapshot)
 
-    disqualified    = _is_disqualified(ai_context, volatility,
-                                       demote_conf_tier=brain_sovereign)
+    disqualified, disqualifier_reason = _is_disqualified(
+        ai_context, volatility, demote_conf_tier=brain_sovereign)
     opp_score       = 0 if disqualified else _opportunity_score(snapshot)
     status          = _status(opp_score, disqualified)
     grade           = _grade(opp_score, disqualified)
@@ -644,6 +671,17 @@ def qualify_trade(snapshot: dict) -> dict:
             f"(source={direction_source})"
         ]
 
+    # ── HOSTILE-AUDIT (2026-07-08) — truthful no_trade reason ─────────────────
+    # A hard disqualifier zeroes the score REGARDLESS of setup quality (by
+    # design — it judges environment SAFETY, not opportunity). Surfacing the
+    # SPECIFIC disqualifier keeps decision/risk from reporting the generic
+    # "no opportunity identified" while a READY tool exists. Qualification runs
+    # BEFORE the toolbox, so it cannot see tool readiness itself — the
+    # tool-aware phrasing lives in decision_engine (post-toolbox). Verdict
+    # unchanged; this is audit truth only.
+    if disqualified and disqualifier_reason:
+        warnings = list(warnings) + [f"hard disqualifier: {disqualifier_reason}"]
+
     return {
         "status":            status,
         "grade":             grade,
@@ -654,6 +692,8 @@ def qualify_trade(snapshot: dict) -> dict:
         "primary_driver":    primary_driver,
         "reasons":           reasons,
         "warnings":          warnings,
+        # HOSTILE-AUDIT — the specific hard disqualifier (None when qualified)
+        "disqualifier_reason": disqualifier_reason if disqualified else None,
         # Phase AB-7.3c — thesis stability floor audit trail
         "mechanical_status":     mechanical_status,
         "thesis_floor_applied":  thesis_floor_applied,

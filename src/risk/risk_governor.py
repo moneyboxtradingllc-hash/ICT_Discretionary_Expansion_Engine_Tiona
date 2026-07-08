@@ -45,7 +45,14 @@ def _hard_blocks(snapshot: dict) -> list:
     qual = snapshot.get("qualification", {})
 
     if qual.get("status") == "no_trade":
-        blocks.append("blocked: qualification is no_trade — no opportunity identified")
+        # HOSTILE-AUDIT (2026-07-08) — name the real disqualifier when qual
+        # provides one (environmental danger != "no opportunity"). Block logic
+        # and risk tier are byte-identical; only the message text changes.
+        _disq = qual.get("disqualifier_reason")
+        if _disq:
+            blocks.append(f"blocked: qualification no_trade — {_disq}")
+        else:
+            blocks.append("blocked: qualification is no_trade — no opportunity identified")
 
     if qual.get("status") == "watchlist":
         blocks.append("blocked: qualification is watchlist — environment has not cleared")
