@@ -362,7 +362,13 @@ def format_dashboard_line(dash: dict) -> str:
     br  = dash.get("best_regime")
     bp  = dash.get("best_playbook")
     if n == 0:
-        return "Dashboard: insufficient sample | OBSERVE_ONLY"
+        # DASHBOARD-BASELINE — active baseline empty. Say so explicitly, and
+        # name any pre-baseline lineage that was excluded from active memory.
+        excl = dash.get("pre_epoch_excluded", 0)
+        if excl:
+            return (f"Dashboard: CLEAN_BASELINE | 0 validated trades | "
+                    f"{excl} pre-baseline archived | OBSERVE_ONLY")
+        return "Dashboard: CLEAN_BASELINE | 0 validated trades | OBSERVE_ONLY"
     parts = [f"{n} trades"]
     if wr is not None:
         parts.append(f"WR {wr:.1f}%")

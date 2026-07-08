@@ -120,7 +120,10 @@ class TestDeduplication(unittest.TestCase):
     def _load_both(self, intent_dir, trades_dir):
         with patch.object(mrb, "_INTENT_DIR", intent_dir), \
              patch.object(mrb, "_TRADES_DIR", trades_dir):
-            return load_memory_records("QQQ")
+            # DASHBOARD-BASELINE: these tests exercise load/dedup MECHANICS with
+            # pre-epoch fixture timestamps — use the raw-loading accessor so the
+            # baseline epoch gate does not filter the fixtures.
+            return load_memory_records("QQQ", include_pre_epoch=True)
 
     def test_01_linked_intent_and_trade_dedupes_to_one_record(self):
         """A paper trade that claims intent I_001 should produce exactly 1 record total."""

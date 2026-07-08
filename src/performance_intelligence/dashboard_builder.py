@@ -3,7 +3,9 @@ Phase 5D — Dashboard Builder.
 Builds the Performance Intelligence Dashboard from paper trade records.
 OBSERVE_ONLY — no decision logic, no execution influence.
 """
-from memory_search.memory_record_builder import load_memory_records
+from memory_search.memory_record_builder import (
+    load_memory_records_partitioned,
+)
 from performance_intelligence.performance_metrics import (
     calculate_trade_metrics,
     calculate_regime_metrics,
@@ -41,8 +43,12 @@ def build_dashboard_from_records(
 # ── Internal ──────────────────────────────────────────────────────────────────
 
 def _build(symbol: str | None, memory_summary: dict | None) -> dict:
-    records = load_memory_records(symbol)
-    return _build_from_records(records, memory_summary)
+    # DASHBOARD-BASELINE — active baseline = post-epoch only; the pre-epoch
+    # count is carried for the CLEAN_BASELINE audit line.
+    records, pre_epoch = load_memory_records_partitioned(symbol)
+    dash = _build_from_records(records, memory_summary)
+    dash["pre_epoch_excluded"] = len(pre_epoch)
+    return dash
 
 
 def _build_from_records(records: list[dict], memory_summary: dict | None) -> dict:
@@ -79,6 +85,7 @@ def _build_from_records(records: list[dict], memory_summary: dict | None) -> dic
         "enabled":               True,
         "authority_level":       "observe_only",
         "confidence_modifier":   0,
+        "pre_epoch_excluded":    0,   # DASHBOARD-BASELINE (set by _build)
 
         "total_trades":          trade_m["total_trades"],
         "closed_trades":         closed,
@@ -128,6 +135,7 @@ def _empty_dashboard(warnings: list[str] | None = None) -> dict:
         "enabled":               True,
         "authority_level":       "observe_only",
         "confidence_modifier":   0,
+        "pre_epoch_excluded":    0,   # DASHBOARD-BASELINE
         "total_trades":          0,
         "closed_trades":         0,
         "wins":                  0,

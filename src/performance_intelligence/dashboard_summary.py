@@ -20,12 +20,16 @@ def build_dashboard_summary(dashboard: dict) -> dict:
 def _build(d: dict) -> dict:
     report = build_performance_report(d)
 
+    closed = d.get("closed_trades", 0)
     return {
         "enabled":             True,
         "authority_level":     "observe_only",
         "confidence_modifier": 0,
         "performance_quality": report["performance_quality"],
-        "sample_size":         d.get("closed_trades", 0),
+        "sample_size":         closed,
+        # DASHBOARD-BASELINE audit — active baseline holds only post-epoch trades
+        "baseline":            "clean_baseline" if closed == 0 else "active",
+        "pre_epoch_excluded":  d.get("pre_epoch_excluded", 0),
         "win_rate":            d.get("win_rate"),
         "average_r":           d.get("average_r"),
         "best_regime":         d.get("best_regime"),
@@ -51,6 +55,8 @@ def _safe_default() -> dict:
         "confidence_modifier": 0,
         "performance_quality": "none",
         "sample_size":         0,
+        "baseline":            "clean_baseline",
+        "pre_epoch_excluded":  0,
         "win_rate":            None,
         "average_r":           None,
         "best_regime":         None,

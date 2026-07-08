@@ -151,7 +151,9 @@ class TestRecordLoading(unittest.TestCase):
             import memory_search.memory_record_builder as mrb
             with patch.object(mrb, "_INTENT_DIR", tmpdir), \
                  patch.object(mrb, "_TRADES_DIR", tmpdir):
-                records = load_memory_records("QQQ")
+                # DASHBOARD-BASELINE: raw-loading mechanics test — pre-epoch
+                # fixture; bypass the baseline epoch gate.
+                records = load_memory_records("QQQ", include_pre_epoch=True)
         self.assertEqual(len(records), 2)
         self.assertEqual(records[0]["intent_id"], "I_A")
 
@@ -165,7 +167,9 @@ class TestRecordLoading(unittest.TestCase):
             import memory_search.memory_record_builder as mrb
             with patch.object(mrb, "_INTENT_DIR", intent_dir), \
                  patch.object(mrb, "_TRADES_DIR", trades_dir):
-                records = load_memory_records("QQQ")
+                # DASHBOARD-BASELINE: raw-loading mechanics test — pre-epoch
+                # fixture; bypass the baseline epoch gate.
+                records = load_memory_records("QQQ", include_pre_epoch=True)
         self.assertEqual(len(records), 2)
         self.assertEqual(records[0]["trade_id"], "T_001")
 
@@ -263,12 +267,19 @@ class TestSimilaritySearch(unittest.TestCase):
             "intents": [_intent("I_DUP", realized_r=1.0), _intent("I_DUP", realized_r=0.5)],
         }
         import memory_search.memory_record_builder as mrb
+        import memory_search.similarity_search as ss
+        # DASHBOARD-BASELINE: this is a dedup-MECHANICS test with a timestampless
+        # (=> pre-epoch) fixture. Force the raw-loading accessor so the baseline
+        # epoch gate does not filter the fixture; the dedup logic under test is
+        # unchanged.
+        _raw_loader = lambda sym: mrb.load_memory_records(sym, include_pre_epoch=True)
         with tempfile.TemporaryDirectory() as intent_dir, \
              tempfile.TemporaryDirectory() as trades_dir:
             with open(os.path.join(intent_dir, "20260608_QQQ_intents.json"), "w") as f:
                 json.dump(intent_data, f)
             with patch.object(mrb, "_INTENT_DIR", intent_dir), \
-                 patch.object(mrb, "_TRADES_DIR", trades_dir):
+                 patch.object(mrb, "_TRADES_DIR", trades_dir), \
+                 patch.object(ss, "load_memory_records", _raw_loader):
                 result = find_similar_setups(snap, symbol="QQQ", min_similarity=0.0)
         intent_ids = [m.get("intent_id") for m in result["top_matches"]]
         self.assertEqual(intent_ids.count("I_DUP"), 1)

@@ -18,14 +18,36 @@ _CLOSED_STATUSES  = {"closed", "externally_closed"}
 _CLOSED_OUTCOMES  = {"win", "loss", "breakeven"}
 
 
-def load_memory_records(symbol: str | None = None) -> list[dict]:
-    """
-    Load and normalize all available memory records for the given symbol.
-    Paper trade records are loaded first and claim their linked intent_ids.
-    Intent archive records whose intent_id is claimed are skipped to prevent
-    double-counting a single trade across both sources.
-    Returns a deduplicated list of normalized dicts. Never raises.
-    """
+def _organism_epoch() -> str:
+    """Lineage boundary (YYYYMMDD). Lazy import keeps this observe-only reader
+    free of the adaptive stack at module-load and honors ORGANISM_EPOCH_DATE."""
+    try:
+        from adaptive_learning.performance_tables import organism_epoch
+        return organism_epoch()
+    except Exception:  # noqa: BLE001
+        import os
+        return os.getenv("ORGANISM_EPOCH_DATE") or "20260706"
+
+
+def _record_day(rec: dict) -> str:
+    """YYYYMMDD of the record's entry timestamp, or '' when unparseable."""
+    ts = str(rec.get("timestamp") or "")
+    day = ts.replace("-", "")[:8]
+    return day if day.isdigit() and len(day) == 8 else ""
+
+
+def _is_pre_epoch(rec: dict) -> bool:
+    """DASHBOARD-BASELINE — a record entered before the organism epoch is
+    PRE-BASELINE lineage (stale/pre-repair). Records with no parseable day are
+    conservatively treated as pre-epoch (they predate timestamped journaling)."""
+    day = _record_day(rec)
+    if not day:
+        return True
+    return day < _organism_epoch()
+
+
+def _load_all_records(symbol: str | None) -> list[dict]:
+    """The full deduplicated normalized set (pre- and post-epoch)."""
     # Step 1: load paper trades and deduplicate by trade_id
     trade_records = _load_from_paper_trades(symbol)
     seen_trade_ids: set[str] = set()
@@ -48,6 +70,42 @@ def load_memory_records(symbol: str | None = None) -> list[dict]:
 
     # Paper trades first (authoritative), then unlinked intent records
     return deduped_trades + intent_records
+
+
+def load_memory_records(symbol: str | None = None,
+                        include_pre_epoch: bool = False) -> list[dict]:
+    """
+    Load and normalize available memory records for the given symbol.
+    Paper trade records are loaded first and claim their linked intent_ids;
+    intent archive records whose intent_id is claimed are skipped to prevent
+    double-counting a single trade across both sources.
+
+    DASHBOARD-BASELINE (2026-07-08): the ACTIVE validation baseline contains
+    ONLY post-epoch trades. Pre-epoch lineage (the STALE_PRE_AI June batch
+    HTF-MEM-1 quarantined from the performance TABLES, but which this read path
+    still surfaced) is excluded by default — that stale memory produced the
+    false "Dashboard: 5 trades | WR 0.0% | AvgR -1.40" line and polluted the
+    Brain's context summary + memory-search + recommendations (all
+    OBSERVE_ONLY; no authority — this is a source-of-truth repair, not an
+    authority change). `include_pre_epoch=True` is the explicit, labeled
+    archival-only accessor. Never raises.
+    """
+    all_records = _load_all_records(symbol)
+    if include_pre_epoch:
+        return all_records
+    return [r for r in all_records if not _is_pre_epoch(r)]
+
+
+def load_memory_records_partitioned(
+    symbol: str | None = None,
+) -> "tuple[list[dict], list[dict]]":
+    """(active_post_epoch, pre_epoch_excluded). Single pass; observe-only audit
+    source for the CLEAN_BASELINE dashboard label. Never raises."""
+    active: list[dict] = []
+    pre_epoch: list[dict] = []
+    for rec in _load_all_records(symbol):
+        (pre_epoch if _is_pre_epoch(rec) else active).append(rec)
+    return active, pre_epoch
 
 
 # ── Intent Archive ────────────────────────────────────────────────────────────
