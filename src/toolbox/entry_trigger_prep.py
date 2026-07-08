@@ -74,6 +74,53 @@ def _confirmation_candle_ok(snapshot: dict, direction: str, price_level: dict) -
         return False
 
 
+def _confirmation_detail(snapshot: dict, direction: str, price_level: dict) -> dict:
+    """TRIGGER-AUDIT (2026-07-08) — WHY confirmation did/didn't complete this scan.
+
+    The 10-intent candle trial proved the confirmation RULE is legitimate (only
+    1/10 intents had a discretionary confirmation the rule refused — below the
+    overbuilt threshold). But 0/10 confirmed LIVE while 4/10 had a code-
+    confirming candle in replay: the confirming candle (close beyond midpoint)
+    closes past the zone edge, flipping price_relation to above/below_zone, and
+    upstream setup/qualification/toolbox flicker vanishes the setup on the very
+    scan the candle closes. This block makes that failure transparent and
+    measurable — it changes NO behavior (the trigger verdict is unchanged); it
+    only records the exact failed condition so the true owner (flicker + zone-
+    exit geometry) is visible to the next session. Never raises.
+    """
+    detail = {"confirmation_candle_met": False, "failed_condition": None,
+              "last_candle_tf": None}
+    try:
+        mid = price_level.get("midpoint")
+        if mid is None:
+            detail["failed_condition"] = "no_midpoint"
+            return detail
+        mid = float(mid)
+        tfs = snapshot.get("timeframes", {}) or {}
+        last = None
+        for tf in ("1m", "3m"):
+            lc = (tfs.get(tf) or {}).get("last_candle")
+            if lc and lc.get("close") is not None and lc.get("open") is not None:
+                last, detail["last_candle_tf"] = lc, tf
+                break
+        if last is None:
+            detail["failed_condition"] = "no_candle_data"
+            return detail
+        o, cl = float(last["open"]), float(last["close"])
+        directional = (cl > o) if direction == "bullish" else (cl < o)
+        beyond_mid = (cl > mid) if direction == "bullish" else (cl < mid)
+        if directional and beyond_mid:
+            detail["confirmation_candle_met"] = True
+        elif not directional:
+            detail["failed_condition"] = "candle_not_directional"
+        else:  # directional but not beyond midpoint (the wick-rejection axis)
+            detail["failed_condition"] = "directional_but_not_beyond_midpoint"
+        return detail
+    except (TypeError, ValueError) as exc:
+        detail["failed_condition"] = f"error:{exc}"
+        return detail
+
+
 def _effective_trigger_status(raw_ts: str, effective_tool_status: str) -> str:
     """
     Apply risk governor override.
@@ -212,6 +259,12 @@ def build_trigger_prep(
     ):
         raw_ts = "confirmed"
 
+    # TRIGGER-AUDIT — observability only; does not change raw_ts/eff_ts above.
+    # Recorded on every scan where a zone exists so the next session can measure
+    # how often confirmation is missed and WHY (the trial proved the rule sound;
+    # the loss is upstream flicker + zone-exit geometry, not rule strictness).
+    conf_detail = _confirmation_detail(snapshot, direction, price_level)
+
     eff_ts = _effective_trigger_status(raw_ts, effective_status)
 
     # execution_ready: every condition must be true simultaneously
@@ -231,4 +284,8 @@ def build_trigger_prep(
         "confirmation_needed":     _confirmation_list(fam, direction, price_level),
         "invalidation_conditions": _invalidation_list(fam, direction, price_level),
         "execution_ready":         execution_ready,
+        # TRIGGER-AUDIT (2026-07-08) — confirmation transparency (observe-only)
+        "confirmation_candle_met":     conf_detail["confirmation_candle_met"],
+        "confirmation_failed_condition": conf_detail["failed_condition"],
+        "confirmation_candle_tf":      conf_detail["last_candle_tf"],
     }
