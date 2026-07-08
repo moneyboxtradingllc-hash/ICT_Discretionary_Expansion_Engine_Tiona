@@ -644,6 +644,17 @@ def qualify_trade(snapshot: dict) -> dict:
         ai_context, volatility, demote_conf_tier=brain_sovereign,
         demote_volatility=_vol_observe)
     opp_score       = 0 if disqualified else _opportunity_score(snapshot)
+
+    # QUAL-FLICKER-AUDIT (2026-07-08) — the 2026-07-08 flicker trial proved every
+    # narrative/conf-tier hard-disqualified no_trade scan had a would-be
+    # opportunity score of <=22 (max, across all 86 scans) — i.e. the
+    # disqualifier NEVER masked a tradeable-threshold opportunity; the score was
+    # genuinely low (choppy, indecisive market). This records the score that
+    # WOULD apply absent the disqualifier so "is qualification hiding
+    # opportunity?" is answerable every scan. Observability only; the verdict is
+    # unchanged.
+    opp_score_undisq = _opportunity_score(snapshot) if disqualified else opp_score
+    disqualifier_masks_opportunity = bool(disqualified and opp_score_undisq >= 40)
     status          = _status(opp_score, disqualified)
     grade           = _grade(opp_score, disqualified)
     direction, direction_source = _direction_with_source(
@@ -740,4 +751,7 @@ def qualify_trade(snapshot: dict) -> dict:
         "volatility_veto_reason":            _vol_tel["volatility_veto_reason"],
         "volatility_effect_on_score":        _vol_tel["volatility_effect_on_score"],
         "qualification_zeroed_by_volatility": qualification_zeroed_by_volatility,
+        # QUAL-FLICKER-AUDIT — is the hard disqualifier masking real opportunity?
+        "opportunity_score_undisqualified":  opp_score_undisq,
+        "disqualifier_masks_opportunity":    disqualifier_masks_opportunity,
     }
