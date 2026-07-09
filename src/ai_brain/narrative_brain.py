@@ -42,7 +42,9 @@ from adaptive_learning.context_formatter import (
 from ai_brain.brain_schema import (
     empty_brain_output, validate_brain_output, validate_llm_core,
 )
-from ai_brain.brain_validation import normalize_output, needs_repair, scan_payload_taint
+from ai_brain.brain_validation import (
+    normalize_output, needs_repair, scan_payload_taint, directional_family_gap,
+)
 from ai_brain.brain_persistence import persist_brain_call
 from narrative_authority.narrative_engine import build_narrative
 
@@ -56,6 +58,16 @@ def enabled() -> bool:
 
 def _llm_enabled() -> bool:
     return os.getenv("AI_BRAIN_LLM", "false").lower().strip() == "true"
+
+
+def _family_repair_enabled() -> bool:
+    """BRAIN-FAMILY-REPAIR (2026-07-09) — gate for the SOFT family-repair turn.
+    When on, a bullish/bearish narrative whose playbook/tool family is 'none'
+    (an AB-5C mandate violation seen on 60/80 directional scans) gets ONE repair
+    round-trip asking the LLM to name the concrete family its own story implies.
+    The repair may never flip direction and its failure keeps the original
+    output — it can only ADD a family, never degrade the read. Default off."""
+    return os.getenv("BRAIN_FAMILY_REPAIR", "off").lower().strip() == "on"
 
 
 # ── Deterministic synthesis core (NA-1 engine → 23-field schema) ──────────────
@@ -352,6 +364,7 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
         ai_market_commander = None   # MARKET COMMANDER B2 (observe-only side output)
         source, fallback_reason = "deterministic", None
         norm_notes, repair_errors, repaired = [], [], False
+        family_repair_attempted, family_repair_fixed, family_errors = False, False, []
         taint_clean, taint_paths = scan_payload_taint(brain_input)
         if _llm_enabled() and not taint_clean:
             # AI-BRAIN-H2 — contaminated input: do NOT call the LLM.
@@ -399,6 +412,30 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
                     output.setdefault("warnings", []).append(f"llm_fallback: {fallback_reason}")
                 else:
                     source = "llm"
+                    # ── BRAIN-FAMILY-REPAIR (2026-07-09) — SOFT repair turn ────
+                    # A directional read whose family is 'none' violates the
+                    # AB-5C mandate and blocks sovereignty. One repair attempt
+                    # asks the LLM to name the family its own story implies.
+                    # Guards: the repaired output must keep the SAME direction
+                    # (no flip smuggled through), still pass hard validation,
+                    # and actually close the gap — otherwise the ORIGINAL
+                    # output stands. Never falls back, never fabricates.
+                    fam_gap, family_errors = directional_family_gap(parsed)
+                    if fam_gap and _family_repair_enabled():
+                        family_repair_attempted = True
+                        frep = _call_llm(brain_input, repair={
+                            "previous": parsed, "errors": family_errors})
+                        if frep["ok"]:
+                            cand, cand_notes = normalize_output(frep["parsed"], analogs)
+                            still_hard, _ = needs_repair(cand)
+                            still_gap, _ = directional_family_gap(cand)
+                            same_dir = (cand.get("narrative_direction")
+                                        == parsed.get("narrative_direction"))
+                            if not still_hard and not still_gap and same_dir:
+                                parsed = cand
+                                norm_notes += cand_notes
+                                family_repair_fixed = True
+                                llm_call["family_repair_usage"] = frep.get("usage")
                     # MARKET COMMANDER B2 — capture the Brain-authored matrix from
                     # the RAW parse (observe-only side output; validated/coerced by
                     # market_commander, never consumed as authority here).
@@ -454,6 +491,11 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             "repair_attempted": repaired,
             "repair_errors": repair_errors,
             "repair_usage": (llm_call or {}).get("repair_usage"),
+            # BRAIN-FAMILY-REPAIR (2026-07-09) — soft family-repair audit trail
+            "family_repair_attempted": family_repair_attempted,
+            "family_repair_fixed": family_repair_fixed,
+            "family_repair_errors": family_errors,
+            "family_repair_usage": (llm_call or {}).get("family_repair_usage"),
             "input_degraded": brain_input.get("degraded", []),
             "input_payload": brain_input,
             "adaptive_telemetry": adaptive_telemetry,   # ADAPTIVE-1C (observe_only)
@@ -475,6 +517,9 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             "fallback_reason": fallback_reason,
             "normalization_notes": norm_notes,
             "repair_attempted": repaired,
+            # BRAIN-FAMILY-REPAIR (2026-07-09) — soft family-repair telemetry
+            "family_repair_attempted": family_repair_attempted,
+            "family_repair_fixed": family_repair_fixed,
             "input_degraded": brain_input.get("degraded", []),
             "output": output,
             "adaptive_telemetry": adaptive_telemetry,   # ADAPTIVE-1C (observe_only)

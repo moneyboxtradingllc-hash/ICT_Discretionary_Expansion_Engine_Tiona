@@ -235,6 +235,44 @@ def needs_repair(parsed: dict) -> tuple:
     return (len(errors) > 0), errors
 
 
+# ── BRAIN-FAMILY-REPAIR (2026-07-09): directional read without a family ───────
+# The 2026-07-09 sovereignty audit found the LLM emitted a bullish/bearish
+# narrative_direction with recommended_playbook_family='none' on 60 of 80
+# directional scans — violating the AB-5C prompt mandate and blocking Brain
+# sovereignty (sovereign_conversion requires a real family). This detector names
+# that gap so narrative_brain can run a SOFT repair turn (keep the original LLM
+# output if the repair fails — a stubborn 'none' must never nuke a healthy
+# directional read into deterministic fallback).
+
+def directional_family_gap(parsed: dict) -> tuple:
+    """(gap: bool, errors[]). True when narrative_direction is bullish/bearish
+    but the playbook/tool family is a neutral token or empty. Never raises."""
+    errors = []
+    try:
+        out = parsed or {}
+        direction = (out.get("narrative_direction") or "neutral").lower().strip()
+        if direction not in ("bullish", "bearish"):
+            return False, []
+        pb = str(out.get("recommended_playbook_family") or "").lower().strip()
+        if not pb or pb in NEUTRAL_TOOL_FAMILIES:
+            errors.append(
+                f"directional_without_playbook_family: narrative_direction="
+                f"{direction} but recommended_playbook_family={pb or 'empty'!r} — "
+                "a directional narrative MUST name one of the six canonical "
+                "playbooks (AB-5C)")
+        tf = out.get("recommended_tool_family")
+        toks = [str(t).lower().strip() for t in (tf if isinstance(tf, list) else [tf])
+                if t is not None]
+        if not toks or all(t in NEUTRAL_TOOL_FAMILIES for t in toks):
+            errors.append(
+                f"directional_without_tool_family: narrative_direction="
+                f"{direction} but recommended_tool_family={toks or 'empty'} — "
+                "a directional narrative MUST name a concrete tool family (AB-5C)")
+        return (len(errors) > 0), errors
+    except Exception as exc:  # noqa: BLE001
+        return False, [f"family_gap_error:{exc}"]
+
+
 # ── AI-BRAIN-H2: prompt-input taint guard ─────────────────────────────────────
 import json as _json
 

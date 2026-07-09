@@ -53,6 +53,17 @@ $env:AI_BRAIN_MODEL                = "gpt-4o-mini"
 $env:AI_BRAIN_TIMEOUT_SECONDS      = "25"
 $env:AI_RETRIEVAL_ENABLED          = "true"
 
+# ── BRAIN-FAMILY-REPAIR (2026-07-09): soft family-repair turn.
+# 2026-07-09 audit: the LLM emitted a directional narrative with
+# recommended_playbook_family='none' on 60/80 directional scans — violating the
+# AB-5C mandate and blocking Brain sovereignty on 75% of directional reads. In
+# "on" mode a directional read whose family is 'none' gets ONE repair round-trip
+# asking the LLM to name the family its own story implies. Guards: the repair
+# may never flip direction; a failed repair keeps the ORIGINAL output (never
+# falls back, never fabricates). Prompt mandate also strengthened inline.
+# Rollback: set "off".
+$env:BRAIN_FAMILY_REPAIR           = "on"
+
 # ── AI-AUTH-2 — qualification stability floor (AB-7.3c, implemented + tested).
 # A mature persistent thesis prevents a one-scan mechanical dip from collapsing
 # qualified->no_trade. Complements the Brain-sovereignty repair; never overrides

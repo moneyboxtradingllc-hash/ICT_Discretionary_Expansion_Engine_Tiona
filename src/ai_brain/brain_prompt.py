@@ -89,8 +89,8 @@ Output ONLY valid JSON, exactly this schema, no prose, no markdown:
  "protected_high_status": "approaching|rejecting|violating|below|none",
  "protected_low_status": "approaching|rejecting|violating|above|none",
  "dominant_reasoning": "<the single strongest reason for your direction>",
- "recommended_playbook_family": "<one of: liquidity_sweep_reversal, trend_continuation, manipulation_to_distribution, failed_breakout_reversal, opening_drive, range_expansion, none>",
- "recommended_tool_family": ["<one of: fvg, ifvg, order_block, breaker, rejection_block, ote_retracement, mss_retest, ote_after_reclaim, opening_fvg, opening_order_block, range_break_retest, none>"]
+ "recommended_playbook_family": "<one of: liquidity_sweep_reversal, trend_continuation, manipulation_to_distribution, failed_breakout_reversal, opening_drive, range_expansion — 'none' is ONLY legal when narrative_direction is conflicted/neutral>",
+ "recommended_tool_family": ["<one of: fvg, ifvg, order_block, breaker, rejection_block, ote_retracement, mss_retest, ote_after_reclaim, opening_fvg, opening_order_block, range_break_retest — 'none' is ONLY legal when narrative_direction is conflicted/neutral>"]
 }
 
 AB-5C: recommended_playbook_family MUST be one of the six canonical playbooks
@@ -98,7 +98,14 @@ AB-5C: recommended_playbook_family MUST be one of the six canonical playbooks
 — do NOT prefix bullish/bearish; the direction is taken from narrative_direction.
 When narrative_direction is bullish or bearish you MUST choose a CONCRETE
 playbook and a CONCRETE tool family (NOT "none"/"wait"/"confirmation_required").
-Only conflicted/neutral narratives may use "none". Tool families that fit each
+Only conflicted/neutral narratives may use "none". A directional narrative that
+answers "none" is an INCOMPLETE answer and will be sent back for repair: your
+own story already implies the family — a swept-and-reclaimed level implies
+liquidity_sweep_reversal, intact directional delivery implies trend_continuation,
+manipulation resolving into delivery implies manipulation_to_distribution, a
+failed break implies failed_breakout_reversal. If you are not confident enough
+to name a playbook, you are not confident enough to be directional — say
+conflicted instead. Tool families that fit each
 playbook: liquidity_sweep_reversal → ifvg/breaker/rejection_block/mss_retest/
 ote_after_reclaim; trend_continuation → fvg/order_block/ote_retracement/mss_retest;
 manipulation_to_distribution → ifvg/breaker/rejection_block/fvg;
@@ -283,4 +290,10 @@ Requirements for the fix:
 - narrative_phase must be one of: accumulation, manipulation, distribution,
   reversal, continuation, exhaustion, transition, neutral, conflicted.
 - tools/playbooks must not contradict narrative_direction.
+- if narrative_direction is bullish or bearish, recommended_playbook_family MUST
+  be one of the six canonical playbooks and recommended_tool_family MUST name a
+  concrete tool family — never "none"/"wait"/"confirmation_required". Do NOT
+  change narrative_direction to satisfy this; name the family your existing
+  story implies (or, only if the story truly supports no playbook, downgrade to
+  conflicted and explain why).
 Return JSON only, no prose outside the JSON."""
