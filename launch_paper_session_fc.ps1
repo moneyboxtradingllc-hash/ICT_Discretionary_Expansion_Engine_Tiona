@@ -127,6 +127,19 @@ $env:THESIS_MONITOR_ENABLED        = "true"
 $env:REGIME_AUTHORITY_ENABLED      = "true"
 $env:RULE_GOVERNANCE_ENABLED       = "true"
 
+# ── REGIME-DEMOTE (2026-07-09): mechanical Regime Authority = OBSERVE_ONLY.
+# Live scan 20260709_094951 showed the mechanical regime still owning FINAL
+# execution authority — a range_rotation label imposed required_trigger=confirmed
+# + min_setup_age=2 and hard-blocked an ELITE LIQUIDITY_SWEEP_REVERSAL SHORT while
+# Market Commander was DIRECTIONAL/MATURE_EXPANSION and itself only OBSERVE.
+# In observe_only the regime still CALCULATES, WARNS, records
+# regime_would_have_blocked/veto_reason, and feeds Market Commander — but it may
+# NOT hard-block execution; the gate falls through to the next non-regime
+# authority (decision, real trigger execution_ready, risk, council, narrative).
+# FC-0B, risk, sizing, stops, broker, max-trades, daily-loss are UNAFFECTED.
+# Market Commander owns final environment authority. Rollback: set "enforce".
+$env:REGIME_AUTHORITY_MODE         = "observe_only"
+
 # ── OPS-1 — end-of-day authority ─────────────────────────────────────────────
 $env:EOD_NO_ENTRY_AFTER            = "15:50"
 $env:EOD_FLATTEN_AT                = "15:55"

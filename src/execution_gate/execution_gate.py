@@ -37,6 +37,7 @@ import os
 
 from decision_authority.decision_engine import normalize_decision
 from narrative_authority.narrative_engine import narrative_permits
+from regime_authority.regime_authority_mode import regime_authority_mode, regime_enforces
 from rule_governance.promoted_rules import evaluate_promoted_rules
 
 
@@ -171,6 +172,38 @@ def evaluate_gate(snapshot: dict) -> dict:
             thesis_age_applied  = True
     setup_age_met    = effective_setup_age >= min_setup_age
 
+    # ── REGIME-DEMOTE (2026-07-09): mechanical-regime execution authority ──────
+    # The three checks above (regime permission, regime-required trigger, regime
+    # min-age) are the mechanical regime's ONLY execution-block channels. When
+    # REGIME_AUTHORITY_MODE=observe_only the regime is demoted to telemetry: it
+    # still computes would_have_blocked / veto_reason (below) and feeds Market
+    # Commander, but it may NOT hard-block. The gate then falls through to the
+    # next non-regime authority (decision, real trigger execution_ready, risk,
+    # council, rules, narrative) — none of which this touches. In enforce mode
+    # the effective values equal the raw values, so behavior is bit-for-bit legacy.
+    regime_mode      = regime_authority_mode()
+    regime_enforced  = regime_enforces()
+    eff_regime_allowed = regime_allowed if regime_enforced else True
+    eff_trig_req_met   = trig_req_met   if regime_enforced else True
+    eff_setup_age_met  = setup_age_met  if regime_enforced else True
+
+    # Raw would-have-blocked telemetry (independent of mode)
+    regime_veto_parts: list[str] = []
+    if not regime_allowed:
+        regime_veto_parts.append(
+            (regime_blocking[0] if regime_blocking else "regime permission blocked")
+        )
+    if not trig_req_met:
+        regime_veto_parts.append(
+            f"regime-required trigger (required={required_trigger}, actual={actual_trigger})"
+        )
+    if not setup_age_met:
+        regime_veto_parts.append(
+            f"regime min setup age (required={min_setup_age}, actual={effective_setup_age})"
+        )
+    regime_would_have_blocked = bool(regime_veto_parts)
+    regime_veto_reason = "; ".join(regime_veto_parts) if regime_veto_parts else None
+
     # ── Phase FC-1: promoted authority (June 11) ─────────────────────────────
     council          = snapshot.get("council", {}) or {}
     council_veto     = council.get("veto") or {}
@@ -192,10 +225,10 @@ def evaluate_gate(snapshot: dict) -> dict:
         "trigger_execution_ready":   exec_ready,
         "setup_not_invalidated":     setup_not_inv,
         "lifecycle_allows_trade":    lifecycle_ok,
-        # Phase 5F regime constraint checks
-        "regime_permission_allowed": regime_allowed,
-        "trigger_requirement_met":   trig_req_met,
-        "setup_age_requirement_met": setup_age_met,
+        # Phase 5F regime constraint checks (effective = regime-authority-gated)
+        "regime_permission_allowed": eff_regime_allowed,
+        "trigger_requirement_met":   eff_trig_req_met,
+        "setup_age_requirement_met": eff_setup_age_met,
         # Phase FC-1 promoted authority checks
         "council_permits_trade":     council_permits,
         "no_promoted_rule_block":    rules_permit,
@@ -214,10 +247,11 @@ def evaluate_gate(snapshot: dict) -> dict:
         and setup_not_inv
         # AI-AUTH-1: the legacy wrapper's debate stance and fusion-disagreement
         # vetoes are REMOVED — the wrapper observes, it does not authorize.
-        # Phase 5F — regime constraint authority
-        and regime_allowed
-        and trig_req_met
-        and setup_age_met
+        # Phase 5F — regime constraint authority (REGIME-DEMOTE: effective values;
+        # observe_only pass-through so the mechanical regime cannot hard-block)
+        and eff_regime_allowed
+        and eff_trig_req_met
+        and eff_setup_age_met
         # Phase FC-1 — promoted authority (June 11)
         and council_permits
         and rules_permit
@@ -237,16 +271,17 @@ def evaluate_gate(snapshot: dict) -> dict:
         blocking.append("trigger execution_ready=false")
     if not setup_not_inv:
         blocking.append("setup or trigger invalidated")
-    # Phase 5F blocking factors
-    if not regime_allowed:
+    # Phase 5F blocking factors (REGIME-DEMOTE: effective values — in observe_only
+    # these are pass-through True, so the regime never enters hard blocking)
+    if not eff_regime_allowed:
         detail = f": {regime_blocking[0]}" if regime_blocking else ""
         blocking.append(f"regime permission blocked{detail}")
-    if not trig_req_met:
+    if not eff_trig_req_met:
         blocking.append(
             f"trigger requirement not met "
             f"(required={required_trigger}, actual={actual_trigger})"
         )
-    if not setup_age_met:
+    if not eff_setup_age_met:
         blocking.append(
             f"setup age requirement not met "
             f"(required={min_setup_age}, actual={effective_setup_age})"
@@ -269,6 +304,10 @@ def evaluate_gate(snapshot: dict) -> dict:
     for w in da.get("warnings", []):
         if w not in warnings:
             warnings.append(w)
+    # REGIME-DEMOTE: in observe_only the regime's would-have-block survives as a
+    # non-blocking warning so the caution signal is never lost.
+    if not regime_enforced and regime_would_have_blocked:
+        warnings.append(f"regime would_have_blocked (advisory): {regime_veto_reason}")
 
     # ── Gate status ───────────────────────────────────────────────────────────
     if st_inv or lifecycle_inv:
@@ -318,8 +357,28 @@ def evaluate_gate(snapshot: dict) -> dict:
         "setup_age_effective":        effective_setup_age,
         "thesis_age_applied":         thesis_age_applied,
         # Phase 5F — regime permission source
-        "regime_permission_allowed":  regime_allowed,
+        "regime_permission_allowed":  eff_regime_allowed,
         "regime_constraint_source":   regime_source,
+        # REGIME-DEMOTE (2026-07-09) — mechanical-regime authority telemetry.
+        # In observe_only the regime is telemetry_only: it records what it WOULD
+        # have blocked but does not gate execution. Market Commander owns final
+        # environment authority; while Commander is observe-only the enforcement
+        # source is none.
+        "regime_authority": {
+            "regime_authority":                regime_mode,
+            "mode":                            regime_mode,
+            "regime_would_have_blocked":       regime_would_have_blocked,
+            "regime_veto_reason":              regime_veto_reason,
+            "final_regime_enforcement_source": (
+                "mechanical_regime" if (regime_enforced and regime_would_have_blocked)
+                else "market_commander_or_none"
+            ),
+            "mechanical_regime_role":          "enforce" if regime_enforced else "telemetry_only",
+            "regime_effect_on_execution":      "enforced" if regime_enforced else "advisory_only",
+            "regime_raw_permission_allowed":   regime_allowed,
+            "regime_raw_trigger_requirement_met": trig_req_met,
+            "regime_raw_setup_age_met":        setup_age_met,
+        },
         # Phase FC-1 — promoted authority audit trail
         "council_permits_trade":      council_permits,
         "council_authority":          council.get("authority_level", "observe_only"),
