@@ -43,6 +43,7 @@ def build_snapshot(
     symbol: str = None,
     swing_tracker=None,
     po3_stability=None,
+    expansion_stability=None,
     capital_report=None,
     htf_context=None,
 ) -> dict:
@@ -78,6 +79,13 @@ def build_snapshot(
         atr_result = calculate_atr(candles)
         volatility[tf] = classify_volatility(candles, atr_result)
         expansion[tf] = detect_expansion(candles, atr_result, tf)   # VECTOR-3: tf enables magnitude gate
+
+    # PERCEPTION-1 — expansion state hysteresis (VECTOR-3 analogue). The live
+    # loop passes its persistent instance; one-shot callers get no stabilizer
+    # (bit-for-bit legacy). Debounces the flickering per-TF expansion `state`
+    # so a one-scan threshold crossing no longer overrides a stable state.
+    if expansion_stability is not None:
+        expansion = expansion_stability.update(expansion)
 
     # Anchor snapshot to the most granular available last candle
     anchor = None

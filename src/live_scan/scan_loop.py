@@ -764,6 +764,8 @@ def run_scan_loop(symbol: str = None, data_provider: str = None):
     stance_memory            = StanceMemory()            # Phase AB-1 (brain self-memory)
     thesis_engine            = ThesisLifecycleEngine(symbol=symbol)   # Phase AB-7 (persistent thesis)
     po3_stability            = Po3StabilityManager()     # VECTOR-3 (PO3 alignment hysteresis)
+    from volatility.expansion_stability import ExpansionStabilityManager
+    expansion_stability      = ExpansionStabilityManager()   # PERCEPTION-1 (expansion state hysteresis)
     prev_experience_summary  = None   # Phase 3A: carry forward for AI input next scan
     # Phase 5E.3: carry 5C/5D/5E summaries forward so AI sees them on the next scan
     prev_memory_search       = None
@@ -901,6 +903,7 @@ def run_scan_loop(symbol: str = None, data_provider: str = None):
                     symbol=symbol,
                     swing_tracker=swing_tracker,   # PIPE-1: tracker advanced inside build_snapshot
                     po3_stability=po3_stability,   # VECTOR-3: persistent alignment hysteresis
+                    expansion_stability=expansion_stability,  # PERCEPTION-1: expansion state hysteresis
                     capital_report=capital_report, # CAPITAL-1: equity awareness
                     htf_context=htf_context,       # HTF-MEM-1: multi-day context
                 )

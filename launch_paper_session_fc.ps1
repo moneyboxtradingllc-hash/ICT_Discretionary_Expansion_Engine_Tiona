@@ -59,6 +59,14 @@ $env:AI_RETRIEVAL_ENABLED          = "true"
 # a hard disqualification.
 $env:QUALIFICATION_THESIS_FLOOR    = "true"
 
+# ── PERCEPTION-1 — expansion-state hysteresis (VECTOR-3 analogue).
+# The 5m expansion classifier oscillated (state 29 transitions/11 one-scan
+# reversals; exhaustion level 51/21) with no hysteresis, driving 38/48
+# exhaustion_risk narratives off a noisy fast-TF signal while the 15m stayed
+# stable. This debounces the per-TF expansion state (a change must persist 2
+# scans to be accepted) without touching the detector. Rollback: set "off".
+$env:EXPANSION_STABILITY_MODE      = "on"
+
 # ── SETUP-PERSIST — setup lifecycle transient-flicker grace window.
 # A single-scan qualification dip (no_trade -> no_playbook) previously killed
 # the active setup at age 1 (71% of setups died at age 1). This lets a setup
