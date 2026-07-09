@@ -332,6 +332,45 @@ def _warnings(structure: dict, volatility: dict, expansion: dict,
     return w
 
 
+# ── NARRATIVE-AUDIT (2026-07-08) — decision-reason transparency ───────────────
+# The 2026-07-08 narrative trial proved 54/55 transitions were driven by a real
+# market-evidence change (the narrative faithfully tracks perception, it does
+# NOT manufacture states). But the persisted snapshot did not record WHICH rule
+# fired or WHICH timeframe drove it, so attributing a transition required parsing
+# a truncated text summary. This records the exact rule + driving timeframe(s)
+# behind each narrative so future transitions are attributable without guessing.
+# It mirrors _market_narrative's priority cascade exactly (a test asserts they
+# never disagree); it changes NO narrative output.
+def _narrative_reason(bias: str, market_state: str, structure: dict,
+                      liquidity: dict, expansion: dict, po3: dict) -> dict:
+    _tfs = ["15m", "5m", "3m"]
+    sweep_tf = next((tf for tf in ["15m", "5m", "3m", "1m"]
+                     if liquidity.get(tf, {}).get("sweep_detected")
+                     and liquidity.get(tf, {}).get("reclaim_detected")), None)
+    if sweep_tf:
+        return {"rule": "sweep_reclaim(rule1)", "driver_tf": sweep_tf}
+    exh_tfs = [tf for tf in _tfs
+               if expansion.get(tf, {}).get("state") == "exhaustion_risk"]
+    if exh_tfs:
+        return {"rule": "exhaustion_override(rule2)", "driver_tf": ",".join(exh_tfs)}
+    if market_state == "dangerous":
+        return {"rule": "dangerous_state(rule3)", "driver_tf": None}
+    align = po3.get("alignment", "")
+    if align in ("manipulation_to_distribution", "full_distribution_alignment",
+                 "accumulation_building"):
+        return {"rule": f"po3_{align}", "driver_tf": None}
+    manip = [tf for tf in ["15m", "5m"] if po3.get(tf, {}).get("phase") == "manipulation"]
+    dist = [tf for tf in ["3m", "1m"]
+            if po3.get(tf, {}).get("phase") in ("distribution", "transition")]
+    if manip and not dist:
+        return {"rule": "single_tf_manipulation", "driver_tf": ",".join(manip)}
+    if bias in ("bullish", "bearish") and market_state in ("trending", "expanding", "reversing"):
+        return {"rule": "base_directional", "driver_tf": None}
+    if bias == "conflicted":
+        return {"rule": "bias_conflicted", "driver_tf": None}
+    return {"rule": "base_neutral/compression", "driver_tf": None}
+
+
 # ── Public Entry Point ────────────────────────────────────────────────────────
 
 def build_narrative(structure: dict, volatility: dict, expansion: dict,
@@ -340,6 +379,7 @@ def build_narrative(structure: dict, volatility: dict, expansion: dict,
     bias      = _directional_bias(structure)
     state     = _market_state(structure, volatility, expansion, liquidity)
     narrative = _market_narrative(bias, state, structure, liquidity, expansion, po3)
+    narr_reason = _narrative_reason(bias, state, structure, liquidity, expansion, po3)
     personality = _trade_personality(narrative, state, bias, liquidity, session)
     coherence = _coherence(structure, volatility, expansion, liquidity)
     warnings  = _warnings(structure, volatility, expansion, liquidity, bias, po3, memory_mods)
@@ -351,4 +391,7 @@ def build_narrative(structure: dict, volatility: dict, expansion: dict,
         "trade_personality": personality,
         "coherence":         coherence,
         "warnings":          warnings,
+        # NARRATIVE-AUDIT — which cascade rule + timeframe produced the narrative
+        "narrative_reason":  narr_reason["rule"],
+        "narrative_driver_tf": narr_reason["driver_tf"],
     }

@@ -118,6 +118,9 @@ def build_snapshot(
         "trade_personality": narrative["trade_personality"],
         "coherence":         narrative["coherence"],
         "warnings":          narrative["warnings"],
+        # NARRATIVE-AUDIT — decision-reason transparency (observe-only telemetry)
+        "narrative_reason":     narrative.get("narrative_reason"),
+        "narrative_driver_tf":  narrative.get("narrative_driver_tf"),
         "summary":           "",  # filled after memory is attached
     }
 
