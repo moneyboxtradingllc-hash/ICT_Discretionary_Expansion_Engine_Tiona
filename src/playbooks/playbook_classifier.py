@@ -5,6 +5,18 @@ Reads pre-computed snapshot dicts only. No indicator recalculation here.
 
 from playbooks.playbook_library import eligible_tools, preferred_tools
 
+
+def _judges_frozen() -> bool:
+    """JUDGE-FREEZE (2026-07-09) — when mechanical judges are telemetry_only the
+    mechanical confidence_tier may not nudge playbook scores (the Brain owns
+    direction/playbook). Default active = legacy scoring, bit-for-bit unchanged."""
+    try:
+        from shared_context.mechanical_judges import judges_telemetry_only
+        return judges_telemetry_only()
+    except Exception:  # noqa: BLE001
+        return False
+
+
 _TFS = ["15m", "5m", "3m", "1m"]
 
 _SWEEP_NARRATIVES = {
@@ -47,7 +59,7 @@ def _score_liquidity_sweep_reversal(snap: dict) -> int:
     if any(exp.get(tf, {}).get("state") in ("early_expansion", "healthy_expansion")
            for tf in ["3m", "1m"]):                                  s += 10
 
-    if ai.get("confidence_tier") != "no_trade":                      s += 5
+    if not _judges_frozen() and ai.get("confidence_tier") != "no_trade": s += 5
 
     if ai.get("market_state") == "dangerous":                        s -= 20
     if ai.get("market_narrative") in ("conflicted", "exhaustion_risk"): s -= 15
@@ -77,7 +89,7 @@ def _score_trend_continuation(snap: dict) -> int:
     if any(exp.get(tf, {}).get("state") in ("healthy_expansion", "mature_expansion")
            for tf in ["15m", "5m"]):                                  s += 15
 
-    if ai.get("confidence_tier") in ("valid_setup", "elite_setup"):  s += 10
+    if not _judges_frozen() and ai.get("confidence_tier") in ("valid_setup", "elite_setup"): s += 10
 
     # Bonus: no opposing sweep (clean trend, no manipulation noise)
     if not any(liq.get(tf, {}).get("sweep_detected") for tf in _TFS): s += 5
@@ -158,7 +170,7 @@ def _score_opening_drive(snap: dict) -> int:
     align_pts = {"full": 15, "strong": 12, "partial": 8, "mixed": 3, "neutral": 0}
     s += align_pts.get(struct.get("alignment", "neutral"), 0)
 
-    if ai.get("confidence_tier") != "no_trade":                        s += 10
+    if not _judges_frozen() and ai.get("confidence_tier") != "no_trade": s += 10
 
     if vol_state in ("toxic", "explosive"):                            s -= 20
     if ai.get("market_narrative") in ("conflicted", "exhaustion_risk"): s -= 15

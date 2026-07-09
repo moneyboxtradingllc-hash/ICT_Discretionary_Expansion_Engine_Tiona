@@ -163,6 +163,19 @@ $env:MARKET_COMMANDER_AUTHORITY_MODE = "enforce"
 # extended displacement entries. Rollback: set "off".
 $env:EXPANSION_CONTINUATION_TRIGGER = "on"
 
+# ── JUDGE-FREEZE (2026-07-09): mechanical judges = TELEMETRY_ONLY.
+# The mechanical confidence_tier still influenced decisions off the gate — it
+# disqualified in qualification, hard-blocked in risk, and boosted playbook
+# scores, a second opinion competing with the sovereign AI Brain. In
+# telemetry_only it MAY measure/warn/log/record would_have_* and feed post-trade
+# analysis, but MAY NOT block execution or alter qualification/decision/playbook/
+# trigger/intent, nor override Brain / Market Commander. Regime and council are
+# already gate-demoted (REGIME_AUTHORITY_MODE / MARKET_COMMANDER_AUTHORITY_MODE);
+# the regime risk-multiplier CAP (reduce-only) and ALL safety systems (risk,
+# sizing, stops, daily-loss, max-trades, broker, FC-0B) are UNTOUCHED.
+# Rollback: set "active".
+$env:MECHANICAL_JUDGES_MODE        = "telemetry_only"
+
 # ── OPS-1 — end-of-day authority ─────────────────────────────────────────────
 $env:EOD_NO_ENTRY_AFTER            = "15:50"
 $env:EOD_FLATTEN_AT                = "15:55"

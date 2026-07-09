@@ -640,8 +640,13 @@ def qualify_trade(snapshot: dict) -> dict:
     _vol_observe = _vol_observe_only()
     _vol_tel = volatility_telemetry(ai_context, volatility)
 
+    from shared_context.mechanical_judges import judges_telemetry_only
+    # JUDGE-FREEZE (2026-07-09) — in telemetry_only the mechanical confidence
+    # tier may not disqualify; it becomes witness-only exactly as under a
+    # sovereign-Brain demotion. The disqualifier_reason telemetry is preserved.
     disqualified, disqualifier_reason = _is_disqualified(
-        ai_context, volatility, demote_conf_tier=brain_sovereign,
+        ai_context, volatility,
+        demote_conf_tier=(brain_sovereign or judges_telemetry_only()),
         demote_volatility=_vol_observe)
     opp_score       = 0 if disqualified else _opportunity_score(snapshot)
 

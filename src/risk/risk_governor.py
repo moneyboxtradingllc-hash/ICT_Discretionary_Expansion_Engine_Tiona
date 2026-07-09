@@ -70,7 +70,12 @@ def _hard_blocks(snapshot: dict) -> list:
             sovereign, _detail = sovereign_conversion(snapshot)
         except Exception:  # noqa: BLE001
             sovereign = False
-        if not sovereign:
+        # JUDGE-FREEZE (2026-07-09) — in telemetry_only the mechanical confidence
+        # tier is a witness, never a hard block (the disagreement is still surfaced
+        # as a restriction in evaluate_risk). Risk ceilings/tiers/sizing/loss limits
+        # are untouched. Default 'active' keeps the sovereign-gated block identical.
+        from shared_context.mechanical_judges import judges_telemetry_only
+        if not sovereign and not judges_telemetry_only():
             blocks.append("confidence tier is no_trade — environment not tradeable")
 
     narrative = ai.get("market_narrative", "")
@@ -314,10 +319,18 @@ def evaluate_risk(snapshot: dict) -> dict:
             and not any("confidence tier is no_trade" in b for b in blocks)):
         try:
             from ai_brain.ecu import sovereign_conversion
+            from shared_context.mechanical_judges import judges_telemetry_only
             if sovereign_conversion(snapshot)[0]:
                 restrictions = list(restrictions) + [
                     "confidence tier no_trade — witness only "
                     "(AI-AUTH-2: Brain conversion sovereign)"
+                ]
+            elif judges_telemetry_only():
+                # JUDGE-FREEZE — conf-tier demoted to witness by policy; the
+                # disagreement stays visible but does not block.
+                restrictions = list(restrictions) + [
+                    "confidence tier no_trade — witness only "
+                    "(JUDGE-FREEZE: mechanical judges telemetry_only)"
                 ]
         except Exception:  # noqa: BLE001
             pass
