@@ -63,3 +63,6 @@ ICT_Discretionary_Expansion_Engine_BACKUP*/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# REPLAY-1 — candle archive + future replay run artifacts (market data, never committed)
+data/replay/

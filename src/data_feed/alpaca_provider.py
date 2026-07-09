@@ -75,3 +75,37 @@ class AlpacaProvider(BaseDataProvider):
 
         # Keep only the most recent lookback_bars to match the requested window
         return candles[-lookback_bars:] if len(candles) > lookback_bars else candles
+
+    # REPLAY-1 (2026-07-09) — explicit historical window for the candle archive.
+    # Identical candle normalization to fetch_1m_candles; no tail slice (the
+    # caller asked for the whole window). Read-only, same IEX feed, no order
+    # endpoints touched.
+    def fetch_1m_candles_range(self, symbol: str, start, end) -> list:
+        from alpaca.data.requests  import StockBarsRequest
+        from alpaca.data.timeframe import TimeFrame
+        from alpaca.data.enums     import DataFeed
+
+        try:
+            request = StockBarsRequest(
+                symbol_or_symbols=symbol,
+                timeframe=TimeFrame.Minute,
+                start=start,
+                end=end,
+                feed=DataFeed.IEX,
+            )
+            bars = self._client.get_stock_bars(request)
+        except Exception as exc:
+            raise DataFeedError(f"Alpaca API error for {symbol}: {exc}")
+
+        bar_list = bars.data.get(symbol, []) if bars and hasattr(bars, "data") else []
+        return [
+            {
+                "timestamp": bar.timestamp.isoformat(),
+                "open":      float(bar.open),
+                "high":      float(bar.high),
+                "low":       float(bar.low),
+                "close":     float(bar.close),
+                "volume":    float(bar.volume),
+            }
+            for bar in bar_list
+        ]

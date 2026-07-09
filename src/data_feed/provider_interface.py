@@ -27,3 +27,16 @@ class BaseDataProvider(ABC):
         Return up to lookback_bars completed 1-minute candles for symbol,
         sorted oldest-first.  Raise DataFeedError on any unrecoverable failure.
         """
+
+    # REPLAY-1 (2026-07-09) — historical range fetch for the candle archive.
+    # NON-abstract on purpose: existing providers keep working unchanged; only
+    # providers that can serve arbitrary historical windows override it.
+    def fetch_1m_candles_range(self, symbol: str, start, end) -> list:
+        """
+        Return ALL completed 1-minute candles for symbol in [start, end)
+        (timezone-aware datetimes), sorted oldest-first, same candle dict shape
+        as fetch_1m_candles. Raise DataFeedError when unsupported or on failure.
+        """
+        raise DataFeedError(
+            f"{type(self).__name__} does not support historical range fetch"
+        )
