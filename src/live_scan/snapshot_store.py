@@ -159,6 +159,26 @@ def build_authority_trace(snapshot: dict) -> dict:
     }
 
 
+def _brain_sovereignty_record(snapshot: dict) -> dict:
+    """THESIS-PERSIST — derived sovereignty verdict, computed at save time on the
+    live in-memory snapshot (where brain_thesis/candidate_thesis still exist).
+    Observability only; consumers of authority call sovereign_conversion
+    themselves. Never raises."""
+    try:
+        from ai_brain.ecu import sovereign_conversion, healthy_directional_thesis
+        sov, sov_detail = sovereign_conversion(snapshot)
+        healthy, health_detail = healthy_directional_thesis(snapshot)
+        return {
+            "sovereign": bool(sov),
+            "detail": sov_detail,
+            "healthy_directional": bool(healthy),
+            "health_detail": health_detail,
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"sovereign": False, "detail": f"record_error:{type(exc).__name__}",
+                "healthy_directional": False, "health_detail": None}
+
+
 def save_snapshot(snapshot: dict, symbol: str) -> str:
     """
     Persist a compact scan snapshot to data/live_snapshots/.
@@ -223,6 +243,25 @@ def save_snapshot(snapshot: dict, symbol: str) -> str:
             "source": b.get("source"), "input_degraded": b.get("input_degraded"),
             "output": b.get("output"),
         } if isinstance(b, dict) else None)(snapshot.get("ai_brain") or {}),
+        # THESIS-PERSIST (2026-07-09) — the canonical Brain thesis was never
+        # persisted (only thesis_state was), so every post-hoc audit saw
+        # brain_thesis=None and concluded the Brain never converted — a storage
+        # artifact, not reality (the 2026-07-09 ECU investigation). Persist the
+        # compact thesis (brain_block excluded — ai_brain.output already carries
+        # the full record), the candidate source (healthy-LLM check input), and
+        # the derived sovereignty verdict computed on the LIVE in-memory
+        # snapshot, so replays can measure sovereignty without reconstruction.
+        "brain_thesis":        (lambda t: {
+            k: t.get(k) for k in (
+                "owner", "source", "direction", "forbidden_direction",
+                "opportunity", "opportunity_type", "playbook_family",
+                "tool_family", "confidence",
+            )
+        } if isinstance(t, dict) else None)(snapshot.get("brain_thesis")),
+        "candidate_thesis_source": (lambda c: c.get("source")
+                                    if isinstance(c, dict) else None
+                                    )(snapshot.get("candidate_thesis")),
+        "brain_sovereignty":   _brain_sovereignty_record(snapshot),
         "ai_divergence":       snapshot.get("ai_divergence"),
         "ai_debate":         snapshot.get("ai_debate"),
         "decision_authority": snapshot.get("decision_authority"),
