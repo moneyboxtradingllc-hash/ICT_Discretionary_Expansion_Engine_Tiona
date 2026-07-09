@@ -63,9 +63,18 @@ $env:QUALIFICATION_THESIS_FLOOR    = "true"
 # The 5m expansion classifier oscillated (state 29 transitions/11 one-scan
 # reversals; exhaustion level 51/21) with no hysteresis, driving 38/48
 # exhaustion_risk narratives off a noisy fast-TF signal while the 15m stayed
-# stable. This debounces the per-TF expansion state (a change must persist 2
+# stable. This debounces the per-TF expansion state (a change must persist N
 # scans to be accepted) without touching the detector. Rollback: set "off".
 $env:EXPANSION_STABILITY_MODE      = "on"
+# BOT-VS-MAURICE (2026-07-08): behavioral replay proved the confirmed 13:12
+# short (+1.69R) was killed at 13:13:43 by a TRANSIENT 2-scan 5m exhaustion
+# blip ~1 min before its confirmation candle. Session exhaustion episodes split
+# cleanly: 9 noise episodes (<=2 scans) vs 4 sustained (>=4 scans) — ZERO 3-scan
+# episodes, so a 3-scan confirm window absorbs every blip while accepting every
+# genuine exhaustion. confirm=3 clears 131237's exhaustion block (confirm=2 held
+# it) and leaves the one confirmed LOSER (142641) gating byte-identical, so it
+# adds no losing entry. Code default stays 2 (legacy). Rollback: remove/set "2".
+$env:EXPANSION_STABILITY_CONFIRM   = "3"
 
 # ── SETUP-PERSIST — setup lifecycle transient-flicker grace window.
 # A single-scan qualification dip (no_trade -> no_playbook) previously killed
