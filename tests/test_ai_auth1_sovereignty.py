@@ -210,6 +210,9 @@ class TestE_MarketCommanderShadow(unittest.TestCase):
             os.path.join("market_data", "snapshot_builder.py"),   # writes it
             os.path.join("live_scan", "scan_loop.py"),            # writes/prints
             os.path.join("live_scan", "snapshot_store.py"),       # persists
+            # REPLAY-2 — the replay walker mirrors scan_loop's write (same
+            # observe-only build; the pipeline never imports replay_validation)
+            os.path.join("replay_validation", "replay_session.py"),
             os.path.join("ai_brain", "narrative_brain.py"),       # AUTHORS B2 block
             os.path.join("ai_brain", "brain_prompt.py"),          # B2 prompt text
             # META-1 — observe-only self-observation reads MC contradictions
