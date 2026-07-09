@@ -195,10 +195,18 @@ class TestE_MarketCommanderShadow(unittest.TestCase):
         self.assertFalse(_thesis_executable({}))
 
     def test_no_module_consumes_commander_output(self):
-        """Source guard: nothing outside the allowed observability set reads
-        snapshot['market_commander']."""
+        """Source guard: nothing outside the allowed set reads
+        snapshot['market_commander'].
+
+        MC-ENFORCE (2026-07-09): Market Commander was promoted from OBSERVE_ONLY
+        to FINAL ENVIRONMENT AUTHORITY. commander_authority.py is the thin
+        authority adapter that derives the commander_* verdict from the MC matrix;
+        it is the ONE sanctioned consumer of the read. The execution gate consumes
+        it only through that adapter's import (no direct 'market_commander' read),
+        so the sovereignty invariant is preserved: exactly one authority owner."""
         allowed = {
             os.path.join("market_commander", "market_commander.py"),
+            os.path.join("market_commander", "commander_authority.py"),  # MC-ENFORCE authority adapter
             os.path.join("market_data", "snapshot_builder.py"),   # writes it
             os.path.join("live_scan", "scan_loop.py"),            # writes/prints
             os.path.join("live_scan", "snapshot_store.py"),       # persists

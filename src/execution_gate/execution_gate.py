@@ -36,6 +36,9 @@ This module ONLY evaluates authorization -- it never submits orders.
 import os
 
 from decision_authority.decision_engine import normalize_decision
+from market_commander.commander_authority import (
+    build_commander_authority, commander_enforces, review_council_authority,
+)
 from narrative_authority.narrative_engine import narrative_permits
 from regime_authority.regime_authority_mode import regime_authority_mode, regime_enforces
 from rule_governance.promoted_rules import evaluate_promoted_rules
@@ -208,7 +211,24 @@ def evaluate_gate(snapshot: dict) -> dict:
     council          = snapshot.get("council", {}) or {}
     council_veto     = council.get("veto") or {}
     council_enforced = (council.get("authority_level") == "enforce")
-    council_permits  = not (council_enforced and council_veto.get("veto_triggered", False))
+
+    # ── MC-ENFORCE (2026-07-09): Market Commander owns final environment authority.
+    # When MARKET_COMMANDER_AUTHORITY_MODE=enforce, the council is split into
+    # safety-class (RISK — may still veto) and advisory-class (mechanical REGIME/
+    # OPPORTUNITY/DELIVERY/QUALIFICATION/TOOLBOX — demoted to would_have_vetoed).
+    # This closes the indirect channel by which demoted mechanical subsystems could
+    # still veto the Commander through the council. In observe_only (default) the
+    # full council veto stands — bit-for-bit legacy. Safety gates below are untouched.
+    commander_auth    = build_commander_authority(snapshot)
+    commander_enforce = commander_enforces()
+    council_review    = review_council_authority(council, commander_enforce)
+    effective_council_veto = council_review["council_veto_effective"]
+    council_permits   = not (council_enforced and effective_council_veto)
+
+    # Commander itself may hard-block ONLY a STAND_DOWN (HOSTILE/INERT guardian)
+    # environment, and only while it enforces. Directional/rotational reads never
+    # hard-block — they let the pipeline reach the real trigger/risk authorities.
+    commander_permits = not (commander_enforce and commander_auth["commander_blocks_trade"])
 
     promoted_rules   = evaluate_promoted_rules(snapshot.get("shared_context", {}) or {})
     rules_permit     = not promoted_rules.get("blocked", False)
@@ -234,6 +254,8 @@ def evaluate_gate(snapshot: dict) -> dict:
         "no_promoted_rule_block":    rules_permit,
         # Phase NA-1 narrative authority check
         "narrative_permits_trade":   narrative_ok,
+        # MC-ENFORCE — Market Commander final environment authority
+        "commander_permits_trade":   commander_permits,
     }
 
     # ── would_authorize_if_enabled ────────────────────────────────────────────
@@ -257,6 +279,8 @@ def evaluate_gate(snapshot: dict) -> dict:
         and rules_permit
         # Phase NA-1 — narrative authority
         and narrative_ok
+        # MC-ENFORCE — Commander STAND_DOWN (hostile/inert) may block; else pass-through
+        and commander_permits
     )
 
     # ── Blocking factors ──────────────────────────────────────────────────────
@@ -289,6 +313,11 @@ def evaluate_gate(snapshot: dict) -> dict:
     # Phase FC-1 blocking factors
     if not council_permits:
         blocking.append(council_veto.get("veto_reason") or "council veto")
+    # MC-ENFORCE blocking factor — Commander STAND_DOWN (hostile/inert only)
+    if not commander_permits:
+        blocking.append(
+            f"market commander STAND_DOWN: {commander_auth.get('commander_override_reason') or commander_auth['commander_final_environment']}"
+        )
     if not rules_permit:
         fired_desc = "; ".join(
             f"{f.get('rule_id')}: {f.get('reason')}"
@@ -308,6 +337,11 @@ def evaluate_gate(snapshot: dict) -> dict:
     # non-blocking warning so the caution signal is never lost.
     if not regime_enforced and regime_would_have_blocked:
         warnings.append(f"regime would_have_blocked (advisory): {regime_veto_reason}")
+    # MC-ENFORCE: a demoted advisory council veto survives as a non-blocking warning.
+    if council_review.get("advisory_veto_demoted"):
+        _adv = ", ".join(f"{m.get('member')}@{m.get('confidence')}"
+                         for m in council_review.get("advisory_dissent", []))
+        warnings.append(f"council advisory would_have_vetoed (demoted by commander): {_adv}")
 
     # ── Gate status ───────────────────────────────────────────────────────────
     if st_inv or lifecycle_inv:
@@ -388,4 +422,20 @@ def evaluate_gate(snapshot: dict) -> dict:
         # Phase NA-1 — narrative authority audit trail
         "narrative_permits_trade":    narrative_ok,
         "narrative_reason":           narrative_reason,
+        # ── MC-ENFORCE — Market Commander final environment authority ─────────
+        "commander_permits_trade":    commander_permits,
+        "commander_authority":        commander_auth,
+        "council_authority_review":   council_review,
+        # Mechanical regime demoted to telemetry (mission-required field names)
+        "mechanical_regime": {
+            "mechanical_regime":                   regime_source,
+            "mechanical_regime_confidence":        int(
+                (snapshot.get("market_regime", {}) or {}).get("confidence", 0) or 0
+            ),
+            "mechanical_regime_would_have_blocked": regime_would_have_blocked,
+            "mechanical_regime_veto_reason":       regime_veto_reason,
+            "mechanical_regime_role": (
+                "enforce" if regime_enforced else "telemetry_only"
+            ),
+        },
     }

@@ -140,6 +140,17 @@ $env:RULE_GOVERNANCE_ENABLED       = "true"
 # Market Commander owns final environment authority. Rollback: set "enforce".
 $env:REGIME_AUTHORITY_MODE         = "observe_only"
 
+# ── MC-ENFORCE (2026-07-09): Market Commander = FINAL ENVIRONMENT AUTHORITY.
+# The mechanical council voices (REGIME/OPPORTUNITY/TOOLBOX/DELIVERY/QUALIFICATION)
+# were still vetoing the gate while Market Commander read DIRECTIONAL/MATURE_EXPANSION
+# (scans 094304/094349/095057) — an indirect channel restoring the demoted regime
+# veto. In enforce mode the council is split: safety-class (RISK) may still veto;
+# advisory-class NO votes become would_have_vetoed telemetry. Commander itself
+# hard-blocks ONLY a STAND_DOWN (HOSTILE/INERT guardian) environment. FC-0B, risk,
+# sizing, stops, broker, max-trades, daily-loss, and the real trigger
+# execution_ready check are ALL untouched. Rollback: set "observe_only".
+$env:MARKET_COMMANDER_AUTHORITY_MODE = "enforce"
+
 # ── OPS-1 — end-of-day authority ─────────────────────────────────────────────
 $env:EOD_NO_ENTRY_AFTER            = "15:50"
 $env:EOD_FLATTEN_AT                = "15:55"

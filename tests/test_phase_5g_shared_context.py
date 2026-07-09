@@ -415,15 +415,37 @@ class TestSnapshotIntegration(unittest.TestCase):
         self.assertEqual(len(council["members"]), 6)
 
     def test_gate_output_unchanged_by_council_keys(self):
-        """Decision/execution layers are blind to council output."""
+        """Decision/execution layers are blind to council output for the
+        AUTHORIZATION decision (council observe_only default).
+
+        MC-ENFORCE (2026-07-09): the gate now also emits Market-Commander /
+        council-authority / mechanical-regime TELEMETRY blocks that legitimately
+        reflect the evidence (adding shared_context changes the Commander's
+        environment read). Those observability blocks are excluded here; the
+        invariant under test is that the authorization VERDICT is unchanged."""
         from execution_gate.execution_gate import evaluate_gate
+        _telemetry = ("commander_authority", "council_authority_review",
+                      "mechanical_regime", "commander_permits_trade")
+
+        def _authz(g):
+            g = {k: v for k, v in g.items() if k not in _telemetry}
+            g["authorization_checks"] = {
+                k: v for k, v in g["authorization_checks"].items()
+                if k != "commander_permits_trade"
+            }
+            return g
+
         with open(_SNAPSHOT_20260610, encoding="utf-8") as f:
             snap = json.load(f)
         eg_without = evaluate_gate(copy.deepcopy(snap))
         snap["shared_context"] = build_shared_market_context(snap, "QQQ")
         snap["council"]        = run_council(snap["shared_context"])
         eg_with = evaluate_gate(snap)
-        self.assertEqual(eg_without, eg_with)
+        # authorization verdict is identical; only evidence telemetry differs
+        self.assertEqual(_authz(eg_without), _authz(eg_with))
+        self.assertEqual(eg_without["allow_execution"], eg_with["allow_execution"])
+        self.assertEqual(eg_without["would_authorize_if_enabled"],
+                         eg_with["would_authorize_if_enabled"])
 
 
 # ══════════════════════════════════════════════════════════════════════════════
