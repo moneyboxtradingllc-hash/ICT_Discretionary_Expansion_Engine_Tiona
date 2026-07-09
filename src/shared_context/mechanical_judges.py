@@ -32,3 +32,18 @@ def mechanical_judges_mode() -> str:
 def judges_telemetry_only() -> bool:
     """True when mechanical judges may observe but not influence decisions."""
     return mechanical_judges_mode() == "telemetry_only"
+
+
+def mechanical_context_witness(snapshot: dict) -> bool:
+    """AI_CONTEXT-AUTHORITY (2026-07-09) — True when the MECHANICALLY-authored
+    ai_context fields (market_narrative / market_state / directional_bias) must be
+    demoted to witness-only. That is the case only when the judges are frozen AND
+    the AI Brain holds a SOVEREIGN directional conversion — so a degraded/absent
+    Brain still keeps the mechanical narrative as a live safety net. Never raises."""
+    if not judges_telemetry_only():
+        return False
+    try:
+        from ai_brain.ecu import sovereign_conversion
+        return bool(sovereign_conversion(snapshot or {})[0])
+    except Exception:  # noqa: BLE001
+        return False

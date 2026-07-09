@@ -79,7 +79,13 @@ def _hard_blocks(snapshot: dict) -> list:
             blocks.append("confidence tier is no_trade — environment not tradeable")
 
     narrative = ai.get("market_narrative", "")
-    if narrative in _HARD_BLOCK_NARRATIVES:
+    # AI_CONTEXT-AUTHORITY (2026-07-09) — market_narrative is MECHANICALLY authored.
+    # When the Brain holds a sovereign directional conversion it may not hard-block
+    # risk; the disagreement is surfaced as a witness restriction in evaluate_risk.
+    # Degraded/absent Brain keeps the block (safety net). Risk ceilings/sizing/loss
+    # limits are untouched either way.
+    from shared_context.mechanical_judges import mechanical_context_witness
+    if narrative in _HARD_BLOCK_NARRATIVES and not mechanical_context_witness(snapshot):
         blocks.append(f"market narrative '{narrative}' — engagement prohibited")
 
     # ── VOL-AUTH-1 — volatility hard blocks (dangerous state, multi-TF toxic).
@@ -331,6 +337,21 @@ def evaluate_risk(snapshot: dict) -> dict:
                 restrictions = list(restrictions) + [
                     "confidence tier no_trade — witness only "
                     "(JUDGE-FREEZE: mechanical judges telemetry_only)"
+                ]
+        except Exception:  # noqa: BLE001
+            pass
+
+    # AI_CONTEXT-AUTHORITY (2026-07-09) — when the mechanical market_narrative
+    # hard-block was demoted (Brain sovereign), keep the caution visible.
+    if (snapshot.get("ai_context", {}).get("market_narrative") in _HARD_BLOCK_NARRATIVES
+            and not any("engagement prohibited" in b for b in blocks)):
+        try:
+            from shared_context.mechanical_judges import mechanical_context_witness
+            if mechanical_context_witness(snapshot):
+                _n = snapshot["ai_context"]["market_narrative"]
+                restrictions = list(restrictions) + [
+                    f"market narrative '{_n}' — witness only "
+                    "(AI_CONTEXT-AUTHORITY: mechanical narrative, Brain sovereign)"
                 ]
         except Exception:  # noqa: BLE001
             pass

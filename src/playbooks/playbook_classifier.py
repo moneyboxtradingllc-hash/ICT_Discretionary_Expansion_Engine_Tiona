@@ -17,6 +17,17 @@ def _judges_frozen() -> bool:
         return False
 
 
+def _mech_ctx_witness(snap: dict) -> bool:
+    """AI_CONTEXT-AUTHORITY (2026-07-09) — when the Brain is sovereign the
+    MECHANICAL ai_context.market_state may not DOWNGRADE the playbook. Default
+    active / non-sovereign = legacy penalty applies, bit-for-bit unchanged."""
+    try:
+        from shared_context.mechanical_judges import mechanical_context_witness
+        return mechanical_context_witness(snap)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 _TFS = ["15m", "5m", "3m", "1m"]
 
 _SWEEP_NARRATIVES = {
@@ -61,7 +72,7 @@ def _score_liquidity_sweep_reversal(snap: dict) -> int:
 
     if not _judges_frozen() and ai.get("confidence_tier") != "no_trade": s += 5
 
-    if ai.get("market_state") == "dangerous":                        s -= 20
+    if ai.get("market_state") == "dangerous" and not _mech_ctx_witness(snap):                        s -= 20
     if ai.get("market_narrative") in ("conflicted", "exhaustion_risk"): s -= 15
 
     return max(0, min(100, s))
@@ -96,7 +107,7 @@ def _score_trend_continuation(snap: dict) -> int:
 
     if bias in ("conflicted", "neutral"):                             s -= 20
     if ai.get("market_narrative") in ("conflicted", "exhaustion_risk"): s -= 15
-    if ai.get("market_state") == "dangerous":                         s -= 15
+    if ai.get("market_state") == "dangerous" and not _mech_ctx_witness(snap):                         s -= 15
 
     return max(0, min(100, s))
 
@@ -124,7 +135,7 @@ def _score_manipulation_to_distribution(snap: dict) -> int:
     if any(po3.get(tf, {}).get("phase") in ("accumulation", "manipulation")
            for tf in ["15m", "5m"]):                                  s += 10
 
-    if ai.get("market_state") == "dangerous":                        s -= 20
+    if ai.get("market_state") == "dangerous" and not _mech_ctx_witness(snap):                        s -= 20
     if ai.get("market_narrative") in ("conflicted", "exhaustion_risk"): s -= 15
 
     return max(0, min(100, s))
@@ -202,7 +213,7 @@ def _score_range_expansion(snap: dict) -> int:
         s += 10
 
     if ai.get("market_narrative") in ("conflicted", "exhaustion_risk"): s -= 15
-    if ai.get("market_state") == "dangerous":                           s -= 15
+    if ai.get("market_state") == "dangerous" and not _mech_ctx_witness(snap):                           s -= 15
 
     return max(0, min(100, s))
 

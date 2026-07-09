@@ -132,6 +132,29 @@ def build_snapshot(
         "summary":           "",  # filled after memory is attached
     }
 
+    # AI_CONTEXT-AUTHORITY (2026-07-09) — TRUTH-IN-LABELLING. Despite the name,
+    # EVERY ai_context field is MECHANICALLY authored: build_narrative() /
+    # score_confidence() read only structure/volatility/expansion/liquidity/po3.
+    # The true AI Brain lives in snapshot['ai_brain'] / ['brain_thesis'] /
+    # ['thesis_state']. This metadata marks each field's real author so no
+    # consumer can mistake a mechanical reading for AI authority. Decision
+    # consumers demote these to witness when the Brain is sovereign (see
+    # shared_context.mechanical_judges.mechanical_context_witness).
+    ai_context["_authorship"] = {
+        "market_narrative":  "mechanical_derived",
+        "market_state":      "mechanical_derived",
+        "directional_bias":  "mechanical_derived",
+        "confidence_score":  "mechanical_derived",
+        "confidence_tier":   "mechanical_derived",
+        "trade_personality": "mechanical_derived",
+        "coherence":         "mechanical_sensor",
+        "warnings":          "mechanical_sensor",
+        "narrative_reason":     "telemetry",
+        "narrative_driver_tf":  "telemetry",
+        "summary":              "telemetry",
+    }
+    ai_context["ai_context_is_mechanical_witness"] = True
+
     snapshot = {
         "timestamp":  snap_time,
         "session":    session,

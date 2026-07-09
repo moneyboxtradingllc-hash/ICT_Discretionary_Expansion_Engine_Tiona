@@ -143,7 +143,8 @@ def _apply_brain_conversion_floor(status: str, direction: str,
 
 def _is_disqualified(ai_context: dict, volatility: dict,
                      demote_conf_tier: bool = False,
-                     demote_volatility: bool = False) -> "tuple[bool, str | None]":
+                     demote_volatility: bool = False,
+                     demote_narrative: bool = False) -> "tuple[bool, str | None]":
     """
     Returns (disqualified, reason). The boolean is byte-identical to the prior
     behavior; the reason NAMES the specific hard disqualifier so a READY setup
@@ -163,7 +164,13 @@ def _is_disqualified(ai_context: dict, volatility: dict,
     conf_tier    = ai_context.get("confidence_tier", "")
     narrative    = ai_context.get("market_narrative", "")
 
-    if narrative in _NO_TRADE_NARRATIVES:
+    # AI_CONTEXT-AUTHORITY (2026-07-09) — market_narrative is MECHANICALLY authored
+    # (build_narrative reads structure/vol/expansion/liquidity/po3, no Brain input).
+    # When the Brain holds a sovereign directional conversion it may not hard-
+    # disqualify; the would_have_disqualified telemetry is recorded by the caller.
+    # demote_narrative is False by default and when the Brain is degraded/absent —
+    # the mechanical narrative stays a live safety net there.
+    if narrative in _NO_TRADE_NARRATIVES and not demote_narrative:
         return True, f"no_trade_narrative:{narrative}"
 
     # NOTE: control flow below is byte-identical to the pre-HOSTILE-AUDIT
@@ -640,14 +647,24 @@ def qualify_trade(snapshot: dict) -> dict:
     _vol_observe = _vol_observe_only()
     _vol_tel = volatility_telemetry(ai_context, volatility)
 
-    from shared_context.mechanical_judges import judges_telemetry_only
-    # JUDGE-FREEZE (2026-07-09) — in telemetry_only the mechanical confidence
-    # tier may not disqualify; it becomes witness-only exactly as under a
-    # sovereign-Brain demotion. The disqualifier_reason telemetry is preserved.
+    from shared_context.mechanical_judges import (
+        judges_telemetry_only, mechanical_context_witness,
+    )
+    # JUDGE-FREEZE — in telemetry_only the mechanical confidence tier may not
+    # disqualify. AI_CONTEXT-AUTHORITY — when the Brain is sovereign the
+    # MECHANICAL market_narrative (conflicted/exhaustion_risk/compression) may not
+    # hard-disqualify either; both become witness-only. Telemetry is preserved.
+    _demote_narrative = mechanical_context_witness(snapshot)
     disqualified, disqualifier_reason = _is_disqualified(
         ai_context, volatility,
         demote_conf_tier=(brain_sovereign or judges_telemetry_only()),
-        demote_volatility=_vol_observe)
+        demote_volatility=_vol_observe,
+        demote_narrative=_demote_narrative)
+    # would_have_disqualified telemetry for the demoted mechanical narrative
+    narrative_would_have_disqualified = (
+        ai_context.get("market_narrative") in _NO_TRADE_NARRATIVES)
+    narrative_disqualifier_demoted = bool(
+        narrative_would_have_disqualified and _demote_narrative)
     opp_score       = 0 if disqualified else _opportunity_score(snapshot)
 
     # QUAL-FLICKER-AUDIT (2026-07-08) — the 2026-07-08 flicker trial proved every
@@ -759,4 +776,7 @@ def qualify_trade(snapshot: dict) -> dict:
         # QUAL-FLICKER-AUDIT — is the hard disqualifier masking real opportunity?
         "opportunity_score_undisqualified":  opp_score_undisq,
         "disqualifier_masks_opportunity":    disqualifier_masks_opportunity,
+        # AI_CONTEXT-AUTHORITY (2026-07-09) — mechanical narrative demotion audit
+        "narrative_would_have_disqualified": narrative_would_have_disqualified,
+        "narrative_disqualifier_demoted":    narrative_disqualifier_demoted,
     }
