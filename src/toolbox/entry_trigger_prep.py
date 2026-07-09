@@ -3,6 +3,87 @@ Entry Trigger Prep — Phase 1L.
 Reads price_level and readiness to determine trigger status and next-step confirmation.
 No execution, no order routing, no broker connections.
 """
+import os
+
+# ── RETEST-DOCTRINE (2026-07-09): expansion-continuation trigger path ──────────
+# The 2026-07-09 retest trial proved the trigger applied ONE retest-only rule to
+# every family: any price_relation other than inside/touching → waiting_for_retest,
+# forever, with no way to confirm a CONTINUATION entry once price displaces past
+# the zone in the trade direction. In a MATURE_EXPANSION environment (Market
+# Commander DIRECTIONAL) a continuation setup that has already displaced never
+# retests — the bot waited all day (scan 095457: trend_continuation, price 2.2pt
+# above the FVG, never returned). This adds a PLAYBOOK-SPECIFIC alternative: a
+# continuation family in a directional expansion may confirm on a genuine
+# DISPLACEMENT candle (directional momentum close beyond the far zone edge in the
+# trade direction) instead of a classical pullback retest. REVERSAL setups keep
+# their retest/rejection requirement unchanged. Confirmation is NOT removed — the
+# displacement candle IS the confirmation — and FC-0B's chase cap remains the
+# backstop against extended entries. Config-gated (default off = legacy). Never
+# forces a trade: every other gate (risk, invalidation, decision, FC-0B) still holds.
+_CONTINUATION_PLAYBOOKS = frozenset({
+    "trend_continuation", "opening_drive", "range_expansion",
+    "manipulation_to_distribution",
+})
+_DIRECTIONAL_EXPANSION_STATES = frozenset({
+    "mature_expansion", "healthy_expansion", "strong_expansion",
+    "expansion", "expanding",
+})
+
+
+def _expansion_trigger_enabled() -> bool:
+    return os.getenv("EXPANSION_CONTINUATION_TRIGGER", "off").lower().strip() == "on"
+
+
+def _continuation_context(snapshot: dict) -> tuple:
+    """(ok, reason) — is this a continuation playbook in a directional expansion?
+    Uses playbook + market_regime.expansion_state (both built before the toolbox,
+    the mechanical basis for the Market Commander DIRECTIONAL/MATURE_EXPANSION read
+    which is assembled later in the pipeline)."""
+    pb = str((snapshot.get("playbook", {}) or {}).get("selected_playbook", "")).lower()
+    if pb not in _CONTINUATION_PLAYBOOKS:
+        return False, f"playbook '{pb or 'none'}' is not a continuation family (retest required)"
+    exp = str((snapshot.get("market_regime", {}) or {}).get("expansion_state", "")).lower()
+    if exp not in _DIRECTIONAL_EXPANSION_STATES:
+        return False, f"expansion_state '{exp or 'none'}' is not a directional expansion"
+    return True, f"continuation '{pb}' in {exp}"
+
+
+def _displacement_confirmed(snapshot: dict, direction: str, price_level: dict) -> tuple:
+    """(ok, reason) — the trade-direction displacement itself is the entry signal.
+
+    Requires BOTH: (1) price is displaced FAVOURABLY past the zone — above_zone for
+    a bullish trade, below_zone for a bearish trade — and (2) the last closed
+    candle is a directional momentum candle closing beyond the FAR zone edge in the
+    trade direction. This is displacement/continuation confirmation, NOT a retest,
+    and it refuses to confirm while price is reversing (an up candle can never
+    confirm a short — the 094951 reversal case). Never raises."""
+    try:
+        relation = price_level.get("price_relation")
+        zl, zh = price_level.get("zone_low"), price_level.get("zone_high")
+        if zl is None or zh is None:
+            return False, "no zone bounds"
+        if direction == "bullish" and relation != "above_zone":
+            return False, f"not displaced above zone (relation={relation})"
+        if direction == "bearish" and relation != "below_zone":
+            return False, f"not displaced below zone (relation={relation})"
+        tfs = snapshot.get("timeframes", {}) or {}
+        last = None
+        for tf in ("1m", "3m"):
+            lc = (tfs.get(tf) or {}).get("last_candle")
+            if lc and lc.get("close") is not None and lc.get("open") is not None:
+                last = lc
+                break
+        if last is None:
+            return False, "no candle data"
+        o, cl = float(last["open"]), float(last["close"])
+        if direction == "bullish":
+            ok = cl > o and cl > float(zh)
+        else:
+            ok = cl < o and cl < float(zl)
+        return (ok, "displacement candle confirmed" if ok
+                else "no directional displacement candle (price not actively expanding)")
+    except (TypeError, ValueError) as exc:
+        return False, f"error:{exc}"
 
 
 def _family(tool: str) -> str:
@@ -265,14 +346,49 @@ def build_trigger_prep(
     # the loss is upstream flicker + zone-exit geometry, not rule strictness).
     conf_detail = _confirmation_detail(snapshot, direction, price_level)
 
+    # ── RETEST-DOCTRINE (2026-07-09) — expansion-continuation trigger path ─────
+    # When the retest-only doctrine would say waiting_for_retest AND this is a
+    # continuation family in a directional expansion AND price has produced a
+    # genuine displacement candle in the trade direction, confirm on displacement
+    # instead of demanding a pullback. Reversal setups never take this path.
+    expansion_path_available = False
+    expansion_confirmed      = False
+    expansion_reason         = None
+    trigger_wait_reason      = None
+    if raw_ts == "waiting_for_retest":
+        if _expansion_trigger_enabled():
+            ctx_ok, ctx_reason = _continuation_context(snapshot)
+            if ctx_ok:
+                expansion_path_available = True
+                disp_ok, disp_reason = _displacement_confirmed(snapshot, direction, price_level)
+                expansion_confirmed = disp_ok
+                expansion_reason = f"{ctx_reason}; {disp_reason}"
+                if disp_ok:
+                    raw_ts = "confirmed"   # displacement-continuation confirmation
+                else:
+                    trigger_wait_reason = f"expansion path open but {disp_reason}"
+            else:
+                trigger_wait_reason = f"retest required: {ctx_reason}"
+        else:
+            # Repair G — audit-truth: say WHY it is waiting, not just that it is.
+            trigger_wait_reason = (
+                f"price {relation} — classical retest into zone required "
+                f"(expansion-continuation path disabled)"
+            )
+
     eff_ts = _effective_trigger_status(raw_ts, effective_status)
 
-    # execution_ready: every condition must be true simultaneously
+    # execution_ready: every condition must be true simultaneously. The zone
+    # requirement is satisfied by a classical retest (inside/touching) OR — for a
+    # confirmed continuation displacement — by expansion_confirmed. Every other
+    # safety condition (risk, invalidation, prereqs) is UNCHANGED; FC-0B's chase
+    # cap remains the backstop against extended displacement entries downstream.
+    zone_relation_ok = relation in ("inside_zone", "touching_zone") or expansion_confirmed
     execution_ready = (
         raw_status == "actionable"
         and effective_status == "actionable"    # risk governor permits
         and trade_allowed                        # governor flag
-        and relation in ("inside_zone", "touching_zone")
+        and zone_relation_ok                     # retest OR expansion displacement
         and not invalidated
         and not no_zone
         and prereqs_ok                           # no missing prerequisites
@@ -288,4 +404,9 @@ def build_trigger_prep(
         "confirmation_candle_met":     conf_detail["confirmation_candle_met"],
         "confirmation_failed_condition": conf_detail["failed_condition"],
         "confirmation_candle_tf":      conf_detail["last_candle_tf"],
+        # RETEST-DOCTRINE (2026-07-09) — expansion-continuation path + audit truth
+        "expansion_path_available":    expansion_path_available,
+        "expansion_confirmed":         expansion_confirmed,
+        "expansion_path_reason":       expansion_reason,
+        "trigger_wait_reason":         trigger_wait_reason,
     }

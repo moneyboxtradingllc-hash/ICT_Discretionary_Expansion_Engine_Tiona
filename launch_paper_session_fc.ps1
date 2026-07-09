@@ -151,6 +151,18 @@ $env:REGIME_AUTHORITY_MODE         = "observe_only"
 # execution_ready check are ALL untouched. Rollback: set "observe_only".
 $env:MARKET_COMMANDER_AUTHORITY_MODE = "enforce"
 
+# ── RETEST-DOCTRINE (2026-07-09): expansion-continuation trigger path.
+# The retest trial proved the trigger applied ONE retest-only rule to every
+# family: any relation other than inside/touching → waiting_for_retest forever.
+# Scan 095457 (trend_continuation, price 2.2pt above the FVG in mature_expansion)
+# waited all day while the market expanded. In "on" mode a CONTINUATION family in
+# a directional expansion may confirm on a genuine displacement candle instead of
+# a pullback retest. REVERSAL setups (liquidity_sweep_reversal, etc.) keep their
+# retest requirement — 094951's tape reversed up, so waiting was correct there.
+# Confirmation is NOT removed; FC-0B's chase cap remains the backstop against
+# extended displacement entries. Rollback: set "off".
+$env:EXPANSION_CONTINUATION_TRIGGER = "on"
+
 # ── OPS-1 — end-of-day authority ─────────────────────────────────────────────
 $env:EOD_NO_ENTRY_AFTER            = "15:50"
 $env:EOD_FLATTEN_AT                = "15:55"
