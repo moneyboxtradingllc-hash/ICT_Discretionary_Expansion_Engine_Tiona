@@ -78,7 +78,7 @@ Output ONLY valid JSON, exactly this schema, no prose, no markdown:
  "preferred_trade_family": "<string>",
  "preferred_playbooks": ["<string>", ...],
  "preferred_tools": ["<string>", ...],
- "invalidation_level": <number or null>,
+ "invalidation_level": <number — REQUIRED when narrative_direction is bullish/bearish: the exact price where your thesis is WRONG (opposing protected swing, reclaim level, or zone origin; ABOVE price for bearish, BELOW for bullish); null is ONLY legal for conflicted/neutral>,
  "thesis_health": "<string>",
  "contradiction_flags": ["<string>", ...],
  "warnings": ["<string>", ...],
@@ -296,4 +296,9 @@ Requirements for the fix:
   change narrative_direction to satisfy this; name the family your existing
   story implies (or, only if the story truly supports no playbook, downgrade to
   conflicted and explain why).
+- if narrative_direction is bullish or bearish, invalidation_level MUST be a
+  number — the exact price where your thesis is WRONG (above price for bearish,
+  below for bullish). Your story already names it: the opposing protected
+  swing, the reclaim level, the zone origin. A directional thesis without an
+  invalidation is INCOMPLETE and will be sent back for repair.
 Return JSON only, no prose outside the JSON."""

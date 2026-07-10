@@ -273,6 +273,49 @@ def directional_family_gap(parsed: dict) -> tuple:
         return False, [f"family_gap_error:{exc}"]
 
 
+# ── BRAIN-INVALIDATION-REPAIR (2026-07-10): directional read without a stop ───
+# The Brain review measured invalidation_level null on 73% of directional reads
+# — the same under-elicitation disease family='none' had (fixed to ~2% by the
+# gap-detector + soft-repair pattern). A directional thesis that refuses to say
+# where it is WRONG is incomplete: it blocks trade-path grading and forces
+# zone-edge fallback stops downstream. Same recipe, one variable.
+
+def directional_invalidation_gap(parsed: dict) -> tuple:
+    """(gap: bool, errors[]). True when narrative_direction is bullish/bearish
+    but invalidation_level is missing/non-numeric. Never raises."""
+    try:
+        out = parsed or {}
+        direction = (out.get("narrative_direction") or "neutral").lower().strip()
+        if direction not in ("bullish", "bearish"):
+            return False, []
+        inv = out.get("invalidation_level")
+        if isinstance(inv, (int, float)) and not isinstance(inv, bool):
+            return False, []
+        return True, [
+            f"directional_without_invalidation: narrative_direction={direction} "
+            f"but invalidation_level={inv!r} — a directional thesis MUST name "
+            "the price where it is WRONG (the opposing protected swing, the "
+            "reclaim level, or the zone origin)"]
+    except Exception as exc:  # noqa: BLE001
+        return False, [f"invalidation_gap_error:{exc}"]
+
+
+def invalidation_side_ok(direction: str, invalidation_level,
+                         current_price) -> bool:
+    """Sanity guard for a REPAIRED invalidation: a bearish thesis dies ABOVE
+    price, a bullish one BELOW. Unknown current price -> accept numeric (the
+    gap fix must not be stricter than the organism's own knowledge)."""
+    try:
+        inv = float(invalidation_level)
+    except (TypeError, ValueError):
+        return False
+    try:
+        px = float(current_price)
+    except (TypeError, ValueError):
+        return True
+    return inv > px if str(direction).lower() == "bearish" else inv < px
+
+
 # ── AI-BRAIN-H2: prompt-input taint guard ─────────────────────────────────────
 import json as _json
 

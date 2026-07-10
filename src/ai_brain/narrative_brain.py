@@ -44,6 +44,7 @@ from ai_brain.brain_schema import (
 )
 from ai_brain.brain_validation import (
     normalize_output, needs_repair, scan_payload_taint, directional_family_gap,
+    directional_invalidation_gap, invalidation_side_ok,
 )
 from ai_brain.brain_persistence import persist_brain_call
 from narrative_authority.narrative_engine import build_narrative
@@ -69,6 +70,17 @@ def _keep_shallow_enabled() -> bool:
     inversion (mechanical replaces AI over style). Empty direction/phase/
     reasoning still falls back (content gaps are real failures). Default off."""
     return os.getenv("BRAIN_KEEP_SHALLOW_REASONING", "false").lower().strip() == "true"
+
+
+def _invalidation_repair_enabled() -> bool:
+    """BRAIN-INVALIDATION-REPAIR (2026-07-10) — gate for the SOFT invalidation
+    repair turn. The Brain review measured invalidation_level null on 73% of
+    directional reads. One repair round-trip asks the Brain to name the price
+    where its own story is wrong. Adoption guards: same direction, hard
+    validation passes, gap closed, and the level is on the CORRECT SIDE of
+    price (a bearish stop above, bullish below) — a hallucinated level is
+    refused and the original read stands. Never falls back. Default off."""
+    return os.getenv("BRAIN_INVALIDATION_REPAIR", "off").lower().strip() == "on"
 
 
 def _family_repair_enabled() -> bool:
@@ -390,6 +402,8 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
         source, fallback_reason = "deterministic", None
         norm_notes, repair_errors, repaired = [], [], False
         family_repair_attempted, family_repair_fixed, family_errors = False, False, []
+        invalidation_repair_attempted, invalidation_repair_fixed = False, False
+        invalidation_errors: list = []
         shallow_kept = False   # BRAIN-RELIABILITY-1 audit flag
         taint_clean, taint_paths = scan_payload_taint(brain_input)
         if _llm_enabled() and not taint_clean:
@@ -480,6 +494,35 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
                                 norm_notes += cand_notes
                                 family_repair_fixed = True
                                 llm_call["family_repair_usage"] = frep.get("usage")
+
+                    # ── BRAIN-INVALIDATION-REPAIR (2026-07-10) — SOFT turn ────
+                    # A directional read that refuses to name where it is WRONG
+                    # (invalidation_level null — 73% of directional reads) gets
+                    # ONE repair round-trip. Guards: same direction, hard
+                    # validation, gap closed, AND the level sits on the correct
+                    # side of price — hallucinated stops are refused. The
+                    # ORIGINAL read stands on any failure; never falls back.
+                    inv_gap, invalidation_errors = directional_invalidation_gap(parsed)
+                    if inv_gap and _invalidation_repair_enabled():
+                        invalidation_repair_attempted = True
+                        irep = _call_llm(brain_input, repair={
+                            "previous": parsed, "errors": invalidation_errors})
+                        if irep["ok"]:
+                            cand, cand_notes = normalize_output(irep["parsed"], analogs)
+                            still_hard, _ = needs_repair(cand)
+                            still_gap, _ = directional_invalidation_gap(cand)
+                            same_dir = (cand.get("narrative_direction")
+                                        == parsed.get("narrative_direction"))
+                            side_ok = invalidation_side_ok(
+                                cand.get("narrative_direction"),
+                                cand.get("invalidation_level"),
+                                (brain_input.get("market") or {}).get("current_price"))
+                            if (not still_hard and not still_gap
+                                    and same_dir and side_ok):
+                                parsed = cand
+                                norm_notes += cand_notes
+                                invalidation_repair_fixed = True
+                                llm_call["invalidation_repair_usage"] = irep.get("usage")
                     # MARKET COMMANDER B2 — capture the Brain-authored matrix from
                     # the RAW parse (observe-only side output; validated/coerced by
                     # market_commander, never consumed as authority here).
@@ -538,6 +581,9 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             # BRAIN-FAMILY-REPAIR (2026-07-09) — soft family-repair audit trail
             "family_repair_attempted": family_repair_attempted,
             "family_repair_fixed": family_repair_fixed,
+            # BRAIN-INVALIDATION-REPAIR (2026-07-10) — soft repair audit trail
+            "invalidation_repair_attempted": invalidation_repair_attempted,
+            "invalidation_repair_fixed": invalidation_repair_fixed,
             "family_repair_errors": family_errors,
             "family_repair_usage": (llm_call or {}).get("family_repair_usage"),
             # BRAIN-RELIABILITY-1 — shallow prose kept instead of nuking the read
@@ -566,6 +612,9 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             # BRAIN-FAMILY-REPAIR (2026-07-09) — soft family-repair telemetry
             "family_repair_attempted": family_repair_attempted,
             "family_repair_fixed": family_repair_fixed,
+            # BRAIN-INVALIDATION-REPAIR (2026-07-10) — soft repair audit trail
+            "invalidation_repair_attempted": invalidation_repair_attempted,
+            "invalidation_repair_fixed": invalidation_repair_fixed,
             # BRAIN-RELIABILITY-1 — shallow prose kept instead of nuking the read
             "shallow_reasoning_kept": shallow_kept,
             "input_degraded": brain_input.get("degraded", []),

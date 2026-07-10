@@ -64,6 +64,15 @@ $env:AI_RETRIEVAL_ENABLED          = "true"
 # Rollback: set "off".
 $env:BRAIN_FAMILY_REPAIR           = "on"
 
+# ── BRAIN-INVALIDATION-REPAIR (2026-07-10): completeness — the Brain must name
+# where it is WRONG. invalidation_level was null on 73% of directional reads
+# (blocking thesis path-grading + forcing zone-edge fallback stops). Replay
+# verdict on 40 historical gap scans: 70% fixed (27 prompt + 1 repair), 10
+# migrated to honest conflicted, 0 unfixed nulls among still-directional reads.
+# Repair adoption refuses wrong-side levels (bearish stop must sit ABOVE price);
+# never falls back, never flips direction. Rollback: "off".
+$env:BRAIN_INVALIDATION_REPAIR     = "on"
+
 # ── BRAIN-RELIABILITY (2026-07-09, Mission 3 organism examination):
 # 1) A schema-valid directional LLM read whose ONLY residual repair error is
 #    shallow PROSE is KEPT with a warning instead of being replaced by the
