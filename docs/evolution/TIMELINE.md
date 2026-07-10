@@ -5,7 +5,7 @@ lab/ablation artifact; a claim without an artifact renders as PENDING._
 _`REJECTED` and `NO CHANGE` entries are displayed with the same
 prominence as wins — they are the credibility of this document._
 
-_Rendered 2026-07-10T15:29:14.128385+00:00 — 15 milestones on a 145-commit spine._
+_Rendered 2026-07-10T16:38:54.594657+00:00 — 16 milestones on a 147-commit spine._
 
 ## 2026-07-08
 
@@ -122,4 +122,11 @@ _Rendered 2026-07-10T15:29:14.128385+00:00 — 15 milestones on a 145-commit spi
 - **Evidence:** `live replay on 40 historical gap-scan payloads (2026-07-10)`
 - **Commit:** `734da90`
 
-<sub>spine: `1fcba8c` ADAPT-LOOP-2 - Adaptive effect ledger and resolver · `12ceed0` ADAPT-LOOP-3 - Brain accuracy table and self-track-record feed · `9d409b5` ADAPT-LOOP-3B - Brain thesis quality grading · `d34dc21` ADAPT-LOOP-4 - Earn-back governance with replay gate · `85e204e` ADAPT-LOOP-5 - Retire recommendation engine · `48b1a79` REPLAY-4 - Counterfactual decision laboratory · `e295fc8` ADAPT-LOOP-6 - Organism health monitor and evolution timeline · `134a708` BRAIN-LIFECYCLE-ENFORCE - Persistent thesis promoted to enforce · `14a400b` MILESTONE - Brain lifecycle enforce · `734da90` BRAIN-INVALIDATION-REPAIR - Elicit invalidation level</sub>
+### [NO CHANGE] LAB: adaptive_unblocked counterfactual
+
+- **Change:** what if the adaptive soft-veto hadn't blocked? (0709, current stack)
+- **Measured:** adaptive block authority unproven → 0 scans mutated — the soft-veto never fired (substrate empty; authority currently inert)
+- **Evidence:** `data/replay/reports/lab_adaptive_unblocked_20260709_20260710_121247.json`
+- **Commit:** `1aa2278`
+
+<sub>spine: `1fcba8c` ADAPT-LOOP-2 - Adaptive effect ledger and resolver · `12ceed0` ADAPT-LOOP-3 - Brain accuracy table and self-track-record feed · `9d409b5` ADAPT-LOOP-3B - Brain thesis quality grading · `d34dc21` ADAPT-LOOP-4 - Earn-back governance with replay gate · `85e204e` ADAPT-LOOP-5 - Retire recommendation engine · `48b1a79` REPLAY-4 - Counterfactual decision laboratory · `e295fc8` ADAPT-LOOP-6 - Organism health monitor and evolution timeline · `134a708` BRAIN-LIFECYCLE-ENFORCE - Persistent thesis promoted to enforce · `14a400b` MILESTONE - Brain lifecycle enforce · `734da90` BRAIN-INVALIDATION-REPAIR - Elicit invalidation level · `477f531` MILESTONE - Brain invalidation repair · `1aa2278` BRAIN-MODEL-TRIAL - Model arm support in live brain study</sub>
