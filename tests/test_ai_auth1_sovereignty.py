@@ -213,6 +213,9 @@ class TestE_MarketCommanderShadow(unittest.TestCase):
             # REPLAY-2 — the replay walker mirrors scan_loop's write (same
             # observe-only build; the pipeline never imports replay_validation)
             os.path.join("replay_validation", "replay_session.py"),
+            # ADAPT-LOOP-3B — descriptive context JOIN from STORED snapshots
+            # (grading ledger only; no authority, nothing consumed live)
+            os.path.join("replay_validation", "brain_thesis_quality.py"),
             os.path.join("ai_brain", "narrative_brain.py"),       # AUTHORS B2 block
             os.path.join("ai_brain", "brain_prompt.py"),          # B2 prompt text
             # META-1 — observe-only self-observation reads MC contradictions
