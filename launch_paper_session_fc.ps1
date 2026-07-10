@@ -107,6 +107,15 @@ $env:BRAIN_ACCURACY_CONTEXT        = "on"
 #      python -m replay_validation.earnback_gate --proposal <id>
 $env:EARNBACK_MODE                 = "shadow"
 
+# ── BRAIN-LIFECYCLE-ENFORCE (2026-07-10): AB-7 persistent thesis PROMOTED.
+# Replay ablation (recorded, 0708+0709): brain-direction flicker HALVED
+# (70→41, 48→24), sovereignty 27→49 / 18→38, intents +7/+10, confirmed
+# triggers 14→23, would_authorize UNCHANGED (no discipline erosion), 0 errors.
+# In enforce, snapshot.brain_thesis is the STABILIZED persistent thesis
+# (source=ab7_active_thesis); sovereignty still fails closed on degraded scans
+# (the stabilized thesis cannot launder a dead Brain). Rollback: "shadow".
+$env:THESIS_LIFECYCLE_MODE         = "enforce"
+
 # ── AI-AUTH-2 — qualification stability floor (AB-7.3c, implemented + tested).
 # A mature persistent thesis prevents a one-scan mechanical dip from collapsing
 # qualified->no_trade. Complements the Brain-sovereignty repair; never overrides
