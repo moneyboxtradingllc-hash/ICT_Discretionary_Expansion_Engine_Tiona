@@ -5,7 +5,7 @@ lab/ablation artifact; a claim without an artifact renders as PENDING._
 _`REJECTED` and `NO CHANGE` entries are displayed with the same
 prominence as wins — they are the credibility of this document._
 
-_Rendered 2026-07-10T15:00:48.305252+00:00 — 14 milestones on a 143-commit spine._
+_Rendered 2026-07-10T15:29:14.128385+00:00 — 15 milestones on a 145-commit spine._
 
 ## 2026-07-08
 
@@ -115,4 +115,11 @@ _Rendered 2026-07-10T15:00:48.305252+00:00 — 14 milestones on a 143-commit spi
 - **Evidence:** `replay ablation 20260708+20260709 (recorded, deterministic)`
 - **Commit:** `134a708`
 
-<sub>spine: `1fcba8c` ADAPT-LOOP-2 - Adaptive effect ledger and resolver · `12ceed0` ADAPT-LOOP-3 - Brain accuracy table and self-track-record feed · `9d409b5` ADAPT-LOOP-3B - Brain thesis quality grading · `d34dc21` ADAPT-LOOP-4 - Earn-back governance with replay gate · `85e204e` ADAPT-LOOP-5 - Retire recommendation engine · `48b1a79` REPLAY-4 - Counterfactual decision laboratory · `e295fc8` ADAPT-LOOP-6 - Organism health monitor and evolution timeline · `134a708` BRAIN-LIFECYCLE-ENFORCE - Persistent thesis promoted to enforce</sub>
+### [VALIDATED] BRAIN-INVALIDATION-REPAIR
+
+- **Change:** prompt mandate + gap detector + soft repair for invalidation_level (family-repair recipe)
+- **Measured:** invalidation_level null on 73% of directional reads → 70% fixed (27 prompt + 1 repair / 40 sampled); 0 unfixed nulls among still-directional; wrong-side levels refused
+- **Evidence:** `live replay on 40 historical gap-scan payloads (2026-07-10)`
+- **Commit:** `734da90`
+
+<sub>spine: `1fcba8c` ADAPT-LOOP-2 - Adaptive effect ledger and resolver · `12ceed0` ADAPT-LOOP-3 - Brain accuracy table and self-track-record feed · `9d409b5` ADAPT-LOOP-3B - Brain thesis quality grading · `d34dc21` ADAPT-LOOP-4 - Earn-back governance with replay gate · `85e204e` ADAPT-LOOP-5 - Retire recommendation engine · `48b1a79` REPLAY-4 - Counterfactual decision laboratory · `e295fc8` ADAPT-LOOP-6 - Organism health monitor and evolution timeline · `134a708` BRAIN-LIFECYCLE-ENFORCE - Persistent thesis promoted to enforce · `14a400b` MILESTONE - Brain lifecycle enforce · `734da90` BRAIN-INVALIDATION-REPAIR - Elicit invalidation level</sub>
