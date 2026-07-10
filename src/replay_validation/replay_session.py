@@ -109,10 +109,16 @@ def _default_ticks(date: str, symbol: str, candles: list, brain: RecordedBrain) 
 def replay_session(date: str, symbol: str = "QQQ", flags: dict = None,
                    ticks: list = None, lookback: int = _LOOKBACK_DEFAULT,
                    sandbox: str = None, max_scans: int = None,
-                   brain: str = "recorded") -> dict:
+                   brain: str = "recorded", post_stage_hook=None) -> dict:
     """Replay one archived session through the current pipeline.
     brain: recorded (default, deterministic) | live (real LLM calls) |
     deterministic (mechanical fallback only).
+    post_stage_hook (REPLAY-4 Counterfactual Decision Laboratory): optional
+    callable(stage_name, snapshot) invoked at the named seams — "post_build",
+    "post_council", "pre_decision", "post_gate" — allowing a counterfactual
+    run to flip ONE authority's verdict in-place. Replay-side only; never used
+    by the trading pipeline. Hook exceptions are swallowed (a broken hook must
+    not masquerade as organism behavior — the scan errors instead).
     Returns {"manifest", "scans": [{timestamp, trace}], "summary"}."""
     if brain not in _BRAIN_MODE_ENV:
         raise ValueError(f"unknown brain mode: {brain!r}")
@@ -149,6 +155,7 @@ def replay_session(date: str, symbol: str = "QQQ", flags: dict = None,
         "date": date, "symbol": symbol, "flags": dict(flags or {}),
         "forced_safety": dict(_SAFETY_ENV),
         "brain_mode": brain, "brain_records": len(rec_brain.records),
+        "counterfactual_hook": bool(post_stage_hook),
         "candles": len(parsed), "prev_session_loaded": prev_date,
         "lookback": lookback, "scans_planned": len(tick_list),
         "caveats": ["news_off", "retrieval_off", "shadow_off",
@@ -206,6 +213,12 @@ def replay_session(date: str, symbol: str = "QQQ", flags: dict = None,
                     po3_stability=po3_stability,
                     expansion_stability=expansion_stability,
                 )
+
+                def _hook(stage):
+                    if post_stage_hook is not None:
+                        post_stage_hook(stage, snapshot)
+
+                _hook("post_build")
                 # ── scan_loop's post-snapshot decision-critical order ────────
                 cur_qual = (snapshot.get("qualification", {}).get("status")
                             or "no_trade").lower()
@@ -217,19 +230,31 @@ def replay_session(date: str, symbol: str = "QQQ", flags: dict = None,
                 snapshot["setup_lifecycle"] = setup_tracker.update(snapshot, symbol)
                 snapshot["shared_context"] = build_shared_market_context(snapshot, symbol)
                 snapshot["council"] = run_council(snapshot["shared_context"])
+                _hook("post_council")
 
                 _canonical = (snapshot.get("candidate_thesis") or {}).get("brain_block")
                 if _canonical is not None:
                     snapshot["ai_brain"] = _canonical
 
                 consume_adaptive_overlays(snapshot)
+                _hook("pre_decision")
                 snapshot["decision_authority"] = make_decision(snapshot)
                 snapshot["execution_gate"] = evaluate_gate(snapshot)
                 snapshot["market_commander"] = build_market_commander_matrix(snapshot)
                 snapshot["trade_intent"] = build_intent(snapshot, symbol)
+                _hook("post_gate")
 
+                # intent-zone capture (REPLAY-3/4 outcome scoring input)
+                _ez = dict((snapshot.get("trade_intent") or {})
+                           .get("entry_zone") or {})
+                for _c in (snapshot.get("toolbox") or {}).get("tool_candidates") or []:
+                    if _c.get("tool") == (snapshot.get("toolbox") or {}).get("preferred_tool"):
+                        _ez["invalidation_level"] = (
+                            (_c.get("price_level") or {}).get("invalidation_level"))
+                        break
                 scans.append({"timestamp": snapshot.get("timestamp"),
-                              "trace": build_stage_trace(snapshot)})
+                              "trace": build_stage_trace(snapshot),
+                              "intent_zone": _ez or None})
             except Exception as exc:  # noqa: BLE001 — one bad scan must not kill the run
                 errors.append({"tick": tick.isoformat(), "error": repr(exc)})
 
@@ -252,6 +277,8 @@ def _summarize(scans: list, brain: "RecordedBrain | None", errors: list) -> dict
         "qualified_scans": sum(1 for t in traces
                                if t.get("qual_status") in ("candidate", "qualified", "elite")),
         "intents": sum(1 for t in traces if t.get("intent_created")),
+        "confirmed_triggers": sum(1 for t in traces
+                                  if t.get("trigger_status") == "confirmed"),
         "would_authorize": sum(1 for t in traces if t.get("would_authorize")),
     }
 
