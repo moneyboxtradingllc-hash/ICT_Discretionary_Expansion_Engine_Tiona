@@ -179,19 +179,7 @@ class TestPhase5E3AIConnectivitySequencing(unittest.TestCase):
         self.assertAlmostEqual(pd.get("win_rate"), 60.0)
         self.assertEqual(pd.get("authority_level"), "observe_only")
 
-    # 08 — recommendations in AI compact input
-    def test_08_recommendations_in_ai_input(self):
-        from ai_layer.ai_input_builder import build_compact_ai_input
-        snap = _minimal_snapshot()
-        snap["recommendations"] = {
-            "recommendation_count": 2, "top_recommendation": "Wait for regime clarity.",
-            "recommendation_quality": "developing", "status": "active",
-        }
-        result = build_compact_ai_input(snap)
-        rec = result.get("recommendations", {})
-        self.assertEqual(rec.get("recommendation_count"),   2)
-        self.assertEqual(rec.get("top_recommendation"),     "Wait for regime clarity.")
-        self.assertEqual(rec.get("authority_level"),        "observe_only")
+    # (test_08 retired with the recommendation_engine — ADAPT-LOOP-5)
 
     # 09 — confidence_modifier remains 0
     def test_09_confidence_modifier_remains_zero(self):
@@ -263,11 +251,9 @@ class TestPhase5E3AIConnectivitySequencing(unittest.TestCase):
             "market_data.snapshot_builder",
             "execution_gate.execution_gate",
             "decision_authority.decision_engine",
-            "recommendation_engine.recommendation_builder",
             "memory_search.similarity_search",
             "memory_search.memory_record_builder",
             "performance_intelligence.dashboard_builder",
-            "recommendation_engine.recommendation_persistence",
         ]
         for mod in modules:
             with self.subTest(module=mod):

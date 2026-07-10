@@ -89,15 +89,11 @@ from ai_layer.ai_snapshot_formatter                 import (
     format_ai_feedback_line,
     format_memory_search_line,
     format_dashboard_line,
-    format_recommendations_line,
 )
 from memory_search.similarity_search import find_similar_setups
 from memory_search.memory_summary    import build_memory_summary
 from performance_intelligence.dashboard_builder  import build_dashboard
 from performance_intelligence.dashboard_summary  import build_dashboard_summary
-from recommendation_engine.recommendation_builder     import build_recommendations
-from recommendation_engine.recommendation_summary     import build_recommendation_summary
-from recommendation_engine.recommendation_persistence import save_recommendations
 
 _EASTERN = pytz.timezone("America/New_York")
 _DIV     = "=" * 60
@@ -527,16 +523,6 @@ def _print_scan_summary(snapshot: dict, symbol: str, scan_num: int, saved_path: 
         d_parts.append(d_qual.upper())
         print("Dashboard     : " + " | ".join(d_parts) + " | OBSERVE_ONLY")
 
-    rec      = snapshot.get("recommendations") or {}
-    rec_cnt  = rec.get("recommendation_count", 0)
-    rec_top  = rec.get("top_recommendation")
-    rec_qual = rec.get("recommendation_quality", "none")
-    if rec_cnt == 0:
-        print(f"Recommend     : none | {rec_qual.upper()} | OBSERVE_ONLY")
-    else:
-        top_str = f" | top={rec_top[:55]}" if rec_top else ""
-        print(f"Recommend     : {rec_cnt} active{top_str} | OBSERVE_ONLY")
-
     pa_plan   = snapshot.get("paper_activation_plan", {})
     pa        = snapshot.get("paper_activation", {})
     pa_status = (pa.get("status") or "disabled").upper()
@@ -770,7 +756,6 @@ def run_scan_loop(symbol: str = None, data_provider: str = None):
     # Phase 5E.3: carry 5C/5D/5E summaries forward so AI sees them on the next scan
     prev_memory_search       = None
     prev_dashboard           = None
-    prev_recommendations     = None
 
     # Initialise provider (fail fast before entering the loop)
     try:
@@ -898,7 +883,6 @@ def run_scan_loop(symbol: str = None, data_provider: str = None):
                     experience_summary=prev_experience_summary,
                     prior_memory_search=prev_memory_search,
                     prior_dashboard=prev_dashboard,
-                    prior_recommendations=prev_recommendations,
                     thesis_engine=thesis_engine,
                     symbol=symbol,
                     swing_tracker=swing_tracker,   # PIPE-1: tracker advanced inside build_snapshot
@@ -1106,22 +1090,6 @@ def run_scan_loop(symbol: str = None, data_provider: str = None):
                 snapshot["ai_context"]["summary"] = (
                     snapshot["ai_context"].get("summary", "") + " " + dash_line
                 ).strip()
-
-            # ── Recommendation Engine (Phase 5E — OBSERVE_ONLY) ────────────
-            # Pass _dash_full explicitly to avoid a redundant disk read inside builder
-            _rec_full = build_recommendations(symbol, snapshot, dashboard=_dash_full)
-            snapshot["recommendations"] = build_recommendation_summary(_rec_full)
-            snapshot["recommendations"]["_full_result"] = _rec_full
-            # Phase 5E.3: persist summary (no large objects) for next scan's AI input
-            prev_recommendations = {k: v for k, v in snapshot["recommendations"].items() if k != "_full_result"}
-            rec_line = format_recommendations_line(snapshot["recommendations"])
-            if rec_line:
-                snapshot["ai_context"]["summary"] = (
-                    snapshot["ai_context"].get("summary", "") + " " + rec_line
-                ).strip()
-
-            # ── Recommendation Persistence (Phase 5E.1) ────────────────────
-            save_recommendations(symbol, _rec_full)
 
             # ── Broker Position Supremacy (exposure is truth) ─────────────
             # Runs BEFORE the position monitor and before entry evaluation.

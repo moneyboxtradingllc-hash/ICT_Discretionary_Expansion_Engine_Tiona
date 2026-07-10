@@ -38,7 +38,6 @@ def build_snapshot(
     experience_summary: dict = None,
     prior_memory_search: dict = None,
     prior_dashboard: dict = None,
-    prior_recommendations: dict = None,
     thesis_engine=None,
     symbol: str = None,
     swing_tracker=None,
@@ -342,8 +341,6 @@ def build_snapshot(
         snapshot["memory_search"] = prior_memory_search
     if prior_dashboard:
         snapshot["performance_dashboard"] = prior_dashboard
-    if prior_recommendations:
-        snapshot["recommendations"] = prior_recommendations
 
     # AI Discretionary Engine: interprets the full assembled snapshot
     ai_disc, confidence_fusion, ai_debate = run_discretionary_ai(snapshot, mode_override=ai_mode_override)

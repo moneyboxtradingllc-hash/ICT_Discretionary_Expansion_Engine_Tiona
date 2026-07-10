@@ -338,7 +338,6 @@ class TestPhase5E4TriggerActiveAlignment(unittest.TestCase):
             "decision_authority.decision_engine",
             "toolbox.entry_trigger_prep",
             "toolbox.toolbox_engine",
-            "recommendation_engine.recommendation_builder",
             "memory_search.similarity_search",
             "performance_intelligence.dashboard_builder",
         ]

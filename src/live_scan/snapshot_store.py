@@ -396,15 +396,6 @@ def save_snapshot(snapshot: dict, symbol: str) -> str:
             "best_ai_condition":    snapshot.get("ai_feedback_summary", {}).get("best_ai_condition"),
             "worst_ai_condition":   snapshot.get("ai_feedback_summary", {}).get("worst_ai_condition"),
         },
-        "recommendations": {
-            "enabled":                snapshot.get("recommendations", {}).get("enabled"),
-            "authority_level":        "observe_only",
-            "confidence_modifier":    0,
-            "recommendation_count":   snapshot.get("recommendations", {}).get("recommendation_count", 0),
-            "top_recommendation":     snapshot.get("recommendations", {}).get("top_recommendation"),
-            "recommendation_quality": snapshot.get("recommendations", {}).get("recommendation_quality", "none"),
-            "status":                 snapshot.get("recommendations", {}).get("status", "no_recommendations"),
-        },
         "performance_dashboard": {
             "enabled":             snapshot.get("performance_dashboard", {}).get("enabled"),
             "authority_level":     "observe_only",

@@ -25,11 +25,6 @@ from memory_search.memory_record_builder import (
     _normalize_trade,
 )
 from memory_search.similarity_search import find_similar_setups
-from recommendation_engine.recommendation_builder    import (
-    build_recommendations,
-    build_recommendations_from_context,
-)
-from recommendation_engine.recommendation_persistence import save_recommendations
 from intent_archive.intent_archive import _make_new_record
 
 
@@ -316,47 +311,9 @@ class TestOutcomeSummaryAlignment(unittest.TestCase):
 # 4. Recommendation Builder Dashboard Pass-Through
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class TestDashboardPassThrough(unittest.TestCase):
+# (Phase 5E dashboard-pass-through tests retired with the
+#  recommendation_engine — ADAPT-LOOP-5, 2026-07-10)
 
-    def test_08_build_recommendations_uses_provided_dashboard(self):
-        """When dashboard is passed explicitly, build_dashboard must not be called."""
-        from performance_intelligence import dashboard_builder as db_mod
-        call_count = {"n": 0}
-        original = db_mod.build_dashboard
-
-        def counting_build(*a, **kw):
-            call_count["n"] += 1
-            return original(*a, **kw)
-
-        dash = _dashboard(closed=30)
-        with patch.object(db_mod, "build_dashboard", side_effect=counting_build):
-            result = build_recommendations(symbol="QQQ", snapshot={}, dashboard=dash)
-
-        self.assertEqual(call_count["n"], 0,
-            "build_dashboard was called despite an explicit dashboard being passed")
-        self.assertEqual(result["authority_level"], "observe_only")
-
-    def test_09_build_recommendations_fallback_builds_dashboard_when_none(self):
-        """When no dashboard is passed and no snapshot intelligence exists, build_dashboard is called."""
-        import recommendation_engine.recommendation_builder as rb_mod
-        call_count = {"n": 0}
-        original = rb_mod.build_dashboard
-
-        def counting_build(*a, **kw):
-            call_count["n"] += 1
-            return original(*a, **kw)
-
-        with patch.object(rb_mod, "build_dashboard", side_effect=counting_build):
-            result = build_recommendations(symbol="QQQ", snapshot={}, dashboard=None)
-
-        self.assertGreaterEqual(call_count["n"], 1,
-            "build_dashboard was not called when no dashboard was provided")
-        self.assertEqual(result["authority_level"], "observe_only")
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# 5. Intent Archive Regime/Session Enrichment
-# ═══════════════════════════════════════════════════════════════════════════════
 
 class TestIntentArchiveEnrichment(unittest.TestCase):
 
@@ -436,112 +393,8 @@ class TestIntentArchiveEnrichment(unittest.TestCase):
 # 6. Recommendation Persistence
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class TestRecommendationPersistence(unittest.TestCase):
+# (Phase 5E persistence tests retired with the recommendation_engine)
 
-    def _rec_result(self, count=2):
-        recs = [
-            {
-                "type":              "regime",
-                "severity":          "moderate",
-                "finding":           "Chop underperforming",
-                "evidence":          "35% WR over 11 trades",
-                "recommendation":    "Reduce chop participation",
-                "status":            "human_review_required",
-                "authority_level":   "observe_only",
-                "confidence_modifier": 0,
-            }
-        ] * count
-        return {
-            "enabled":              True,
-            "authority_level":      "observe_only",
-            "confidence_modifier":  0,
-            "recommendation_count": count,
-            "recommendations":      recs,
-            "notes":                [],
-            "warnings":             [],
-        }
-
-    def test_13_persistence_writes_daily_file(self):
-        from recommendation_engine import recommendation_persistence as rp_mod
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with patch.object(rp_mod, "_REC_DIR", tmpdir):
-                status = save_recommendations("QQQ", self._rec_result(2))
-
-            self.assertTrue(status["saved"])
-            self.assertIn("filepath", status)
-            self.assertTrue(os.path.exists(status["filepath"]))
-
-            with open(status["filepath"]) as f:
-                data = json.load(f)
-        self.assertIsInstance(data, list)
-        self.assertEqual(len(data), 1)
-        entry = data[0]
-        self.assertEqual(entry["symbol"],               "QQQ")
-        self.assertEqual(entry["recommendation_count"], 2)
-        self.assertEqual(entry["authority_level"],      "observe_only")
-        self.assertEqual(entry["confidence_modifier"],  0)
-
-    def test_14_persistence_appends_safely(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            from recommendation_engine import recommendation_persistence as rp_mod
-            with patch.object(rp_mod, "_REC_DIR", tmpdir):
-                save_recommendations("QQQ", self._rec_result(1))
-                save_recommendations("QQQ", self._rec_result(2))
-                status = save_recommendations("QQQ", self._rec_result(3))
-
-            with open(status["filepath"]) as f:
-                data = json.load(f)
-
-        self.assertEqual(len(data), 3)
-        self.assertEqual(data[0]["recommendation_count"], 1)
-        self.assertEqual(data[1]["recommendation_count"], 2)
-        self.assertEqual(data[2]["recommendation_count"], 3)
-
-    def test_15_persistence_failure_returns_warning_not_crash(self):
-        # Patch os.makedirs to raise PermissionError to simulate an unwritable directory
-        from recommendation_engine import recommendation_persistence as rp_mod
-        import builtins
-        original_open = builtins.open
-
-        def failing_open(path, *a, **kw):
-            if "recommendations" in str(path):
-                raise PermissionError("simulated write failure")
-            return original_open(path, *a, **kw)
-
-        with tempfile.TemporaryDirectory() as tmpdir, \
-             patch.object(rp_mod, "_REC_DIR", tmpdir), \
-             patch("builtins.open", side_effect=failing_open):
-            status = save_recommendations("QQQ", self._rec_result())
-
-        self.assertFalse(status["saved"])
-        self.assertIn("warning", status)
-        self.assertIn("non-blocking", status["warning"])
-
-    def test_15b_persisted_entries_never_contain_forbidden_fields(self):
-        dirty_result = self._rec_result(1)
-        dirty_result["recommendations"][0]["allow_execution"]      = True
-        dirty_result["recommendations"][0]["risk_multiplier"]      = 2.0
-        dirty_result["recommendations"][0]["confidence_modifier_delta"] = 5
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            from recommendation_engine import recommendation_persistence as rp_mod
-            with patch.object(rp_mod, "_REC_DIR", tmpdir):
-                status = save_recommendations("QQQ", dirty_result)
-            with open(status["filepath"]) as f:
-                data = json.load(f)
-
-        forbidden = {"allow_execution", "risk_multiplier", "confidence_modifier_delta"}
-        for entry in data:
-            for rec in entry.get("recommendations", []):
-                self.assertFalse(
-                    forbidden & set(rec.keys()),
-                    f"Forbidden field found in persisted recommendation: {set(rec.keys()) & forbidden}"
-                )
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# 7. Safety Invariants
-# ═══════════════════════════════════════════════════════════════════════════════
 
 class TestSafetyInvariants(unittest.TestCase):
 
@@ -556,28 +409,11 @@ class TestSafetyInvariants(unittest.TestCase):
         result = find_similar_setups(_snapshot(), "QQQ")
         self.assertEqual(result["authority_level"], "observe_only")
 
-        # Recommendations
-        ctx = {
-            "dashboard":     _dashboard(closed=30),
-            "ai_feedback":   {},
-            "memory_search": {},
-        }
-        rec_result = build_recommendations_from_context(ctx)
-        self.assertEqual(rec_result["authority_level"], "observe_only")
 
     def test_17_confidence_modifier_always_zero(self):
         result = find_similar_setups(_snapshot(), "QQQ")
         self.assertEqual(result["confidence_modifier"], 0)
 
-        ctx = {
-            "dashboard":     _dashboard(closed=30),
-            "ai_feedback":   {},
-            "memory_search": {},
-        }
-        rec_result = build_recommendations_from_context(ctx)
-        self.assertEqual(rec_result["confidence_modifier"], 0)
-        for rec in rec_result["recommendations"]:
-            self.assertEqual(rec["confidence_modifier"], 0)
 
     def test_18_no_execution_behavior_changed(self):
         """Normalized records and search results must not contain execution gate fields."""
