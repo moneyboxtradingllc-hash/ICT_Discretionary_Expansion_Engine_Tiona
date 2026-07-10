@@ -5,7 +5,7 @@ lab/ablation artifact; a claim without an artifact renders as PENDING._
 _`REJECTED` and `NO CHANGE` entries are displayed with the same
 prominence as wins — they are the credibility of this document._
 
-_Rendered 2026-07-10T16:38:54.594657+00:00 — 16 milestones on a 147-commit spine._
+_Rendered 2026-07-10T16:50:55.516929+00:00 — 17 milestones on a 149-commit spine._
 
 ## 2026-07-08
 
@@ -129,4 +129,11 @@ _Rendered 2026-07-10T16:38:54.594657+00:00 — 16 milestones on a 147-commit spi
 - **Evidence:** `data/replay/reports/lab_adaptive_unblocked_20260709_20260710_121247.json`
 - **Commit:** `1aa2278`
 
-<sub>spine: `1fcba8c` ADAPT-LOOP-2 - Adaptive effect ledger and resolver · `12ceed0` ADAPT-LOOP-3 - Brain accuracy table and self-track-record feed · `9d409b5` ADAPT-LOOP-3B - Brain thesis quality grading · `d34dc21` ADAPT-LOOP-4 - Earn-back governance with replay gate · `85e204e` ADAPT-LOOP-5 - Retire recommendation engine · `48b1a79` REPLAY-4 - Counterfactual decision laboratory · `e295fc8` ADAPT-LOOP-6 - Organism health monitor and evolution timeline · `134a708` BRAIN-LIFECYCLE-ENFORCE - Persistent thesis promoted to enforce · `14a400b` MILESTONE - Brain lifecycle enforce · `734da90` BRAIN-INVALIDATION-REPAIR - Elicit invalidation level · `477f531` MILESTONE - Brain invalidation repair · `1aa2278` BRAIN-MODEL-TRIAL - Model arm support in live brain study</sub>
+### [VALIDATED] AI-BRAIN-REQUIRED
+
+- **Change:** operating policy: new judgment requires the Brain; position safety never does (preflight refusal + 5-failure entry revocation)
+- **Measured:** credit/auth failure silently substituted the deterministic fallback organism → session refuses to start without a healthy Brain; degraded scans marked; entries revoked at threshold; positions managed regardless
+- **Evidence:** `tests/test_ai_brain_required.py (12 locks incl. quota/auth classification)`
+- **Commit:** `93b2ee3`
+
+<sub>spine: `1fcba8c` ADAPT-LOOP-2 - Adaptive effect ledger and resolver · `12ceed0` ADAPT-LOOP-3 - Brain accuracy table and self-track-record feed · `9d409b5` ADAPT-LOOP-3B - Brain thesis quality grading · `d34dc21` ADAPT-LOOP-4 - Earn-back governance with replay gate · `85e204e` ADAPT-LOOP-5 - Retire recommendation engine · `48b1a79` REPLAY-4 - Counterfactual decision laboratory · `e295fc8` ADAPT-LOOP-6 - Organism health monitor and evolution timeline · `134a708` BRAIN-LIFECYCLE-ENFORCE - Persistent thesis promoted to enforce · `14a400b` MILESTONE - Brain lifecycle enforce · `734da90` BRAIN-INVALIDATION-REPAIR - Elicit invalidation level · `477f531` MILESTONE - Brain invalidation repair · `1aa2278` BRAIN-MODEL-TRIAL - Model arm support in live brain study · `e15dc90` MILESTONE - Adaptive unblocked lab result · `93b2ee3` AI-BRAIN-REQUIRED - Brain availability operating policy</sub>
