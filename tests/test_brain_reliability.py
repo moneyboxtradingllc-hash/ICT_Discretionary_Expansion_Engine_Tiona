@@ -165,5 +165,49 @@ class TestJsonMode(_Base):
         self.assertEqual(captured.get("response_format"), {"type": "json_object"})
 
 
+class TestPhaseSynonymTolerance(_Base):
+    """BRAIN-RELIABILITY-3 — validate-before-normalize seam. The core validator
+    rejected phases the normalizer maps deterministically one step later
+    ('manipulation_to_distribution'->distribution, 'mixed'->conflicted),
+    destroying healthy reads. Tolerance accepts KNOWN synonyms only."""
+
+    def test_default_off_synonym_rejected(self):
+        from ai_brain.brain_schema import validate_llm_core
+        ok, reason = validate_llm_core(_out(phase="manipulation_to_distribution"))
+        self.assertFalse(ok)
+        self.assertIn("manipulation_to_distribution", reason)
+
+    def test_on_known_synonym_accepted(self):
+        from ai_brain.brain_schema import validate_llm_core
+        with patch.dict(os.environ, {"BRAIN_PHASE_SYNONYM_TOLERANCE": "on"}):
+            for phase in ("manipulation_to_distribution", "mixed",
+                          "early_expansion", "range_rotation"):
+                ok, reason = validate_llm_core(_out(phase=phase))
+                self.assertTrue(ok, f"{phase}: {reason}")
+
+    def test_on_unknown_phase_still_rejected(self):
+        from ai_brain.brain_schema import validate_llm_core
+        with patch.dict(os.environ, {"BRAIN_PHASE_SYNONYM_TOLERANCE": "on"}):
+            ok, _ = validate_llm_core(_out(phase="sideways_voodoo"))
+            self.assertFalse(ok)
+
+    def test_end_to_end_synonym_survives_and_normalizes(self):
+        # a synonym-phase LLM response now reaches the normalizer (source=llm)
+        # and is mapped to the canonical phase instead of falling back
+        deep = ("Buy-side liquidity was swept and reclaimed; price is trading "
+                "near the protected high at 702.5 while delivery is bearish; "
+                "the draw remains sell-side at 699.6 in a manipulation phase; "
+                "invalidation is a reclaim above 702.5; the bot must not take "
+                "bullish positions.")
+        os.environ["BRAIN_PHASE_SYNONYM_TOLERANCE"] = "on"
+        out = _out(reason=deep, phase="manipulation_to_distribution")
+        with patch.object(nb, "_call_llm",
+                          side_effect=lambda bi, repair=None: _callrec(out)):
+            res = self._run()
+        os.environ.pop("BRAIN_PHASE_SYNONYM_TOLERANCE", None)
+        self.assertEqual(res["source"], "llm")
+        self.assertEqual(res["output"]["narrative_phase"], "distribution")
+
+
 if __name__ == "__main__":
     unittest.main()

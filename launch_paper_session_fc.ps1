@@ -73,6 +73,11 @@ $env:BRAIN_FAMILY_REPAIR           = "on"
 #    JSONDecodeError fallback class. Rollback: "false" / "off".
 $env:BRAIN_KEEP_SHALLOW_REASONING  = "true"
 $env:BRAIN_JSON_MODE               = "on"
+# 3) validate-before-normalize seam: the core validator rejected phases the
+#    normalizer maps deterministically one step later (live-replay proof:
+#    'manipulation_to_distribution', 'mixed'). Tolerance accepts KNOWN synonyms
+#    only; unknown phases still fail. Rollback: "off".
+$env:BRAIN_PHASE_SYNONYM_TOLERANCE = "on"
 
 # ── AI-AUTH-2 — qualification stability floor (AB-7.3c, implemented + tested).
 # A mature persistent thesis prevents a one-scan mechanical dip from collapsing

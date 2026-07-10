@@ -114,10 +114,36 @@ def validate_llm_core(resp: dict) -> tuple:
         if resp["narrative_direction"] not in _DIRECTIONS:
             return False, f"narrative_direction '{resp['narrative_direction']}' invalid"
         if resp["narrative_phase"] not in _PHASES:
-            return False, f"narrative_phase '{resp['narrative_phase']}' invalid"
+            # BRAIN-RELIABILITY-3 (2026-07-09) — validate-before-normalize seam.
+            # Live replays proved this validator REJECTED phases that
+            # normalize_output's PHASE_NORMALIZATION maps deterministically one
+            # step later ('manipulation_to_distribution'->distribution,
+            # 'mixed'->conflicted), destroying healthy directional reads via
+            # fallback. With tolerance on, a KNOWN synonym passes core
+            # validation and the normalizer converts it as designed. Unknown
+            # phases still fail. Default off = legacy validator.
+            if not (_phase_synonym_tolerance()
+                    and _is_phase_synonym(resp["narrative_phase"])):
+                return False, f"narrative_phase '{resp['narrative_phase']}' invalid"
         return True, None
     except Exception as exc:  # noqa: BLE001
         return False, f"core validation error: {exc}"
+
+
+def _phase_synonym_tolerance() -> bool:
+    import os
+    return os.getenv("BRAIN_PHASE_SYNONYM_TOLERANCE", "off").lower().strip() == "on"
+
+
+def _is_phase_synonym(phase) -> bool:
+    """True when the normalizer holds a deterministic mapping for this phase.
+    Mirrors normalize_output's lower/strip handling. Never raises."""
+    try:
+        from ai_brain.brain_validation import PHASE_NORMALIZATION, VALID_PHASES
+        p = str(phase).lower().strip()
+        return p in PHASE_NORMALIZATION or p in VALID_PHASES
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def validate_brain_output(resp: dict) -> tuple:
