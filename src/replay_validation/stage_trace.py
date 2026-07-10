@@ -42,7 +42,8 @@ STORED_TRIMMED_FIELDS = ("market_state", "directional_bias")
 # brain_thesis fields — persisted only from THESIS-PERSIST (723151b) onward;
 # non-comparable for sessions stored before it.
 BRAIN_FIELDS = ("brain_direction", "brain_source", "brain_playbook_family",
-                "brain_sovereign")
+                "brain_tool_family", "brain_sovereign",
+                "family_repair_attempted", "family_repair_fixed")
 
 # DECISION-level calibration set: fields that are (a) persisted by the store and
 # (b) revision-stable DECISIONS rather than telemetry/reason text. Ground-truth
@@ -75,7 +76,9 @@ _SCHEMA = (
     _field("narrative", "market_narrative"), _field("narrative", "market_state"),
     _field("narrative", "directional_bias"),
     _field("brain", "brain_direction"), _field("brain", "brain_source"),
-    _field("brain", "brain_playbook_family"), _field("brain", "brain_sovereign"),
+    _field("brain", "brain_playbook_family"), _field("brain", "brain_tool_family"),
+    _field("brain", "brain_sovereign"),
+    _field("brain", "family_repair_attempted"), _field("brain", "family_repair_fixed"),
     _field("qualification", "qual_status"), _field("qualification", "qual_score"),
     _field("qualification", "qual_disqualifier"),
     _field("playbook", "playbook_selected"), _field("playbook", "playbook_direction"),
@@ -144,7 +147,12 @@ def build_stage_trace(snapshot: dict) -> dict:
         "brain_direction": bt.get("direction"),
         "brain_source": bt.get("source"),
         "brain_playbook_family": bt.get("playbook_family"),
+        "brain_tool_family": bt.get("tool_family"),
         "brain_sovereign": _sovereign(s),
+        # LIVE-BRAIN study — soft-repair telemetry (ai_brain block; None when
+        # recorded/stored records predate BRAIN-FAMILY-REPAIR)
+        "family_repair_attempted": (s.get("ai_brain") or {}).get("family_repair_attempted"),
+        "family_repair_fixed": (s.get("ai_brain") or {}).get("family_repair_fixed"),
         "qual_status": q.get("status"),
         "qual_score": q.get("opportunity_score"),
         "qual_disqualifier": q.get("disqualifier_reason"),
