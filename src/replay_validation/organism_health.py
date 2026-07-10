@@ -79,8 +79,47 @@ def governance(symbol="QQQ", base_dir=None) -> dict:
                     "enforce-mode lifts produce outcomes"}
 
 
+def config_era_quality(date: str, commits: list = None) -> dict:
+    """HEALTH-ERA-LABEL (2026-07-10, Maurice's doctrine): a stored live session
+    whose configuration CHANGED mid-session is a NONSTATIONARY baseline —
+    forensically useful, longitudinally meaningless. Derived AUTOMATICALLY:
+    any mission commit whose timestamp falls inside that date's session window
+    (09:30-16:00 ET) marks the day mixed_config_era / trend_eligible=false.
+
+    commits: injectable [(iso_author_ts, subject)] for tests; default = git log."""
+    from datetime import datetime, time as dtime
+    from zoneinfo import ZoneInfo
+    et = ZoneInfo("America/New_York")
+    if commits is None:
+        import subprocess
+        try:
+            raw = subprocess.run(["git", "log", "-300", "--format=%aI|%s"],
+                                 capture_output=True, text=True, timeout=30).stdout
+            commits = [tuple(line.split("|", 1)) for line in raw.splitlines()
+                       if "|" in line]
+        except Exception:  # noqa: BLE001
+            return {"calibration_quality": "unknown", "trend_eligible": False,
+                    "note": "git unavailable"}
+    in_session = []
+    for ts, subject in commits:
+        try:
+            t = datetime.fromisoformat(str(ts)).astimezone(et)
+        except (ValueError, TypeError):
+            continue
+        if t.strftime("%Y%m%d") == date and \
+                dtime(9, 30) <= t.time() <= dtime(16, 0):
+            in_session.append(f"{t.strftime('%H:%M')} {subject[:60]}")
+    if in_session:
+        return {"calibration_quality": "mixed_config_era",
+                "trend_eligible": False,
+                "in_session_commits": in_session[:8]}
+    return {"calibration_quality": "clean_era", "trend_eligible": True}
+
+
 def calibration_drift() -> dict:
-    """Latest saved replay run that carries a calibration block."""
+    """Latest saved replay run that carries a calibration block, labeled with
+    the baseline day's config-era quality so a mid-session architecture change
+    is never mistaken for replay deterioration."""
     runs = sorted(glob.glob(os.path.join("data", "replay", "runs", "*",
                                          "result.json")), key=os.path.getmtime)
     for path in reversed(runs):
@@ -92,7 +131,12 @@ def calibration_drift() -> dict:
         if cal and cal.get("field_match_rates"):
             rates = cal["field_match_rates"]
             worst = min(rates, key=rates.get)
-            return {"source": path, "matched_scans": cal.get("matched"),
+            date = str((r.get("manifest") or {}).get("date") or "")
+            era = config_era_quality(date) if date else {
+                "calibration_quality": "unknown", "trend_eligible": False}
+            return {"source": path, "baseline_date": date,
+                    **era,
+                    "matched_scans": cal.get("matched"),
                     "identical": cal.get("identical"),
                     "field_match_rates": rates,
                     "worst_field": {worst: rates[worst]}}

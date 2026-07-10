@@ -90,6 +90,44 @@ class TestGitSpine(unittest.TestCase):
             self.assertIn("subject", c)
 
 
+class TestConfigEraLabel(unittest.TestCase):
+    """HEALTH-ERA-LABEL — a mid-session config change makes the baseline
+    nonstationary: mixed_config_era / trend_eligible=false, derived from
+    commit timestamps, never mistaken for replay deterioration."""
+
+    def test_in_session_commit_marks_mixed_era(self):
+        from replay_validation.organism_health import config_era_quality
+        out = config_era_quality("20260709", commits=[
+            ("2026-07-09T10:12:00-04:00", "REGIME-DEMOTE - ..."),
+            ("2026-07-09T22:00:00-04:00", "EVENING - ..."),
+        ])
+        self.assertEqual(out["calibration_quality"], "mixed_config_era")
+        self.assertFalse(out["trend_eligible"])
+        self.assertEqual(len(out["in_session_commits"]), 1)
+
+    def test_evening_commits_stay_clean_era(self):
+        from replay_validation.organism_health import config_era_quality
+        out = config_era_quality("20260708", commits=[
+            ("2026-07-08T18:45:00-04:00", "PERCEPTION-1 - ..."),
+            ("2026-07-08T23:10:00-04:00", "PERCEPTION-2 - ..."),
+        ])
+        self.assertEqual(out["calibration_quality"], "clean_era")
+        self.assertTrue(out["trend_eligible"])
+
+    def test_other_days_commits_ignored(self):
+        from replay_validation.organism_health import config_era_quality
+        out = config_era_quality("20260709", commits=[
+            ("2026-07-08T10:00:00-04:00", "X"),
+        ])
+        self.assertTrue(out["trend_eligible"])
+
+    def test_real_0709_is_mixed_era(self):
+        # the real repo spine: REGIME-DEMOTE/MC-ENFORCE landed in-session 0709
+        from replay_validation.organism_health import config_era_quality
+        out = config_era_quality("20260709")
+        self.assertEqual(out["calibration_quality"], "mixed_config_era")
+
+
 class TestHealthNoSilentHealth(unittest.TestCase):
     def test_brain_trend_no_data_under_min_n(self):
         tmp = tempfile.mkdtemp()
