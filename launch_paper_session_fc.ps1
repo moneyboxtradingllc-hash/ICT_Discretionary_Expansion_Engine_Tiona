@@ -79,6 +79,15 @@ $env:BRAIN_JSON_MODE               = "on"
 #    only; unknown phases still fail. Rollback: "off".
 $env:BRAIN_PHASE_SYNONYM_TOLERANCE = "on"
 
+# ── ADAPT-LOOP-2 (2026-07-09): Adaptive Effect Ledger (TELEMETRY ONLY).
+# Every adaptive actuation (soft-block / confidence-lower / size-reduce) with a
+# measurable trade-intent context is recorded; the replay engine resolves each
+# into helped/hurt via SimBroker counterfactuals — the adaptive layer graded on
+# its own decisions (the missing second-order loop). Zero authority; the ledger
+# influences nothing until earn-back governance (ADAPT-LOOP-4) consumes it
+# under replay gates. Rollback: "off".
+$env:ADAPTIVE_EFFECT_LEDGER        = "on"
+
 # ── AI-AUTH-2 — qualification stability floor (AB-7.3c, implemented + tested).
 # A mature persistent thesis prevents a one-scan mechanical dip from collapsing
 # qualified->no_trade. Complements the Brain-sovereignty repair; never overrides

@@ -1246,6 +1246,19 @@ def run_scan_loop(symbol: str = None, data_provider: str = None):
                       f" owners={','.join(_r.get('block_owners') or [])}"
                       f" | SHADOW (no authority)")
 
+            # ── ADAPT-LOOP-2 — Adaptive Effect Ledger (TELEMETRY ONLY) ─────
+            # When an adaptive actuation fired this scan (soft-block /
+            # confidence-lower / size-reduce) and a trade intent gives it a
+            # measurable context, record one open action; the replay engine
+            # resolves it via SimBroker counterfactuals into helped/hurt so the
+            # adaptive layer is graded on ITS OWN decisions. Gated
+            # ADAPTIVE_EFFECT_LEDGER (default off); zero authority; never raises.
+            from adaptive_learning.adaptive_effect import record_adaptive_actions
+            _ae = record_adaptive_actions(snapshot, symbol)
+            if _ae.get("recorded"):
+                print(f"  AdaptEffect  : RECORDED {_ae['recorded']} action(s)"
+                      f" {','.join(_ae.get('actions', []))} | telemetry only")
+
             # ── Stop Enforcer (Phase 2B) ───────────────────────────────────
             snapshot["stop_enforcer"] = enforce_stop(
                 snapshot, symbol, snapshot["position_monitor"]
