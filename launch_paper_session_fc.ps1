@@ -46,6 +46,16 @@ $env:THESIS_EXIT_CONFIRM_SCANS     = "1"
 # ── AB-1/AB-3/AI-BRAIN-L — AI Brain + LLM + vector retrieval (OBSERVE-ONLY) ──
 $env:AI_BRAIN_ENABLED              = "true"
 $env:AI_BRAIN_LLM                  = "true"      # real GPT narrative
+
+# ── AI-BRAIN-REQUIRED (2026-07-10): the Brain-availability operating policy.
+# Silent deterministic fallback changes the ORGANISM being tested — a session
+# without the Brain is safe but behaviorally meaningless as AI evidence.
+# Preflight must succeed (no quota/auth/model-access error) or the session
+# REFUSES TO START; in-session, 5 consecutive Brain failures revoke NEW-ENTRY
+# authority (restored on the next healthy scan). Existing-position safety
+# (stops, management, reconciliation, EOD) NEVER depends on the Brain.
+# Diagnostics-only sessions: set "false" (results are not AI-organism evidence).
+$env:AI_BRAIN_REQUIRED             = "true"
 # AB-5B/5C — ECU mode: Brain OWNS direction/opportunity/playbook/tool;
 # mechanical layer becomes sensors/validators/executors. Enabled for the ECU test.
 $env:BRAIN_ECU_MODE                = "true"

@@ -787,6 +787,26 @@ def run_scan_loop(symbol: str = None, data_provider: str = None):
     consecutive_feed_failures = 0
     atexit.register(release_instance_lock)
 
+    # ── AI-BRAIN-REQUIRED (2026-07-10) — the Brain-availability policy ────────
+    # Silent deterministic fallback changes the ORGANISM being tested: the
+    # session stays safe but its evidence becomes behaviorally meaningless.
+    # With AI_BRAIN_REQUIRED=true a live-model preflight must succeed or the
+    # session refuses to start; in-session, N consecutive Brain failures revoke
+    # NEW-ENTRY authority (positions remain managed deterministically, always).
+    from ai_brain.brain_preflight import brain_required, preflight, BrainHealthGate
+    brain_gate = BrainHealthGate()
+    if brain_required():
+        pf = preflight()
+        if not pf["ok"]:
+            print("STARTUP DENIED — AI_BRAIN_REQUIRED and the Brain preflight failed.")
+            print(f"  model={pf['model']} class={pf['classification']}")
+            print(f"  detail: {pf['detail']}")
+            print("  Fix credits/auth/model access, or set AI_BRAIN_REQUIRED=false")
+            print("  for a diagnostics-only session (results are NOT AI-organism evidence).")
+            release_instance_lock()
+            return
+        print(f"  Brain preflight: OK ({pf['model']})")
+
     print(_DIV)
     print(f"Phase 1P - Live Scan Loop | {symbol}")
     print(_DIV)
@@ -971,6 +991,23 @@ def run_scan_loop(symbol: str = None, data_provider: str = None):
             else:
                 snapshot["ai_brain"] = run_narrative_brain(snapshot, symbol, stance_memory)
 
+            # ── AI-BRAIN-REQUIRED — per-scan Brain health gate ─────────────
+            # Marks degraded scans; after N consecutive failures NEW-ENTRY
+            # authority is revoked (restored on the next healthy Brain scan).
+            # Entries only — stops/position management stay deterministic.
+            _bh = brain_gate.update((snapshot.get("ai_brain") or {}).get("source"))
+            snapshot["brain_required"] = _bh
+            if brain_required():
+                if _bh["revoked_now"]:
+                    print(f"  [OPS] entry authority REVOKED — {_bh['consecutive_failures']} "
+                          "consecutive Brain failures (positions remain managed)")
+                if _bh["restored_now"]:
+                    print("  [OPS] entry authority RESTORED — Brain healthy again")
+                if _bh["degraded"]:
+                    print(f"  [OPS] scan DEGRADED — brain_source="
+                          f"{_bh['brain_source']} ({_bh['consecutive_failures']}/"
+                          f"{_bh['threshold']})")
+
             # ── AB-4 — Wrapper vs Brain divergence (OBSERVE_ONLY) ──────────
             # Both AI paths observed the same scan; measure disagreement.
             # Pure measurement — influences nothing downstream.
@@ -1151,6 +1188,13 @@ def run_scan_loop(symbol: str = None, data_provider: str = None):
                 entry_denied_reason = "ops: MANAGEMENT_ONLY (restart with open position)"
             elif not entry_authority:
                 entry_denied_reason = "ops: entry authority revoked (feed instability)"
+            elif brain_required() and not brain_gate.entry_allowed:
+                # AI-BRAIN-REQUIRED — new judgment requires the Brain; a session
+                # degraded past the threshold may not open NEW positions.
+                # Position management above/below is untouched (deterministic).
+                entry_denied_reason = ("ops: entry authority revoked (Brain "
+                                       f"unavailable {brain_gate.consecutive_failures} "
+                                       "consecutive scans; positions remain managed)")
             elif not eod["entries_allowed"]:
                 entry_denied_reason = f"ops: EOD entry cutoff ({eod['no_entry_after']} ET)"
             elif adaptive_entry_block_reason(snapshot) is not None:
