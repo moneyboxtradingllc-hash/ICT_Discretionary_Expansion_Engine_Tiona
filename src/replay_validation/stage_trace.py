@@ -87,6 +87,7 @@ _SCHEMA = (
     _field("decision", "decision"),
     _field("gate", "would_authorize"), _field("gate", "gate_blockers"),
     _field("intent", "intent_created"), _field("intent", "intent_type"),
+    _field("intent", "intent_gated_score"), _field("intent", "intent_gated_quality"),
 )
 
 
@@ -167,6 +168,9 @@ def build_stage_trace(snapshot: dict) -> dict:
         "gate_blockers": tuple(g.get("blocking_factors") or []),
         "intent_created": ti.get("intent_created"),
         "intent_type": ti.get("intent_type"),
+        # INTENT-SCORE-AUDIT — the execution-path quality gate's verdict
+        "intent_gated_score": (s.get("intent_score") or {}).get("gated_score"),
+        "intent_gated_quality": (s.get("intent_score") or {}).get("gated_quality"),
     }
 
 

@@ -307,6 +307,17 @@ def meets_score_threshold(snapshot: dict) -> tuple[bool, str]:
     """
     Check intent_score against MIN_INTENT_GATED_SCORE and MIN_INTENT_QUALITY env vars.
     Returns (meets: bool, reason: str).
+
+    INTENT-SCORE-AUDIT (2026-07-10): this was the last un-audited mechanical
+    judge between the gate and the broker. Replay evidence (0709, lifecycle-
+    enforce stack): it would have BLOCKED 2 of the Brain's 7 authorized trades
+    — and the blocked pair outcome-scored BETTER (2×breakeven, 0.0R) than the
+    5 it passed (4×stop + 1×BE, −4.0R). Its penalties re-litigate authorized
+    trades with mechanical-era weights (minimal risk TIER and YOUNG setups
+    lose points — punishing defensiveness and fresh sovereign theses).
+    INTENT_SCORE_MODE=observe_only demotes it to a WITNESS: the verdict is
+    computed and recorded as would_have_blocked telemetry, but it may not veto
+    a gate-authorized trade. Default "enforce" = byte-identical legacy.
     """
     min_score   = int(os.getenv("MIN_INTENT_GATED_SCORE", "70"))
     min_quality = os.getenv("MIN_INTENT_QUALITY", "strong_watch").lower().strip()
@@ -315,8 +326,23 @@ def meets_score_threshold(snapshot: dict) -> tuple[bool, str]:
     gated_score = iscr.get("gated_score", 0)
     gated_qual  = (iscr.get("gated_quality") or "no_intent").lower()
 
+    verdict_ok, verdict_reason = True, "score thresholds met"
     if gated_score < min_score:
-        return False, f"gated_score {gated_score} < minimum {min_score}"
-    if quality_rank(gated_qual) < quality_rank(min_quality):
-        return False, f"gated_quality '{gated_qual}' below minimum '{min_quality}'"
-    return True, "score thresholds met"
+        verdict_ok, verdict_reason = False, \
+            f"gated_score {gated_score} < minimum {min_score}"
+    elif quality_rank(gated_qual) < quality_rank(min_quality):
+        verdict_ok, verdict_reason = False, \
+            f"gated_quality '{gated_qual}' below minimum '{min_quality}'"
+
+    mode = os.getenv("INTENT_SCORE_MODE", "enforce").lower().strip()
+    if mode == "observe_only" and not verdict_ok:
+        # witness demotion: record, never veto
+        if isinstance(iscr, dict):
+            iscr["would_have_blocked"] = True
+            iscr["would_have_blocked_reason"] = verdict_reason
+            iscr["authority_mode"] = "observe_only"
+        return True, f"observe_only: would_have_blocked ({verdict_reason})"
+    if isinstance(iscr, dict):
+        iscr["would_have_blocked"] = (not verdict_ok)
+        iscr["authority_mode"] = mode if mode in ("enforce", "observe_only") else "enforce"
+    return verdict_ok, verdict_reason

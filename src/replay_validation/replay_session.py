@@ -186,6 +186,7 @@ def replay_session(date: str, symbol: str = "QQQ", flags: dict = None,
         from execution_gate.execution_gate import evaluate_gate
         from market_commander.market_commander import build_market_commander_matrix
         from trade_intent.intent_builder import build_intent
+        from intent_scoring.intent_scorer import score_intent
         from adaptive_learning.adaptive_live_authority import consume_adaptive_overlays
 
         memory = MarketMemory(max_snapshots=20)
@@ -242,6 +243,9 @@ def replay_session(date: str, symbol: str = "QQQ", flags: dict = None,
                 snapshot["execution_gate"] = evaluate_gate(snapshot)
                 snapshot["market_commander"] = build_market_commander_matrix(snapshot)
                 snapshot["trade_intent"] = build_intent(snapshot, symbol)
+                # INTENT-SCORE-AUDIT (2026-07-10) — mirror scan_loop's scorer so
+                # replay can audit the execution-path quality gate
+                snapshot["intent_score"] = score_intent(snapshot, symbol)
                 _hook("post_gate")
 
                 # intent-zone capture (REPLAY-3/4 outcome scoring input)

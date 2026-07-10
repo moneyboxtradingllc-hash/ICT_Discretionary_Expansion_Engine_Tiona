@@ -56,6 +56,14 @@ $env:AI_BRAIN_LLM                  = "true"      # real GPT narrative
 # (stops, management, reconciliation, EOD) NEVER depends on the Brain.
 # Diagnostics-only sessions: set "false" (results are not AI-organism evidence).
 $env:AI_BRAIN_REQUIRED             = "true"
+
+# ── INTENT-SCORE-AUDIT (2026-07-10): the last un-audited mechanical judge in
+# the execution path, demoted on replay evidence. It would have blocked 2/7 of
+# the Brain's authorized trades — and the blocked pair outcome-scored BETTER
+# (0.0R) than the five it passed (−4.0R); its penalties punish defensive risk
+# tiers and young (fresh sovereign) setups. observe_only = verdict computed +
+# recorded as would_have_blocked telemetry, never a veto. Rollback: "enforce".
+$env:INTENT_SCORE_MODE             = "observe_only"
 # AB-5B/5C — ECU mode: Brain OWNS direction/opportunity/playbook/tool;
 # mechanical layer becomes sensors/validators/executors. Enabled for the ECU test.
 $env:BRAIN_ECU_MODE                = "true"
