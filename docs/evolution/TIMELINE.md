@@ -5,7 +5,7 @@ lab/ablation artifact; a claim without an artifact renders as PENDING._
 _`REJECTED` and `NO CHANGE` entries are displayed with the same
 prominence as wins — they are the credibility of this document._
 
-_Rendered 2026-07-10T17:07:33.745990+00:00 — 18 milestones on a 151-commit spine._
+_Rendered 2026-07-10T18:59:05.674065+00:00 — 19 milestones on a 153-commit spine._
 
 ## 2026-07-08
 
@@ -143,4 +143,11 @@ _Rendered 2026-07-10T17:07:33.745990+00:00 — 18 milestones on a 151-commit spi
 - **Evidence:** `organism_health.config_era_quality + live check naming the in-session commits`
 - **Commit:** `09bfc3f`
 
-<sub>spine: `1fcba8c` ADAPT-LOOP-2 - Adaptive effect ledger and resolver · `12ceed0` ADAPT-LOOP-3 - Brain accuracy table and self-track-record feed · `9d409b5` ADAPT-LOOP-3B - Brain thesis quality grading · `d34dc21` ADAPT-LOOP-4 - Earn-back governance with replay gate · `85e204e` ADAPT-LOOP-5 - Retire recommendation engine · `48b1a79` REPLAY-4 - Counterfactual decision laboratory · `e295fc8` ADAPT-LOOP-6 - Organism health monitor and evolution timeline · `134a708` BRAIN-LIFECYCLE-ENFORCE - Persistent thesis promoted to enforce · `14a400b` MILESTONE - Brain lifecycle enforce · `734da90` BRAIN-INVALIDATION-REPAIR - Elicit invalidation level · `477f531` MILESTONE - Brain invalidation repair · `1aa2278` BRAIN-MODEL-TRIAL - Model arm support in live brain study · `e15dc90` MILESTONE - Adaptive unblocked lab result · `93b2ee3` AI-BRAIN-REQUIRED - Brain availability operating policy · `1e22d3e` MILESTONE - AI Brain required policy · `09bfc3f` HEALTH-ERA-LABEL - Calibration era quality from commit timestamps</sub>
+### [VALIDATED] INTENT-SCORE-AUDIT
+
+- **Change:** last un-audited mechanical judge (order_builder quality gate) demoted to witness
+- **Measured:** would have blocked 2/7 of the Brain's authorized trades → blocked pair outcome-scored BETTER (0.0R) than the 5 passed (-4.0R) — inverse discrimination; observe_only records would_have_blocked, never vetoes
+- **Evidence:** `replay 0709 lifecycle-enforce + SimBroker outcome comparison`
+- **Commit:** `f605670`
+
+<sub>spine: `1fcba8c` ADAPT-LOOP-2 - Adaptive effect ledger and resolver · `12ceed0` ADAPT-LOOP-3 - Brain accuracy table and self-track-record feed · `9d409b5` ADAPT-LOOP-3B - Brain thesis quality grading · `d34dc21` ADAPT-LOOP-4 - Earn-back governance with replay gate · `85e204e` ADAPT-LOOP-5 - Retire recommendation engine · `48b1a79` REPLAY-4 - Counterfactual decision laboratory · `e295fc8` ADAPT-LOOP-6 - Organism health monitor and evolution timeline · `134a708` BRAIN-LIFECYCLE-ENFORCE - Persistent thesis promoted to enforce · `14a400b` MILESTONE - Brain lifecycle enforce · `734da90` BRAIN-INVALIDATION-REPAIR - Elicit invalidation level · `477f531` MILESTONE - Brain invalidation repair · `1aa2278` BRAIN-MODEL-TRIAL - Model arm support in live brain study · `e15dc90` MILESTONE - Adaptive unblocked lab result · `93b2ee3` AI-BRAIN-REQUIRED - Brain availability operating policy · `1e22d3e` MILESTONE - AI Brain required policy · `09bfc3f` HEALTH-ERA-LABEL - Calibration era quality from commit timestamps · `0b72e1c` MILESTONE - Calibration era labeling · `f605670` INTENT-SCORE-AUDIT - Execution-path quality gate demoted to witness</sub>
