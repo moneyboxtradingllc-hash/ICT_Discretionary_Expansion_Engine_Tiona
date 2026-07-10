@@ -88,6 +88,14 @@ $env:BRAIN_PHASE_SYNONYM_TOLERANCE = "on"
 # under replay gates. Rollback: "off".
 $env:ADAPTIVE_EFFECT_LEDGER        = "on"
 
+# ── ADAPT-LOOP-3 (2026-07-10): Brain self-accuracy context (DESCRIPTIVE_ONLY).
+# The Brain's payload carries its own graded directional track record (replay-
+# built brain_accuracy.json: 896 calls graded 2026-06→07: overall 49.4% hits,
+# confidence anti-calibrated — <50-conf calls hit 59.7%, 50-69 band 37.6%).
+# Context the Brain reasons WITH, never a directional input; no module may veto
+# on it. Refresh: python -m replay_validation.brain_accuracy. Rollback: "off".
+$env:BRAIN_ACCURACY_CONTEXT        = "on"
+
 # ── AI-AUTH-2 — qualification stability floor (AB-7.3c, implemented + tested).
 # A mature persistent thesis prevents a one-scan mechanical dip from collapsing
 # qualified->no_trade. Complements the Brain-sovereignty repair; never overrides

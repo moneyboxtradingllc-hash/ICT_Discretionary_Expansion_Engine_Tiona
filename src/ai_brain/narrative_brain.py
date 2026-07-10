@@ -301,6 +301,14 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
         # brain_input["adaptive_learning_context"] (neutral when no analogs).
         adaptive_signal = inject_adaptive_context(brain_input, analogs, snapshot)
 
+        # ── ADAPT-LOOP-3 — Brain self-accuracy context (DESCRIPTIVE_ONLY).
+        # Gated BRAIN_ACCURACY_CONTEXT (default off): attaches the Brain's OWN
+        # graded directional track record (replay-built table) inside
+        # adaptive_learning_context so it reasons knowing how its calls resolve.
+        # Inherits the ADAPTIVE_LEARNING cognitive boundary; never raises.
+        from adaptive_learning.brain_accuracy import attach_accuracy_context
+        attach_accuracy_context(brain_input, symbol)
+
         # ── ADAPTIVE-2A/2B — Adaptive Friction + Interpretation (OBSERVE_ONLY).
         # History's objection + experience-based read are attached to the payload
         # so the Brain can rebut them. No authority: influences NO decision,
