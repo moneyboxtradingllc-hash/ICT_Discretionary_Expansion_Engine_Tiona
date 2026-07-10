@@ -96,6 +96,17 @@ $env:ADAPTIVE_EFFECT_LEDGER        = "on"
 # on it. Refresh: python -m replay_validation.brain_accuracy. Rollback: "off".
 $env:BRAIN_ACCURACY_CONTEXT        = "on"
 
+# ── ADAPT-LOOP-4 (2026-07-10): Earn-Back Governance — SHADOW first.
+# The symmetric actuation path: an APPROVED (evidence → replay gate → explicit
+# approval) promotion may LIFT one of the adaptive layer's OWN per-bucket
+# restrictions (trade_block / risk_reduction / confidence_penalty). Ceiling is
+# NEUTRAL (no boosts, never above 1.0x size); capital locks and hard safety
+# caps are NEVER targets; no self-approval path exists. SHADOW records what
+# WOULD lift without lifting — promote to "enforce" only after shadow evidence.
+# CLI: python -m adaptive_learning.earnback --generate / --approve <id>
+#      python -m replay_validation.earnback_gate --proposal <id>
+$env:EARNBACK_MODE                 = "shadow"
+
 # ── AI-AUTH-2 — qualification stability floor (AB-7.3c, implemented + tested).
 # A mature persistent thesis prevents a one-scan mechanical dip from collapsing
 # qualified->no_trade. Complements the Brain-sovereignty repair; never overrides

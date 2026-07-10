@@ -103,6 +103,12 @@ def generate_adaptive_policy_report(candidate: dict,
         adjustments: list = []
         boost = penalty = risk_reduction = trade_block = False
         probation_active = False
+        # ── ADAPT-LOOP-4 — earn-back governance (EARNBACK_MODE, default off).
+        # An APPROVED (evidence + replay-gate + explicit approval) promotion may
+        # LIFT this bucket's OWN restriction at its birth site below; shadow
+        # mode only records what WOULD lift. Capital locks are never targets.
+        earnback_events: list = []
+        from adaptive_learning.earnback import earnback_check as _eb_check
 
         for dim in DIMENSIONS:
             key = candidate.get(dim)
@@ -130,13 +136,29 @@ def generate_adaptive_policy_report(candidate: dict,
             # ── DEFENSIVE flags (require sample) ──
             if trades >= MIN_SAMPLE:
                 if exp <= SEVERE_THRESHOLD:
-                    risk_reduction = True
-                    adjustments.append(
-                        f"{dim}({key}): expectancy {exp:+.2f} <= {SEVERE_THRESHOLD} -> risk_reduction")
+                    _eb = _eb_check(symbol, dim, key, "risk_reduction", base_dir)
+                    if _eb["lift"]:
+                        earnback_events.append(
+                            f"{dim}({key}): risk_reduction LIFTED (earn-back approved)")
+                    else:
+                        if _eb["shadow_lift"]:
+                            earnback_events.append(
+                                f"{dim}({key}): risk_reduction would lift (earn-back shadow)")
+                        risk_reduction = True
+                        adjustments.append(
+                            f"{dim}({key}): expectancy {exp:+.2f} <= {SEVERE_THRESHOLD} -> risk_reduction")
                 if exp <= PENALTY_THRESHOLD:
-                    penalty = True
-                    adjustments.append(
-                        f"{dim}({key}): expectancy {exp:+.2f} <= {PENALTY_THRESHOLD} -> confidence_penalty")
+                    _eb = _eb_check(symbol, dim, key, "confidence_penalty", base_dir)
+                    if _eb["lift"]:
+                        earnback_events.append(
+                            f"{dim}({key}): confidence_penalty LIFTED (earn-back approved)")
+                    else:
+                        if _eb["shadow_lift"]:
+                            earnback_events.append(
+                                f"{dim}({key}): confidence_penalty would lift (earn-back shadow)")
+                        penalty = True
+                        adjustments.append(
+                            f"{dim}({key}): expectancy {exp:+.2f} <= {PENALTY_THRESHOLD} -> confidence_penalty")
                 elif exp >= BOOST_THRESHOLD:
                     adjustments.append(
                         f"{dim}({key}): expectancy {exp:+.2f} >= {BOOST_THRESHOLD} -> confidence_boost")
@@ -154,11 +176,19 @@ def generate_adaptive_policy_report(candidate: dict,
                         f"{dim}({key}): PROBATION (lock #{decay.get('lock_count')}, "
                         f"cooldown served) -> reduced size + reduced confidence")
                 else:
-                    trade_block = True
-                    adjustments.append(
-                        f"{dim}({key}): loss_streak {streak} >= {BLOCK_LOSS_STREAK} "
-                        f"-> trade_block [{decay.get('decay_status')} "
-                        f"{decay.get('scar_age_sessions')}/{decay.get('cooldown_required')}]")
+                    _eb = _eb_check(symbol, dim, key, "trade_block", base_dir)
+                    if _eb["lift"]:
+                        earnback_events.append(
+                            f"{dim}({key}): trade_block LIFTED (earn-back approved)")
+                    else:
+                        if _eb["shadow_lift"]:
+                            earnback_events.append(
+                                f"{dim}({key}): trade_block would lift (earn-back shadow)")
+                        trade_block = True
+                        adjustments.append(
+                            f"{dim}({key}): loss_streak {streak} >= {BLOCK_LOSS_STREAK} "
+                            f"-> trade_block [{decay.get('decay_status')} "
+                            f"{decay.get('scar_age_sessions')}/{decay.get('cooldown_required')}]")
 
         # ── CAPITAL-1: capital condition as a DEFENSIVE evidence source ──
         # Capital may CONTRACT (penalty/size), LOCK (block), or PERMIT — it can
@@ -198,6 +228,8 @@ def generate_adaptive_policy_report(candidate: dict,
             "trade_block_recommended": trade_block,
             "probation_active": probation_active,
             "recommended_adjustments": adjustments,
+            # ADAPT-LOOP-4 — earn-back audit trail (lifts + shadow would-lifts)
+            "earnback_events": earnback_events,
             "authority_level": AUTHORITY_LEVEL,
             "posture": POSTURE,
             "dimensions": detail,
