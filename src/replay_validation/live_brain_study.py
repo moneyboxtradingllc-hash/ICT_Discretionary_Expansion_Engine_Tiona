@@ -51,6 +51,18 @@ BASE = {
 
 _NON_FAMILIES = {"", "none", "unknown", "confirmation_required", "n/a", "null"}
 
+# BRAIN-MODEL-TRIAL (2026-07-10) — the CURRENT organism stack (launcher parity
+# as of the trial date), so a model arm measures the MODEL and nothing else.
+CURRENT_STACK = dict(BASE, **{
+    "THESIS_LIFECYCLE_MODE": "enforce",
+    "BRAIN_KEEP_SHALLOW_REASONING": "true",
+    "BRAIN_JSON_MODE": "on",
+    "BRAIN_PHASE_SYNONYM_TOLERANCE": "on",
+    "BRAIN_FAMILY_REPAIR": "on",
+    "BRAIN_INVALIDATION_REPAIR": "on",
+    "BRAIN_ACCURACY_CONTEXT": "on",
+})
+
 
 def _fam_missing(v) -> bool:
     items = v if isinstance(v, list) else [v]
@@ -112,11 +124,18 @@ class _RateLimitedLLM:
         return out
 
 
-def do_run(date: str, repair: str, run_idx: int) -> str:
-    """One replay run; writes traces + metrics to the study dir."""
+def do_run(date: str, repair: str, run_idx: int, model: str = None) -> str:
+    """One replay run; writes traces + metrics to the study dir.
+    repair: recorded | off | on — or model:<name> (BRAIN-MODEL-TRIAL arm:
+    CURRENT organism stack, live brain, AI_BRAIN_MODEL=<name>)."""
     from replay_validation.replay_session import replay_session
     os.makedirs(STUDY_DIR, exist_ok=True)
-    if repair == "recorded":
+    if model or repair.startswith("model:"):
+        model = model or repair.split(":", 1)[1]
+        repair = f"model_{model}"
+        brain = "live"
+        flags = dict(CURRENT_STACK, AI_BRAIN_MODEL=model)
+    elif repair == "recorded":
         brain, flags = "recorded", dict(BASE)
     else:
         brain = "live"
@@ -272,11 +291,12 @@ if __name__ == "__main__":
     sub = p.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run")
     r.add_argument("--date", required=True)
-    r.add_argument("--repair", required=True, choices=("recorded", "off", "on"))
+    r.add_argument("--repair", default="on")
+    r.add_argument("--model", help="BRAIN-MODEL-TRIAL arm: AI_BRAIN_MODEL name")
     r.add_argument("--run", type=int, default=0)
     sub.add_parser("aggregate")
     a = p.parse_args()
     if a.cmd == "run":
-        do_run(a.date, a.repair, a.run)
+        do_run(a.date, a.repair, a.run, model=a.model)
     else:
         aggregate()
