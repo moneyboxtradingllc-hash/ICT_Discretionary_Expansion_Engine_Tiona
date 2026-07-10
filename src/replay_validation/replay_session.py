@@ -47,7 +47,17 @@ _SAFETY_ENV = {
     "AI_SHADOW_ENABLED":   "false",
     "AI_RETRIEVAL_ENABLED": "false",
     "NEWS_LAYER_ENABLED":  "false",
-    "AI_BRAIN_LLM":        "false",   # RecordedBrain replaces the call anyway
+}
+
+# Brain modes (REPLAY-2 LIVE addition, 2026-07-09):
+#   recorded      — RecordedBrain serves persisted outputs (deterministic, free)
+#   live          — the REAL LLM is called on the reconstructed inputs
+#                   (non-deterministic, costs API usage; for Brain-side repairs)
+#   deterministic — LLM off, mechanical fallback brain only
+_BRAIN_MODE_ENV = {
+    "recorded":      {"AI_BRAIN_LLM": "false"},   # substitution handles it
+    "live":          {"AI_BRAIN_LLM": "true"},
+    "deterministic": {"AI_BRAIN_LLM": "false"},
 }
 _BASE_ENV = {
     "AI_BRAIN_ENABLED":    "true",
@@ -98,9 +108,14 @@ def _default_ticks(date: str, symbol: str, candles: list, brain: RecordedBrain) 
 
 def replay_session(date: str, symbol: str = "QQQ", flags: dict = None,
                    ticks: list = None, lookback: int = _LOOKBACK_DEFAULT,
-                   sandbox: str = None, max_scans: int = None) -> dict:
+                   sandbox: str = None, max_scans: int = None,
+                   brain: str = "recorded") -> dict:
     """Replay one archived session through the current pipeline.
+    brain: recorded (default, deterministic) | live (real LLM calls) |
+    deterministic (mechanical fallback only).
     Returns {"manifest", "scans": [{timestamp, trace}], "summary"}."""
+    if brain not in _BRAIN_MODE_ENV:
+        raise ValueError(f"unknown brain mode: {brain!r}")
     candles = load_session(date, symbol)   # raises if never archived
     prev_date = None
     try:  # prior session extends the lookback window across the open
@@ -120,9 +135,12 @@ def replay_session(date: str, symbol: str = "QQQ", flags: dict = None,
     parsed = [(ts, c) for ts, c in parsed if ts is not None]
     parsed.sort(key=lambda p: p[0])
 
-    brain = RecordedBrain(date, symbol)
+    # RecordedBrain is always constructed — its record timestamps are the tick
+    # grid even in live/deterministic modes; substitution happens only in
+    # recorded mode.
+    rec_brain = RecordedBrain(date, symbol)
     tick_list = ticks or _default_ticks(date, symbol,
-                                        [c for _ts, c in parsed], brain)
+                                        [c for _ts, c in parsed], rec_brain)
 
     own_sandbox = sandbox is None
     sandbox = sandbox or tempfile.mkdtemp(prefix=f"replay_{date}_")
@@ -130,16 +148,21 @@ def replay_session(date: str, symbol: str = "QQQ", flags: dict = None,
     manifest = {
         "date": date, "symbol": symbol, "flags": dict(flags or {}),
         "forced_safety": dict(_SAFETY_ENV),
-        "brain_mode": "recorded", "brain_records": len(brain.records),
+        "brain_mode": brain, "brain_records": len(rec_brain.records),
         "candles": len(parsed), "prev_session_loaded": prev_date,
         "lookback": lookback, "scans_planned": len(tick_list),
         "caveats": ["news_off", "retrieval_off", "shadow_off",
-                    "fresh_memory", "empty_adaptive_history", "no_execution"],
+                    "fresh_memory", "empty_adaptive_history", "no_execution"]
+                   + (["live_llm_nondeterministic"] if brain == "live" else []),
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
 
+    from contextlib import nullcontext
+    mode_flags = dict(flags or {})
+    mode_flags.update(_BRAIN_MODE_ENV[brain])
+    brain_ctx = brain_replay(rec_brain) if brain == "recorded" else nullcontext()
     scans, errors = [], []
-    with _replay_env(flags or {}, sandbox), brain_replay(brain):
+    with _replay_env(mode_flags, sandbox), brain_ctx:
         # ── persistent per-run state (mirrors scan_loop init) ────────────────
         from state.market_memory import MarketMemory
         from ai_brain.thesis_lifecycle import ThesisLifecycleEngine
@@ -211,20 +234,20 @@ def replay_session(date: str, symbol: str = "QQQ", flags: dict = None,
                 errors.append({"tick": tick.isoformat(), "error": repr(exc)})
 
     manifest["finished_at"] = datetime.now(timezone.utc).isoformat()
-    summary = _summarize(scans, brain, errors)
+    summary = _summarize(scans, rec_brain if brain == "recorded" else None, errors)
     if own_sandbox:
         manifest["sandbox"] = sandbox
     return {"manifest": manifest, "scans": scans, "summary": summary}
 
 
-def _summarize(scans: list, brain: RecordedBrain, errors: list) -> dict:
+def _summarize(scans: list, brain: "RecordedBrain | None", errors: list) -> dict:
     traces = [s["trace"] for s in scans]
     return {
         "scans": len(scans),
         "errors": len(errors),
         "error_detail": errors[:5],
-        "brain_served": brain.served,
-        "brain_misses": brain.misses,
+        "brain_served": brain.served if brain else None,   # None in live/deterministic
+        "brain_misses": brain.misses if brain else None,
         "sovereign_scans": sum(1 for t in traces if t.get("brain_sovereign")),
         "qualified_scans": sum(1 for t in traces
                                if t.get("qual_status") in ("candidate", "qualified", "elite")),
@@ -287,6 +310,8 @@ def _main() -> int:
     p.add_argument("--date", required=True)
     p.add_argument("--symbol", default="QQQ")
     p.add_argument("--flags", nargs="*", default=[], help="K=V behavior flags")
+    p.add_argument("--brain", default="recorded",
+                   choices=("recorded", "live", "deterministic"))
     p.add_argument("--max-scans", type=int)
     p.add_argument("--calibrate", action="store_true")
     p.add_argument("--out", default=os.path.join("data", "replay", "runs"))
@@ -294,7 +319,7 @@ def _main() -> int:
 
     flags = dict(kv.split("=", 1) for kv in args.flags)
     result = replay_session(args.date, args.symbol, flags=flags,
-                            max_scans=args.max_scans)
+                            max_scans=args.max_scans, brain=args.brain)
     print(json.dumps(result["summary"], indent=2))
     if args.calibrate:
         cal = calibrate(result, args.date, args.symbol)
