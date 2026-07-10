@@ -60,6 +60,17 @@ def _llm_enabled() -> bool:
     return os.getenv("AI_BRAIN_LLM", "false").lower().strip() == "true"
 
 
+def _keep_shallow_enabled() -> bool:
+    """BRAIN-RELIABILITY-1 (2026-07-09) — when on, a schema-valid LLM read whose
+    ONLY residual repair error is reasoning-DEPTH (shallow prose) is KEPT with a
+    warning instead of being destroyed by deterministic fallback. The organism
+    examination found 12 healthy directional reads nuked to the mechanical
+    narrative because their prose covered too few story elements — an authority
+    inversion (mechanical replaces AI over style). Empty direction/phase/
+    reasoning still falls back (content gaps are real failures). Default off."""
+    return os.getenv("BRAIN_KEEP_SHALLOW_REASONING", "false").lower().strip() == "true"
+
+
 def _family_repair_enabled() -> bool:
     """BRAIN-FAMILY-REPAIR (2026-07-09) — gate for the SOFT family-repair turn.
     When on, a bullish/bearish narrative whose playbook/tool family is 'none'
@@ -222,8 +233,14 @@ def _call_llm(brain_input: dict, repair: "dict | None" = None) -> dict:
             messages.append({"role": "user", "content": REPAIR_PROMPT_TEMPLATE.format(
                 errors="\n".join(str(e) for e in repair.get("errors", [])),
                 previous=json.dumps(repair.get("previous", {}), default=str))})
-        resp = client.chat.completions.create(
-            model=model, messages=messages, timeout=timeout)
+        create_kwargs = {"model": model, "messages": messages, "timeout": timeout}
+        # BRAIN-RELIABILITY-2 (2026-07-09) — structured JSON output eliminates
+        # the JSONDecodeError fallback class (malformed JSON destroying healthy
+        # reads). The prompt already demands JSON-only output; this makes the
+        # API enforce it. Default off = legacy request shape.
+        if os.getenv("BRAIN_JSON_MODE", "off").lower().strip() == "on":
+            create_kwargs["response_format"] = {"type": "json_object"}
+        resp = client.chat.completions.create(**create_kwargs)
         content = resp.choices[0].message.content or ""
         out["raw_response"] = content
         try:
@@ -365,6 +382,7 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
         source, fallback_reason = "deterministic", None
         norm_notes, repair_errors, repaired = [], [], False
         family_repair_attempted, family_repair_fixed, family_errors = False, False, []
+        shallow_kept = False   # BRAIN-RELIABILITY-1 audit flag
         taint_clean, taint_paths = scan_payload_taint(brain_input)
         if _llm_enabled() and not taint_clean:
             # AI-BRAIN-H2 — contaminated input: do NOT call the LLM.
@@ -401,6 +419,24 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
                         need, repair_errors = needs_repair(parsed)
                     else:
                         repair_errors.append(f"repair_call_failed:{rep['fallback_reason']}")
+                # ── BRAIN-RELIABILITY-1 (2026-07-09) — style must not beat AI ──
+                # If the ONLY residual errors are shallow_reasoning (prose depth)
+                # and the read carries a real direction, phase, and non-empty
+                # reasoning, KEEP the LLM output with a warning. Content gaps
+                # (empty direction/phase/reasoning) still fall back.
+                if need and _keep_shallow_enabled():
+                    only_style = bool(repair_errors) and all(
+                        str(e).startswith("shallow_reasoning")
+                        for e in repair_errors)
+                    if (only_style
+                            and (parsed.get("narrative_direction") or "").lower()
+                            in ("bullish", "bearish", "conflicted", "neutral")
+                            and (parsed.get("narrative_phase") or "").strip()
+                            and (parsed.get("dominant_reasoning") or "").strip()):
+                        need = False
+                        shallow_kept = True
+                        parsed.setdefault("warnings", []).append(
+                            f"shallow_reasoning_kept: {repair_errors}")
                 if need:
                     # repair did not fix it → EXPLICIT fallback (logged)
                     source = "llm_failed_fallback"
@@ -496,6 +532,8 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             "family_repair_fixed": family_repair_fixed,
             "family_repair_errors": family_errors,
             "family_repair_usage": (llm_call or {}).get("family_repair_usage"),
+            # BRAIN-RELIABILITY-1 — shallow prose kept instead of nuking the read
+            "shallow_reasoning_kept": shallow_kept,
             "input_degraded": brain_input.get("degraded", []),
             "input_payload": brain_input,
             "adaptive_telemetry": adaptive_telemetry,   # ADAPTIVE-1C (observe_only)
@@ -520,6 +558,8 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             # BRAIN-FAMILY-REPAIR (2026-07-09) — soft family-repair telemetry
             "family_repair_attempted": family_repair_attempted,
             "family_repair_fixed": family_repair_fixed,
+            # BRAIN-RELIABILITY-1 — shallow prose kept instead of nuking the read
+            "shallow_reasoning_kept": shallow_kept,
             "input_degraded": brain_input.get("degraded", []),
             "output": output,
             "adaptive_telemetry": adaptive_telemetry,   # ADAPTIVE-1C (observe_only)

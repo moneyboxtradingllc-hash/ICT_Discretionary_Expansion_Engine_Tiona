@@ -64,6 +64,16 @@ $env:AI_RETRIEVAL_ENABLED          = "true"
 # Rollback: set "off".
 $env:BRAIN_FAMILY_REPAIR           = "on"
 
+# ── BRAIN-RELIABILITY (2026-07-09, Mission 3 organism examination):
+# 1) A schema-valid directional LLM read whose ONLY residual repair error is
+#    shallow PROSE is KEPT with a warning instead of being replaced by the
+#    deterministic fallback (12 records + live-replay scans showed healthy reads
+#    nuked over style — an authority inversion). Content gaps still fall back.
+# 2) BRAIN_JSON_MODE=on makes OpenAI enforce JSON output, eliminating the
+#    JSONDecodeError fallback class. Rollback: "false" / "off".
+$env:BRAIN_KEEP_SHALLOW_REASONING  = "true"
+$env:BRAIN_JSON_MODE               = "on"
+
 # ── AI-AUTH-2 — qualification stability floor (AB-7.3c, implemented + tested).
 # A mature persistent thesis prevents a one-scan mechanical dip from collapsing
 # qualified->no_trade. Complements the Brain-sovereignty repair; never overrides
