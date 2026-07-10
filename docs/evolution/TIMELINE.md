@@ -5,7 +5,7 @@ lab/ablation artifact; a claim without an artifact renders as PENDING._
 _`REJECTED` and `NO CHANGE` entries are displayed with the same
 prominence as wins — they are the credibility of this document._
 
-_Rendered 2026-07-10T14:08:03.350912+00:00 — 13 milestones on a 141-commit spine._
+_Rendered 2026-07-10T15:00:48.305252+00:00 — 14 milestones on a 143-commit spine._
 
 ## 2026-07-08
 
@@ -108,4 +108,11 @@ _Rendered 2026-07-10T14:08:03.350912+00:00 — 13 milestones on a 141-commit spi
 - **Evidence:** _none — pending until an artifact exists_
 - **Commit:** `d34dc21`
 
-<sub>spine: `1fcba8c` ADAPT-LOOP-2 - Adaptive effect ledger and resolver · `12ceed0` ADAPT-LOOP-3 - Brain accuracy table and self-track-record feed · `9d409b5` ADAPT-LOOP-3B - Brain thesis quality grading · `d34dc21` ADAPT-LOOP-4 - Earn-back governance with replay gate · `85e204e` ADAPT-LOOP-5 - Retire recommendation engine · `48b1a79` REPLAY-4 - Counterfactual decision laboratory</sub>
+### [VALIDATED] BRAIN-LIFECYCLE-ENFORCE
+
+- **Change:** AB-7 persistent thesis promoted shadow->enforce (dormant since AB-7)
+- **Measured:** brain-direction flicker 70/48 per session; sovereignty 27/18 recorded → flicker 41/24 (halved); sovereignty 49/38; would_authorize unchanged
+- **Evidence:** `replay ablation 20260708+20260709 (recorded, deterministic)`
+- **Commit:** `134a708`
+
+<sub>spine: `1fcba8c` ADAPT-LOOP-2 - Adaptive effect ledger and resolver · `12ceed0` ADAPT-LOOP-3 - Brain accuracy table and self-track-record feed · `9d409b5` ADAPT-LOOP-3B - Brain thesis quality grading · `d34dc21` ADAPT-LOOP-4 - Earn-back governance with replay gate · `85e204e` ADAPT-LOOP-5 - Retire recommendation engine · `48b1a79` REPLAY-4 - Counterfactual decision laboratory · `e295fc8` ADAPT-LOOP-6 - Organism health monitor and evolution timeline · `134a708` BRAIN-LIFECYCLE-ENFORCE - Persistent thesis promoted to enforce</sub>
