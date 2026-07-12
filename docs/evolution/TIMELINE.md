@@ -5,7 +5,7 @@ lab/ablation artifact; a claim without an artifact renders as PENDING._
 _`REJECTED` and `NO CHANGE` entries are displayed with the same
 prominence as wins — they are the credibility of this document._
 
-_Rendered 2026-07-12T02:00:48.184378+00:00 — 22 milestones on a 159-commit spine._
+_Rendered 2026-07-12T03:34:28.495530+00:00 — 23 milestones on a 161-commit spine._
 
 ## 2026-07-10
 
@@ -31,6 +31,17 @@ _Rendered 2026-07-12T02:00:48.184378+00:00 — 22 milestones on a 159-commit spi
 - **Commit:** `63721ad`
 
 <sub>spine: `1fcba8c` ADAPT-LOOP-2 - Adaptive effect ledger and resolver · `12ceed0` ADAPT-LOOP-3 - Brain accuracy table and self-track-record feed · `9d409b5` ADAPT-LOOP-3B - Brain thesis quality grading · `d34dc21` ADAPT-LOOP-4 - Earn-back governance with replay gate · `85e204e` ADAPT-LOOP-5 - Retire recommendation engine · `48b1a79` REPLAY-4 - Counterfactual decision laboratory · `e295fc8` ADAPT-LOOP-6 - Organism health monitor and evolution timeline · `134a708` BRAIN-LIFECYCLE-ENFORCE - Persistent thesis promoted to enforce · `14a400b` MILESTONE - Brain lifecycle enforce · `734da90` BRAIN-INVALIDATION-REPAIR - Elicit invalidation level · `477f531` MILESTONE - Brain invalidation repair · `1aa2278` BRAIN-MODEL-TRIAL - Model arm support in live brain study · `e15dc90` MILESTONE - Adaptive unblocked lab result · `93b2ee3` AI-BRAIN-REQUIRED - Brain availability operating policy · `1e22d3e` MILESTONE - AI Brain required policy · `09bfc3f` HEALTH-ERA-LABEL - Calibration era quality from commit timestamps · `0b72e1c` MILESTONE - Calibration era labeling · `f605670` INTENT-SCORE-AUDIT - Execution-path quality gate demoted to witness · `df7289c` MILESTONE - Intent score demotion</sub>
+
+## 2026-07-11
+
+### [NO CHANGE] NA-1-AUDIT
+
+- **Change:** Narrative gate (narrative_permits_trade, NARRATIVE_AUTHORITY=enforce) put on trial via new counterfactual lab override narrative_permits (pre_decision seam; evidence channel untouched, only gate-read veto fields flip; prong provenance recorded). NO code change to authority — the gate KEEPS enforce.
+- **Measured:** last mechanical judge with live gate authority, never measured; anatomy looked suspect (AI lens structurally empty live; mechanical-quarrel global kill possible) → 22 sessions / 12,043 scans: veto touches 31.8pct of scans; 50 binding vetoes -> 38 scored suppressed trades = 10W/21L/7BE, net -1.0R AVOIDED (protective); suspect wide_lens_vs_structure prong fired ZERO times — live vetoes are 100pct protected-swing zone doctrine. VERDICT: NO CHANGE, gate vindicated (2nd judge to survive trial after council)
+- **Evidence:** `data/replay/reports/na1_audit_20260711.json`
+- **Commit:** `47b78c4`
+
+<sub>spine: `fa15e4b` TIER-2A - Legacy AI wrapper retirement · `271ae2d` MILESTONE - TIER-2A wrapper retirement · `1e2f689` TIER-2B - Dead journal package retirement · `c980bdf` MILESTONE - TIER-2B journal retirement · `63721ad` VOLUME-WITNESS - Participation sense organ · `6fad982` MILESTONE - Volume witness organ · `47b78c4` NA-1-AUDIT - Narrative gate vindicated</sub>
 
 ## 2026-07-08
 
