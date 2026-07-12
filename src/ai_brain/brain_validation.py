@@ -316,6 +316,44 @@ def invalidation_side_ok(direction: str, invalidation_level,
     return inv > px if str(direction).lower() == "bearish" else inv < px
 
 
+# ── BRAIN-INVALIDATION-SIDE-CHECK (2026-07-12): initial reads, same guard ─────
+# BRAIN-INVALIDATION-REPAIR side-checked repair ADOPTIONS only; an INITIAL read
+# with a numeric invalidation on the WRONG side of price (a bearish thesis
+# "dying" below price) passed unguarded (~5% of directional reads, the #9 watch
+# item). This detector names that defect so narrative_brain can strip the
+# poisoned level — turning it into an ordinary invalidation GAP that the
+# existing detector + guarded soft repair already know how to handle.
+
+def wrong_side_initial_invalidation(parsed: dict, current_price) -> tuple:
+    """(wrong_side: bool, errors[]). True when narrative_direction is
+    bullish/bearish AND invalidation_level is numeric AND it sits on the wrong
+    side of a KNOWN current price. Unknown price never fires (the check must
+    not be stricter than the organism's own knowledge). Never raises."""
+    try:
+        out = parsed or {}
+        direction = (out.get("narrative_direction") or "neutral").lower().strip()
+        if direction not in ("bullish", "bearish"):
+            return False, []
+        inv = out.get("invalidation_level")
+        if not isinstance(inv, (int, float)) or isinstance(inv, bool):
+            return False, []   # missing/non-numeric is the GAP detector's case
+        try:
+            px = float(current_price)
+        except (TypeError, ValueError):
+            return False, []   # unknown price: accept, exactly like the guard
+        if invalidation_side_ok(direction, inv, px):
+            return False, []
+        expected = "ABOVE" if direction == "bearish" else "BELOW"
+        return True, [
+            f"wrong_side_invalidation: {direction} thesis with "
+            f"invalidation_level={inv} on the wrong side of price {px} — a "
+            f"{direction} thesis dies {expected} price. The defective level "
+            "was removed; name the correct level (the opposing protected "
+            "swing, the reclaim level, or the zone origin)"]
+    except Exception as exc:  # noqa: BLE001
+        return False, [f"side_check_error:{exc}"]
+
+
 # ── AI-BRAIN-H2: prompt-input taint guard ─────────────────────────────────────
 import json as _json
 

@@ -46,6 +46,7 @@ from ai_brain.brain_schema import (
 from ai_brain.brain_validation import (
     normalize_output, needs_repair, scan_payload_taint, directional_family_gap,
     directional_invalidation_gap, invalidation_side_ok,
+    wrong_side_initial_invalidation,
 )
 from ai_brain.brain_persistence import persist_brain_call
 from narrative_authority.narrative_engine import build_narrative
@@ -82,6 +83,17 @@ def _invalidation_repair_enabled() -> bool:
     price (a bearish stop above, bullish below) — a hallucinated level is
     refused and the original read stands. Never falls back. Default off."""
     return os.getenv("BRAIN_INVALIDATION_REPAIR", "off").lower().strip() == "on"
+
+
+def _invalidation_side_check_enabled() -> bool:
+    """BRAIN-INVALIDATION-SIDE-CHECK (2026-07-12) — gate for the INITIAL-read
+    side guard (the #9 watch item: repair adoptions were side-checked, initial
+    reads were not). When on, a directional read whose numeric
+    invalidation_level sits on the WRONG side of a known price has that level
+    STRIPPED (recorded in telemetry) — becoming an ordinary invalidation gap
+    the existing detector + guarded soft repair already handle. Direction is
+    never touched; unknown price never fires; default off = byte-identical."""
+    return os.getenv("BRAIN_INVALIDATION_SIDE_CHECK", "off").lower().strip() == "on"
 
 
 def _family_repair_enabled() -> bool:
@@ -409,6 +421,7 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
         family_repair_attempted, family_repair_fixed, family_errors = False, False, []
         invalidation_repair_attempted, invalidation_repair_fixed = False, False
         invalidation_errors: list = []
+        side_check_flagged, side_check_stripped = False, None   # SIDE-CHECK audit
         shallow_kept = False   # BRAIN-RELIABILITY-1 audit flag
         taint_clean, taint_paths = scan_payload_taint(brain_input)
         if _llm_enabled() and not taint_clean:
@@ -500,6 +513,24 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
                                 family_repair_fixed = True
                                 llm_call["family_repair_usage"] = frep.get("usage")
 
+                    # ── BRAIN-INVALIDATION-SIDE-CHECK (2026-07-12) ────────────
+                    # Initial-read guard (the #9 watch item): a directional read
+                    # whose NUMERIC invalidation sits on the wrong side of a
+                    # known price is a poisoned stop reference. Strip the level
+                    # (recorded below) so it becomes an ordinary invalidation
+                    # GAP — the existing detector + guarded repair take over.
+                    # Direction untouched; unknown price never fires.
+                    side_errors: list = []
+                    if _invalidation_side_check_enabled():
+                        _wrong, side_errors = wrong_side_initial_invalidation(
+                            parsed,
+                            (brain_input.get("market") or {}).get("current_price"))
+                        if _wrong:
+                            side_check_flagged = True
+                            side_check_stripped = parsed.get("invalidation_level")
+                            parsed = dict(parsed)
+                            parsed["invalidation_level"] = None
+
                     # ── BRAIN-INVALIDATION-REPAIR (2026-07-10) — SOFT turn ────
                     # A directional read that refuses to name where it is WRONG
                     # (invalidation_level null — 73% of directional reads) gets
@@ -508,6 +539,10 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
                     # side of price — hallucinated stops are refused. The
                     # ORIGINAL read stands on any failure; never falls back.
                     inv_gap, invalidation_errors = directional_invalidation_gap(parsed)
+                    if side_errors:
+                        # tell the repair turn WHY the level was removed, not
+                        # just that it is missing
+                        invalidation_errors = side_errors + invalidation_errors
                     if inv_gap and _invalidation_repair_enabled():
                         invalidation_repair_attempted = True
                         irep = _call_llm(brain_input, repair={
@@ -589,6 +624,9 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             # BRAIN-INVALIDATION-REPAIR (2026-07-10) — soft repair audit trail
             "invalidation_repair_attempted": invalidation_repair_attempted,
             "invalidation_repair_fixed": invalidation_repair_fixed,
+            # BRAIN-INVALIDATION-SIDE-CHECK (2026-07-12) — initial-read guard
+            "invalidation_side_check_flagged": side_check_flagged,
+            "invalidation_side_check_stripped": side_check_stripped,
             "family_repair_errors": family_errors,
             "family_repair_usage": (llm_call or {}).get("family_repair_usage"),
             # BRAIN-RELIABILITY-1 — shallow prose kept instead of nuking the read
@@ -620,6 +658,9 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             # BRAIN-INVALIDATION-REPAIR (2026-07-10) — soft repair audit trail
             "invalidation_repair_attempted": invalidation_repair_attempted,
             "invalidation_repair_fixed": invalidation_repair_fixed,
+            # BRAIN-INVALIDATION-SIDE-CHECK (2026-07-12) — initial-read guard
+            "invalidation_side_check_flagged": side_check_flagged,
+            "invalidation_side_check_stripped": side_check_stripped,
             # BRAIN-RELIABILITY-1 — shallow prose kept instead of nuking the read
             "shallow_reasoning_kept": shallow_kept,
             "input_degraded": brain_input.get("degraded", []),

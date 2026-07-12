@@ -107,6 +107,16 @@ $env:BRAIN_FAMILY_REPAIR           = "on"
 # never falls back, never flips direction. Rollback: "off".
 $env:BRAIN_INVALIDATION_REPAIR     = "on"
 
+# ── BRAIN-INVALIDATION-SIDE-CHECK (2026-07-12): the #9 watch item closed.
+# Repair ADOPTIONS were side-checked; INITIAL reads were not — a directional
+# read with a numeric invalidation on the WRONG side of price (bearish thesis
+# "dying" below price) passed unguarded as a poisoned stop reference. When on,
+# the level is STRIPPED (recorded in telemetry as invalidation_side_check_
+# flagged/stripped) and becomes an ordinary invalidation gap for the existing
+# guarded repair turn. Direction never touched; unknown price never fires.
+# Rollback: "off".
+$env:BRAIN_INVALIDATION_SIDE_CHECK = "on"
+
 # ── BRAIN-RELIABILITY (2026-07-09, Mission 3 organism examination):
 # 1) A schema-valid directional LLM read whose ONLY residual repair error is
 #    shallow PROSE is KEPT with a warning instead of being replaced by the
