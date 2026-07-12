@@ -5,7 +5,7 @@ lab/ablation artifact; a claim without an artifact renders as PENDING._
 _`REJECTED` and `NO CHANGE` entries are displayed with the same
 prominence as wins — they are the credibility of this document._
 
-_Rendered 2026-07-12T04:07:49.183188+00:00 — 24 milestones on a 163-commit spine._
+_Rendered 2026-07-12T08:54:49.275979+00:00 — 25 milestones on a 165-commit spine._
 
 ## 2026-07-10
 
@@ -49,6 +49,17 @@ _Rendered 2026-07-12T04:07:49.183188+00:00 — 24 milestones on a 163-commit spi
 - **Commit:** `6f82ee8`
 
 <sub>spine: `fa15e4b` TIER-2A - Legacy AI wrapper retirement · `271ae2d` MILESTONE - TIER-2A wrapper retirement · `1e2f689` TIER-2B - Dead journal package retirement · `c980bdf` MILESTONE - TIER-2B journal retirement · `63721ad` VOLUME-WITNESS - Participation sense organ · `6fad982` MILESTONE - Volume witness organ · `47b78c4` NA-1-AUDIT - Narrative gate vindicated · `2b76f17` MILESTONE - Narrative gate trial</sub>
+
+## 2026-07-12
+
+### [VALIDATED] SIDE-CHECK
+
+- **Change:** Initial-read invalidation side guard (BRAIN_INVALIDATION_SIDE_CHECK, launcher on, default off): a directional read whose numeric invalidation sits on the WRONG side of a known price has the poisoned level STRIPPED (telemetry: invalidation_side_check_flagged/stripped) and becomes an ordinary invalidation gap for the existing guarded repair turn (which is told WHY). Direction never touched; unknown price never fires; repair adoption side-guard unchanged.
+- **Measured:** watch item estimated ~5pct wrong-side INITIAL reads passing unguarded (repair adoptions were side-checked, initial reads were not) → MEASURED 4x worse: 83/394 (21.1pct) of checkable directional LLM reads carried a wrong-side invalidation (bullish theses 'dying' ABOVE price — target named as stop; incl. degenerate inv==px). All 83 would now be stripped->repaired-or-honest-null. Suite 1814 (11 new tests). Live repair-fix rate measurable when credits/live sessions resume
+- **Evidence:** `data/replay/reports/invalidation_side_check_20260712.json`
+- **Commit:** `67d76d2`
+
+<sub>spine: `6f82ee8` R-001-AUDIT - Promoted rule demoted to shadow · `642c42e` MILESTONE - R-001 demotion · `67d76d2` SIDE-CHECK - Initial-read invalidation guard</sub>
 
 ## 2026-07-08
 
