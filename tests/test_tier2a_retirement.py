@@ -30,6 +30,9 @@ RETIRED_MODULES = (
     "ai_layer.shadow_ai_evaluator",
     "live_scan.ai_refresh_controller",
     "ai_brain.divergence",
+    # TIER-2B (2026-07-10) — dead Phase-3 stub package (pass-only, zero
+    # importers); the REAL journal is paper_execution/trade_journal.py
+    "journal.trade_journal",
 )
 
 KEPT_MODULES = (
