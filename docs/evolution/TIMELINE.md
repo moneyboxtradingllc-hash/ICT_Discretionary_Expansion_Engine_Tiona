@@ -5,7 +5,7 @@ lab/ablation artifact; a claim without an artifact renders as PENDING._
 _`REJECTED` and `NO CHANGE` entries are displayed with the same
 prominence as wins — they are the credibility of this document._
 
-_Rendered 2026-07-12T09:14:24.351627+00:00 — 26 milestones on a 166-commit spine._
+_Rendered 2026-07-12T19:07:44.979944+00:00 — 26 milestones on a 167-commit spine._
 
 ## 2026-07-10
 
@@ -66,7 +66,7 @@ _Rendered 2026-07-12T09:14:24.351627+00:00 — 26 milestones on a 166-commit spi
 - **Evidence:** `data/replay/reports/retro_remeasure_20260712.json + organism_health_20260712_050437.json`
 - **Commit:** `7427a1c`
 
-<sub>spine: `6f82ee8` R-001-AUDIT - Promoted rule demoted to shadow · `642c42e` MILESTONE - R-001 demotion · `67d76d2` SIDE-CHECK - Initial-read invalidation guard · `7427a1c` MILESTONE - Invalidation side check</sub>
+<sub>spine: `6f82ee8` R-001-AUDIT - Promoted rule demoted to shadow · `642c42e` MILESTONE - R-001 demotion · `67d76d2` SIDE-CHECK - Initial-read invalidation guard · `7427a1c` MILESTONE - Invalidation side check · `2e6aa43` MILESTONE - Retro-remeasure of timeline claims</sub>
 
 ## 2026-07-08
 

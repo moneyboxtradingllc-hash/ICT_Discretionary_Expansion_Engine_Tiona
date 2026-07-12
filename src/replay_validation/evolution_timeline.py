@@ -23,7 +23,8 @@ metric_after/evidence_ref — the changelog's evidence strengthens (or honestly
 weakens) with n.
 
 Store: docs/evolution/milestones.jsonl (committed). Render: docs/evolution/
-TIMELINE.md. Descriptive only — nothing consumes this for authority.
+TIMELINE.md + TIMELINE.html (self-contained dashboard, no network, no CDN —
+open locally). Descriptive only — nothing consumes this for authority.
 
 CLI:
   python -m replay_validation.evolution_timeline add --date 20260710 \\
@@ -43,6 +44,7 @@ _BADGE = {"validated": "[VALIDATED]", "rejected": "[REJECTED]",
 
 MILESTONES_PATH = os.path.join("docs", "evolution", "milestones.jsonl")
 TIMELINE_PATH = os.path.join("docs", "evolution", "TIMELINE.md")
+TIMELINE_HTML_PATH = os.path.join("docs", "evolution", "TIMELINE.html")
 
 
 def _path(base_dir=None):
@@ -177,6 +179,179 @@ def render_markdown(base_dir=None, out_path=None) -> str:
     return md
 
 
+# ── HTML dashboard (2026-07-12, user-approved "later" item) ──────────────────
+# Self-contained: inline CSS/JS, zero network, zero CDN — opens as a local
+# file. Doctrine preserved: negative verdicts get EQUAL visual prominence,
+# forced-pending renders visibly, every card shows its evidence artifact.
+
+_HTML_COLORS = {"validated": "#22c55e", "rejected": "#ef4444",
+                "no_change": "#94a3b8", "pending": "#f59e0b"}
+_HTML_LABEL = {"validated": "VALIDATED", "rejected": "REJECTED",
+               "no_change": "NO CHANGE", "pending": "PENDING"}
+
+
+def _esc(s) -> str:
+    return (str(s).replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;"))
+
+
+def _pretty_date(d: str) -> str:
+    return (f"{d[:4]}-{d[4:6]}-{d[6:8]}"
+            if len(d) == 8 and d.isdigit() else d)
+
+
+def render_html(base_dir=None, out_path=None) -> str:
+    """TIMELINE.html — filterable dashboard over milestones.jsonl.
+    Newest day first; verdict chips filter; free-text search; every card
+    carries verdict / change / measured / evidence / commit."""
+    milestones = load_milestones(base_dir)
+    counts = {v: 0 for v in VERDICTS}
+    for m in milestones:
+        counts[m.get("verdict", "pending")] = \
+            counts.get(m.get("verdict", "pending"), 0) + 1
+
+    cards = []
+    for date in sorted({m["date"] for m in milestones}, reverse=True):
+        day = [m for m in milestones if m["date"] == date]
+        day_html = [f'<h2 class="day">{_esc(_pretty_date(date))}</h2>']
+        for m in day:
+            v = m.get("verdict", "pending")
+            color = _HTML_COLORS.get(v, _HTML_COLORS["pending"])
+            measured = ""
+            if m.get("metric_before") is not None or m.get("metric_after") is not None:
+                measured = (f'<div class="row"><span class="k">Measured</span>'
+                            f'<span class="arrowblock"><span class="before">'
+                            f'{_esc(m.get("metric_before"))}</span>'
+                            f'<span class="arrow">&rarr;</span>'
+                            f'<span class="after">{_esc(m.get("metric_after"))}'
+                            f'</span></span></div>')
+            evidence = (f'<div class="row"><span class="k">Evidence</span>'
+                        f'<code>{_esc(m["evidence_ref"])}</code></div>'
+                        if m.get("evidence_ref") else
+                        '<div class="row"><span class="k">Evidence</span>'
+                        '<em class="noev">none — pending until an artifact '
+                        'exists</em></div>')
+            commit = (f'<div class="row"><span class="k">Commit</span>'
+                      f'<code>{_esc(m["commit"])}</code></div>'
+                      if m.get("commit") else "")
+            forced = ('<div class="forced">&#9888; forced pending — claims '
+                      "don't get badges, artifacts do</div>"
+                      if m.get("forced_pending") else "")
+            day_html.append(
+                f'<article class="card" data-verdict="{_esc(v)}">'
+                f'<header><span class="badge" style="background:{color}">'
+                f'{_HTML_LABEL.get(v, "PENDING")}</span>'
+                f'<span class="mission">{_esc(m["mission"])}</span></header>'
+                f'<p class="change">{_esc(m["change"])}</p>'
+                f'{measured}{evidence}{commit}{forced}</article>')
+        cards.append('<section class="dayblock">' + "".join(day_html)
+                     + "</section>")
+
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    chips = "".join(
+        f'<button class="chip" data-filter="{v}" '
+        f'style="--c:{_HTML_COLORS[v]}">{_HTML_LABEL[v]} '
+        f'<b>{counts.get(v, 0)}</b></button>' for v in VERDICTS)
+
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Organism Evolution Timeline</title>
+<style>
+  :root {{ color-scheme: dark; }}
+  * {{ box-sizing: border-box; margin: 0; }}
+  body {{ background:#0b1220; color:#dbe4f0; font:15px/1.55 system-ui,
+         Segoe UI, sans-serif; padding:2rem 1rem 4rem; }}
+  .wrap {{ max-width: 860px; margin: 0 auto; }}
+  h1 {{ font-size:1.5rem; letter-spacing:.02em; }}
+  .sub {{ color:#7d8aa0; margin:.35rem 0 1.4rem; font-size:.9rem; }}
+  .controls {{ display:flex; flex-wrap:wrap; gap:.5rem; margin-bottom:1.6rem;
+               align-items:center; }}
+  .chip {{ background:#141d31; color:#dbe4f0; border:1px solid var(--c);
+           border-radius:999px; padding:.3rem .8rem; cursor:pointer;
+           font-size:.8rem; }}
+  .chip b {{ color:var(--c); }}
+  .chip.active {{ background:var(--c); color:#0b1220; }}
+  .chip.all {{ --c:#dbe4f0; }}
+  #q {{ flex:1 1 200px; min-width:160px; background:#141d31; color:#dbe4f0;
+        border:1px solid #2a3752; border-radius:8px; padding:.4rem .7rem; }}
+  .day {{ font-size:1.02rem; color:#9fb0c8; border-bottom:1px solid #22304a;
+          padding-bottom:.3rem; margin:1.8rem 0 .9rem; }}
+  .card {{ background:#121b2e; border:1px solid #22304a; border-radius:12px;
+           padding:1rem 1.1rem; margin-bottom:.9rem; }}
+  .card header {{ display:flex; gap:.7rem; align-items:center;
+                  margin-bottom:.55rem; flex-wrap:wrap; }}
+  .badge {{ color:#0b1220; font-weight:700; font-size:.72rem;
+            letter-spacing:.06em; border-radius:6px; padding:.18rem .55rem; }}
+  .mission {{ font-weight:650; font-size:1.02rem; }}
+  .change {{ color:#c3cfdf; margin-bottom:.6rem; }}
+  .row {{ display:flex; gap:.6rem; margin:.3rem 0; font-size:.86rem;
+          align-items:baseline; }}
+  .k {{ color:#7d8aa0; min-width:74px; flex:none; text-transform:uppercase;
+        font-size:.68rem; letter-spacing:.08em; padding-top:.15rem; }}
+  code {{ background:#0e1626; border:1px solid #22304a; border-radius:6px;
+          padding:.08rem .4rem; font-size:.8rem; word-break:break-all; }}
+  .arrowblock {{ display:flex; gap:.5rem; flex-wrap:wrap;
+                 align-items:baseline; }}
+  .before {{ color:#8fa0b8; }}
+  .after {{ color:#e8eefb; }}
+  .arrow {{ color:#5b6b85; }}
+  .noev {{ color:#f59e0b; }}
+  .forced {{ color:#f59e0b; font-size:.8rem; margin-top:.45rem; }}
+  .hidden {{ display:none; }}
+  .doctrine {{ background:#121b2e; border:1px dashed #2a3752; border-radius:12px;
+               padding: .8rem 1rem; color:#9fb0c8; font-size:.85rem;
+               margin-bottom:1.4rem; }}
+</style></head><body><div class="wrap">
+<h1>Organism Evolution Timeline</h1>
+<div class="sub">{len(milestones)} milestones &middot; rendered {stamp}
+&middot; descriptive only — nothing consumes this for authority</div>
+<div class="doctrine">Every badge is backed by a replay / lab / ablation
+artifact; a claim without an artifact renders as PENDING.
+<b>REJECTED and NO CHANGE entries carry the same prominence as wins — they
+are the credibility of this document.</b></div>
+<div class="controls">
+  <button class="chip all active" data-filter="all">ALL
+    <b>{len(milestones)}</b></button>
+  {chips}
+  <input id="q" type="search" placeholder="search missions, changes, evidence&hellip;">
+</div>
+<main id="timeline">
+{"".join(cards)}
+</main></div>
+<script>
+  const chipsEls = document.querySelectorAll('.chip');
+  const q = document.getElementById('q');
+  let verdict = 'all';
+  function apply() {{
+    const needle = q.value.toLowerCase();
+    document.querySelectorAll('.card').forEach(c => {{
+      const okV = verdict === 'all' || c.dataset.verdict === verdict;
+      const okQ = !needle || c.textContent.toLowerCase().includes(needle);
+      c.classList.toggle('hidden', !(okV && okQ));
+    }});
+    document.querySelectorAll('.dayblock').forEach(d => {{
+      d.classList.toggle('hidden',
+        d.querySelectorAll('.card:not(.hidden)').length === 0);
+    }});
+  }}
+  chipsEls.forEach(ch => ch.addEventListener('click', () => {{
+    chipsEls.forEach(x => x.classList.remove('active'));
+    ch.classList.add('active');
+    verdict = ch.dataset.filter;
+    apply();
+  }}));
+  q.addEventListener('input', apply);
+</script></body></html>"""
+
+    path = out_path or (os.path.join(base_dir, "TIMELINE.html") if base_dir
+                        else TIMELINE_HTML_PATH)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(html)
+    return html
+
+
 if __name__ == "__main__":
     import argparse
     p = argparse.ArgumentParser(description="Evolution Timeline")
@@ -201,4 +376,5 @@ if __name__ == "__main__":
         print(json.dumps(m, indent=1))
     else:
         render_markdown()
-        print(f"rendered {TIMELINE_PATH}")
+        render_html()
+        print(f"rendered {TIMELINE_PATH} + {TIMELINE_HTML_PATH}")

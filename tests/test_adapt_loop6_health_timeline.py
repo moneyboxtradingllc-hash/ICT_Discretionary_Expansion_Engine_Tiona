@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from replay_validation.evolution_timeline import (        # noqa: E402
     normalize_milestone, add_milestone, load_milestones, render_markdown,
-    git_spine, VERDICTS,
+    render_html, git_spine, VERDICTS,
 )
 from replay_validation.organism_health import (           # noqa: E402
     brain_trend, governance, posture_drift,
@@ -78,6 +78,56 @@ class TestTimelineRoundTrip(unittest.TestCase):
         self.assertIn("0 → 7", md)
         self.assertIn("_none — pending until an artifact exists_", md)
         self.assertTrue(os.path.exists(os.path.join(self.tmp, "TIMELINE.md")))
+
+
+class TestHtmlDashboard(unittest.TestCase):
+    """DASHBOARD (2026-07-12) — self-contained HTML render of the timeline."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def _seed(self):
+        add_milestone({"date": "20260709", "mission": "WIN", "change": "w",
+                       "metric_before": "0", "metric_after": "7",
+                       "evidence_ref": "suite.json", "verdict": "validated"},
+                      base_dir=self.tmp)
+        add_milestone({"date": "20260710", "mission": "CONTROL", "change": "c",
+                       "evidence_ref": "lab.json", "verdict": "rejected"},
+                      base_dir=self.tmp)
+        # a claim WITHOUT evidence — normalize forces it to pending visibly
+        add_milestone({"date": "20260710", "mission": "ARMED", "change": "a",
+                       "verdict": "validated", "evidence_ref": None},
+                      base_dir=self.tmp)
+
+    def test_render_contains_all_cards_and_equal_prominence(self):
+        self._seed()
+        html = render_html(base_dir=self.tmp)
+        for mission in ("WIN", "CONTROL", "ARMED"):
+            self.assertIn(mission, html)
+        # negative verdict badge rendered exactly like a win (same markup)
+        self.assertIn('data-verdict="rejected"', html)
+        self.assertIn('data-verdict="validated"', html)
+        self.assertIn("REJECTED and NO CHANGE entries carry the same "
+                      "prominence", html)
+        # forced-pending renders its visible marker
+        self.assertIn("forced pending", html)
+        self.assertTrue(os.path.exists(os.path.join(self.tmp, "TIMELINE.html")))
+
+    def test_self_contained_no_network(self):
+        self._seed()
+        html = render_html(base_dir=self.tmp)
+        for needle in ("http://", "https://", "cdn.", "<link", "src="):
+            self.assertNotIn(needle, html, needle)
+
+    def test_user_text_is_escaped(self):
+        add_milestone({"date": "20260710",
+                       "mission": '<script>alert("x")</script>',
+                       "change": "a & b < c", "evidence_ref": "e.json",
+                       "verdict": "validated"}, base_dir=self.tmp)
+        html = render_html(base_dir=self.tmp)
+        self.assertNotIn('<script>alert', html)
+        self.assertIn("&lt;script&gt;", html)
+        self.assertIn("a &amp; b &lt; c", html)
 
 
 class TestGitSpine(unittest.TestCase):
