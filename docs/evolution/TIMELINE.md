@@ -5,7 +5,7 @@ lab/ablation artifact; a claim without an artifact renders as PENDING._
 _`REJECTED` and `NO CHANGE` entries are displayed with the same
 prominence as wins — they are the credibility of this document._
 
-_Rendered 2026-07-12T03:34:28.495530+00:00 — 23 milestones on a 161-commit spine._
+_Rendered 2026-07-12T04:07:49.183188+00:00 — 24 milestones on a 163-commit spine._
 
 ## 2026-07-10
 
@@ -41,7 +41,14 @@ _Rendered 2026-07-12T03:34:28.495530+00:00 — 23 milestones on a 161-commit spi
 - **Evidence:** `data/replay/reports/na1_audit_20260711.json`
 - **Commit:** `47b78c4`
 
-<sub>spine: `fa15e4b` TIER-2A - Legacy AI wrapper retirement · `271ae2d` MILESTONE - TIER-2A wrapper retirement · `1e2f689` TIER-2B - Dead journal package retirement · `c980bdf` MILESTONE - TIER-2B journal retirement · `63721ad` VOLUME-WITNESS - Participation sense organ · `6fad982` MILESTONE - Volume witness organ · `47b78c4` NA-1-AUDIT - Narrative gate vindicated</sub>
+### [VALIDATED] R-001-AUDIT
+
+- **Change:** Promoted rule R-001 (compound hostility) DEMOTED enforce->shadow (launcher + CURRENT_STACK). Rule stays registered — the divergence ledger keeps recording every fire (would-have-blocked evidence continues). Rollback: RULE_GOVERNANCE_MODE=enforce. Re-promotion = its own governance mission.
+- **Measured:** promoted on ONE June-11 trade (-1.34R); fired on 58.8pct of ALL scans; regime input = the DEMOTED classifier's label re-entering as veto basis → flag ablation, 22 sessions: 110 binding vetoes -> 87 scored suppressed trades = 28W/48L/11BE net +3.06R — blocked a net-POSITIVE population with ZERO discrimination (vs council -2.0R and narrative -1.0R, both protective, both kept). Suite 1803
+- **Evidence:** `data/replay/reports/r001_audit_20260711.json`
+- **Commit:** `6f82ee8`
+
+<sub>spine: `fa15e4b` TIER-2A - Legacy AI wrapper retirement · `271ae2d` MILESTONE - TIER-2A wrapper retirement · `1e2f689` TIER-2B - Dead journal package retirement · `c980bdf` MILESTONE - TIER-2B journal retirement · `63721ad` VOLUME-WITNESS - Participation sense organ · `6fad982` MILESTONE - Volume witness organ · `47b78c4` NA-1-AUDIT - Narrative gate vindicated · `2b76f17` MILESTONE - Narrative gate trial</sub>
 
 ## 2026-07-08
 
