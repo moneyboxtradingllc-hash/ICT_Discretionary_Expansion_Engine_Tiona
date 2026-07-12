@@ -5,7 +5,7 @@ lab/ablation artifact; a claim without an artifact renders as PENDING._
 _`REJECTED` and `NO CHANGE` entries are displayed with the same
 prominence as wins — they are the credibility of this document._
 
-_Rendered 2026-07-12T08:54:49.275979+00:00 — 25 milestones on a 165-commit spine._
+_Rendered 2026-07-12T09:14:24.351627+00:00 — 26 milestones on a 166-commit spine._
 
 ## 2026-07-10
 
@@ -59,7 +59,14 @@ _Rendered 2026-07-12T08:54:49.275979+00:00 — 25 milestones on a 165-commit spi
 - **Evidence:** `data/replay/reports/invalidation_side_check_20260712.json`
 - **Commit:** `67d76d2`
 
-<sub>spine: `6f82ee8` R-001-AUDIT - Promoted rule demoted to shadow · `642c42e` MILESTONE - R-001 demotion · `67d76d2` SIDE-CHECK - Initial-read invalidation guard</sub>
+### [VALIDATED] RETRO-REMEASURE
+
+- **Change:** First periodic retro-remeasure: earlier milestone claims re-tested over the grown 22-session archive (no code changed — pure evidence). Confirmation doctrine and council claims re-tried at the same scale as NA-1/R-001; brain report-card tables rebuilt; organism health refreshed.
+- **Measured:** confirmation doctrine n=2 (0W/2L one day); council vindication n=6 one day (-2.0R, 0709-era config); brain tables n=896; 80-89 bucket -0.27R (n=59) → CONFIRMATION STRENGTHENED 170x: waiving it = 342 trades 101W/184L/57BE net -8.26R (29.5pct win rate, below 2:1 breakeven) — the most valuable constraint ever measured. COUNCIL: era claim HOLDS but on the CURRENT stack its veto is 100pct REDUNDANT (fires ~every scan, 0 binding vetoes in 22 sessions — everything it blocks is already blocked upstream; harmless, kept). TABLES: reproduced exactly (n=896, integrity confirmed, no new data until live resumes). 80-89 pocket moderated to +0.044R (n=51, still parked <100)
+- **Evidence:** `data/replay/reports/retro_remeasure_20260712.json + organism_health_20260712_050437.json`
+- **Commit:** `7427a1c`
+
+<sub>spine: `6f82ee8` R-001-AUDIT - Promoted rule demoted to shadow · `642c42e` MILESTONE - R-001 demotion · `67d76d2` SIDE-CHECK - Initial-read invalidation guard · `7427a1c` MILESTONE - Invalidation side check</sub>
 
 ## 2026-07-08
 
