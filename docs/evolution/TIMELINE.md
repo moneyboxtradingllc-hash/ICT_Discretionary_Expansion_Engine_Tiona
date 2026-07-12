@@ -5,7 +5,7 @@ lab/ablation artifact; a claim without an artifact renders as PENDING._
 _`REJECTED` and `NO CHANGE` entries are displayed with the same
 prominence as wins — they are the credibility of this document._
 
-_Rendered 2026-07-12T19:07:44.979944+00:00 — 26 milestones on a 167-commit spine._
+_Rendered 2026-07-12T22:31:04.157946+00:00 — 27 milestones on a 168-commit spine._
 
 ## 2026-07-10
 
@@ -66,7 +66,14 @@ _Rendered 2026-07-12T19:07:44.979944+00:00 — 26 milestones on a 167-commit spi
 - **Evidence:** `data/replay/reports/retro_remeasure_20260712.json + organism_health_20260712_050437.json`
 - **Commit:** `7427a1c`
 
-<sub>spine: `6f82ee8` R-001-AUDIT - Promoted rule demoted to shadow · `642c42e` MILESTONE - R-001 demotion · `67d76d2` SIDE-CHECK - Initial-read invalidation guard · `7427a1c` MILESTONE - Invalidation side check · `2e6aa43` MILESTONE - Retro-remeasure of timeline claims</sub>
+### [VALIDATED] DASHBOARD
+
+- **Change:** Evolution Timeline HTML dashboard (user idea from ADAPT-LOOP-6, deferred 'later'): render_html() beside render_markdown(); the render CLI now emits TIMELINE.md + TIMELINE.html. Self-contained (inline CSS/JS, zero network/CDN, opens as a local file), verdict-chip filters + free-text search, newest-first day groups, every card carries verdict/change/measured/evidence/commit. Doctrine preserved: negative verdicts equal prominence; forced-pending renders its visible marker; all user text HTML-escaped.
+- **Measured:** timeline readable only as TIMELINE.md prose → 26 milestones rendered as a filterable local dashboard (28.6KB single file); 3 lock tests (equal prominence, self-containment, escaping); suite 1817
+- **Evidence:** `docs/evolution/TIMELINE.html + tests/test_adapt_loop6_health_timeline.py`
+- **Commit:** `8b47e96`
+
+<sub>spine: `6f82ee8` R-001-AUDIT - Promoted rule demoted to shadow · `642c42e` MILESTONE - R-001 demotion · `67d76d2` SIDE-CHECK - Initial-read invalidation guard · `7427a1c` MILESTONE - Invalidation side check · `2e6aa43` MILESTONE - Retro-remeasure of timeline claims · `8b47e96` DASHBOARD - Evolution timeline HTML</sub>
 
 ## 2026-07-08
 
