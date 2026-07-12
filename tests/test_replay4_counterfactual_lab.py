@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from replay_validation.counterfactual_lab import (       # noqa: E402
     OVERRIDES, FORBIDDEN_OVERRIDE_TERMS, run_lab,
     _ov_council_yes, _ov_adaptive_unblocked, _ov_trigger_confirmed,
+    _ov_narrative_permits,
 )
 from replay_validation.replay_session import replay_session  # noqa: E402
 from replay_validation.candle_archive import archive_session  # noqa: E402
@@ -36,10 +37,54 @@ class TestRegistryDoctrine(unittest.TestCase):
         with self.assertRaises(ValueError):
             run_lab("20260708", "risk_doubled")
 
-    def test_v1_registry_contents(self):
+    def test_registry_contents(self):
+        # v1 + NA-1-AUDIT (2026-07-10): narrative_permits — the narrative
+        # gate veto on trial (evidence channel untouched)
         self.assertEqual(set(OVERRIDES),
                          {"council_yes", "adaptive_unblocked",
-                          "trigger_confirmed"})
+                          "trigger_confirmed", "narrative_permits"})
+
+
+class TestNarrativePermitsOverride(unittest.TestCase):
+    """NA-1-AUDIT — flips ONLY the gate-read veto fields at pre_decision."""
+
+    def _snap(self):
+        return {"timestamp": "t1", "narrative_authority": {
+            "trade_allowed": False,
+            "forbidden_trade_direction": "bullish",
+            "conflict_flags": ["wide_lens_vs_structure"],
+            "narrative_direction": "conflicted",
+            "active_liquidity_draw": {"side": "sell_side"},
+        }}
+
+    def test_wrong_seam_is_noop(self):
+        snap = self._snap()
+        _ov_narrative_permits("post_build", snap)
+        self.assertFalse(snap["narrative_authority"]["trade_allowed"])
+        self.assertNotIn("_lab_mutations", snap)
+
+    def test_pre_decision_flips_only_veto_fields(self):
+        snap = self._snap()
+        _ov_narrative_permits("pre_decision", snap)
+        na = snap["narrative_authority"]
+        self.assertTrue(na["trade_allowed"])
+        self.assertIsNone(na["forbidden_trade_direction"])
+        self.assertEqual(na["_lab_forbidden_was"], "bullish")
+        # evidence channel untouched — flags, direction, draw all intact
+        self.assertEqual(na["conflict_flags"], ["wide_lens_vs_structure"])
+        self.assertEqual(na["narrative_direction"], "conflicted")
+        self.assertEqual(na["active_liquidity_draw"], {"side": "sell_side"})
+        self.assertEqual(snap["_lab_mutations"], ["narrative_permits"])
+        self.assertEqual(snap["_lab_prongs"][0]["flipped"],
+                         ["trade_allowed", "forbidden_direction"])
+        self.assertEqual(snap["_lab_prongs"][0]["conflict_flags"],
+                         ["wide_lens_vs_structure"])
+
+    def test_permitting_narrative_not_mutated(self):
+        snap = {"timestamp": "t2", "narrative_authority": {
+            "trade_allowed": True, "forbidden_trade_direction": None}}
+        _ov_narrative_permits("pre_decision", snap)
+        self.assertNotIn("_lab_mutations", snap)
 
 
 class TestOverrideSeams(unittest.TestCase):

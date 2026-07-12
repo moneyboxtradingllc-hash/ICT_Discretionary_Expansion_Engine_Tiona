@@ -25,9 +25,12 @@ Registry (v1):
   trigger_confirmed  what if we hadn't waited for confirmation? (expected to
                      score BADLY per the BOT-VS-MAURICE trial — a negative
                      control proving the lab detects harmful counterfactuals)
+  narrative_permits  NA-1-AUDIT (2026-07-10): what if the narrative gate
+                     hadn't vetoed? (evidence channel untouched — only the
+                     gate-read veto fields flip)
 Deferred (documented, not silently absent): brain_direction_wins (forcing the
-qualification direction is deep surgery), narrative_permits, size_plus_one
-(sizing never runs in replay; the effect-ledger math covers size counterfactuals).
+qualification direction is deep surgery), size_plus_one (sizing never runs in
+replay; the effect-ledger math covers size counterfactuals).
 
 CLI: python -m replay_validation.counterfactual_lab --date 20260709 --override council_yes
 """
@@ -90,10 +93,42 @@ def _ov_trigger_confirmed(stage, snapshot):
         return
 
 
+def _ov_narrative_permits(stage, snapshot):
+    """NA-1-AUDIT — what if the narrative gate hadn't vetoed? Flips only the
+    two GATE-read fields (trade_allowed / forbidden_trade_direction) at
+    pre_decision — AFTER the Brain consumed the narrative evidence inside
+    build_snapshot, so the evidence channel is untouched and only the veto
+    channel is counterfactual. Prong provenance (conflict_flags) is preserved
+    on the mutation record for decomposition."""
+    if stage != "pre_decision":
+        return
+    na = snapshot.get("narrative_authority")
+    if not isinstance(na, dict):
+        return
+    changed = []
+    if not na.get("trade_allowed", True):
+        na["trade_allowed"] = True
+        changed.append("trade_allowed")
+    if na.get("forbidden_trade_direction"):
+        na["_lab_forbidden_was"] = na["forbidden_trade_direction"]
+        na["forbidden_trade_direction"] = None
+        changed.append("forbidden_direction")
+    if changed:
+        na["counterfactual_lab"] = ("narrative_permits: veto suppressed "
+                                    f"({'+'.join(changed)})")
+        snapshot.setdefault("_lab_mutations", []).append("narrative_permits")
+        snapshot.setdefault("_lab_prongs", []).append({
+            "timestamp": snapshot.get("timestamp"),
+            "flipped": changed,
+            "conflict_flags": list(na.get("conflict_flags") or []),
+        })
+
+
 OVERRIDES = {
     "council_yes": _ov_council_yes,
     "adaptive_unblocked": _ov_adaptive_unblocked,
     "trigger_confirmed": _ov_trigger_confirmed,
+    "narrative_permits": _ov_narrative_permits,
 }
 
 # Safety caps are NOT counterfactual variables — the registry must never grow
@@ -156,13 +191,16 @@ def run_lab(date: str, override: str, symbol: str = "QQQ",
         raise ValueError(f"unknown override {override!r}; "
                          f"registry: {sorted(OVERRIDES)}")
     fn = OVERRIDES[override]
-    mutated_scans = []
+    mutated_scans, prong_records = [], []
 
     def hook(stage, snapshot):
         before = len(snapshot.get("_lab_mutations", []) or [])
         fn(stage, snapshot)
         if len(snapshot.get("_lab_mutations", []) or []) > before:
             mutated_scans.append(snapshot.get("timestamp"))
+            prongs = snapshot.get("_lab_prongs") or []
+            if prongs:
+                prong_records.append(prongs[-1])
 
     baseline = replay_session(date, symbol, flags=flags)
     altered = replay_session(date, symbol, flags=flags, post_stage_hook=hook)
@@ -191,6 +229,8 @@ def run_lab(date: str, override: str, symbol: str = "QQQ",
                             "would_authorize")},
         "scans_diverged": diffs,
         "divergence_by_stage": by_stage,
+        "mutation_prongs": prong_records,   # per-flip provenance (when the
+                                            # override records it; else empty)
         "alternate_history": outcomes,
         "authority": "descriptive_only",
     }
