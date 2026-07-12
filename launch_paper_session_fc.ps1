@@ -32,11 +32,19 @@ $env:DIRECTION_CONFLICT_VETO       = "true"
 $env:ENTRY_ORDER_TYPE              = "market"
 $env:MAX_CHASE_RISK_MULT           = "2.0"
 
-# ── FC-1 — promoted authority: council veto + R-001 enforcement ──────────────
+# ── FC-1 — promoted authority: council veto (measured PROTECTIVE, kept) ──────
 $env:COUNCIL_AUTHORITY             = "enforce"
 $env:COUNCIL_VETO_MIN_NO_VOTES     = "2"
 $env:COUNCIL_VETO_MIN_CONFIDENCE   = "70"
-$env:RULE_GOVERNANCE_MODE          = "enforce"
+# ── R-001-AUDIT (2026-07-11): R-001 DEMOTED enforce→shadow on evidence.
+# 22 sessions / 87 suppressed trades: 28W/48L/11BE net +3.06R — the rule
+# blocked a net-POSITIVE population with ZERO discrimination while firing on
+# 58.8% of all scans (vs council −2.0R and narrative −1.0R, both protective).
+# Its regime input is the demoted classifier's label. Shadow keeps the
+# divergence ledger recording every fire (would-have-blocked evidence
+# continues). Re-promotion = its own governance mission (no auto path back).
+# Rollback: "enforce".
+$env:RULE_GOVERNANCE_MODE          = "shadow"
 $env:PROMOTED_RULES                = "R-001"
 
 # ── FC-2 — live thesis exits (TFX-001 promotion) ─────────────────────────────

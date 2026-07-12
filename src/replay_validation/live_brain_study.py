@@ -61,6 +61,10 @@ CURRENT_STACK = dict(BASE, **{
     "BRAIN_FAMILY_REPAIR": "on",
     "BRAIN_INVALIDATION_REPAIR": "on",
     "BRAIN_ACCURACY_CONTEXT": "on",
+    # INTENT-SCORE-AUDIT (2026-07-10) + R-001-AUDIT (2026-07-11) demotions —
+    # BASE keeps the historical values; the CURRENT stack mirrors the launcher
+    "INTENT_SCORE_MODE": "observe_only",
+    "RULE_GOVERNANCE_MODE": "shadow",
 })
 
 
