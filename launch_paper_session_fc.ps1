@@ -64,6 +64,14 @@ $env:AI_BRAIN_REQUIRED             = "true"
 # tiers and young (fresh sovereign) setups. observe_only = verdict computed +
 # recorded as would_have_blocked telemetry, never a veto. Rollback: "enforce".
 $env:INTENT_SCORE_MODE             = "observe_only"
+
+# ── VOLUME-WITNESS (2026-07-10): relative-volume sense organ. Volume flowed
+# through the whole data plane and was read by NOTHING. Per-TF participation
+# (last/recent volume vs own trailing baseline → dead/quiet/normal/elevated/
+# climactic) attached to the Brain payload as NON-DIRECTIONAL conviction
+# evidence + prompt clause. Witness only — no gate/risk/decision path reads it
+# (test-locked). Rollback: "off" (organ not computed, payload unchanged).
+$env:VOLUME_WITNESS                = "on"
 # AB-5B/5C — ECU mode: Brain OWNS direction/opportunity/playbook/tool;
 # mechanical layer becomes sensors/validators/executors. Enabled for the ECU test.
 $env:BRAIN_ECU_MODE                = "true"

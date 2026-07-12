@@ -193,6 +193,11 @@ def build_brain_input(snapshot: dict, stance_history: dict) -> dict:
             # the Brain may weigh it, it can never be forced by it).
             **({"htf_memory": snapshot["htf_memory"]}
                if isinstance(snapshot.get("htf_memory"), dict) else {}),
+            # VOLUME-WITNESS — non-directional participation evidence (present
+            # only when VOLUME_WITNESS attached it upstream). Conviction/quality
+            # context only; it never carries or implies a direction.
+            **({"volume_witness": snapshot["volume_witness"]}
+               if isinstance(snapshot.get("volume_witness"), dict) else {}),
         }
     except Exception as exc:  # noqa: BLE001
         return {"timestamp": snapshot.get("timestamp"), "degraded": [f"input_error:{exc}"]}

@@ -25,6 +25,7 @@ import logging
 from ai_brain.brain_input import build_brain_input
 from ai_brain.brain_prompt import (
     BRAIN_SYSTEM_PROMPT, REPAIR_PROMPT_TEMPLATE, NEWS_CONTEXT_ADDENDUM,
+    VOLUME_WITNESS_ADDENDUM,
     ADAPTIVE_LEARNING_ADDENDUM, ADAPTIVE_FRICTION_ADDENDUM, MARKET_COMMANDER_ADDENDUM,
 )
 
@@ -209,6 +210,10 @@ def _call_llm(brain_input: dict, repair: "dict | None" = None) -> dict:
     system_prompt = BRAIN_SYSTEM_PROMPT
     if isinstance(brain_input.get("news_context"), dict):
         system_prompt = system_prompt + NEWS_CONTEXT_ADDENDUM
+    # VOLUME-WITNESS — participation clause ONLY when the payload carries the
+    # block (VOLUME_WITNESS=on). Non-directional conviction evidence.
+    if isinstance(brain_input.get("volume_witness"), dict):
+        system_prompt = system_prompt + VOLUME_WITNESS_ADDENDUM
     # ADAPTIVE-1C — append the OBSERVE_ONLY cognitive boundary when adaptive
     # context is present (always once wired). Recommendation only; never applied.
     if isinstance(brain_input.get("adaptive_learning_context"), dict):

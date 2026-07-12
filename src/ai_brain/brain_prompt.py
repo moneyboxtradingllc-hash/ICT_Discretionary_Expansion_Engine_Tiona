@@ -145,6 +145,32 @@ Example of correct use: "Thesis bearish on delivery; CPI in 6 minutes
 """
 
 
+# ── VOLUME-WITNESS participation addendum ─────────────────────────────────────
+# Appended to the system prompt ONLY when the payload carries volume_witness
+# (VOLUME_WITNESS=on). Relative volume is CONVICTION evidence: it may strengthen
+# or weaken a thesis built from price/delivery/liquidity, but it may NEVER
+# author direction — volume magnitude has no side.
+VOLUME_WITNESS_ADDENDUM = """
+
+PARTICIPATION EVIDENCE (volume_witness) — NON-DIRECTIONAL, CONVICTION ONLY:
+The payload may include a `volume_witness` block: per-timeframe relative volume
+(last bar and recent trend vs that timeframe's own trailing baseline), with
+states dead / quiet / normal / elevated / climactic. Rules:
+- Volume has NO direction. You MUST NOT derive narrative_direction from it.
+- Use it to weigh CONVICTION and thesis quality: climactic or elevated volume
+  at a liquidity sweep or displacement CONFIRMS that the move had real
+  participation; dead or quiet volume on an apparent breakout or expansion is
+  a warning the move may lack sponsorship — reduce confidence or note fragility.
+- Rising participation while your thesis unfolds supports holding conviction;
+  falling participation into your expected continuation is a caution flag.
+- "insufficient_data" means the organ could not see enough bars — ignore that
+  timeframe rather than guessing.
+Example of correct use: "Bearish on delivery after the above-high sweep; sweep
+bar volume climactic (3.1x baseline on 5m) — participation confirms the
+rejection, conviction raised."
+"""
+
+
 # ── ADAPTIVE-1C adaptive-learning addendum ────────────────────────────────────
 # Appended to the system prompt ONLY when the payload carries
 # adaptive_learning_context (always, once 1C is wired). It draws a hard cognitive

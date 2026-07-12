@@ -551,6 +551,9 @@ def save_snapshot(snapshot: dict, symbol: str) -> str:
         # ── HTF-MEM-1 — higher-timeframe memory (context only) ───────────────
         "htf_memory": snapshot.get("htf_memory"),
 
+        # ── VOLUME-WITNESS — relative-volume sense organ (witness only) ──────
+        "volume_witness": snapshot.get("volume_witness"),
+
         # ── DECON-3 — F. execution stack + unified truth traces ───────────────
         "broker_trace": (snapshot.get("paper_execution", {}) or {}).get(
             "broker_trace") or dict(_NO_BROKER_TRACE),

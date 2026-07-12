@@ -187,6 +187,19 @@ def build_snapshot(
     if news_enabled():
         snapshot["news_context"] = build_news_context(snapshot.get("timestamp"))
 
+    # ── VOLUME-WITNESS — participation sense organ (gated VOLUME_WITNESS) ─────
+    # Non-directional participation evidence attached BEFORE the ECU pre-pass:
+    # per-TF relative volume + z-score + same-minute-of-day percentile (replay-
+    # built baseline table) + sweep/displacement association (EXISTING sensors'
+    # events only — no re-detection) + IEX venue provenance. WITNESS ONLY: no
+    # gate/risk/qualification/decision path reads it (test-locked). When OFF,
+    # skipped entirely — pipeline bit-for-bit unchanged.
+    from market_data.volume_witness import volume_witness_enabled, build_volume_witness
+    if volume_witness_enabled():
+        snapshot["volume_witness"] = build_volume_witness(
+            all_normalized, liquidity=liquidity, expansion=expansion,
+            symbol=symbol or snapshot.get("symbol"))
+
     # ── HTF-MEM-1 — higher-timeframe memory (CONTEXT ONLY) ─────────────────────
     # Multi-day context (previous day/session, weekly direction, gap, untapped
     # liquidity) computed by the scan loop's HtfMemoryEngine and attached BEFORE

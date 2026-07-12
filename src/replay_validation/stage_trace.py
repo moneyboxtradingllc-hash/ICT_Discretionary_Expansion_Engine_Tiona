@@ -13,9 +13,13 @@ fields are marked non-comparable there (see PERCEPTION_FIELDS).
 import json
 
 # Ordered stages; each field lives in exactly one stage.
+# "witness" is LAST by design (VOLUME-WITNESS): observe-only telemetry that can
+# never be the cause of an upstream divergence — a run differing only in
+# witness fields diverges at the witness stage, keeping every decision stage
+# comparable across witness-on/off configurations.
 STAGES = (
     "perception", "narrative", "brain", "qualification", "playbook",
-    "toolbox", "trigger", "decision", "gate", "intent",
+    "toolbox", "trigger", "decision", "gate", "intent", "witness",
 )
 
 STAGE_OWNER = {
@@ -29,6 +33,7 @@ STAGE_OWNER = {
     "decision":      "decision_authority/decision_engine.py",
     "gate":          "execution_gate/execution_gate.py",
     "intent":        "trade_intent/intent_builder.py",
+    "witness":       "market_data/volume_witness.py",
 }
 
 # Fields only reproducible from raw candles — absent from stored live snapshots.
@@ -88,6 +93,9 @@ _SCHEMA = (
     _field("gate", "would_authorize"), _field("gate", "gate_blockers"),
     _field("intent", "intent_created"), _field("intent", "intent_type"),
     _field("intent", "intent_gated_score"), _field("intent", "intent_gated_quality"),
+    # VOLUME-WITNESS — observe-only telemetry, LAST by design (see STAGES note)
+    _field("witness", "volume_participation"), _field("witness", "volume_relative_1m"),
+    _field("witness", "volume_sweep_relative"),
 )
 
 
@@ -171,6 +179,13 @@ def build_stage_trace(snapshot: dict) -> dict:
         # INTENT-SCORE-AUDIT — the execution-path quality gate's verdict
         "intent_gated_score": (s.get("intent_score") or {}).get("gated_score"),
         "intent_gated_quality": (s.get("intent_score") or {}).get("gated_quality"),
+        # VOLUME-WITNESS — observe-only participation telemetry (None when off)
+        "volume_participation": ((s.get("volume_witness") or {}).get("participation")
+                                 or {}).get("state"),
+        "volume_relative_1m": ((s.get("volume_witness") or {}).get("current_bar")
+                               or {}).get("relative_volume_20"),
+        "volume_sweep_relative": ((s.get("volume_witness") or {}).get("sweep_context")
+                                  or {}).get("relative_volume"),
     }
 
 
