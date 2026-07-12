@@ -5,7 +5,7 @@ lab/ablation artifact; a claim without an artifact renders as PENDING._
 _`REJECTED` and `NO CHANGE` entries are displayed with the same
 prominence as wins — they are the credibility of this document._
 
-_Rendered 2026-07-12T01:40:08.618630+00:00 — 21 milestones on a 157-commit spine._
+_Rendered 2026-07-12T02:00:48.184378+00:00 — 22 milestones on a 159-commit spine._
 
 ## 2026-07-10
 
@@ -22,6 +22,13 @@ _Rendered 2026-07-12T01:40:08.618630+00:00 — 21 milestones on a 157-commit spi
 - **Measured:** 6-line stub package shipped in every backup/deploy; zero importers (static, dynamic, CLI, scheduled, artifact, migration — all verified zero) → package gone; suite 1769 passed; lock test forbids revival
 - **Evidence:** `tests/test_tier2a_retirement.py (journal.trade_journal in RETIRED_MODULES)`
 - **Commit:** `1e2f689`
+
+### [VALIDATED] VOLUME-WITNESS
+
+- **Change:** Participation sense organ: per-TF relative volume + z-score + same-minute-of-day percentile (22-session replay-built baseline) + sweep/displacement association (existing sensors' events only) + IEX venue provenance, attached to the Brain payload as NON-DIRECTIONAL conviction evidence with prompt clause. Witness only: no authority path reads it (test-locked); gated VOLUME_WITNESS (launcher on, default off).
+- **Measured:** volume flowed alpaca(IEX)->timeframe_builder->normalizer and was read by NOTHING; Brain traded blind to participation → replay: 372/372 scans ZERO pre-witness divergence, funnels identical; descriptive gradients (n=888 joined rows): fulfilled 24->34pct and invalidated 34->20pct dead->climactic; rising-trend +0.248R vs falling -0.00R; interactions INSUFFICIENT DATA (n<30); ~581 payload tokens/scan; suite 1797
+- **Evidence:** `data/replay/reports/volume_witness_parity_20260710.json + volume_witness_report_*.json`
+- **Commit:** `63721ad`
 
 <sub>spine: `1fcba8c` ADAPT-LOOP-2 - Adaptive effect ledger and resolver · `12ceed0` ADAPT-LOOP-3 - Brain accuracy table and self-track-record feed · `9d409b5` ADAPT-LOOP-3B - Brain thesis quality grading · `d34dc21` ADAPT-LOOP-4 - Earn-back governance with replay gate · `85e204e` ADAPT-LOOP-5 - Retire recommendation engine · `48b1a79` REPLAY-4 - Counterfactual decision laboratory · `e295fc8` ADAPT-LOOP-6 - Organism health monitor and evolution timeline · `134a708` BRAIN-LIFECYCLE-ENFORCE - Persistent thesis promoted to enforce · `14a400b` MILESTONE - Brain lifecycle enforce · `734da90` BRAIN-INVALIDATION-REPAIR - Elicit invalidation level · `477f531` MILESTONE - Brain invalidation repair · `1aa2278` BRAIN-MODEL-TRIAL - Model arm support in live brain study · `e15dc90` MILESTONE - Adaptive unblocked lab result · `93b2ee3` AI-BRAIN-REQUIRED - Brain availability operating policy · `1e22d3e` MILESTONE - AI Brain required policy · `09bfc3f` HEALTH-ERA-LABEL - Calibration era quality from commit timestamps · `0b72e1c` MILESTONE - Calibration era labeling · `f605670` INTENT-SCORE-AUDIT - Execution-path quality gate demoted to witness · `df7289c` MILESTONE - Intent score demotion</sub>
 
