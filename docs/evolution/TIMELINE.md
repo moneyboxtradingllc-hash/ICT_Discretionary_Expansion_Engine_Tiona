@@ -5,7 +5,7 @@ lab/ablation artifact; a claim without an artifact renders as PENDING._
 _`REJECTED` and `NO CHANGE` entries are displayed with the same
 prominence as wins — they are the credibility of this document._
 
-_Rendered 2026-07-12T01:37:50.564762+00:00 — 20 milestones on a 155-commit spine._
+_Rendered 2026-07-12T01:40:08.618630+00:00 — 21 milestones on a 157-commit spine._
 
 ## 2026-07-10
 
@@ -15,6 +15,13 @@ _Rendered 2026-07-12T01:37:50.564762+00:00 — 20 milestones on a 155-commit spi
 - **Measured:** wrapper ran every scan (deterministic mode) + Fable5 shadow API calls; fusion fed Commander council testimony + decision.confidence → replay parity 372/372 scans zero divergence, funnels identical (0708: 6 auth, 0709: 7 auth); suite 1769 passed
 - **Evidence:** `data/replay/reports/tier2a_parity_20260710.json`
 - **Commit:** `fa15e4b`
+
+### [VALIDATED] TIER-2B
+
+- **Change:** Deleted dead journal/ package (Phase-3 stub: empty __init__ + pass-only trade_journal). The real journal is paper_execution/trade_journal.py, untouched.
+- **Measured:** 6-line stub package shipped in every backup/deploy; zero importers (static, dynamic, CLI, scheduled, artifact, migration — all verified zero) → package gone; suite 1769 passed; lock test forbids revival
+- **Evidence:** `tests/test_tier2a_retirement.py (journal.trade_journal in RETIRED_MODULES)`
+- **Commit:** `1e2f689`
 
 <sub>spine: `1fcba8c` ADAPT-LOOP-2 - Adaptive effect ledger and resolver · `12ceed0` ADAPT-LOOP-3 - Brain accuracy table and self-track-record feed · `9d409b5` ADAPT-LOOP-3B - Brain thesis quality grading · `d34dc21` ADAPT-LOOP-4 - Earn-back governance with replay gate · `85e204e` ADAPT-LOOP-5 - Retire recommendation engine · `48b1a79` REPLAY-4 - Counterfactual decision laboratory · `e295fc8` ADAPT-LOOP-6 - Organism health monitor and evolution timeline · `134a708` BRAIN-LIFECYCLE-ENFORCE - Persistent thesis promoted to enforce · `14a400b` MILESTONE - Brain lifecycle enforce · `734da90` BRAIN-INVALIDATION-REPAIR - Elicit invalidation level · `477f531` MILESTONE - Brain invalidation repair · `1aa2278` BRAIN-MODEL-TRIAL - Model arm support in live brain study · `e15dc90` MILESTONE - Adaptive unblocked lab result · `93b2ee3` AI-BRAIN-REQUIRED - Brain availability operating policy · `1e22d3e` MILESTONE - AI Brain required policy · `09bfc3f` HEALTH-ERA-LABEL - Calibration era quality from commit timestamps · `0b72e1c` MILESTONE - Calibration era labeling · `f605670` INTENT-SCORE-AUDIT - Execution-path quality gate demoted to witness · `df7289c` MILESTONE - Intent score demotion</sub>
 
