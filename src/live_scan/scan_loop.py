@@ -24,7 +24,6 @@ from data_feed.provider_interface    import DataFeedError
 from data_feed.timeframe_builder     import build_timeframes
 from data_feed.market_clock          import is_within_scan_window
 from live_scan.snapshot_store              import save_snapshot
-from live_scan.ai_refresh_controller       import AIRefreshController
 from state_transitions.transition_engine   import analyze_transition
 from setup_lifecycle.setup_tracker         import SetupTracker
 from shared_context.shared_market_context  import build_shared_market_context
@@ -42,14 +41,12 @@ from market_commander.market_commander      import (   # MARKET COMMANDER B1 (ob
 )
 from ai_brain.stance_memory                import StanceMemory
 from ai_brain.thesis_lifecycle             import ThesisLifecycleEngine
-from ai_brain.divergence                   import compute_divergence
 from ai_retrieval.retrieval                import retrieve_for_snapshot
 from rule_governance.shadow_evaluator      import evaluate_shadow_rules
 from rule_governance.divergence_ledger     import append_events, resolve_pending
 from paper_execution.trade_journal         import update_trade_management
 from paper_execution.thesis_monitor        import monitor_thesis
 from paper_execution.position_supremacy    import enforce_position_supremacy
-from ai_layer.shadow_ai_evaluator          import evaluate_shadow_ai
 from decision_authority.decision_engine    import make_decision
 from execution_gate.execution_gate         import evaluate_gate
 from trade_intent.intent_builder           import build_intent
@@ -99,24 +96,9 @@ _EASTERN = pytz.timezone("America/New_York")
 _DIV     = "=" * 60
 
 
-# ── Confidence fusion rebuild ────────────────────────────────────────────────
-# Mirrors _confidence_fusion() in discretionary_ai.py — used after patching
-# a cached external AI result to keep fusion numbers consistent.
-
-def _rebuild_fusion(snapshot: dict) -> dict:
-    ai_conf    = snapshot.get("ai_discretionary", {}).get("ai_confidence", 0)
-    mechanical = snapshot.get("qualification", {}).get("opportunity_score", 0)
-    combined   = round((mechanical + ai_conf) / 2)
-    diff       = abs(mechanical - ai_conf)
-    if   diff <= 15: status = "agreement"
-    elif diff <= 30: status = "mild_disagreement"
-    else:            status = "strong_disagreement"
-    return {
-        "mechanical_score":    mechanical,
-        "ai_confidence":       ai_conf,
-        "combined_confidence": combined,
-        "fusion_status":       status,
-    }
+# TIER-2A (2026-07-10) — legacy AI wrapper retired: discretionary_ai, debate,
+# confidence fusion, shadow evaluator, refresh controller and the wrapper-vs-
+# Brain divergence probe are gone. The ECU Brain is the single AI organ.
 
 
 # ── Per-scan compact console output ─────────────────────────────────────────
@@ -128,8 +110,6 @@ def _print_scan_summary(snapshot: dict, symbol: str, scan_num: int, saved_path: 
     pb   = snapshot.get("playbook",       {})
     risk = snapshot.get("risk",           {})
     tb   = snapshot.get("toolbox",        {})
-    ai   = snapshot.get("ai_discretionary", {})
-    fus  = snapshot.get("confidence_fusion", {})
 
     preferred  = tb.get("preferred_tool") or "no_tool"
     candidates = tb.get("tool_candidates", [])
@@ -141,23 +121,6 @@ def _print_scan_summary(snapshot: dict, symbol: str, scan_num: int, saved_path: 
     tp         = pref_c.get("trigger_prep", {})
     raw_trig   = tp.get("raw_trigger_status",      "n/a")
     eff_trig   = tp.get("effective_trigger_status", "n/a")
-
-    ai_mode        = ai.get("ai_mode", "?")
-    ai_model       = ai.get("model") or "internal"
-    ai_conf        = ai.get("ai_confidence", 0)
-    ai_reused      = ai.get("ai_reused", False)
-    fallback       = ai.get("fallback_used", False)
-    age_secs       = ai.get("ai_last_refresh_age_seconds")
-    ai_ext_att     = ai.get("ai_external_attempted", False)
-    ai_ext_ok      = ai.get("ai_external_success",   False)
-    ai_err_type    = ai.get("ai_external_error_type")
-    ai_model_used  = ai.get("ai_model_used") or ai_model
-    ai_latency     = ai.get("latency_ms")
-
-    mech     = fus.get("mechanical_score",    0)
-    ai_c     = fus.get("ai_confidence",       0)
-    combined = fus.get("combined_confidence", 0)
-    fstatus  = fus.get("fusion_status",       "?")
 
     print(_DIV)
     print(f"LIVE SCAN {now_str} | {symbol} | scan #{scan_num}")
@@ -193,23 +156,6 @@ def _print_scan_summary(snapshot: dict, symbol: str, scan_num: int, saved_path: 
         trig_line += f" -> {eff_trig.upper()}"
     print(f"Trigger       : {trig_line}")
 
-    if ai_reused:
-        reuse_tag = f"reused=true ({age_secs}s ago)"
-    else:
-        reuse_tag = "reused=false"
-    fallback_tag = " [fallback]" if fallback else ""
-    print(f"AI            : {ai_mode} {ai_model}{fallback_tag} | confidence={ai_conf} | {reuse_tag}")
-
-    if ai_ext_att:
-        if ai_ext_ok:
-            lat_str = f" | latency={ai_latency}ms" if ai_latency is not None else ""
-            print(f"AI External   : SUCCESS | model={ai_model_used}{lat_str}")
-        else:
-            err_str = f" | reason={ai_err_type}" if ai_err_type else ""
-            print(f"AI External   : FALLBACK | model={ai_model_used}{err_str}")
-
-    print(f"Fusion        : mechanical={mech} / AI={ai_c} / combined={combined} / {fstatus.upper()}")
-
     st          = snapshot.get("state_transition", {})
     trans_label = st.get("transition", "stable").upper()
     prev_s      = st.get("previous_state", "none")
@@ -221,19 +167,6 @@ def _print_scan_summary(snapshot: dict, symbol: str, scan_num: int, saved_path: 
     if warns:
         trans_line += f"  WARN: {warns[0]}"
     print(f"Transition    : {trans_line}")
-
-    deb     = snapshot.get("ai_debate", {})
-    fv      = deb.get("final_verdict", {})
-    db_bull = deb.get("bullish_thesis",  {}).get("case_strength", 0)
-    db_bear = deb.get("bearish_thesis",  {}).get("case_strength", 0)
-    db_neut = deb.get("neutral_thesis",  {}).get("case_strength", 0)
-    db_stance = (fv.get("recommended_stance") or "stand_down").upper()
-    db_dom    = (fv.get("dominant_thesis")     or "neutral").lower()
-    if deb.get("enabled"):
-        print(
-            f"AI Debate     : bull={db_bull} bear={db_bear} neutral={db_neut}"
-            f" -> {db_stance} ({db_dom} dominant)"
-        )
 
     sl = snapshot.get("setup_lifecycle", {})
     if not sl.get("active"):
@@ -255,22 +188,6 @@ def _print_scan_summary(snapshot: dict, symbol: str, scan_num: int, saved_path: 
             f" | current={sl.get('current_quality','?')}"
             f" | path={path_str}{warn_str}"
         )
-
-    # Phase AI-SHADOW — Fable 5 shadow evaluation (OBSERVE_ONLY)
-    sh = snapshot.get("ai_shadow", {})
-    if sh.get("enabled") and not sh.get("skipped"):
-        if sh.get("success"):
-            print(
-                f"AI Shadow     : provider=Fable5 | stance={sh.get('stance')}"
-                f" | confidence={sh.get('confidence')}"
-                f" | latency={sh.get('latency_ms')}ms"
-                f" | agrees_with_live={str(sh.get('agrees_with_live')).lower()}"
-            )
-        else:
-            print(
-                f"AI Shadow     : provider=Fable5 | FAILED ({str(sh.get('error'))[:60]})"
-                f" | live trading unaffected"
-            )
 
     # Phase 5G — council (OBSERVE_ONLY, informational)
     co = snapshot.get("council", {})
@@ -689,8 +606,6 @@ def _print_loop_summary(
     scan_count: int,
     save_count: int,
     feed_errors: int,
-    ai_ext_calls: int,
-    ai_fallbacks: int,
     start_time: datetime,
 ):
     elapsed = int((datetime.now(_EASTERN) - start_time).total_seconds())
@@ -702,8 +617,6 @@ def _print_loop_summary(
     print(f"  Scans completed    : {scan_count}")
     print(f"  Snapshots saved    : {save_count}")
     print(f"  Feed errors        : {feed_errors}")
-    print(f"  AI external calls  : {ai_ext_calls}")
-    print(f"  AI fallbacks       : {ai_fallbacks}")
     print(f"  Elapsed time       : {mins}m {secs}s")
     print(_DIV)
 
@@ -720,14 +633,8 @@ def run_scan_loop(symbol: str = None, data_provider: str = None):
     end_t      = os.getenv("SCAN_END_TIME",          "15:00")
     interval   = int(os.getenv("SCAN_INTERVAL_SECONDS", "60"))
     max_iter   = int(os.getenv("MAX_SCAN_ITERATIONS",    "0"))
-    ai_refresh = int(os.getenv("AI_REFRESH_SECONDS",     "60"))
-
-    # AI refresh control only applies when the env mode calls external AI
-    ai_env_mode        = os.getenv("AI_MODE", "internal").lower()
-    use_refresh_ctrl   = ai_env_mode in ("external", "hybrid")
 
     memory     = MarketMemory(max_snapshots=20)
-    ai_ctrl    = AIRefreshController(ai_refresh)
     # META-1 — organ self-observation (OBSERVE_ONLY; rolling window per session)
     from adaptive_learning.meta_awareness_engine import MetaAwarenessEngine
     meta_engine = MetaAwarenessEngine(symbol=symbol)
@@ -738,8 +645,6 @@ def run_scan_loop(symbol: str = None, data_provider: str = None):
     scan_count   = 0
     save_count   = 0
     feed_errors  = 0
-    ai_ext_calls = 0
-    ai_fallbacks = 0
     start_time   = datetime.now(_EASTERN)
 
     previous_snapshot        = None
@@ -813,10 +718,6 @@ def run_scan_loop(symbol: str = None, data_provider: str = None):
     limit_str = "unlimited" if max_iter == 0 else str(max_iter)
     print(f"  Interval     : {interval}s | Max iterations : {limit_str}")
     print(f"  Scan window  : {start_t} - {end_t} ET")
-    if use_refresh_ctrl:
-        print(f"  AI refresh   : every {ai_refresh}s + signal-triggered on high-confidence setups")
-    else:
-        print(f"  AI mode      : {ai_env_mode} (runs every scan)")
     print("  Press Ctrl+C to stop")
     print()
 
@@ -874,14 +775,6 @@ def run_scan_loop(symbol: str = None, data_provider: str = None):
             # memory; context (not authority) is passed into the snapshot.
             htf_context = htf_engine.update(candles_1m)
 
-            # ── Decide AI mode for this iteration ─────────────────────────
-            if use_refresh_ctrl:
-                refresh_ai    = ai_ctrl.should_refresh()
-                mode_override = None if refresh_ai else "internal"
-            else:
-                refresh_ai    = True
-                mode_override = None   # honour AI_MODE env var directly
-
             # ── CAPITAL-1 — capital condition (DEFENSIVE evidence; scan loop
             # is the only writer of capital history per the persist contract).
             # Fail-safe: on any error capital contributes NOTHING this scan.
@@ -899,7 +792,6 @@ def run_scan_loop(symbol: str = None, data_provider: str = None):
                 snapshot = build_snapshot(
                     raw_data,
                     memory=memory,
-                    ai_mode_override=mode_override,
                     experience_summary=prev_experience_summary,
                     prior_memory_search=prev_memory_search,
                     prior_dashboard=prev_dashboard,
@@ -915,29 +807,6 @@ def run_scan_loop(symbol: str = None, data_provider: str = None):
                 print(f"  [SNAPSHOT ERROR scan #{scan_count}] {exc}")
                 _sleep_remainder(scan_start, interval)
                 continue
-
-            # ── AI result handling ─────────────────────────────────────────
-            ai_disc = snapshot.get("ai_discretionary", {})
-
-            if use_refresh_ctrl and not refresh_ai and ai_ctrl.has_cached_result:
-                # Inject cached external result and recompute fusion
-                snapshot["ai_discretionary"] = ai_ctrl.get_reused()
-                snapshot["confidence_fusion"] = _rebuild_fusion(snapshot)
-            elif use_refresh_ctrl and refresh_ai:
-                # External was attempted — check outcome
-                if ai_disc.get("external_ai_connected") and not ai_disc.get("fallback_used"):
-                    ai_ctrl.record_refresh(ai_disc)
-                    ai_ext_calls += 1
-                elif ai_disc.get("ai_mode") in ("external", "hybrid") and ai_disc.get("fallback_used"):
-                    ai_fallbacks += 1
-
-            # Ensure ai_reused field is always present
-            if "ai_reused" not in snapshot.get("ai_discretionary", {}):
-                snapshot["ai_discretionary"]["ai_reused"] = False
-
-            # Update controller state for next iteration's refresh decision
-            if use_refresh_ctrl:
-                ai_ctrl.update_state(snapshot)
 
             # ── State transition detection ─────────────────────────────────
             cur_qual = (snapshot.get("qualification", {}).get("status") or "no_trade").lower()
@@ -959,11 +828,6 @@ def run_scan_loop(symbol: str = None, data_provider: str = None):
             # contradiction. It has NO authority: nothing downstream reads it.
             snapshot["shared_context"] = build_shared_market_context(snapshot, symbol)
             snapshot["council"]        = run_council(snapshot["shared_context"])
-
-            # ── Fable 5 Shadow AI (Phase AI-SHADOW — OBSERVE_ONLY) ─────────
-            # Same input as the live AI; zero execution influence; any
-            # failure leaves live trading unaffected. Evidence before authority.
-            snapshot["ai_shadow"] = evaluate_shadow_ai(snapshot, symbol)
 
             # ── Narrative Authority (Phase NA-1) — built upstream in PIPE-1 ─
             # protected_swings + narrative_authority are now assembled inside
@@ -1007,11 +871,6 @@ def run_scan_loop(symbol: str = None, data_provider: str = None):
                     print(f"  [OPS] scan DEGRADED — brain_source="
                           f"{_bh['brain_source']} ({_bh['consecutive_failures']}/"
                           f"{_bh['threshold']})")
-
-            # ── AB-4 — Wrapper vs Brain divergence (OBSERVE_ONLY) ──────────
-            # Both AI paths observed the same scan; measure disagreement.
-            # Pure measurement — influences nothing downstream.
-            snapshot["ai_divergence"] = compute_divergence(snapshot, symbol)
 
             # ── ADAPTIVE-6 — Live overlay consumption (DEFENSIVE_ONLY) ─────
             # Consume the adaptive_confidence overlay by LOWERING
@@ -1222,19 +1081,6 @@ def run_scan_loop(symbol: str = None, data_provider: str = None):
                     "alpaca_order_id": None,
                     "trade_id":        None,
                 }
-            # Phase AI-SHADOW: stamp the shadow stance onto any submitted trade
-            # (evidence joining only — never influences the order itself)
-            _pe = snapshot["paper_execution"]
-            _sh = snapshot.get("ai_shadow", {})
-            if _pe.get("status") == "submitted" and _pe.get("trade_id") and _sh.get("enabled"):
-                update_trade_management(_pe["trade_id"], {"ai_shadow_at_entry": {
-                    "stance":           _sh.get("stance"),
-                    "confidence":       _sh.get("confidence"),
-                    "live_stance":      _sh.get("live_stance"),
-                    "agrees_with_live": _sh.get("agrees_with_live"),
-                    "success":          _sh.get("success"),
-                }}, symbol)
-
             pe_line = format_paper_execution_line(snapshot["paper_execution"])
             if pe_line:
                 snapshot["ai_context"]["summary"] = (
@@ -1462,8 +1308,7 @@ def run_scan_loop(symbol: str = None, data_provider: str = None):
         pass
 
     _print_loop_summary(
-        scan_count, save_count, feed_errors,
-        ai_ext_calls, ai_fallbacks, start_time,
+        scan_count, save_count, feed_errors, start_time,
     )
 
 

@@ -631,7 +631,6 @@ class TestPhase5E5PendingOrderLifecycle(unittest.TestCase):
             "live_scan.scan_loop",
             "setup_lifecycle.setup_tracker",
             "state_transitions.transition_engine",
-            "ai_layer.ai_debate_engine",
             "execution_gate.execution_gate",
             "decision_authority.decision_engine",
         ]

@@ -87,10 +87,11 @@ def _determine_direction(snapshot: dict) -> str:
 
 
 def _confidence(snapshot: dict) -> int:
-    # Reporting-only value: combined_confidence is the ADAPTIVE-6 defensive
-    # consumption target (already lowered when the adaptive overlay fired).
-    # It gates nothing — no authorization path reads decision.confidence.
-    return snapshot.get("confidence_fusion", {}).get("combined_confidence") or 0
+    # TIER-2A (2026-07-10) — the wrapper confidence_fusion that fed this
+    # reporting-only value is RETIRED. It gated nothing before (no
+    # authorization path reads decision.confidence) and reports 0 now; the
+    # key is kept for record-schema stability across eras.
+    return 0
 
 
 # ── Core decision selection ───────────────────────────────────────────────────

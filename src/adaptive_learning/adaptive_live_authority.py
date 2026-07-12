@@ -226,8 +226,12 @@ def record_live_size_consumption(snapshot: dict, original_qty, final_qty,
 def consume_adaptive_overlays(snapshot: dict) -> dict:
     """LIVE, DEFENSIVE_ONLY consumption of the exposed overlays.
 
-    Confidence: lowers ``confidence_fusion.combined_confidence`` to the adaptive
-    final when that is lower (never raises). Size: recorded when a live qty
+    Confidence: TIER-2A (2026-07-10) retired the wrapper's confidence_fusion —
+    the confidence overlay's live target no longer exists, so the isinstance
+    guard below makes confidence consumption a recorded no-op (the actuator is
+    retained for forensic continuity, its target is gone; re-pointing it at a
+    Brain-owned value would be a new, separately-approved mission).
+    Size: recorded when a live qty
     overlay is present (the mainline qty owner is order_builder, a guarded layer,
     so size is resolved via ``resolve_final_qty`` at the legal sizing site, not
     forced here). Soft-block supremacy and every safety layer are untouched — this

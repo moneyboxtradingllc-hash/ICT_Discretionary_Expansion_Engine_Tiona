@@ -15,7 +15,9 @@ from qualification.trade_qualification_engine import qualify_trade
 from playbooks.playbook_classifier import classify_playbook
 from risk.risk_governor import evaluate_risk
 from toolbox.toolbox_engine import run_toolbox
-from ai_layer.discretionary_ai import run_discretionary_ai
+# TIER-2A (2026-07-10) — legacy AI wrapper (discretionary_ai / debate / fusion)
+# retired. The sovereign ECU Brain is the single AI; its thesis exercises
+# authority upstream (qualification/playbook/toolbox direction).
 from regime_classification.regime_classifier import classify_regime
 from regime_authority.regime_permission_matrix import evaluate_regime_permissions
 # ── Phase PIPE-1 — evidence layers the canonical Brain authors from. These were
@@ -34,7 +36,6 @@ def build_snapshot(
     raw_data: dict,
     ref_timestamp: str = None,
     memory=None,
-    ai_mode_override: str = None,
     experience_summary: dict = None,
     prior_memory_search: dict = None,
     prior_dashboard: dict = None,
@@ -342,11 +343,11 @@ def build_snapshot(
     if prior_dashboard:
         snapshot["performance_dashboard"] = prior_dashboard
 
-    # AI Discretionary Engine: interprets the full assembled snapshot
-    ai_disc, confidence_fusion, ai_debate = run_discretionary_ai(snapshot, mode_override=ai_mode_override)
-    snapshot["ai_discretionary"]  = ai_disc
-    snapshot["confidence_fusion"] = confidence_fusion
-    snapshot["ai_debate"]         = ai_debate
+    # TIER-2A (2026-07-10) — the legacy AI wrapper call
+    # (ai_discretionary / confidence_fusion / ai_debate) is RETIRED. Downstream
+    # readers tolerate absence: Commander council testimony reports an explicit
+    # missing_reason; the ADAPTIVE-6 confidence overlay finds no target (its
+    # guard makes it a recorded no-op); decision.confidence reports 0.
 
     # Summary generated last so it sees everything
     ai_context["summary"] = format_for_ai(snapshot)

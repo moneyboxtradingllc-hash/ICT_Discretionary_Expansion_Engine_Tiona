@@ -23,7 +23,6 @@ from performance_intelligence.performance_metrics  import (
 from performance_intelligence.dashboard_builder    import build_dashboard_from_records
 from performance_intelligence.performance_report   import build_performance_report
 from performance_intelligence.dashboard_summary    import build_dashboard_summary
-from ai_layer.ai_input_builder                     import build_compact_ai_input
 from live_scan.snapshot_store                      import save_snapshot
 
 
@@ -309,18 +308,6 @@ class TestSafetyInvariants(unittest.TestCase):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestIntegration(unittest.TestCase):
-
-    def test_14_ai_input_contains_dashboard(self):
-        snap = _snapshot()
-        snap["performance_dashboard"] = build_dashboard_summary(
-            build_dashboard_from_records(_make_sample_records(6, 4))
-        )
-        ai_in = build_compact_ai_input(snap)
-        self.assertIn("performance_dashboard", ai_in)
-        pd = ai_in["performance_dashboard"]
-        self.assertEqual(pd["authority_level"], "observe_only")
-        self.assertIn("performance_quality",    pd)
-        self.assertIn("win_rate",               pd)
 
     def test_15_snapshot_store_contains_dashboard(self):
         import live_scan.snapshot_store as ss_mod

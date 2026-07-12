@@ -2,10 +2,9 @@
 Phase AB-4 — AI Brain authority wiring (OBSERVE MODE) tests (T1-T12).
 
 Brain now consumes retrieval, emits the expanded package, runs parallel to the
-wrapper with divergence logging, and persists stance across restart — all while
-remaining observe-only (no generation/gate/execution influence).
+wrapper (RETIRED — TIER-2A 2026-07-10; divergence tests removed with it) and
+persists stance across restart — all while remaining observe-only.
 """
-import json
 import os
 import sys
 import tempfile
@@ -18,7 +17,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import ai_brain.narrative_brain as nb
 from ai_brain.narrative_brain import run_narrative_brain
 from ai_brain.stance_memory import StanceMemory
-from ai_brain.divergence import compute_divergence
 from ai_brain.brain_schema import validate_brain_output
 from ai_retrieval import vector_store
 from ai_retrieval.memory_schema import make_record
@@ -116,22 +114,6 @@ class T3_SchemaPopulated(_Base):
         self.assertIn("structure_derived", out["direction_provenance"])
 
 
-class T4_DivergenceLogging(_Base):
-    def test_divergence_classified_and_logged(self):
-        snap = _snapshot()
-        snap["ai_brain"] = run_narrative_brain(snap, "QQQ", StanceMemory(persist=False))
-        div = compute_divergence(snap, "QQQ", persist=True)
-        # wrapper bullish@65 vs brain (NA synthesis → conflicted/bearish) must diverge
-        self.assertTrue(div["diverged"])
-        self.assertIn("direction_disagreement", div["classes"])
-        self.assertEqual(div["wrapper_direction"], "bullish")
-        self.assertNotEqual(div["brain_direction"], "bullish")
-        self.assertIsNotNone(div.get("log_path"))
-        rec = json.load(open(div["log_path"], encoding="utf-8"))
-        self.assertIn("wrapper_reasoning", rec)
-        self.assertIn("brain_reasoning", rec)
-
-
 class T5_StanceSurvivesRestart(_Base):
     def test_stance_persists_and_reloads(self):
         m1 = StanceMemory(persist=True)
@@ -167,20 +149,10 @@ class T6_T7_T8_T9_ObserveOnly(_Base):
         os.environ.pop("AI_BRAIN_ENABLED", None)
         res = run_narrative_brain(_snapshot(), "QQQ", StanceMemory(persist=False))
         self.assertFalse(res["enabled"])
-        div = compute_divergence({"ai_brain": res}, "QQQ", persist=False)
-        self.assertFalse(div["enabled"])
 
 
 class T10_T11_Replay(_Base):
     """June 10/11 replay: both AIs observe, brain never authorizes."""
-    def test_june11_long_scan_brain_diverges_from_wrapper(self):
-        snap = _snapshot()  # the 10:29 long scan shape
-        snap["ai_brain"] = run_narrative_brain(snap, "QQQ", StanceMemory(persist=False))
-        div = compute_divergence(snap, "QQQ", persist=False)
-        # wrapper said bullish (the trade that lost); brain did not
-        self.assertEqual(div["wrapper_direction"], "bullish")
-        self.assertNotEqual(div["brain_direction"], "bullish")
-
     def test_brain_provenance_non_structure(self):
         snap = _snapshot()
         res = run_narrative_brain(snap, "QQQ", StanceMemory(persist=False))

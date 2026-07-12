@@ -106,7 +106,9 @@ class MetaAwarenessEngine:
         degraded = bool(degraded) if not isinstance(degraded, list) else bool(degraded)
         source = str(brain.get("source") or "")
 
-        div = s.get("ai_divergence") or {}
+        # TIER-2A (2026-07-10) — wrapper-vs-Brain ai_divergence probe retired
+        # (the wrapper no longer exists to diverge from); conflict detection
+        # now rests on Commander contradictions + narrative conflicts alone.
         mc = s.get("market_commander") or {}
         contradictions = list((mc.get("consistency") or {}).get("contradictions") or [])
         na_conflicts = list((s.get("narrative_authority") or {}).get("conflict_flags") or [])
@@ -131,7 +133,6 @@ class MetaAwarenessEngine:
                 degraded or source in ("deterministic", "fallback_none")),
             "brain_direction":   (out.get("narrative_direction") or "neutral").lower(),
             "brain_confidence":  _num(out.get("phase_confidence")),
-            "diverged":          bool(div.get("diverged")),
             "contradictions":    bool(contradictions or na_conflicts),
             "mutated":           bool((s.get("adaptive_mutation") or {}).get("mutated")),
             "opportunity":       opportunity,
@@ -173,10 +174,10 @@ class MetaAwarenessEngine:
                          f"confidence swing {min(confs)}..{max(confs)} in window")
 
             # ── B. authority conflict (rolling) ──
-            conflict = sum(1 for o in obs if o["diverged"] or o["contradictions"]) / n
+            conflict = sum(1 for o in obs if o["contradictions"]) / n
             if conflict > AUTHORITY_CONFLICT_RATE:
                 _sig("authority", "contradiction_spike", LEVEL_DEGRADED,
-                     f"{conflict:.0%} of scans carry divergence/contradictions")
+                     f"{conflict:.0%} of scans carry contradictions")
 
             # ── C. adaptive instability (rolling part) ──
             mut = sum(1 for o in obs if o["mutated"]) / n

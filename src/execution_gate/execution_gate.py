@@ -112,13 +112,10 @@ def evaluate_gate(snapshot: dict) -> dict:
     risk   = snapshot.get("risk", {})
     sl     = snapshot.get("setup_lifecycle", {})
     st     = snapshot.get("state_transition", {})
-    # AI-AUTH-1 — legacy wrapper demoted to SHADOW: ai_debate and
-    # confidence_fusion are recorded for observability below but hold NO
-    # authorization authority. The ECU Brain is the sole live AI; it exercises
-    # authority upstream (thesis -> qualification/playbook/toolbox direction),
-    # never as a second gate vote.
-    debate = snapshot.get("ai_debate", {})
-    fus    = snapshot.get("confidence_fusion", {})
+    # TIER-2A (2026-07-10) — legacy wrapper (ai_debate/confidence_fusion)
+    # RETIRED entirely; even its shadow observability is gone. The ECU Brain is
+    # the sole AI; it exercises authority upstream (thesis -> qualification/
+    # playbook/toolbox direction), never as a second gate vote.
 
     pref_c = _preferred_candidate(snapshot)
 
@@ -136,11 +133,7 @@ def evaluate_gate(snapshot: dict) -> dict:
     )
     lifecycle_inv  = bool(sl.get("active") and lc_phase == "invalidated")
     setup_not_inv  = not (st_inv or lifecycle_inv)
-    debate_stance  = (
-        debate.get("final_verdict", {}).get("recommended_stance") or "stand_down"
-    ).lower()
     lifecycle_ok   = bool(sl.get("active") and lc_phase not in ("invalidated", "decaying"))
-    fusion_status  = (fus.get("fusion_status") or "").lower()
 
     # ── Phase 5F: regime constraint checks ───────────────────────────────────
     (
@@ -374,9 +367,6 @@ def evaluate_gate(snapshot: dict) -> dict:
         "reason":                     reason,
         "would_authorize_if_enabled": would_authorize,
         "authorization_checks":       auth_checks,
-        # AI-AUTH-1 — legacy wrapper telemetry, SHADOW ONLY (no authority)
-        "ai_debate_stance_observed":  debate_stance,
-        "fusion_status_observed":     fusion_status,
         "blocking_factors":           blocking[:8],
         "warnings":                   warnings[:3],
         # Phase 5F.3 — trigger confirmation enforcement

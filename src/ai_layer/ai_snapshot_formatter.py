@@ -199,68 +199,6 @@ def _memory_line(memory: dict) -> str:
     return "Memory: " + "; ".join(parts) + "."
 
 
-def _debate_line(ai_debate: dict) -> str:
-    """One-line AI debate summary for the snapshot summary string."""
-    if not ai_debate or not ai_debate.get("enabled"):
-        return ""
-    bull    = ai_debate.get("bullish_thesis",  {}).get("case_strength", 0)
-    bear    = ai_debate.get("bearish_thesis",  {}).get("case_strength", 0)
-    neutral = ai_debate.get("neutral_thesis",  {}).get("case_strength", 0)
-    verdict = ai_debate.get("final_verdict",   {})
-    stance  = (verdict.get("recommended_stance") or "stand_down").upper()
-    dom     = verdict.get("dominant_thesis", "neutral")
-    reason  = verdict.get("reason", "")
-    return (
-        f"AI Debate: {dom} thesis dominant at {max(bull, bear, neutral)}. "
-        f"Verdict: {stance.lower()}. Reason: {reason}"
-    )
-
-
-def _discretionary_line(ai_disc: dict, fusion: dict) -> str:
-    """Compact single-line AI discretionary summary for the snapshot summary string."""
-    if not ai_disc:
-        return ""
-
-    direction  = ai_disc.get("ai_direction",  "neutral")
-    confidence = ai_disc.get("ai_confidence",  0)
-    thesis     = ai_disc.get("primary_thesis", "")
-    concerns   = ai_disc.get("concerns",       [])
-    missing    = ai_disc.get("missing_evidence", [])
-    scenario   = ai_disc.get("preferred_scenario", "")
-    agree_pb   = ai_disc.get("agreement_with_playbook", True)
-    agree_risk = ai_disc.get("agreement_with_risk",     True)
-
-    mech     = fusion.get("mechanical_score",    0)
-    combined = fusion.get("combined_confidence", 0)
-    fstatus  = fusion.get("fusion_status",       "unknown")
-
-    parts = [
-        f"AI Direction: {direction}.",
-        f"AI Confidence: {confidence}.",
-    ]
-
-    if not agree_pb:
-        parts.append("AI DISAGREES with playbook direction.")
-    if not agree_risk:
-        parts.append("AI DISAGREES with Risk Governor assessment.")
-
-    if thesis:
-        parts.append(f"Primary Thesis: {thesis}")
-    if missing:
-        parts.append(f"Missing Evidence: {missing[0]}")
-    if concerns:
-        parts.append(f"Concern: {concerns[0]}")
-    if scenario:
-        parts.append(f"Preferred Scenario: {scenario}")
-
-    parts.append(
-        f"Fusion: {fstatus.replace('_', ' ').title()}. "
-        f"Mechanical {mech}, AI {confidence}, Combined {combined}."
-    )
-
-    return " ".join(parts)
-
-
 def format_experience_line(exp: dict) -> str:
     """One-line experience intelligence summary. OBSERVE_ONLY — never influences decisions."""
     if not exp or not exp.get("experience_enabled"):
@@ -712,17 +650,7 @@ def format_for_ai(snapshot: dict) -> str:
     if ep_line:
         parts.append(ep_line)
 
-    # AI Discretionary Engine
-    ai_disc = snapshot.get("ai_discretionary", {})
-    fusion  = snapshot.get("confidence_fusion", {})
-    disc_line = _discretionary_line(ai_disc, fusion)
-    if disc_line:
-        parts.append(disc_line)
-
-    # AI Debate (Phase 1S)
-    debate_line = _debate_line(snapshot.get("ai_debate", {}))
-    if debate_line:
-        parts.append(debate_line)
+    # TIER-2A (2026-07-10) — wrapper discretionary/fusion/debate lines retired
 
     # Execution Gate (Phase 1U)
     gate_line = format_gate_line(snapshot.get("execution_gate", {}))

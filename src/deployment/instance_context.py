@@ -37,7 +37,7 @@ class InstanceContext:
             "intent_archive":     os.path.join(config.memory_path, "intent_archive"),
             "activation_reports": os.path.join(config.log_path, "activation_reports"),
             "rule_governance":    os.path.join(config.memory_path, "rule_governance"),
-            "shadow":             os.path.join(config.memory_path, "ai_shadow"),
+            # "shadow" removed — shadow AI evaluator retired (TIER-2A 2026-07-10)
             "news_memory":        config.news_memory_path,
             "ops":                config.state_path,
         }

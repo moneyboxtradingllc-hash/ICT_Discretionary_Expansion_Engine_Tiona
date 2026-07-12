@@ -81,11 +81,13 @@ class TestSafetyBoundary(unittest.TestCase):
                   encoding="utf-8") as fh:
             txt = fh.read()
         self.assertEqual(txt.count("INTENT_SCORE_MODE"), 2)  # docstring + check
-        for f in (("risk", "risk_governor.py"), ("broker", "broker_adapter.py")):
+        for f in (("risk", "risk_governor.py"),
+                  ("broker", "paper_adapter.py"),
+                  ("paper_execution", "paper_broker.py")):
             path = os.path.join("src", *f)
-            if os.path.exists(path):
-                with open(path, encoding="utf-8") as fh:
-                    self.assertNotIn("INTENT_SCORE_MODE", fh.read())
+            self.assertTrue(os.path.exists(path), path)  # real files, verified
+            with open(path, encoding="utf-8") as fh:
+                self.assertNotIn("INTENT_SCORE_MODE", fh.read())
 
 
 if __name__ == "__main__":

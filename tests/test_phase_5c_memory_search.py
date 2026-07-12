@@ -24,7 +24,6 @@ from memory_search.feature_vector import (
 )
 from memory_search.similarity_search import find_similar_setups
 from memory_search.memory_summary    import build_memory_summary
-from ai_layer.ai_input_builder       import build_compact_ai_input
 from live_scan.snapshot_store        import save_snapshot
 
 
@@ -355,37 +354,8 @@ class TestMemorySummary(unittest.TestCase):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 5. AI Input Integration
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class TestAiInputIntegration(unittest.TestCase):
-
-    def test_15_ai_input_includes_memory_search(self):
-        snap = _snapshot()
-        snap["memory_search"] = {
-            "enabled":             True,
-            "authority_level":     "observe_only",
-            "confidence_modifier": 0,
-            "match_count":         12,
-            "closed_match_count":  8,
-            "best_similarity":     0.91,
-            "similar_win_rate":    62.5,
-            "similar_average_r":   0.84,
-            "memory_quality":      "developing",
-            "top_match_reasons":   ["same regime, playbook, direction"],
-        }
-        ai_input = build_compact_ai_input(snap)
-        self.assertIn("memory_search", ai_input)
-        ms = ai_input["memory_search"]
-        self.assertEqual(ms["authority_level"],    "observe_only")
-        self.assertEqual(ms["match_count"],        12)
-        self.assertEqual(ms["closed_match_count"], 8)
-        self.assertAlmostEqual(ms["best_similarity"], 0.91)
-        self.assertEqual(ms["memory_quality"],     "developing")
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# 6. Snapshot Store Integration
+# 5. Snapshot Store Integration
+#    (AI-input integration test removed with the legacy wrapper — TIER-2A)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestSnapshotStoreIntegration(unittest.TestCase):

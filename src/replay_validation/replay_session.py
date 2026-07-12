@@ -44,7 +44,7 @@ _LOOKBACK_DEFAULT = 300   # scan_loop: SCAN_LOOKBACK_BARS default
 _SAFETY_ENV = {
     "EXECUTION_ENABLED":   "false",
     "ALLOW_PAPER_ORDERS":  "false",
-    "AI_SHADOW_ENABLED":   "false",
+    # AI_SHADOW_ENABLED removed — shadow evaluator retired (TIER-2A 2026-07-10)
     "AI_RETRIEVAL_ENABLED": "false",
     "NEWS_LAYER_ENABLED":  "false",
 }

@@ -136,20 +136,20 @@ def build_authority_trace(snapshot: dict) -> dict:
     """Who owns confidence and qty this scan, with original -> final values."""
     s = snapshot or {}
     c = s.get("adaptive_live_consumption") or {}
-    fus = s.get("confidence_fusion") or {}
     pe = s.get("paper_execution") or {}
     conf_orig = c.get("original_live_confidence")
     conf_final = c.get("final_live_confidence")
-    if conf_orig is None:
-        conf_orig = conf_final = fus.get("combined_confidence")
     qty_orig = c.get("original_live_qty")
     qty_final = c.get("final_live_qty")
     if qty_final is None:
         qty_final = pe.get("qty")
         qty_orig = qty_orig if qty_orig is not None else pe.get("qty")
     return {
-        "confidence_owner":    "confidence_fusion.combined_confidence"
-                               " (adaptive defensive overlay may lower)",
+        # TIER-2A (2026-07-10) — wrapper confidence_fusion retired; the Brain
+        # thesis confidence is witness-only and no numeric confidence gates
+        # anything. The ADAPTIVE-6 confidence overlay now has no live target.
+        "confidence_owner":    "retired (wrapper confidence_fusion removed;"
+                               " no numeric confidence authorizes)",
         "confidence_original": conf_orig,
         "confidence_final":    conf_final,
         "qty_owner":           "paper_execution.order_builder"
@@ -262,8 +262,7 @@ def save_snapshot(snapshot: dict, symbol: str) -> str:
                                     if isinstance(c, dict) else None
                                     )(snapshot.get("candidate_thesis")),
         "brain_sovereignty":   _brain_sovereignty_record(snapshot),
-        "ai_divergence":       snapshot.get("ai_divergence"),
-        "ai_debate":         snapshot.get("ai_debate"),
+        # TIER-2A (2026-07-10) — ai_divergence / ai_debate no longer produced
         "decision_authority": snapshot.get("decision_authority"),
         "execution_gate":    snapshot.get("execution_gate"),
         "trade_intent":      snapshot.get("trade_intent"),
@@ -424,8 +423,7 @@ def save_snapshot(snapshot: dict, symbol: str) -> str:
             "memory_quality":      snapshot.get("memory_search", {}).get("memory_quality",     "none"),
             "notes":               snapshot.get("memory_search", {}).get("notes",              []),
         },
-        "ai_discretionary": snapshot.get("ai_discretionary"),
-        "confidence_fusion": snapshot.get("confidence_fusion"),
+        # TIER-2A (2026-07-10) — ai_discretionary / confidence_fusion retired
         "ai_context": {
             "market_narrative": snapshot.get("ai_context", {}).get("market_narrative"),
             "confidence_score": snapshot.get("ai_context", {}).get("confidence_score"),
@@ -506,14 +504,6 @@ def save_snapshot(snapshot: dict, symbol: str) -> str:
         "pending_entry_order": snapshot.get("pending_entry_order"),
         "eod_authority":       snapshot.get("eod_authority"),
         "scar_writer":         snapshot.get("scar_writer"),
-        "ai_shadow": (lambda sh: {
-            "enabled":          sh.get("enabled"),
-            "success":          sh.get("success"),
-            "stance":           sh.get("stance"),
-            "confidence":       sh.get("confidence"),
-            "agrees_with_live": sh.get("agrees_with_live"),
-            "latency_ms":       sh.get("latency_ms"),
-        })(snapshot.get("ai_shadow") or {}),
 
         # ── DECON-3 — D. adaptive stack (verbatim; these blocks are small) ────
         "adaptive_policy":           snapshot.get("adaptive_policy"),

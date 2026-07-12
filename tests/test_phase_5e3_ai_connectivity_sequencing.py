@@ -101,114 +101,7 @@ class TestPhase5E3AIConnectivitySequencing(unittest.TestCase):
         self.assertFalse(result["ai_external_success"])
         self.assertTrue(result["fallback_required"])
 
-    # 03 — fallback_used=True on failure
-    def test_03_fallback_used_true_on_failure(self):
-        from ai_layer.discretionary_ai import run_discretionary_ai
-        snap = _minimal_snapshot()
-        with patch("ai_layer.discretionary_ai.call_external_ai") as mock_ext:
-            mock_ext.return_value = {
-                "fallback_required": True, "fallback_reason": "timeout",
-                "response": None, "latency_ms": 8000, "model_used": None,
-                "ai_external_attempted": True, "ai_external_success": False,
-                "ai_external_error_type": "timeout", "ai_external_error_message_safe": "timeout",
-            }
-            disc, _, _ = run_discretionary_ai(snap, mode_override="external")
-        self.assertTrue(disc["fallback_used"])
-        self.assertTrue(disc["ai_external_attempted"])
-        self.assertFalse(disc["ai_external_success"])
-
-    # 04 — ai_external_success=True on mocked success
-    def test_04_external_success_true_on_mocked_success(self):
-        from ai_layer.discretionary_ai import run_discretionary_ai
-        snap = _minimal_snapshot()
-        with patch("ai_layer.discretionary_ai.call_external_ai") as mock_ext:
-            mock_ext.return_value = {
-                "fallback_required": False, "fallback_reason": None,
-                "response": _valid_external_response(), "latency_ms": 900, "model_used": "gpt-4o-mini",
-                "ai_external_attempted": True, "ai_external_success": True,
-                "ai_external_error_type": None, "ai_external_error_message_safe": None,
-            }
-            disc, _, _ = run_discretionary_ai(snap, mode_override="external")
-        self.assertFalse(disc["fallback_used"])
-        self.assertTrue(disc["ai_external_success"])
-        self.assertTrue(disc["external_ai_connected"])
-
-    # 05 — ai_model_used persisted
-    def test_05_ai_model_used_persisted(self):
-        from ai_layer.discretionary_ai import run_discretionary_ai
-        snap = _minimal_snapshot()
-        with patch("ai_layer.discretionary_ai.call_external_ai") as mock_ext:
-            mock_ext.return_value = {
-                "fallback_required": False, "fallback_reason": None,
-                "response": _valid_external_response(), "latency_ms": 500, "model_used": "gpt-4o-mini",
-                "ai_external_attempted": True, "ai_external_success": True,
-                "ai_external_error_type": None, "ai_external_error_message_safe": None,
-            }
-            disc, _, _ = run_discretionary_ai(snap, mode_override="external")
-        self.assertEqual(disc["ai_model_used"], "gpt-4o-mini")
-
-    # 06 — memory_search in AI compact input
-    def test_06_memory_search_in_ai_input(self):
-        from ai_layer.ai_input_builder import build_compact_ai_input
-        snap = _minimal_snapshot()
-        snap["memory_search"] = {
-            "match_count": 3, "closed_match_count": 2, "best_similarity": 0.85,
-            "similar_win_rate": 66.7, "similar_average_r": 1.2,
-            "memory_quality": "developing", "top_match_reasons": ["same_session"],
-        }
-        result = build_compact_ai_input(snap)
-        ms = result.get("memory_search", {})
-        self.assertEqual(ms.get("match_count"),        3)
-        self.assertEqual(ms.get("closed_match_count"), 2)
-        self.assertAlmostEqual(ms.get("similar_win_rate"), 66.7)
-        self.assertEqual(ms.get("authority_level"), "observe_only")
-
-    # 07 — performance_dashboard in AI compact input
-    def test_07_performance_dashboard_in_ai_input(self):
-        from ai_layer.ai_input_builder import build_compact_ai_input
-        snap = _minimal_snapshot()
-        snap["performance_dashboard"] = {
-            "sample_size": 10, "win_rate": 60.0, "average_r": 1.1,
-            "best_regime": "trending", "worst_regime": "chop",
-            "best_playbook": "liquidity_sweep", "memory_quality": "developing",
-            "performance_quality": "developing",
-        }
-        result = build_compact_ai_input(snap)
-        pd = result.get("performance_dashboard", {})
-        self.assertEqual(pd.get("sample_size"), 10)
-        self.assertAlmostEqual(pd.get("win_rate"), 60.0)
-        self.assertEqual(pd.get("authority_level"), "observe_only")
-
     # (test_08 retired with the recommendation_engine — ADAPT-LOOP-5)
-
-    # 09 — confidence_modifier remains 0
-    def test_09_confidence_modifier_remains_zero(self):
-        from ai_layer.discretionary_ai import run_discretionary_ai
-        snap = _minimal_snapshot()
-        disc, fusion, _ = run_discretionary_ai(snap, mode_override="internal")
-        # ai_discretionary must not contain a nonzero confidence_modifier
-        cm = disc.get("confidence_modifier", 0)
-        self.assertEqual(cm, 0)
-        # decision_authority in the snapshot must also have confidence_modifier=0
-        da = snap.get("decision_authority", {})
-        self.assertEqual(da.get("confidence_modifier", 0), 0)
-
-    # 10 — authority_level observe_only in intelligence layers
-    def test_10_authority_level_observe_only(self):
-        from ai_layer.ai_input_builder import build_compact_ai_input
-        snap = _minimal_snapshot()
-        snap["experience_summary"] = {
-            "experience_enabled": True, "sample_size": 5,
-            "win_rate": 60.0, "average_r": 1.0, "authority_level": "observe_only",
-        }
-        snap["experience_correlation"] = {
-            "sample_size": 5, "correlation_confidence": "low",
-            "strongest_positive_correlations": [],
-            "strongest_negative_correlations": [],
-            "authority_level": "observe_only",
-        }
-        result = build_compact_ai_input(snap)
-        self.assertEqual(result["experience_correlation"]["authority_level"], "observe_only")
 
     # 11 — no execution behavior changed
     def test_11_no_execution_behavior_changed(self):
@@ -245,8 +138,6 @@ class TestPhase5E3AIConnectivitySequencing(unittest.TestCase):
         import importlib
         modules = [
             "ai_layer.ai_api_adapter",
-            "ai_layer.discretionary_ai",
-            "ai_layer.ai_input_builder",
             "ai_layer.ai_connectivity_test",
             "market_data.snapshot_builder",
             "execution_gate.execution_gate",

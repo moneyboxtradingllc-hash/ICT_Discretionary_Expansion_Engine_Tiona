@@ -23,7 +23,7 @@ SUBSYSTEM_ENV = {
     "intent_archive":     "INTENT_ARCHIVE_DIR",    # per-instance intent records
     "activation_reports": "ACTIVATION_REPORTS_DIR",
     "rule_governance":    "RULE_GOVERNANCE_DIR",   # per-instance governance ledger
-    "shadow":             "AI_SHADOW_DIR",         # per-instance shadow eval
+    # "shadow" removed — shadow AI evaluator retired (TIER-2A 2026-07-10)
     "news_memory":        "NEWS_MEMORY_DIR",       # per-instance news reaction history
     "ops":                "OPS_DIR",               # per-instance lock/heartbeat/state
 }

@@ -112,13 +112,17 @@ class TestB_WrapperCannotVeto(unittest.TestCase):
         self.assertNotIn("ai debate stance is stand_down",
                          " | ".join(gate["blocking_factors"]))
 
-    def test_debate_stance_recorded_as_observability_only(self):
+    def test_gate_carries_no_wrapper_observability(self):
+        # TIER-2A (2026-07-10) — stronger than the original shadow-telemetry
+        # assertion: the wrapper is RETIRED, so the gate records no
+        # observability fields for it. Hostile wrapper blocks in the snapshot
+        # leave zero trace in the gate output.
         with patch.dict(os.environ, _CLEAN_ENV):
             snap = _gate_pass_snapshot()
             snap["decision_authority"] = make_decision(snap)
             gate = evaluate_gate(snap)
-        self.assertEqual(gate["ai_debate_stance_observed"], "stand_down")
-        self.assertEqual(gate["fusion_status_observed"], "strong_disagreement")
+        self.assertNotIn("ai_debate_stance_observed", gate)
+        self.assertNotIn("fusion_status_observed", gate)
 
 
 class TestC_WrapperCannotAlterConfidenceAuthority(unittest.TestCase):

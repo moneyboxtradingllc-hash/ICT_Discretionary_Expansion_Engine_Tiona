@@ -191,16 +191,12 @@ $env:NARRATIVE_DELIVERY_MIN_CONF   = "25"
 $env:NARRATIVE_PROTECTED_ZONE_PCT  = "0.3"
 $env:NARRATIVE_PROTECTED_BUFFER_PCT = "0.05"
 
-# ── AI layer (live + Fable 5 shadow — FC-3 stays observation-stage) ──────────
+# ── AI layer (single sovereign Brain — TIER-2A retired the legacy wrapper,
+# the Fable 5 shadow evaluator, and the refresh controller on 2026-07-10) ────
 $env:AI_MODEL                      = "gpt-4o-mini"
 $env:AI_TIMEOUT_SECONDS            = "25"
 $env:AI_PROVIDER_LIVE              = "openai"
 $env:AI_MODEL_LIVE                 = "gpt-4o-mini"
-$env:AI_PROVIDER_SHADOW            = "anthropic"
-$env:AI_MODEL_SHADOW               = "claude-fable-5"
-$env:AI_SHADOW_ENABLED             = "true"
-$env:AI_SHADOW_MODE                = "setups_only"
-$env:AI_SHADOW_TIMEOUT_SECONDS     = "10"
 
 # ── Phase 5T — adaptive management + thesis monitor ──────────────────────────
 $env:TRADE_MANAGEMENT_ENABLED      = "true"
