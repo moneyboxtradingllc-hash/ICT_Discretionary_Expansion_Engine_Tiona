@@ -5,7 +5,7 @@ lab/ablation artifact; a claim without an artifact renders as PENDING._
 _`REJECTED` and `NO CHANGE` entries are displayed with the same
 prominence as wins — they are the credibility of this document._
 
-_Rendered 2026-07-13T05:44:16.754450+00:00 — 29 milestones on a 172-commit spine._
+_Rendered 2026-07-13T19:18:43.611880+00:00 — 32 milestones on a 174-commit spine._
 
 ## 2026-07-10
 
@@ -91,7 +91,28 @@ _Rendered 2026-07-13T05:44:16.754450+00:00 — 29 milestones on a 172-commit spi
 - **Evidence:** `data/replay/reports/entry_invariant_hardening_20260713.json`
 - **Commit:** `749d26c`
 
-<sub>spine: `c96ea2b` ENTRY-INVARIANT - Thesis invalidation entry eligibility · `18ff69b` MILESTONE - Entry invariant · `749d26c` HARDENING - Entry invariant fail-closed</sub>
+### [NO CHANGE] STOP-QUALITY-TRIAL
+
+- **Change:** Paired SimBroker trial (identical entry/BE/TP, only the stop differs): live zone-stop doctrine vs Brain thesis invalidation. NO code change — zone stops retain the job; Brain-stop research stays deferred with no order-builder authority change.
+- **Measured:** untested assumption that the Brain's invalidation might be the better stop; Brain stops measured 2.3x wider (1.78 vs 0.78 pts — structural levels vs zone edges) → primary (34 paired authorized trades): brain +1.77R paired delta (9/6/19 head-to-head) — mild; secondary (166 paired directional intents): brain -9.16R paired delta (-15.17 vs -6.01) — decisive AGAINST switching; populations conflict, larger sample rules. VERDICT: NO CHANGE
+- **Evidence:** `data/replay/reports/stop_quality_20260713.json`
+- **Commit:** `d33a9f4`
+
+### [VALIDATED] AUTHORSHIP-CLOSURE
+
+- **Change:** The Brain is now the SOLE author of fresh exposure. Audit-first ([CURRENT BYPASS CONFIRMED] declared pre-patch): qualification's authoring seam fell through to mechanical direction on Brain-neutral and never consulted Brain HEALTH (deterministic-fallback theses + served AB-7 on degraded cycles authored direction). Repair: gate guard brain_authorship (BRAIN_AUTHORSHIP_REQUIRED, launcher+CURRENT_STACK on, default off) — direct healthy-LLM or valid AB-7 inheritance (healthy current cycle per existing laundering doctrine) + full direction-chain agreement (decline never substitutes); 16 machine-readable codes; fail-closed at helper AND gate import seam; structured record persisted. Health semantics NOT duplicated (healthy_directional_thesis stays the single owner; consistency test-locked).
+- **Measured:** 175/255 authorized scans on the current stack rode non-Brain-authored direction (decomposed: 167 invalid inherited provenance, 9 unknown source, 5 without opportunity; earlier 'neutral' label corrected) → A/B replay 22 sessions, 0 errors: authorized 217 -> 36 (exactly the 36 provably-sovereign scans); suppressed 137 unique entries scored 38W/85L/14BE -15.51R (DESCRIPTIVE — a profitable unauthorized trade is still unauthorized). ERA CAVEAT: recorded-replay record gaps read as unhealthy cycles, so live binding will be lower — the guard is the fail-closed constitutional backstop. Suite 1893 (34 new tests)
+- **Evidence:** `data/replay/reports/brain_authorship_closure_20260713.json`
+- **Commit:** `b6c642c`
+
+### [VALIDATED] ORGANISM-FREEZE
+
+- **Change:** Credit-free architecture phase CLOSED (documentation-only freeze): constitution, production flags, evidence base, verified capabilities, credit/live-bound queue, and frozen deferred register recorded. No further implementation before OpenAI credits unless a critical safety defect / regression / corruption / live failure is found. Next authorized mission: BRAIN-MODEL-TRIAL.
+- **Measured:** 14 credit-free missions shipped since 2026-07-10 (2 judges demoted, 2 vindicated, 1 redundant-labeled, wrapper+journal retired, volume organ, 4 Brain-integrity guards, dashboard, retro-remeasure, 2 trials) → organism frozen at suite 1893 / 22 sessions / 32 milestones; only credit- or live-data-bound work remains
+- **Evidence:** `docs/evolution/CREDIT_FREE_CLOSURE_20260713.md + data/replay/reports/credit_free_closure_20260713.json`
+- **Commit:** `b6c642c`
+
+<sub>spine: `c96ea2b` ENTRY-INVARIANT - Thesis invalidation entry eligibility · `18ff69b` MILESTONE - Entry invariant · `749d26c` HARDENING - Entry invariant fail-closed · `d33a9f4` MILESTONE - Entry invariant hardening · `b6c642c` CLOSURE - Brain authorship of fresh exposure</sub>
 
 ## 2026-07-08
 
