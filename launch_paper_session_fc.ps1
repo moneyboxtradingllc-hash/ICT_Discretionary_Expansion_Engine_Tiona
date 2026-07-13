@@ -128,6 +128,20 @@ $env:BRAIN_INVALIDATION_SIDE_CHECK = "on"
 # the gate). Rollback: "off".
 $env:BRAIN_INVALIDATION_ENTRY_INVARIANT = "on"
 
+# ── BRAIN-AUTHORSHIP-CLOSURE (2026-07-13): THE BRAIN IS THE SOLE AUTHOR OF
+# FRESH EXPOSURE. Audit: qualification's authoring seam fell through to
+# mechanical direction when the Brain was neutral, and never consulted Brain
+# HEALTH (deterministic-fallback theses and served AB-7 theses on degraded
+# cycles could author direction) — 175/255 authorized scans on the current
+# stack rode non-Brain-authored direction. The gate guard requires direct
+# healthy-LLM authorship or valid AB-7 inheritance (healthy current cycle per
+# the existing laundering doctrine) AND full direction-chain agreement
+# (qualification/decision/playbook may DECLINE, never substitute).
+# Neutral/conflicted/degraded/unavailable/fallback author NOTHING new.
+# Gate-only: position safety, stops, reconciliation, EOD unconditional.
+# Fail-closed while on. Rollback: "off" (legacy mechanical-era authorship).
+$env:BRAIN_AUTHORSHIP_REQUIRED     = "on"
+
 # ── BRAIN-RELIABILITY (2026-07-09, Mission 3 organism examination):
 # 1) A schema-valid directional LLM read whose ONLY residual repair error is
 #    shallow PROSE is KEPT with a warning instead of being replaced by the

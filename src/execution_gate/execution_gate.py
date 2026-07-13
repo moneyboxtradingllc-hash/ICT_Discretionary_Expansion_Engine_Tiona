@@ -258,6 +258,28 @@ def evaluate_gate(snapshot: dict) -> dict:
     thesis_eligible = entry_invariant.get("eligible") is True
     thesis_eligibility_reason = entry_invariant.get("reason") or ""
 
+    # ── BRAIN-AUTHORSHIP-CLOSURE (2026-07-13): sole authorship of fresh
+    # exposure. The Brain (direct healthy LLM, or valid AB-7 inheritance with
+    # a healthy current cycle) must have AUTHORED the directional thesis, and
+    # every downstream direction must agree — mechanics may decline, never
+    # substitute. Neutral/conflicted/degraded/unavailable/fallback/unknown
+    # author nothing new. Gate-only; position management never consults the
+    # gate. Inert unless BRAIN_AUTHORSHIP_REQUIRED=on; fail-CLOSED while on.
+    try:
+        from ai_brain.ecu import brain_authorship
+        authorship = brain_authorship(snapshot)
+    except Exception as exc:  # noqa: BLE001
+        _auth_on = (os.getenv("BRAIN_AUTHORSHIP_REQUIRED", "off")
+                    .lower().strip() == "on")
+        authorship = {
+            "eligible": not _auth_on,
+            "code": "authorship_evaluation_error" if _auth_on else "off",
+            "reason": (f"authorship guard unavailable — fresh exposure denied "
+                       f"(fail-closed): {exc}") if _auth_on
+                      else "brain authorship requirement off",
+        }
+    authorship_ok = authorship.get("eligible") is True
+
     auth_checks = {
         "decision_trade_authorized": da_trade_auth,
         "risk_allows_trade":         risk_allows,
@@ -277,6 +299,8 @@ def evaluate_gate(snapshot: dict) -> dict:
         "commander_permits_trade":   commander_permits,
         # ENTRY-INVARIANT — thesis must name where it is wrong before new risk
         "thesis_invalidation_ok":    thesis_eligible,
+        # BRAIN-AUTHORSHIP — the sovereign must have authored the fresh trade
+        "brain_authorship_ok":       authorship_ok,
     }
 
     # ── would_authorize_if_enabled ────────────────────────────────────────────
@@ -304,6 +328,8 @@ def evaluate_gate(snapshot: dict) -> dict:
         and commander_permits
         # ENTRY-INVARIANT — incomplete directional thesis may not author new risk
         and thesis_eligible
+        # BRAIN-AUTHORSHIP — no fresh exposure without sovereign authorship
+        and authorship_ok
     )
 
     # ── Blocking factors ──────────────────────────────────────────────────────
@@ -354,6 +380,10 @@ def evaluate_gate(snapshot: dict) -> dict:
     if not thesis_eligible:
         blocking.append(f"entry invariant [{entry_invariant.get('code')}]: "
                         f"{thesis_eligibility_reason}")
+    # BRAIN-AUTHORSHIP blocking factor (code is machine-readable)
+    if not authorship_ok:
+        blocking.append(f"brain authorship [{authorship.get('code')}]: "
+                        f"{authorship.get('reason')}")
 
     # ── Warnings (propagated from decision layer) ─────────────────────────────
     warnings: list[str] = []
@@ -449,6 +479,10 @@ def evaluate_gate(snapshot: dict) -> dict:
         # ENTRY-INVARIANT — structured eligibility record (forensics: was the
         # entry blocked, why, which failure class, which direction/source)
         "entry_invariant":            entry_invariant,
+        # BRAIN-AUTHORSHIP — structured authorship record (forensics: was
+        # authorship required/satisfied, direct or inherited, cycle health,
+        # every stage's direction, provenance, failure code)
+        "brain_authorship":           authorship,
         # ── MC-ENFORCE — Market Commander final environment authority ─────────
         "commander_permits_trade":    commander_permits,
         "commander_authority":        commander_auth,

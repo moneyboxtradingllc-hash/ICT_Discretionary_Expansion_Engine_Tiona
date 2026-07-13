@@ -65,6 +65,8 @@ CURRENT_STACK = dict(BASE, **{
     # BASE keeps the historical values; the CURRENT stack mirrors the launcher
     "INTENT_SCORE_MODE": "observe_only",
     "RULE_GOVERNANCE_MODE": "shadow",
+    # BRAIN-AUTHORSHIP-CLOSURE (2026-07-13) — launcher parity
+    "BRAIN_AUTHORSHIP_REQUIRED": "on",
 })
 
 

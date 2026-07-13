@@ -226,6 +226,177 @@ def thesis_entry_eligible(snapshot: dict) -> dict:
                            f"exposure denied (fail-closed): {exc}")
 
 
+# ── BRAIN-AUTHORSHIP-CLOSURE (2026-07-13) — sole authorship of fresh exposure ─
+# Audit finding: qualification's authoring seam (_direction_with_source) falls
+# through to MECHANICAL direction authoring when the Brain is neutral, and
+# checks owner=="ai_brain" without consulting Brain HEALTH — so a
+# deterministic-fallback thesis (or a served AB-7 thesis during a degraded
+# cycle) could author fresh-trade direction. Replayed on the current stack:
+# 175/255 authorized scans rode a non-Brain-authored direction.
+#
+# Constitution: THE BRAIN IS THE SOLE AUTHOR OF FRESH TRADE DIRECTION.
+# Mechanics observe, prove, constrain, reject, size, execute, protect and
+# record — they may not originate a fresh trade when the sovereign declines
+# to author one. Healthy-neutral, healthy-conflicted, degraded, unavailable,
+# fallback, and unknown sources author NOTHING new. Valid AB-7 inheritance
+# (healthy origin, same thesis, lifecycle-valid, current cycle healthy per
+# the existing laundering guard) remains authorship. Direction consistency:
+# qualification/playbook/decision may DECLINE but may not substitute — any
+# mismatch with the Brain's direction denies fresh exposure.
+#
+# Separate from the ENTRY-INVARIANT by design: authorship asks "did the
+# sovereign author this trade?"; the invariant asks "did the thesis name its
+# falsification?". Both are gate-only; position safety never consults either.
+# Health semantics are NOT duplicated — healthy_directional_thesis (below)
+# stays the single owner; this guard classifies its denial into codes.
+# Inert unless BRAIN_AUTHORSHIP_REQUIRED=on (launcher on; default off).
+# Fail-CLOSED for fresh exposure on evaluation error.
+
+BRAIN_AUTHORSHIP_CODES = (
+    "off", "valid_direct_llm_authorship", "valid_inherited_authorship",
+    "missing_brain_result", "degraded_brain", "unavailable_brain",
+    "healthy_brain_neutral", "healthy_brain_conflicted",
+    "non_sovereign_source", "missing_thesis_direction",
+    "invalid_inherited_provenance", "directional_without_opportunity",
+    "qualification_direction_mismatch", "decision_direction_mismatch",
+    "proposed_direction_mismatch", "authorship_evaluation_error",
+)
+
+_HEALTHY_SOURCE = "llm"
+_DEGRADED_SOURCES = {"deterministic", "llm_failed_fallback",
+                     "contaminated_input", "degraded", "ecu_error"}
+
+
+def brain_authorship_required() -> bool:
+    return (os.getenv("BRAIN_AUTHORSHIP_REQUIRED", "off")
+            .lower().strip() == "on")
+
+
+def _auth_record(eligible, code, reason, **fields) -> dict:
+    rec = {"eligible": bool(eligible), "code": code, "reason": reason,
+           "brain_health": None, "brain_source": None,
+           "served_source": None, "served_direction": None,
+           "qualification_direction": None, "decision_direction": None,
+           "proposed_direction": None, "thesis_id": None,
+           "provenance_valid": None, "authorship": None}
+    rec.update(fields)
+    return rec
+
+
+def _classify_authorship(snapshot: dict) -> dict:
+    """Flag-independent classification (the replay decomposition uses this
+    directly). brain_authorship() applies the flag gate around it."""
+    bt = snapshot.get("brain_thesis")
+    cand = snapshot.get("candidate_thesis")
+    cycle_source = str((cand or {}).get("source") or "").lower().strip() \
+        if isinstance(cand, dict) else None
+    served_source = str((bt or {}).get("source") or "").lower().strip() \
+        if isinstance(bt, dict) else None
+    served_dir = str((bt or {}).get("direction") or "").lower().strip() \
+        if isinstance(bt, dict) else None
+    qual_dir = str((snapshot.get("qualification") or {}).get("direction")
+                   or "").lower().strip()
+    dec_dir = str((snapshot.get("decision_authority") or {}).get("direction")
+                  or "").lower().strip()
+    prop_dir = str((snapshot.get("playbook") or {}).get("direction")
+                   or "").lower().strip()
+    base = dict(brain_health=cycle_source or served_source,
+                brain_source=cycle_source, served_source=served_source,
+                served_direction=served_dir,
+                qualification_direction=qual_dir or None,
+                decision_direction=dec_dir or None,
+                proposed_direction=prop_dir or None,
+                thesis_id=(bt or {}).get("thesis_id")
+                if isinstance(bt, dict) else None)
+
+    if not isinstance(bt, dict) or not bt:
+        return _auth_record(False, "missing_brain_result",
+                            "no brain_thesis for this decision cycle — the "
+                            "sovereign authored nothing (AUTHORSHIP)", **base)
+    if served_source in ("brain_disabled", "") or served_source is None:
+        return _auth_record(False, "unavailable_brain",
+                            f"brain unavailable (source="
+                            f"{served_source or 'none'}) (AUTHORSHIP)", **base)
+    if served_source in _DEGRADED_SOURCES or served_source.startswith("ecu_error"):
+        return _auth_record(False, "degraded_brain",
+                            f"degraded brain source '{served_source}' may not "
+                            "author fresh exposure (AUTHORSHIP)", **base)
+
+    inherited = served_source == "ab7_active_thesis"
+    if inherited:
+        # existing laundering doctrine: the served lifecycle thesis is
+        # sovereign only while the CURRENT cycle's own candidate is healthy
+        if cycle_source != _HEALTHY_SOURCE:
+            return _auth_record(False, "invalid_inherited_provenance",
+                                "inherited AB-7 thesis with unhealthy current "
+                                f"cycle (candidate source="
+                                f"{cycle_source or 'none'}) — inheritance may "
+                                "not conceal a dead Brain (AUTHORSHIP)",
+                                provenance_valid=False, **base)
+    elif served_source != _HEALTHY_SOURCE:
+        return _auth_record(False, "non_sovereign_source",
+                            f"unrecognized thesis source '{served_source}' "
+                            "may not author fresh exposure (AUTHORSHIP)",
+                            **base)
+
+    if served_dir in ("", "none", None):
+        return _auth_record(False, "missing_thesis_direction",
+                            "thesis carries no direction (AUTHORSHIP)", **base)
+    if served_dir == "neutral":
+        return _auth_record(False, "healthy_brain_neutral",
+                            "healthy Brain authored NEUTRAL — mechanics may "
+                            "not originate a fresh trade the sovereign "
+                            "declined to author (AUTHORSHIP)", **base)
+    if served_dir == "conflicted":
+        return _auth_record(False, "healthy_brain_conflicted",
+                            "healthy Brain authored CONFLICTED — no fresh "
+                            "exposure (AUTHORSHIP)", **base)
+    if served_dir not in ("bullish", "bearish"):
+        return _auth_record(False, "missing_thesis_direction",
+                            f"thesis direction '{served_dir}' is not "
+                            "directional (AUTHORSHIP)", **base)
+    if not bt.get("opportunity"):
+        return _auth_record(False, "directional_without_opportunity",
+                            f"{served_dir} thesis without an opportunity "
+                            "claim may not author fresh exposure "
+                            "(AUTHORSHIP)", **base)
+
+    # ── direction-consistency chain: downstream may decline, never subst. ──
+    for name, val, code in (
+            ("qualification", qual_dir, "qualification_direction_mismatch"),
+            ("decision", dec_dir, "decision_direction_mismatch"),
+            ("proposed (playbook)", prop_dir, "proposed_direction_mismatch")):
+        if val and val in ("bullish", "bearish") and val != served_dir:
+            return _auth_record(False, code,
+                                f"{name} direction '{val}' contradicts the "
+                                f"Brain's '{served_dir}' — a stage may "
+                                "decline to trade, it may not substitute "
+                                "direction (AUTHORSHIP)", **base)
+
+    code = ("valid_inherited_authorship" if inherited
+            else "valid_direct_llm_authorship")
+    return _auth_record(True, code,
+                        f"sovereign {served_dir} authorship "
+                        f"({'inherited' if inherited else 'direct'})",
+                        provenance_valid=True,
+                        authorship="inherited" if inherited else "direct",
+                        **base)
+
+
+def brain_authorship(snapshot: dict) -> dict:
+    """Gate-side fresh-exposure authorship record. Never raises; fail-CLOSED
+    for fresh exposure on error while armed. Position management never
+    consults this — it never consults the gate at all."""
+    if not brain_authorship_required():
+        return _auth_record(True, "off", "brain authorship requirement off")
+    try:
+        return _classify_authorship(snapshot)
+    except Exception as exc:  # noqa: BLE001
+        return _auth_record(False, "authorship_evaluation_error",
+                            f"authorship evaluation error — fresh exposure "
+                            f"denied (fail-closed): {exc}")
+
+
 # ── AI-AUTH-2 — Brain opportunity sovereignty ─────────────────────────────────
 # THE single definition of "the healthy Brain authored a complete conversion".
 # Consumed by qualification (conf-tier demotion + conversion floor) and by the
