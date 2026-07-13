@@ -117,6 +117,17 @@ $env:BRAIN_INVALIDATION_REPAIR     = "on"
 # Rollback: "off".
 $env:BRAIN_INVALIDATION_SIDE_CHECK = "on"
 
+# ── ENTRY-INVARIANT (2026-07-13): a directional Brain thesis is ineligible
+# for FRESH exposure until it carries a valid correct-side invalidation (its
+# own read, or the active thesis's inherited one — as_brain_thesis/
+# produce_thesis now project the field the audit found dropped everywhere).
+# Audit: 37/80 (46%) of directional authorized scans across 22 sessions rode
+# an invalidation-less thesis. Thesis untouched (stays directional/persistent/
+# repairable); neutral+degraded theses exempt (mechanical era unchanged);
+# POSITION SAFETY UNCONDITIONAL (gate-only; stops/management never consult
+# the gate). Rollback: "off".
+$env:BRAIN_INVALIDATION_ENTRY_INVARIANT = "on"
+
 # ── BRAIN-RELIABILITY (2026-07-09, Mission 3 organism examination):
 # 1) A schema-valid directional LLM read whose ONLY residual repair error is
 #    shallow PROSE is KEPT with a warning instead of being replaced by the

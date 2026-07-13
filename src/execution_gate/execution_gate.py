@@ -232,6 +232,15 @@ def evaluate_gate(snapshot: dict) -> dict:
         snapshot.get("narrative_authority", {}) or {}, proposed_dir,
     )
 
+    # ── ENTRY-INVARIANT (2026-07-13): thesis entry eligibility ───────────────
+    # A directional Brain-owned thesis must carry a valid correct-side
+    # invalidation (own or inherited) before it may author FRESH exposure.
+    # Neutral/degraded theses are exempt (mechanical era untouched); position
+    # management never consults the gate. Inert unless
+    # BRAIN_INVALIDATION_ENTRY_INVARIANT=on.
+    from ai_brain.ecu import thesis_entry_eligible
+    thesis_eligible, thesis_eligibility_reason = thesis_entry_eligible(snapshot)
+
     auth_checks = {
         "decision_trade_authorized": da_trade_auth,
         "risk_allows_trade":         risk_allows,
@@ -249,6 +258,8 @@ def evaluate_gate(snapshot: dict) -> dict:
         "narrative_permits_trade":   narrative_ok,
         # MC-ENFORCE — Market Commander final environment authority
         "commander_permits_trade":   commander_permits,
+        # ENTRY-INVARIANT — thesis must name where it is wrong before new risk
+        "thesis_invalidation_ok":    thesis_eligible,
     }
 
     # ── would_authorize_if_enabled ────────────────────────────────────────────
@@ -274,6 +285,8 @@ def evaluate_gate(snapshot: dict) -> dict:
         and narrative_ok
         # MC-ENFORCE — Commander STAND_DOWN (hostile/inert) may block; else pass-through
         and commander_permits
+        # ENTRY-INVARIANT — incomplete directional thesis may not author new risk
+        and thesis_eligible
     )
 
     # ── Blocking factors ──────────────────────────────────────────────────────
@@ -320,6 +333,9 @@ def evaluate_gate(snapshot: dict) -> dict:
     # Phase NA-1 blocking factor
     if not narrative_ok:
         blocking.append(f"narrative authority: {narrative_reason}")
+    # ENTRY-INVARIANT blocking factor
+    if not thesis_eligible:
+        blocking.append(f"entry invariant: {thesis_eligibility_reason}")
 
     # ── Warnings (propagated from decision layer) ─────────────────────────────
     warnings: list[str] = []

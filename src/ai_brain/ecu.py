@@ -71,6 +71,11 @@ def produce_thesis(snapshot: dict) -> dict:
             "tool_family": o.get("recommended_tool_family"),
             "confidence": o.get("phase_confidence", 0),
             "dominant_reasoning": o.get("dominant_reasoning", ""),
+            # ENTRY-INVARIANT (2026-07-13) — the thesis's own falsification
+            # level, previously dropped here (audit: absent from candidate,
+            # served thesis, and every funnel organ). Witness value; the
+            # entry-eligibility check reads it at the gate.
+            "invalidation_level": o.get("invalidation_level"),
             "brain_block": res,
         }
     except Exception as exc:  # noqa: BLE001
@@ -82,7 +87,70 @@ def _empty(reason: str) -> dict:
             "forbidden_direction": None, "opportunity": False,
             "opportunity_type": None, "playbook_family": None,
             "tool_family": None, "confidence": 0, "dominant_reasoning": "",
-            "brain_block": None}
+            "invalidation_level": None, "brain_block": None}
+
+
+# ── ENTRY-INVARIANT (2026-07-13) — thesis entry eligibility ───────────────────
+# Audit finding (entry_invariant_audit_20260713.json): the Brain's
+# invalidation_level was dropped by BOTH thesis projections and consulted by
+# NOTHING in the funnel; 37/80 (46%) of directional authorized scans across 22
+# sessions rode a thesis with no valid correct-side invalidation, own or
+# inherited. The invariant: a directional Brain-owned thesis is ineligible for
+# FRESH exposure until it names where it is WRONG. The thesis itself is
+# untouched — it stays directional, persistent, lifecycle-visible, and
+# repairable next scan; it just cannot author NEW risk while incomplete.
+#
+# Constitutional boundaries (test-locked):
+#   - Neutral / non-sovereign (degraded-source) theses are EXEMPT — the
+#     mechanical era's authorization path is untouched.
+#   - POSITION SAFETY IS UNCONDITIONAL: this check lives in the entry gate
+#     only; stops, position management, reconciliation and EOD never consult
+#     it (they never consult the gate at all).
+#   - Inheritance is honored: the served ab7_active_thesis carries the active
+#     thesis's kept invalidation (breach-retired by the lifecycle), so a
+#     continuing thesis whose earlier healthy read named a level stays
+#     eligible even when the CURRENT scan's read is null.
+# Inert unless BRAIN_INVALIDATION_ENTRY_INVARIANT=on. Fail-open on error.
+
+def entry_invariant_enabled() -> bool:
+    return (os.getenv("BRAIN_INVALIDATION_ENTRY_INVARIANT", "off")
+            .lower().strip() == "on")
+
+
+def _gate_price(snapshot: dict):
+    ez = (snapshot.get("trade_intent") or {}).get("entry_zone") or {}
+    if ez.get("current_price") is not None:
+        return ez.get("current_price")
+    tf = (snapshot.get("timeframes") or {}).get("1m") or {}
+    return (tf.get("last_candle") or {}).get("close")
+
+
+def thesis_entry_eligible(snapshot: dict) -> tuple:
+    """(eligible: bool, reason: str). Gate-side entry eligibility for the
+    Brain thesis. Never raises; fails OPEN (a broken check must not halt
+    trading — it gets fixed, not obeyed)."""
+    try:
+        if not entry_invariant_enabled():
+            return True, "entry invariant off"
+        bt = snapshot.get("brain_thesis") or {}
+        direction = (bt.get("direction") or "neutral").lower()
+        if direction not in ("bullish", "bearish"):
+            return True, "no directional brain thesis"
+        source = str(bt.get("source") or "")
+        if source not in ("llm", "ab7_active_thesis"):
+            return True, f"non-sovereign thesis source ({source or 'none'})"
+        inv = bt.get("invalidation_level")
+        from ai_brain.brain_validation import invalidation_side_ok
+        px = _gate_price(snapshot)
+        if (isinstance(inv, (int, float)) and not isinstance(inv, bool)
+                and invalidation_side_ok(direction, inv, px)):
+            return True, "thesis invalidation valid"
+        return False, (
+            f"{direction} thesis without a valid correct-side invalidation "
+            f"(level={inv!r}, px={px}) — fresh exposure ineligible until the "
+            "thesis names where it is wrong (ENTRY-INVARIANT)")
+    except Exception as exc:  # noqa: BLE001
+        return True, f"entry invariant error (fail-open): {exc}"
 
 
 # ── AI-AUTH-2 — Brain opportunity sovereignty ─────────────────────────────────

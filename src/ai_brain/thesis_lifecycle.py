@@ -704,6 +704,12 @@ class ThesisLifecycleEngine:
             "playbook_status":    a.get("playbook_status"),
             "playbook_age_scans": a.get("playbook_age_scans"),
             "confidence_trend":   self._confidence_trend(a),
+            # ENTRY-INVARIANT (2026-07-13) — project the INHERITED invalidation
+            # (kept across scans at update time, retired on breach) so the
+            # entry-eligibility check sees what the active thesis actually
+            # holds. Audit: this field existed internally since AB-7 but was
+            # dropped from the served projection.
+            "invalidation_level": a.get("invalidation_level"),
         }
 
 
