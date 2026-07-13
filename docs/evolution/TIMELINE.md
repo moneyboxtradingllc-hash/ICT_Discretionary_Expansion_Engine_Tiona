@@ -5,7 +5,7 @@ lab/ablation artifact; a claim without an artifact renders as PENDING._
 _`REJECTED` and `NO CHANGE` entries are displayed with the same
 prominence as wins — they are the credibility of this document._
 
-_Rendered 2026-07-12T22:31:04.157946+00:00 — 27 milestones on a 168-commit spine._
+_Rendered 2026-07-13T04:08:21.087150+00:00 — 28 milestones on a 170-commit spine._
 
 ## 2026-07-10
 
@@ -73,7 +73,18 @@ _Rendered 2026-07-12T22:31:04.157946+00:00 — 27 milestones on a 168-commit spi
 - **Evidence:** `docs/evolution/TIMELINE.html + tests/test_adapt_loop6_health_timeline.py`
 - **Commit:** `8b47e96`
 
-<sub>spine: `6f82ee8` R-001-AUDIT - Promoted rule demoted to shadow · `642c42e` MILESTONE - R-001 demotion · `67d76d2` SIDE-CHECK - Initial-read invalidation guard · `7427a1c` MILESTONE - Invalidation side check · `2e6aa43` MILESTONE - Retro-remeasure of timeline claims · `8b47e96` DASHBOARD - Evolution timeline HTML</sub>
+<sub>spine: `6f82ee8` R-001-AUDIT - Promoted rule demoted to shadow · `642c42e` MILESTONE - R-001 demotion · `67d76d2` SIDE-CHECK - Initial-read invalidation guard · `7427a1c` MILESTONE - Invalidation side check · `2e6aa43` MILESTONE - Retro-remeasure of timeline claims · `8b47e96` DASHBOARD - Evolution timeline HTML · `c114327` MILESTONE - Timeline dashboard</sub>
+
+## 2026-07-13
+
+### [VALIDATED] ENTRY-INVARIANT
+
+- **Change:** Audit-first mission (user spec): Outcome B confirmed — the Brain's invalidation_level was dropped by BOTH thesis projections (produce_thesis + as_brain_thesis) and consulted by NOTHING; the order builder's same-named stop is the TOOLBOX zone's mechanical level (name collision). Repair: both projections now carry the field (served thesis = the lifecycle's INHERITED, breach-retired level) + gate check thesis_invalidation_ok (BRAIN_INVALIDATION_ENTRY_INVARIANT, launcher on, default off): a directional Brain-owned thesis without a valid correct-side invalidation cannot author FRESH exposure. Thesis untouched (directional/persistent/repairable); neutral+degraded exempt (mechanical era byte-identical); position safety unconditional (gate-only, flag test-locked absent from all safety files); fail-open.
+- **Measured:** 37/80 (46%) of directional authorized scans across 22 sessions rode a thesis with NO valid correct-side invalidation own-or-inherited (inheritance rescued 22, own reads covered only 21) → flag-ON replay, 22 sessions: authorized 255 -> 217 (38 bound vs 37 audit-predicted — real lifecycle inheritance vs harness approximation), 0 errors; suite 1833 (16 new tests). Live binding expected LOWER post-SIDE-CHECK + repair turn (the invariant is the backstop)
+- **Evidence:** `data/replay/reports/entry_invariant_audit_20260713.json + entry_invariant_flagon_20260713.json`
+- **Commit:** `c96ea2b`
+
+<sub>spine: `c96ea2b` ENTRY-INVARIANT - Thesis invalidation entry eligibility</sub>
 
 ## 2026-07-08
 
