@@ -110,11 +110,40 @@ def _empty(reason: str) -> dict:
 #     thesis's kept invalidation (breach-retired by the lifecycle), so a
 #     continuing thesis whose earlier healthy read named a level stays
 #     eligible even when the CURRENT scan's read is null.
-# Inert unless BRAIN_INVALIDATION_ENTRY_INVARIANT=on. Fail-open on error.
+# Inert unless BRAIN_INVALIDATION_ENTRY_INVARIANT=on.
+#
+# ENTRY-INVARIANT-HARDENING (2026-07-13): an entry-authority check must not
+# infer permission from uncertainty. The system must PROVE all three —
+# numeric invalidation, KNOWN finite numeric price, strict correct side
+# (equality invalid) — or fresh exposure is denied. Two audited defects fixed:
+#   1. the exception arm returned eligible=True (fail-open) — now fail-CLOSED
+#      for FRESH EXPOSURE ONLY (never a bot halt, never position management);
+#   2. unknown price accepted a numeric invalidation via the repair-adoption
+#      helper's unknown-px semantics (correct THERE, wrong HERE) — the
+#      invariant now performs its own strict finite-number side check.
+# Also hardened: NaN/inf rejected; booleans masquerading as numbers rejected.
+# The structured record {eligible, code, reason, ...} rides the gate output
+# as `entry_invariant` (persisted verbatim by the snapshot store).
+
+ENTRY_INVARIANT_CODES = (
+    "off", "non_directional", "non_sovereign_source", "valid",
+    "missing_invalidation", "non_numeric_invalidation",
+    "missing_current_price", "non_numeric_current_price",
+    "wrong_side_invalidation", "invariant_evaluation_error",
+)
+
 
 def entry_invariant_enabled() -> bool:
     return (os.getenv("BRAIN_INVALIDATION_ENTRY_INVARIANT", "off")
             .lower().strip() == "on")
+
+
+def _finite(v) -> bool:
+    """True only for real finite numbers. Booleans are ints in Python and NaN/
+    inf compare in surprising ways — neither may qualify as price or level."""
+    import math
+    return (isinstance(v, (int, float)) and not isinstance(v, bool)
+            and math.isfinite(v))
 
 
 def _gate_price(snapshot: dict):
@@ -125,32 +154,76 @@ def _gate_price(snapshot: dict):
     return (tf.get("last_candle") or {}).get("close")
 
 
-def thesis_entry_eligible(snapshot: dict) -> tuple:
-    """(eligible: bool, reason: str). Gate-side entry eligibility for the
-    Brain thesis. Never raises; fails OPEN (a broken check must not halt
-    trading — it gets fixed, not obeyed)."""
+def _inv_record(eligible, code, reason, direction=None, source=None,
+                invalidation_level=None, current_price=None) -> dict:
+    return {"eligible": bool(eligible), "code": code, "reason": reason,
+            "direction": direction, "source": source,
+            "invalidation_level": invalidation_level,
+            "current_price": current_price}
+
+
+def thesis_entry_eligible(snapshot: dict) -> dict:
+    """Structured entry-eligibility record for the Brain thesis:
+    {eligible, code, reason, direction, source, invalidation_level,
+    current_price}. Never raises. FAIL-CLOSED for fresh exposure: an internal
+    error or unverifiable side denies NEW entry (code names the failure
+    class). Position management never consults this — it never consults the
+    gate at all."""
+    if not entry_invariant_enabled():
+        return _inv_record(True, "off", "entry invariant off")
     try:
-        if not entry_invariant_enabled():
-            return True, "entry invariant off"
         bt = snapshot.get("brain_thesis") or {}
-        direction = (bt.get("direction") or "neutral").lower()
-        if direction not in ("bullish", "bearish"):
-            return True, "no directional brain thesis"
-        source = str(bt.get("source") or "")
-        if source not in ("llm", "ab7_active_thesis"):
-            return True, f"non-sovereign thesis source ({source or 'none'})"
+        direction = str(bt.get("direction") or "neutral").lower().strip()
+        source = str(bt.get("source") or "").lower().strip()
         inv = bt.get("invalidation_level")
-        from ai_brain.brain_validation import invalidation_side_ok
         px = _gate_price(snapshot)
-        if (isinstance(inv, (int, float)) and not isinstance(inv, bool)
-                and invalidation_side_ok(direction, inv, px)):
-            return True, "thesis invalidation valid"
-        return False, (
-            f"{direction} thesis without a valid correct-side invalidation "
-            f"(level={inv!r}, px={px}) — fresh exposure ineligible until the "
-            "thesis names where it is wrong (ENTRY-INVARIANT)")
+        base = dict(direction=direction, source=source,
+                    invalidation_level=inv, current_price=px)
+
+        if direction not in ("bullish", "bearish"):
+            return _inv_record(True, "non_directional",
+                               "no directional brain thesis", **base)
+        if source not in ("llm", "ab7_active_thesis"):
+            return _inv_record(True, "non_sovereign_source",
+                               f"non-sovereign thesis source "
+                               f"({source or 'none'}) — mechanical era rules",
+                               **base)
+        if inv is None:
+            return _inv_record(False, "missing_invalidation",
+                               f"{direction} thesis names no invalidation — "
+                               "fresh exposure ineligible until the thesis "
+                               "names where it is wrong (ENTRY-INVARIANT)",
+                               **base)
+        if not _finite(inv):
+            return _inv_record(False, "non_numeric_invalidation",
+                               f"{direction} thesis invalidation {inv!r} is "
+                               "not a finite number (ENTRY-INVARIANT)", **base)
+        if px is None:
+            return _inv_record(False, "missing_current_price",
+                               f"{direction} thesis invalidation {inv} cannot "
+                               "be side-verified — current price unavailable; "
+                               "permission is never inferred from uncertainty "
+                               "(ENTRY-INVARIANT)", **base)
+        if not _finite(px):
+            return _inv_record(False, "non_numeric_current_price",
+                               f"{direction} thesis invalidation {inv} cannot "
+                               f"be side-verified — current price {px!r} is "
+                               "not a finite number (ENTRY-INVARIANT)", **base)
+        side_ok = inv > px if direction == "bearish" else inv < px
+        if not side_ok:   # strict: equality is invalid
+            return _inv_record(False, "wrong_side_invalidation",
+                               f"{direction} thesis with invalidation {inv} "
+                               f"on the wrong side of price {px} — a bearish "
+                               "thesis dies strictly ABOVE price, a bullish "
+                               "one strictly BELOW (ENTRY-INVARIANT)", **base)
+        return _inv_record(True, "valid", "thesis invalidation valid", **base)
     except Exception as exc:  # noqa: BLE001
-        return True, f"entry invariant error (fail-open): {exc}"
+        # HARDENED: an entry-authority check that cannot evaluate must DENY
+        # fresh exposure — never authorize from uncertainty. This is not a
+        # halt: positions/stops/EOD run independently of the gate.
+        return _inv_record(False, "invariant_evaluation_error",
+                           f"entry invariant evaluation error — fresh "
+                           f"exposure denied (fail-closed): {exc}")
 
 
 # ── AI-AUTH-2 — Brain opportunity sovereignty ─────────────────────────────────

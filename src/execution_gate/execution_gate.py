@@ -233,13 +233,30 @@ def evaluate_gate(snapshot: dict) -> dict:
     )
 
     # ── ENTRY-INVARIANT (2026-07-13): thesis entry eligibility ───────────────
-    # A directional Brain-owned thesis must carry a valid correct-side
-    # invalidation (own or inherited) before it may author FRESH exposure.
-    # Neutral/degraded theses are exempt (mechanical era untouched); position
-    # management never consults the gate. Inert unless
-    # BRAIN_INVALIDATION_ENTRY_INVARIANT=on.
-    from ai_brain.ecu import thesis_entry_eligible
-    thesis_eligible, thesis_eligibility_reason = thesis_entry_eligible(snapshot)
+    # A directional Brain-owned thesis must carry a PROVABLY valid correct-
+    # side invalidation before it may author FRESH exposure. Neutral/degraded
+    # theses are exempt (mechanical era untouched); position management never
+    # consults the gate. Inert unless BRAIN_INVALIDATION_ENTRY_INVARIANT=on.
+    # HARDENED (2026-07-13): fail-CLOSED for fresh exposure — even an import/
+    # evaluation failure of the check itself denies NEW entry while the flag
+    # is on (flag off keeps byte-identical legacy pass-through).
+    try:
+        from ai_brain.ecu import thesis_entry_eligible
+        entry_invariant = thesis_entry_eligible(snapshot)
+    except Exception as exc:  # noqa: BLE001
+        _inv_on = (os.getenv("BRAIN_INVALIDATION_ENTRY_INVARIANT", "off")
+                   .lower().strip() == "on")
+        entry_invariant = {
+            "eligible": not _inv_on,
+            "code": "invariant_evaluation_error" if _inv_on else "off",
+            "reason": (f"entry invariant unavailable — fresh exposure denied "
+                       f"(fail-closed): {exc}") if _inv_on
+                      else "entry invariant off",
+            "direction": None, "source": None,
+            "invalidation_level": None, "current_price": None,
+        }
+    thesis_eligible = entry_invariant.get("eligible") is True
+    thesis_eligibility_reason = entry_invariant.get("reason") or ""
 
     auth_checks = {
         "decision_trade_authorized": da_trade_auth,
@@ -333,9 +350,10 @@ def evaluate_gate(snapshot: dict) -> dict:
     # Phase NA-1 blocking factor
     if not narrative_ok:
         blocking.append(f"narrative authority: {narrative_reason}")
-    # ENTRY-INVARIANT blocking factor
+    # ENTRY-INVARIANT blocking factor (code is machine-readable)
     if not thesis_eligible:
-        blocking.append(f"entry invariant: {thesis_eligibility_reason}")
+        blocking.append(f"entry invariant [{entry_invariant.get('code')}]: "
+                        f"{thesis_eligibility_reason}")
 
     # ── Warnings (propagated from decision layer) ─────────────────────────────
     warnings: list[str] = []
@@ -428,6 +446,9 @@ def evaluate_gate(snapshot: dict) -> dict:
         # Phase NA-1 — narrative authority audit trail
         "narrative_permits_trade":    narrative_ok,
         "narrative_reason":           narrative_reason,
+        # ENTRY-INVARIANT — structured eligibility record (forensics: was the
+        # entry blocked, why, which failure class, which direction/source)
+        "entry_invariant":            entry_invariant,
         # ── MC-ENFORCE — Market Commander final environment authority ─────────
         "commander_permits_trade":    commander_permits,
         "commander_authority":        commander_auth,

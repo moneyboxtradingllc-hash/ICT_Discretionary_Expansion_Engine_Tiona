@@ -42,55 +42,61 @@ class TestEligibility(unittest.TestCase):
     def test_default_off_everything_eligible(self):
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("BRAIN_INVALIDATION_ENTRY_INVARIANT", None)
-            ok, reason = thesis_entry_eligible(_snap(inv=None))
-        self.assertTrue(ok)
-        self.assertIn("off", reason)
+            rec = thesis_entry_eligible(_snap(inv=None))
+        self.assertTrue(rec["eligible"])
+        self.assertEqual(rec["code"], "off")
 
     def test_bare_directional_sovereign_ineligible(self):
         with patch.dict(os.environ, _ON):
-            ok, reason = thesis_entry_eligible(_snap(inv=None))
-        self.assertFalse(ok)
-        self.assertIn("ENTRY-INVARIANT", reason)
+            rec = thesis_entry_eligible(_snap(inv=None))
+        self.assertFalse(rec["eligible"])
+        self.assertEqual(rec["code"], "missing_invalidation")
+        self.assertIn("ENTRY-INVARIANT", rec["reason"])
 
     def test_wrong_side_ineligible(self):
         # a bearish thesis "dying" below price is not a valid invalidation
         with patch.dict(os.environ, _ON):
-            ok, _ = thesis_entry_eligible(_snap(inv=698.0, px=700.0))
-        self.assertFalse(ok)
+            rec = thesis_entry_eligible(_snap(inv=698.0, px=700.0))
+        self.assertFalse(rec["eligible"])
+        self.assertEqual(rec["code"], "wrong_side_invalidation")
 
     def test_own_valid_eligible(self):
         with patch.dict(os.environ, _ON):
-            ok, reason = thesis_entry_eligible(_snap(inv=702.5, px=700.0))
-        self.assertTrue(ok)
-        self.assertIn("valid", reason)
+            rec = thesis_entry_eligible(_snap(inv=702.5, px=700.0))
+        self.assertTrue(rec["eligible"])
+        self.assertEqual(rec["code"], "valid")
 
     def test_inherited_via_active_thesis_eligible(self):
         # the served ab7_active_thesis carries the lifecycle's KEPT level
         with patch.dict(os.environ, _ON):
-            ok, _ = thesis_entry_eligible(
+            rec = thesis_entry_eligible(
                 _snap(source="ab7_active_thesis", inv=702.5, px=700.0))
-        self.assertTrue(ok)
+        self.assertTrue(rec["eligible"])
 
     def test_neutral_thesis_exempt(self):
         with patch.dict(os.environ, _ON):
-            ok, reason = thesis_entry_eligible(_snap(direction="neutral"))
-        self.assertTrue(ok)
-        self.assertIn("no directional", reason)
+            rec = thesis_entry_eligible(_snap(direction="neutral"))
+        self.assertTrue(rec["eligible"])
+        self.assertEqual(rec["code"], "non_directional")
 
     def test_degraded_source_exempt_mechanical_era_untouched(self):
         for src in ("deterministic", "llm_failed_fallback", "degraded",
                     "contaminated_input", ""):
             with patch.dict(os.environ, _ON):
-                ok, _ = thesis_entry_eligible(_snap(source=src, inv=None))
-            self.assertTrue(ok, src)
+                rec = thesis_entry_eligible(_snap(source=src, inv=None))
+            self.assertTrue(rec["eligible"], src)
+            self.assertEqual(rec["code"], "non_sovereign_source", src)
 
-    def test_unknown_price_accepts_numeric(self):
-        # the check may not be stricter than the organism's own knowledge
+    def test_unknown_price_denies_fresh_exposure(self):
+        # HARDENED (2026-07-13): an entry authority must not infer permission
+        # from uncertainty — unverifiable side = no fresh exposure
         snap = _snap(inv=698.0)
         snap["trade_intent"] = {}
         with patch.dict(os.environ, _ON):
-            ok, _ = thesis_entry_eligible(snap)
-        self.assertTrue(ok)
+            rec = thesis_entry_eligible(snap)
+        self.assertFalse(rec["eligible"])
+        self.assertEqual(rec["code"], "missing_current_price")
+        self.assertIn("current price unavailable", rec["reason"])
 
 
 class TestProjections(unittest.TestCase):
