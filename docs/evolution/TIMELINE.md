@@ -5,7 +5,7 @@ lab/ablation artifact; a claim without an artifact renders as PENDING._
 _`REJECTED` and `NO CHANGE` entries are displayed with the same
 prominence as wins — they are the credibility of this document._
 
-_Rendered 2026-07-13T04:08:21.087150+00:00 — 28 milestones on a 170-commit spine._
+_Rendered 2026-07-13T05:44:16.754450+00:00 — 29 milestones on a 172-commit spine._
 
 ## 2026-07-10
 
@@ -84,7 +84,14 @@ _Rendered 2026-07-13T04:08:21.087150+00:00 — 28 milestones on a 170-commit spi
 - **Evidence:** `data/replay/reports/entry_invariant_audit_20260713.json + entry_invariant_flagon_20260713.json`
 - **Commit:** `c96ea2b`
 
-<sub>spine: `c96ea2b` ENTRY-INVARIANT - Thesis invalidation entry eligibility</sub>
+### [VALIDATED] ENTRY-INVARIANT-HARDENING
+
+- **Change:** Both audited authority defects CONFIRMED in source and repaired: (1) the invariant's exception arm returned eligible=True (fail-OPEN) — now fail-CLOSED for fresh exposure only, at BOTH the helper and the gate's import seam; (2) unknown price accepted a numeric invalidation via the repair-adoption helper's unknown-px semantics — the invariant now performs its own strict finite-number side check (equality invalid; NaN/inf/bool rejected in both operands, inf previously PASSED). Structured record {eligible, code, reason, direction, source, invalidation_level, current_price} rides gate output as entry_invariant (persisted); blockers carry machine-readable [code]. Flag-off = byte-identical legacy incl. hostile-snapshot case. Deferred: brain-vs-toolbox invalidation_level name-collision schema cleanup.
+- **Measured:** exception -> eligible=True; unknown px -> eligible; inf passed side check; bool px = 1.0; blocker prose-only (398 opaque blocker scans) → replay 22 sessions: authorized 217=217 UNCHANGED (archived tape always has price — live-fault classes measured 0 as pre-declared, proven by tests instead); blocker decomposition now machine-readable: missing_invalidation 328 + wrong_side 70 = 398 (explains yesterday's aggregate exactly); 0 replay errors; suite 1859 (26 hardening tests incl. exception injection at both seams, NaN/inf/bool matrix, position-coexistence harness)
+- **Evidence:** `data/replay/reports/entry_invariant_hardening_20260713.json`
+- **Commit:** `749d26c`
+
+<sub>spine: `c96ea2b` ENTRY-INVARIANT - Thesis invalidation entry eligibility · `18ff69b` MILESTONE - Entry invariant · `749d26c` HARDENING - Entry invariant fail-closed</sub>
 
 ## 2026-07-08
 
