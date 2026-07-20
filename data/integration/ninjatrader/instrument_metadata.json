@@ -1,0 +1,28 @@
+{
+  "artifact": "mnq_instrument_metadata",
+  "integration_era": "MNQ_NINJATRADER_FOUNDATION",
+  "status": "PENDING_PLATFORM_CONFIRMATION",
+  "note": "These are the DECLARED MNQ constants asserted for internal consistency (tick_value == tick_size * point_value). They are NOT yet reconciled against NinjaTrader MasterInstrument metadata because NT8 has never been launched on this machine. instrument_spec.reconcile_with_platform() sets metadata_verified only after an INSTRUMENT_METADATA envelope confirms tick_size AND point_value AND that the resolved root is MNQ (not NQ).",
+  "declared": {
+    "canonical_symbol": "MNQ",
+    "expected_active_instrument": "MNQ 09-26",
+    "expiry": "2026-09",
+    "exchange": "CME",
+    "currency": "USD",
+    "tick_size": 0.25,
+    "point_value": 2.00,
+    "tick_value": 0.50,
+    "quantity_increment": 1,
+    "minimum_quantity": 1,
+    "maximum_quantity": 1
+  },
+  "internal_consistency": {
+    "tick_value_equals_tick_size_times_point_value": true,
+    "checked": "0.25 * 2.00 == 0.50"
+  },
+  "platform_reconciliation": {
+    "metadata_verified": false,
+    "blocker": "NinjaTrader never launched; no MasterInstrument metadata available",
+    "required_envelope": "INSTRUMENT_METADATA {tick_size, point_value, instrument_name, expiry}"
+  }
+}

@@ -108,7 +108,10 @@ class TestBrokerAdapters(unittest.TestCase):
         self.assertEqual(get_adapter(broker="unknown").name, "paper")  # safe default
 
     def test_available(self):
-        self.assertEqual(set(available_brokers()), {"paper", "tradestation"})
+        # ninjatrader registered by NINJATRADER-MNQ-INTEGRATION-FOUNDATION
+        # (Sim101 MNQ, DISARMED); default remains paper.
+        self.assertEqual(set(available_brokers()),
+                         {"paper", "tradestation", "ninjatrader"})
 
     def test_stub_adapters_not_connected_and_refuse(self):
         for b in ("tradestation",):

@@ -18,6 +18,15 @@ def _registry():
             "paper": PaperBrokerAdapter,
             "tradestation": TradeStationBrokerAdapter,
         })
+        # NINJATRADER-MNQ-INTEGRATION-FOUNDATION — Sim101 MNQ adapter, DISARMED.
+        # Registered so it is reachable by explicit `broker: ninjatrader`, but the
+        # default stays `paper`. Imported lazily so its integration deps never
+        # load for QQQ/paper runs.
+        try:
+            from integrations.ninjatrader.execution_adapter import NinjaTraderBrokerAdapter
+            _REGISTRY["ninjatrader"] = NinjaTraderBrokerAdapter
+        except Exception:  # noqa: BLE001 — integration package optional
+            pass
     return _REGISTRY
 
 
