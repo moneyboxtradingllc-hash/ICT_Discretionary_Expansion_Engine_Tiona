@@ -549,17 +549,17 @@ namespace NinjaTrader.NinjaScript.AddOns
                         double tgtPrice = instr.MasterInstrument.RoundToTickSize(fill + TARGET_POINTS);
                         Order stop = acct.CreateOrder(instr, OrderAction.Sell, OrderType.StopMarket, OrderEntry.Manual, TimeInForce.Day, MAX_CONTRACTS, 0, stopPrice, oco, "SmokeStop", NinjaTrader.Core.Globals.MaxDate, null);
                         Order tgt = acct.CreateOrder(instr, OrderAction.Sell, OrderType.Limit, OrderEntry.Manual, TimeInForce.Day, MAX_CONTRACTS, tgtPrice, 0, oco, "SmokeTarget", NinjaTrader.Core.Globals.MaxDate, null);
+                        // This handler runs ASYNC (after the request socket may be
+                        // closed); it must NOT write to the socket. It attaches OCO
+                        // silently; on failure it flattens. Python verifies by polling
+                        // position + working orders.
                         try
                         {
                             acct.Submit(new[] { stop, tgt });
-                            SendEnvelope(stream, "EXECUTION_UPDATE", string.Format(CultureInfo.InvariantCulture,
-                                "{{\"fill\":{0},\"stop\":{1},\"target\":{2},\"oco\":\"{3}\",\"protection\":true}}",
-                                fill, stopPrice, tgtPrice, oco), accountName, instrumentName, "");
                         }
-                        catch (Exception ez)
+                        catch
                         {
-                            try { acct.Flatten(new[] { instr }); } catch { }
-                            SendEnvelope(stream, "ERROR", "{\"reason\":\"protection failed - EMERGENCY FLATTEN: " + Escape(ez.Message) + "\"}", accountName, instrumentName, "");
+                            try { acct.Flatten(new[] { instr }); } catch { }   // EMERGENCY FLATTEN
                         }
                         acct.ExecutionUpdate -= execHandler;
                     }
