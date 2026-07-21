@@ -6,7 +6,58 @@
     "server_port": "36973"
   },
   "environment_proof_payload": {
-    "reason": "unknown message_type"
+    "allowed_account": "DEMO8458533",
+    "arm_orders": false,
+    "accounts": [
+      {
+        "name": "Backtest",
+        "provider": "Simulator",
+        "connection": "",
+        "status": "None"
+      },
+      {
+        "name": "Playback101",
+        "provider": "Playback",
+        "connection": "",
+        "status": "None"
+      },
+      {
+        "name": "Sim101",
+        "provider": "Simulator",
+        "connection": "Simulation",
+        "status": "Connected"
+      },
+      {
+        "name": "DEMO7872698",
+        "provider": "Provider31",
+        "connection": "",
+        "status": "None"
+      },
+      {
+        "name": "1932903",
+        "provider": "Provider31",
+        "connection": "",
+        "status": "None"
+      },
+      {
+        "name": "DEMO7896063",
+        "provider": "Provider31",
+        "connection": "",
+        "status": "None"
+      },
+      {
+        "name": "DEMO8458533",
+        "provider": "Provider31",
+        "connection": "Simulation",
+        "status": "Connected"
+      }
+    ],
+    "connections": [
+      {
+        "name": "Simulation",
+        "status": "Connected"
+      }
+    ]
   },
   "reads": {
     "account_state": {
@@ -36,9 +87,9 @@
     "metadata_verified": true,
     "quote": {
       "instrument": "MNQ SEP26",
-      "last": 29293.5,
-      "bid": 29293.25,
-      "ask": 29293.5,
+      "last": 29291.5,
+      "bid": 29291.75,
+      "ask": 29292.25,
       "volume": 1,
       "have_last": true,
       "have_bid": true,
@@ -51,8 +102,8 @@
       {
         "n": 1,
         "name": "environment_is_simulation",
-        "pass": false,
-        "detail": "DEMO8458533 not present in account list"
+        "pass": true,
+        "detail": "Simulation proven: DEMO8458533 present+connected; no live/funded account detected among ('Backtest', 'Playback101', 'Sim101', 'DEMO7872698', '1932903', 'DEMO7896063', 'DEMO8458533')"
       },
       {
         "n": 2,
@@ -63,7 +114,7 @@
       {
         "n": 3,
         "name": "no_live_account_reachable",
-        "pass": false,
+        "pass": true,
         "detail": "live_suspects=[]; bridge acts only on ['DEMO8458533']"
       },
       {
@@ -106,7 +157,7 @@
         "n": 10,
         "name": "quote_path_healthy",
         "pass": true,
-        "detail": "last=29293.5 bid=29293.25 ask=29293.5"
+        "detail": "last=29291.5 bid=29291.75 ask=29292.25"
       },
       {
         "n": 11,

@@ -1,0 +1,22 @@
+{
+  "artifact": "ninjatrader_account_classification",
+  "integration_era": "MNQ_NINJATRADER_FOUNDATION",
+  "reviewed_at": "2026-07-21",
+  "connection_account_list_reported_by_bridge": [
+    "Backtest", "Playback101", "Sim101", "DEMO7872698", "1932903",
+    "DEMO7896063", "DEMO8458533"
+  ],
+  "classification": {
+    "Backtest": "simulation (strategy analyzer)",
+    "Playback101": "simulation (market replay)",
+    "Sim101": "simulation (built-in simulator)",
+    "DEMO7872698": "simulation (NinjaTrader demo)",
+    "DEMO7896063": "simulation (NinjaTrader demo)",
+    "DEMO8458533": "simulation (NinjaTrader demo) — THE authorized smoke-order account",
+    "1932903": "funded SIM account (NO real money) — attested by Maurice 2026-07-21"
+  },
+  "live_money_accounts_present": false,
+  "attestation": "Maurice confirmed 2026-07-21 that account 1932903 is a funded simulation account, not live money. No live-money account is present on this connection.",
+  "decisive_control_note": "Regardless of the platform account list, the execution path can ONLY address DEMO8458533: MNQBridge hard-pins ALLOWED_ACCOUNT='DEMO8458533', the Python allowlist is {DEMO8458533}, and the ATI DefaultAccount is DEMO8458533. No other account (of any type) is reachable by the bridge.",
+  "order_submitted": false
+}
