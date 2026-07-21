@@ -69,3 +69,8 @@ data/replay/
 
 # One-use smoke-order token — runtime credential, never commit
 data/integration/ninjatrader/smoke_authorization.json
+
+# Deterministic lane runtime state (session + stop flag + evidence stream)
+data/integration/ninjatrader/deterministic/session_state.json
+data/integration/ninjatrader/deterministic/STOP
+data/integration/ninjatrader/deterministic/evidence/

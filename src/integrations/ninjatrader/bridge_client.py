@@ -184,6 +184,15 @@ class NinjaTraderBridgeClient:
     # ── write surface — disarmed until the armed SEND step ───────────────────
     # These send ORDER_SUBMIT_REQUEST; the bridge refuses while ArmOrders=false
     # (returns an ERROR "orders disarmed"), so an accidental call cannot fire.
+    def deterministic_order(self, payload: dict) -> dict:
+        """Send a 5-contract deterministic bracket (LONG/SHORT). Bridge refuses
+        while disarmed or if account/instrument/qty/direction fail its pins."""
+        r = self._request("DETERMINISTIC_ORDER", dict(payload))
+        p = (r or {}).get("payload", {}) if r else {}
+        if (r or {}).get("message_type") == "ERROR" or "reason" in p:
+            return {"accepted": False, "reason": p.get("reason", "bridge refused")}
+        return p
+
     def submit_market_entry(self, intent: dict) -> dict:
         r = self._request("ORDER_SUBMIT_REQUEST", dict(intent))
         payload = (r or {}).get("payload", {}) if r else {}

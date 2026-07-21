@@ -44,8 +44,12 @@ namespace NinjaTrader.NinjaScript.AddOns
         private const string ALLOWED_ACCOUNT = "DEMO8458533";
         private const string ALLOWED_INSTRUMENT = "MNQ SEP26";  // exact pinned expiry
         private const int    MAX_CONTRACTS   = 1;
-        private const double STOP_POINTS     = 5.0;   // protective stop distance
-        private const double TARGET_POINTS   = 5.0;   // profit target distance
+        private const double STOP_POINTS     = 5.0;   // smoke-test protective stop distance
+        private const double TARGET_POINTS   = 5.0;   // smoke-test profit target distance
+        // Deterministic lane doctrine.
+        private const int    DET_QTY         = 5;     // exactly five
+        private const double DET_TARGET_PTS  = 35.0;  // fixed target
+        private const double DET_MAX_STOP    = 20.0;  // hard structural-stop cap
         private const bool   ArmOrders       = false; // physical disarm — flip ONLY at the authorized SEND step.
         private const string LoopbackAddress = "127.0.0.1";
         private const int    ListenPort      = 36901;   // loopback only
@@ -186,6 +190,18 @@ namespace NinjaTrader.NinjaScript.AddOns
                         SendEnvelope(stream, "ERROR", "{\"reason\":\"instrument not the pinned MNQ expiry\"}", account, instrument, "");
                     else
                         SubmitSmokeBracket(stream, account, instrument, line);
+#pragma warning restore 162
+                    break;
+                case "DETERMINISTIC_ORDER":
+#pragma warning disable 162
+                    if (!ArmOrders)
+                        SendEnvelope(stream, "ERROR", "{\"reason\":\"orders disarmed (ArmOrders=false)\"}", account, instrument, "");
+                    else if (account != ALLOWED_ACCOUNT)
+                        SendEnvelope(stream, "ERROR", "{\"reason\":\"account not allowlisted\"}", account, instrument, "");
+                    else if (instrument != ALLOWED_INSTRUMENT)
+                        SendEnvelope(stream, "ERROR", "{\"reason\":\"instrument not the pinned MNQ expiry\"}", account, instrument, "");
+                    else
+                        SubmitDeterministicBracket(stream, account, instrument, line);
 #pragma warning restore 162
                     break;
                 case "HEARTBEAT":
@@ -570,6 +586,77 @@ namespace NinjaTrader.NinjaScript.AddOns
                 Order entry = acct.CreateOrder(instr, OrderAction.Buy, OrderType.Market, OrderEntry.Manual, TimeInForce.Day, MAX_CONTRACTS, 0, 0, "", "SmokeEntry", NinjaTrader.Core.Globals.MaxDate, null);
                 acct.Submit(new[] { entry });
                 SendEnvelope(stream, "ORDER_ACK", "{\"accepted\":true,\"entry\":\"submitted\"}", accountName, instrumentName, "");
+            }
+            catch (Exception ex)
+            {
+                SendEnvelope(stream, "ERROR", "{\"reason\":\"" + Escape(ex.Message) + "\"}", accountName, instrumentName, "");
+            }
+        }
+
+        // DETERMINISTIC lane bracket: exactly 5 contracts, LONG or SHORT, a
+        // STRUCTURAL stop price supplied by the strategy, and a fixed 35-pt target
+        // from the actual fill. On fill it re-checks the true stop distance vs the
+        // 20-pt cap and EMERGENCY-FLATTENS if slippage breached it.
+        private void SubmitDeterministicBracket(NetworkStream stream, string accountName, string instrumentName, string line)
+        {
+            try
+            {
+                string dir = ExtractJsonString(line, "direction").ToLower();
+                int qty = (int)ExtractJsonNumber(line, "quantity");
+                double structuralStop = ExtractJsonNumber(line, "structural_stop_price");
+                if (dir != "long" && dir != "short")
+                { SendEnvelope(stream, "ERROR", "{\"reason\":\"direction must be long or short\"}", accountName, instrumentName, ""); return; }
+                if (qty != DET_QTY)
+                { SendEnvelope(stream, "ERROR", "{\"reason\":\"quantity must be exactly 5\"}", accountName, instrumentName, ""); return; }
+                if (structuralStop <= 0)
+                { SendEnvelope(stream, "ERROR", "{\"reason\":\"structural stop price required\"}", accountName, instrumentName, ""); return; }
+
+                Account acct = FindAllowedAccount();
+                Instrument instr = Instrument.GetInstrument(instrumentName);
+                if (acct == null || instr == null || instr.MasterInstrument == null)
+                { SendEnvelope(stream, "ERROR", "{\"reason\":\"account or instrument missing\"}", accountName, instrumentName, ""); return; }
+                if (instr.MasterInstrument.Name == "NQ")
+                { SendEnvelope(stream, "ERROR", "{\"reason\":\"NQ denied\"}", accountName, instrumentName, ""); return; }
+
+                bool isLong = (dir == "long");
+                OrderAction entryAction = isLong ? OrderAction.Buy : OrderAction.SellShort;
+                OrderAction exitAction = isLong ? OrderAction.Sell : OrderAction.BuyToCover;
+                double stopPx = instr.MasterInstrument.RoundToTickSize(structuralStop);
+                string oco = "DET-OCO-" + Guid.NewGuid().ToString("N");
+
+                EventHandler<ExecutionEventArgs> execHandler = null;
+                execHandler = (object s, ExecutionEventArgs e) =>
+                {
+                    try
+                    {
+                        if (e.Execution == null || e.Execution.Order == null) return;
+                        if (e.Execution.Order.Name != "DetEntry") return;
+                        if (e.Execution.Order.OrderState != OrderState.Filled) return;
+                        double fill = e.Execution.Order.AverageFillPrice;
+                        // Fill-slippage re-check against the 20-pt cap.
+                        double actualStopDist = Math.Abs(fill - stopPx);
+                        if (actualStopDist > DET_MAX_STOP + 1e-9)
+                        {
+                            try { acct.Flatten(new[] { instr }); } catch { }   // EMERGENCY FLATTEN
+                            acct.ExecutionUpdate -= execHandler;
+                            return;
+                        }
+                        double tgtPx = isLong
+                            ? instr.MasterInstrument.RoundToTickSize(fill + DET_TARGET_PTS)
+                            : instr.MasterInstrument.RoundToTickSize(fill - DET_TARGET_PTS);
+                        Order stop = acct.CreateOrder(instr, exitAction, OrderType.StopMarket, OrderEntry.Manual, TimeInForce.Day, DET_QTY, 0, stopPx, oco, "DetStop", NinjaTrader.Core.Globals.MaxDate, null);
+                        Order tgt = acct.CreateOrder(instr, exitAction, OrderType.Limit, OrderEntry.Manual, TimeInForce.Day, DET_QTY, tgtPx, 0, oco, "DetTarget", NinjaTrader.Core.Globals.MaxDate, null);
+                        try { acct.Submit(new[] { stop, tgt }); }
+                        catch { try { acct.Flatten(new[] { instr }); } catch { } }
+                        acct.ExecutionUpdate -= execHandler;
+                    }
+                    catch { }
+                };
+                acct.ExecutionUpdate += execHandler;
+
+                Order entry = acct.CreateOrder(instr, entryAction, OrderType.Market, OrderEntry.Manual, TimeInForce.Day, DET_QTY, 0, 0, "", "DetEntry", NinjaTrader.Core.Globals.MaxDate, null);
+                acct.Submit(new[] { entry });
+                SendEnvelope(stream, "ORDER_ACK", "{\"accepted\":true,\"entry\":\"submitted\",\"lane\":\"deterministic\"}", accountName, instrumentName, "");
             }
             catch (Exception ex)
             {
