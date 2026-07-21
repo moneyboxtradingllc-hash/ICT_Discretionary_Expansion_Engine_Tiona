@@ -88,6 +88,34 @@ def _max_chase_risk_mult() -> float:
         return 2.0
 
 
+def evaluate_fc0b(order_type: str, price_relation, entry_reference,
+                  stop_reference, zone_midpoint) -> tuple:
+    """FC-0B — the ONE owner of entry-location / chase authority.
+
+    Consumed by build_order (the normal execution path) AND, through this same
+    seam, by the deterministic MNQ lane. Two guards, MARKET mode only:
+      (1) in-zone: price_relation must be inside_zone/touching_zone — never chase
+          a price that has left the planned entry zone.
+      (2) chase cap: live risk_per_share <= MAX_CHASE_RISK_MULT x zone risk.
+    Limit mode is the pre-FC rollback (permit). Returns (permit, reason). The
+    reason strings are identical to build_order's historical rejections.
+    """
+    if order_type != "market":
+        return True, "limit mode (pre-FC rollback) — FC-0B not applicable"
+    relation = (price_relation or "unknown").lower()
+    if relation not in _IN_ZONE_RELATIONS:
+        return False, (f"market mode: price_relation '{relation}' — "
+                       "price has left the planned entry zone")
+    if zone_midpoint is not None and stop_reference is not None and entry_reference is not None:
+        zone_risk = abs(float(zone_midpoint) - float(stop_reference))
+        risk_per_share = abs(float(entry_reference) - float(stop_reference))
+        if zone_risk > 0 and risk_per_share > zone_risk * _max_chase_risk_mult():
+            return False, (
+                f"market mode: chase cap — live risk/share {risk_per_share:.4f} "
+                f"exceeds {_max_chase_risk_mult()}x zone risk {zone_risk:.4f}")
+    return True, "FC-0B permit (in zone, chase within cap)"
+
+
 def build_order(snapshot: dict, symbol: str) -> dict:
     """
     Build an order request dict from snapshot state.
@@ -165,14 +193,10 @@ def build_order(snapshot: dict, symbol: str) -> dict:
                 "reject_reason": "market mode: no current_price in entry_zone",
             }
         relation = (ez.get("price_relation") or "unknown").lower()
-        if relation not in _IN_ZONE_RELATIONS:
-            return {
-                "valid": False,
-                "reject_reason": (
-                    f"market mode: price_relation '{relation}' — "
-                    "price has left the planned entry zone"
-                ),
-            }
+        # FC-0B guard (1) in-zone — via the single sanctioned verdict function.
+        _fc_ok, _fc_reason = evaluate_fc0b("market", relation, None, None, None)
+        if not _fc_ok:
+            return {"valid": False, "reject_reason": _fc_reason}
         entry_reference = float(current_price)
         decision_price  = entry_reference
     else:
@@ -197,17 +221,12 @@ def build_order(snapshot: dict, symbol: str) -> dict:
     if risk_per_share <= 0:
         return {"valid": False, "reject_reason": f"risk_per_share <= 0 ({risk_per_share})"}
 
-    # ── FC-0B: chase cap — market entries may not balloon risk vs the plan ────
-    if order_type == "market" and zone_midpoint is not None:
-        zone_risk = abs(float(zone_midpoint) - stop_reference)
-        if zone_risk > 0 and risk_per_share > zone_risk * _max_chase_risk_mult():
-            return {
-                "valid": False,
-                "reject_reason": (
-                    f"market mode: chase cap — live risk/share {risk_per_share:.4f} "
-                    f"exceeds {_max_chase_risk_mult()}x zone risk {zone_risk:.4f}"
-                ),
-            }
+    # ── FC-0B guard (2) chase cap — via the single sanctioned verdict function ─
+    if order_type == "market":
+        _fc_ok, _fc_reason = evaluate_fc0b(
+            "market", "inside_zone", entry_reference, stop_reference, zone_midpoint)
+        if not _fc_ok:
+            return {"valid": False, "reject_reason": _fc_reason}
 
     risk_qty = math.floor(risk_budget / risk_per_share)
     if risk_qty <= 0:

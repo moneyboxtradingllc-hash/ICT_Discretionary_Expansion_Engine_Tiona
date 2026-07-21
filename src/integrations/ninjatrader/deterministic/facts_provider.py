@@ -40,11 +40,15 @@ def build_mnq_snapshot(bars: list):
     (snapshot, decision, gate). No OpenAI (Brain gated off by default)."""
     from data_feed.timeframe_builder import build_timeframes
     from market_data.snapshot_builder import build_snapshot
+    from trade_intent.intent_builder import build_intent
     from decision_authority.decision_engine import make_decision
     from execution_gate.execution_gate import evaluate_gate
 
     tfs = build_timeframes(bars or [])
     snapshot = build_snapshot(tfs, symbol="MNQ SEP26")
+    # Same sanctioned seam scan_loop uses — populates trade_intent.entry_zone,
+    # the input to the real FC-0B verdict.
+    snapshot["trade_intent"] = build_intent(snapshot, "MNQ SEP26")
     decision = make_decision(snapshot)
     gate = evaluate_gate(snapshot)
     # Hard invariant for this lane: the Brain must never have been invoked.
@@ -82,10 +86,21 @@ def build_facts_from_snapshot(snapshot: dict, decision: dict, gate: dict,
     liq = snapshot.get("liquidity", {}) or {}
     exp = snapshot.get("expansion", {}) or {}
 
+    from paper_execution.order_builder import evaluate_fc0b, _preferred_candidate
+
     direction = _dir(decision.get("direction"))
     entry = last_price if isinstance(last_price, (int, float)) else None
-    invalidation = (_structural_invalidation(na, structure, direction, entry)
-                    if (direction and entry) else None)
+
+    # Structural invalidation: the setup's REAL invalidation_level (price_level),
+    # then narrative, then a protected/structure swing on the correct side.
+    ti = snapshot.get("trade_intent", {}) or {}
+    ez = ti.get("entry_zone") or {}
+    pref_c = _preferred_candidate(snapshot)
+    pl = (pref_c.get("price_level") or {}) if isinstance(pref_c, dict) else {}
+    invalidation = pl.get("invalidation_level")
+    if not isinstance(invalidation, (int, float)):
+        invalidation = (_structural_invalidation(na, structure, direction, entry)
+                        if (direction and entry) else None)
 
     commander_permits = bool(gate.get("commander_permits_trade", False))
     # The mechanical (non-Brain) gate: every sub-authority the execution gate
@@ -98,9 +113,21 @@ def build_facts_from_snapshot(snapshot: dict, decision: dict, gate: dict,
     if setup_family in (None, "", "no_playbook"):
         setup_family = None
 
-    # FC-0B chase discipline for this lane = structural stop within the 20-pt cap.
-    fc0b = (invalidation is not None and entry is not None
-            and abs(entry - invalidation) <= 20.0 + 1e-9)
+    # ── ACTUAL FC-0B verdict — the sanctioned order_builder.evaluate_fc0b seam.
+    # Entry-location / chase authority, SEPARATE from the 20-pt structural stop
+    # cap (which stays its own check in the risk engine). Indeterminable FC-0B
+    # inputs -> None -> author fails closed (NO_TRADE).
+    fc_relation = ez.get("price_relation")
+    fc_entry = ez.get("current_price") if ez.get("current_price") is not None else entry
+    fc_stop = pl.get("invalidation_level")
+    if fc_stop is None:
+        fc_stop = ez.get("zone_low") if direction == "long" else ez.get("zone_high")
+    fc_mid = pl.get("midpoint") if pl.get("midpoint") is not None else ez.get("midpoint")
+    if fc_relation is None or fc_entry is None or fc_stop is None:
+        fc0b = None   # FC-0B indeterminable -> NO_TRADE upstream
+    else:
+        _fc_ok, _fc_reason = evaluate_fc0b("market", fc_relation, fc_entry, fc_stop, fc_mid)
+        fc0b = bool(_fc_ok)
 
     return {
         "setup_family": setup_family,
@@ -116,7 +143,8 @@ def build_facts_from_snapshot(snapshot: dict, decision: dict, gate: dict,
         # Commander verdict consumed ONLY through the sanctioned gate adapter
         # (commander_permits_trade), never the raw matrix.
         "commander_state": ("STAND_DOWN" if not commander_permits else "PROCEED"),
-        "fc0b_permits": bool(fc0b),
+        # None when FC-0B is indeterminable -> author treats as unknown -> NO_TRADE.
+        "fc0b_permits": (None if fc0b is None else bool(fc0b)),
         "entry_invalidation": invalidation,
         "opposing_direction": None,
         "final_gate_authorizes": bool(mech_gate),
