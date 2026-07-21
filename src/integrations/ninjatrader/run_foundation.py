@@ -220,7 +220,9 @@ def main(argv=None):
     with open(_HEALTH_PATH, "w", encoding="utf-8") as fh:
         json.dump(out, fh, indent=2)
 
-    print(f"\nActive MNQ expiry (calendar, PENDING platform confirm): {expiry}")
+    _mv = recon.get("metadata_verified") if bridge.get("connected") else None
+    _tag = "platform-confirmed" if _mv else "calendar, PENDING platform confirm"
+    print(f"\nActive MNQ instrument ({_tag}): {meta.get('instrument_name') or expiry}")
     print(f"NinjaTrader installed: {installed} | running: {ninjatrader_running} "
           f"| user-data initialized: {initialized}")
     print(f"Global Simulation Mode (Config.xml): {gsm.get('value')}")

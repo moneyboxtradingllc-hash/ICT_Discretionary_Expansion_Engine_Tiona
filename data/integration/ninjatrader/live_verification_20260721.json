@@ -3,48 +3,85 @@
   "integration_era": "MNQ_NINJATRADER_FOUNDATION",
   "account": "DEMO8458533",
   "verified_at": "2026-07-21",
-  "environment": {
-    "ninjatrader_installed": true,
-    "ninjatrader_running": true,
-    "ninjatrader_pid": 10300,
-    "user_data_dir": "C:\\Users\\jesus\\OneDrive\\Documents\\NinjaTrader 8 (OneDrive-redirected)",
-    "user_data_initialized": true,
-    "pythonnet_installed": false
-  },
+  "path": "LIVE via NinjaScript bridge (127.0.0.1:36901)",
   "global_simulation_mode": {
     "value": false,
-    "source": "Config.xml <IsGlobalSimulationMode>false</IsGlobalSimulationMode> (+ StartInGlobalSimulationMode=false)",
-    "note": "Read directly from persisted config (permitted). Currently DISABLED. Not a read-only blocker; the adapter enforces DEMO8458533-only + disarmed regardless. Recommended ON before the future smoke-order mission as an extra defense layer (DEMO8458533 is already a simulated brokerage-demo account)."
+    "source": "C:\\Users\\jesus\\OneDrive\\Documents\\NinjaTrader 8\\Config.xml",
+    "note": "persisted config value; the running session is authoritative"
   },
-  "bridge": {
-    "source_deployed_to": "C:\\Users\\jesus\\OneDrive\\Documents\\NinjaTrader 8\\bin\\Custom\\AddOns\\MNQBridge.cs",
-    "static_compile": "CLEAN — csc.exe against NinjaTrader.Core.dll + NinjaTrader.Gui.dll, 0 errors 0 warnings",
-    "compiled_inside_nt": false,
-    "ninjatrader_custom_dll_present": false,
-    "listening_on_36901": false,
-    "python_client_connect": false,
-    "blocker": "AddOn not yet compiled inside NinjaTrader (press F5 in NinjaScript Editor). Until then account/position/metadata/quote/bar reads fail closed."
+  "bridge_connected": true,
+  "connection": {
+    "connected": true
   },
-  "read_only_facts_via_bridge": {
-    "note": "All of the following require the compiled bridge; currently UNKNOWN (fail-closed).",
-    "account_DEMO8458533_visible": "unknown",
-    "account_state_known": "unknown",
-    "position_state_known": "unknown",
-    "account_flat": "unknown",
-    "working_order_count": "unknown",
-    "connection_healthy": "unknown",
-    "active_mnq_expiry_platform": "unknown (calendar-derived MNQ 09-26, PENDING platform confirm)",
-    "instrument_metadata_verified": false,
-    "quotes_bid_ask_last": "unknown",
-    "volume": "unknown",
-    "historical_1m_bars": "unknown",
-    "canonical_snapshot_built": false,
-    "reconciliation": "unreconciled (bridge not connected)"
+  "account_state": {
+    "account": "DEMO8458533",
+    "cash_value": 50000
+  },
+  "instrument_metadata": {
+    "instrument_name": "MNQ SEP26",
+    "root": "MNQ",
+    "tick_size": 0.25,
+    "point_value": 2,
+    "currency": "UsDollar"
+  },
+  "metadata_reconcile": {
+    "matches": true,
+    "mismatches": [],
+    "checked": {
+      "tick_size": {
+        "declared": 0.25,
+        "platform": 0.25
+      },
+      "point_value": {
+        "declared": 2.0,
+        "platform": 2
+      },
+      "tick_value": {
+        "declared": 0.5,
+        "platform": 0.5
+      },
+      "instrument_root": {
+        "platform": "MNQ"
+      }
+    },
+    "metadata_verified": true
+  },
+  "position": {
+    "instrument": "MNQ SEP26",
+    "qty": 0,
+    "market_position": "Flat",
+    "avg_price": 0,
+    "flat": true,
+    "known": true
+  },
+  "order_summary": {
+    "working_order_count": 0,
+    "orders": [],
+    "known": true
+  },
+  "quote": {
+    "instrument": "MNQ SEP26",
+    "last": 29102.75,
+    "bid": 29102,
+    "ask": 29102.5,
+    "volume": 1,
+    "have_last": true,
+    "have_bid": true,
+    "have_ask": true
+  },
+  "bars": {
+    "ok": true,
+    "count": 29,
+    "health": "CONNECTED_HEALTHY",
+    "first": "2026-07-21T02:56:00.0000000-04:00",
+    "last": "2026-07-21T03:24:00.0000000-04:00",
+    "snapshot_input_ready": true
   },
   "safety": {
-    "account_allowlist": ["DEMO8458533"],
+    "account_allowlist": [
+      "DEMO8458533"
+    ],
     "automated_order_submission": "DISABLED",
-    "order_submitted_this_session": false
-  },
-  "single_remaining_blocker": "Compile MNQBridge inside NinjaTrader (NinjaScript Editor -> F5) so it listens on 127.0.0.1:36901; then re-run launch_ninjatrader_mnq_readonly.ps1 to light up account/metadata/quote/bar/reconciliation."
+    "order_submitted": false
+  }
 }

@@ -1,7 +1,7 @@
 {
   "banner_account": "DEMO8458533",
   "mode": "readonly",
-  "active_mnq_expiry": "MNQ 09-26",
+  "active_mnq_expiry": "MNQ SEP26",
   "ninjatrader_installed": true,
   "ninjatrader_running": true,
   "ninjatrader_client_dll_present": true,
@@ -12,19 +12,74 @@
     "note": "persisted config value; the running session is authoritative"
   },
   "bridge_probe": {
-    "connected": false,
-    "reason": "bridge not listening on 127.0.0.1:36901 \u2014 AddOn not compiled/running inside NinjaTrader",
+    "connected": true,
     "connection_state": {
-      "known": false
+      "connected": true
     },
     "account_state": {
-      "known": false
+      "account": "DEMO8458533",
+      "cash_value": 50000
     },
     "instrument_metadata": {
-      "known": false
+      "instrument_name": "MNQ SEP26",
+      "root": "MNQ",
+      "tick_size": 0.25,
+      "point_value": 2,
+      "currency": "UsDollar"
+    },
+    "metadata_reconcile": {
+      "matches": true,
+      "mismatches": [],
+      "checked": {
+        "tick_size": {
+          "declared": 0.25,
+          "platform": 0.25
+        },
+        "point_value": {
+          "declared": 2.0,
+          "platform": 2
+        },
+        "tick_value": {
+          "declared": 0.5,
+          "platform": 0.5
+        },
+        "instrument_root": {
+          "platform": "MNQ"
+        }
+      },
+      "metadata_verified": true
     },
     "position": {
-      "known": false
+      "instrument": "MNQ SEP26",
+      "qty": 0,
+      "market_position": "Flat",
+      "avg_price": 0,
+      "flat": true,
+      "known": true
+    },
+    "order_summary": {
+      "working_order_count": 0,
+      "orders": [],
+      "known": true
+    },
+    "working_orders": [],
+    "quote": {
+      "instrument": "MNQ SEP26",
+      "last": 29109.75,
+      "bid": 29109.5,
+      "ask": 29110,
+      "volume": 1,
+      "have_last": true,
+      "have_bid": true,
+      "have_ask": true
+    },
+    "bars": {
+      "ok": true,
+      "count": 29,
+      "health": "CONNECTED_HEALTHY",
+      "first": "2026-07-21T02:55:00.0000000-04:00",
+      "last": "2026-07-21T03:23:00.0000000-04:00",
+      "snapshot_input_ready": true
     }
   },
   "order_submission_denial_proof": {
@@ -37,22 +92,22 @@
     "ninjatrader_running": true,
     "version": "unknown",
     "interface_selected": "ninjascript_bridge",
-    "interface_connected": false,
+    "interface_connected": true,
     "data_connection_name": "unknown",
     "sim_account_visible": null,
     "global_sim_mode_user_confirmed": false,
-    "active_mnq_expiry": "MNQ 09-26",
+    "active_mnq_expiry": "MNQ SEP26",
     "tick_size": 0.25,
     "point_value": 2.0,
     "tick_value": 0.5,
     "quote_freshness_seconds": null,
-    "latest_completed_bar": "none",
-    "warmup_bar_count": 0,
-    "position_state": "unknown",
-    "working_order_count": null,
-    "reconciliation_state": "unreconciled (bridge not connected)",
+    "latest_completed_bar": "2026-07-21T03:23:00.0000000-04:00",
+    "warmup_bar_count": 29,
+    "position_state": "flat",
+    "working_order_count": 0,
+    "reconciliation_state": "clean",
     "order_submission_armed": false,
-    "last_error": "bridge not listening on 127.0.0.1:36901 \u2014 AddOn not compiled/running inside NinjaTrader",
+    "last_error": "",
     "last_heartbeat": "none",
     "integration_version": "0.1.0-foundation",
     "integration_era": "MNQ_NINJATRADER_FOUNDATION"

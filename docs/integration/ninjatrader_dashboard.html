@@ -42,10 +42,10 @@
 <div class="wrap">
   <h1>NinjaTrader MNQ Integration — Foundation</h1>
   <p class="sub">Era <code>MNQ_NINJATRADER_FOUNDATION</code> · account <b>DEMO8458533</b> only · max <b>1 MNQ</b> · read-only</p>
-  <span class="verdict">VERDICT: FOUNDATION PARTIAL — BRIDGE COMPILE REQUIRED (F5 in NT)</span>
+  <span class="verdict" style="background:rgba(26,127,75,.14);color:var(--ok);border-color:var(--ok)">VERDICT: FOUNDATION VALIDATED — READ-ONLY MNQ READY</span>
 
   <div class="banner">NINJATRADER ACCOUNT: DEMO8458533
-INSTRUMENT: MNQ 09-26  (calendar-derived, PENDING platform confirmation)
+INSTRUMENT: MNQ SEP26  (platform-confirmed: tick 0.25, point $2.00, tick $0.50)
 AUTOMATED ORDER SUBMISSION: DISABLED
 MAX CONTRACTS: 1
 LIVE ACCOUNTS: FORBIDDEN
@@ -60,11 +60,11 @@ OPENAI CALLS: DISABLED FOR INTEGRATION TEST</div>
       <div class="kv"><span>Global Sim Mode</span><span class="pill warn">off (Config.xml)</span></div>
     </div>
     <div class="card">
-      <h3>Bridge</h3>
-      <div class="kv"><span>Decision</span><b>NinjaScript bridge</b></div>
-      <div class="kv"><span>Deployed to AddOns</span><span class="pill ok">yes</span></div>
-      <div class="kv"><span>Static compile</span><span class="pill ok">clean</span></div>
-      <div class="kv"><span>Compiled in NT / listening</span><span class="pill block">pending F5</span></div>
+      <h3>Bridge (live)</h3>
+      <div class="kv"><span>Compiled in NT</span><span class="pill ok">yes</span></div>
+      <div class="kv"><span>Listening 127.0.0.1:36901</span><span class="pill ok">yes</span></div>
+      <div class="kv"><span>Account known / flat</span><span class="pill ok">yes / flat</span></div>
+      <div class="kv"><span>Working orders</span><span class="pill ok">0</span></div>
     </div>
     <div class="card">
       <h3>Safety</h3>
@@ -86,13 +86,13 @@ OPENAI CALLS: DISABLED FOR INTEGRATION TEST</div>
   <div class="scroll"><table>
     <tr><th>Stage</th><th>Status</th></tr>
     <tr><td>1 · Filesystem / installation preflight</td><td><span class="pill ok">done</span></td></tr>
-    <tr><td>2 · NT process visibility</td><td><span class="pill ok">done (pid 10300)</span></td></tr>
-    <tr><td>3 · DEMO8458533 account visibility</td><td><span class="pill block">needs bridge</span></td></tr>
-    <tr><td>4–5 · MNQ expiry + metadata (platform-confirmed)</td><td><span class="pill block">needs bridge</span></td></tr>
-    <tr><td>6–8 · Quote / historical / live bars</td><td><span class="pill block">needs bridge</span></td></tr>
-    <tr><td>9 · Build organism snapshot from MNQ</td><td><span class="pill warn">code ready</span></td></tr>
-    <tr><td>10 · Shadow decisions (execution disabled)</td><td><span class="pill warn">code ready</span></td></tr>
-    <tr><td>11 · Flat account readback</td><td><span class="pill block">needs bridge</span></td></tr>
+    <tr><td>2 · NT process visibility</td><td><span class="pill ok">done</span></td></tr>
+    <tr><td>3 · DEMO8458533 account visibility</td><td><span class="pill ok">done ($50k, known)</span></td></tr>
+    <tr><td>4–5 · MNQ expiry + metadata (platform-confirmed)</td><td><span class="pill ok">MNQ SEP26, verified</span></td></tr>
+    <tr><td>6–8 · Quote / historical / live bars</td><td><span class="pill ok">live (29 bars, quote)</span></td></tr>
+    <tr><td>9 · Build organism snapshot from MNQ</td><td><span class="pill ok">candles gatekept (healthy)</span></td></tr>
+    <tr><td>10 · Shadow decisions (execution disabled)</td><td><span class="pill warn">ready to run</span></td></tr>
+    <tr><td>11 · Flat account readback</td><td><span class="pill ok">flat, 0 orders</span></td></tr>
     <tr><td>12 · Submission-denial proof</td><td><span class="pill ok">proven</span></td></tr>
   </table></div>
 
