@@ -478,7 +478,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                 int[] count = { 0 };
                 string[] err = { null };
                 DateTime to = DateTime.Now;
-                DateTime from = to.AddDays(-1);
+                DateTime from = to.AddDays(-5);   // enough history for structural analysis
                 BarsRequest req = new BarsRequest(instr, from, to);
                 req.BarsPeriod = new BarsPeriod { BarsPeriodType = BarsPeriodType.Minute, Value = 1 };
                 req.Request((request, errorCode, errorMessage) =>
@@ -492,7 +492,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                         else if (request != null && request.Bars != null)
                         {
                             int n = request.Bars.Count;
-                            int start = Math.Max(0, n - 30);   // last 30 bars is enough proof
+                            int start = Math.Max(0, n - 400);  // deep history for structure engines
                             for (int i = start; i < n; i++)
                             {
                                 if (sb.Length > 0) sb.Append(",");

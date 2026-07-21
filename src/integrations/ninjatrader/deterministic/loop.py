@@ -95,8 +95,8 @@ def one_scan(client: NinjaTraderBridgeClient, session: SessionAuthority, scan_nu
     in_window = _in_decision_window()
     can_enter, can_reason = session.can_enter()
 
-    # 2. Build MNQ snapshot + mechanical facts (authoritative gates unwired -> unknown).
-    bars = client.historical_1m(INSTRUMENT, 60)
+    # 2. Build MNQ snapshot + mechanical facts from the REAL organism authorities.
+    bars = client.historical_1m(INSTRUMENT, 400)
     quote = client.quote(INSTRUMENT)
     facts = FP.build_facts(bars, quote)
 
@@ -130,8 +130,12 @@ def one_scan(client: NinjaTraderBridgeClient, session: SessionAuthority, scan_nu
         "trade_count": session.trade_count, "realized_pnl": session.realized_pnl,
         "author": decision.to_dict(),
         "snapshot": {"bars": len(bars), "last": quote.get("last"),
-                     "swing_high": facts.get("recent_swing_high"),
-                     "swing_low": facts.get("recent_swing_low")},
+                     "setup_family": facts.get("setup_family"),
+                     "mech_direction": facts.get("direction"),
+                     "decision_state": facts.get("_decision_state"),
+                     "qual_status": facts.get("_qual_status"),
+                     "commander": facts.get("commander_state"),
+                     "invalidation": facts.get("entry_invalidation")},
         "blockers": decision.blockers(),
         "routed": routed,
     }

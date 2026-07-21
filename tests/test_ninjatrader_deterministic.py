@@ -217,6 +217,72 @@ class TestSession(unittest.TestCase):
         self.assertFalse(s.last_reconcile_ok)
 
 
+class TestFactsWiring(unittest.TestCase):
+    """The facts provider maps the REAL subsystem outputs to author facts."""
+
+    def _snapshot(self, direction="bullish", entry=29300.0, invalid=29288.0):
+        return {
+            "qualification": {"status": "qualified", "direction": direction},
+            "playbook": {"selected_playbook": "fvg_reclaim", "direction": direction},
+            "narrative_authority": {"invalidation_level": invalid,
+                                    "protected_low": invalid, "protected_high": entry + 12},
+            "market_commander": {"final_state": "COMMAND_OBSERVE"},
+            "structure": {"1m": {"bos": True, "last_swing_low": invalid,
+                                 "last_swing_high": entry + 12}},
+            "liquidity": {"1m": {"sweep_detected": True}},
+            "expansion": {"1m": {"displacement_detected": True}},
+        }
+
+    def _gate(self, ok=True):
+        return {k: ok for k in ("trigger_requirement_met", "narrative_permits_trade",
+                                "commander_permits_trade", "council_permits_trade",
+                                "regime_permission_allowed", "no_promoted_rule_block")}
+
+    def test_wired_long_authorizes(self):
+        from integrations.ninjatrader.deterministic import facts_provider as FP
+        snap = self._snapshot("bullish", 29300.0, 29288.0)   # 12pt structural stop
+        facts = FP.build_facts_from_snapshot(snap, {"direction": "bullish",
+                                                    "decision": "ready_for_execution"},
+                                             self._gate(True), 29300.0)
+        self.assertEqual(facts["direction"], "long")
+        self.assertEqual(facts["setup_family"], "fvg_reclaim")
+        self.assertEqual(facts["entry_invalidation"], 29288.0)
+        d = _author(facts)
+        self.assertTrue(d.authorized, d.blockers())
+        self.assertEqual(d.quantity, 5)
+
+    def test_wired_short_authorizes(self):
+        from integrations.ninjatrader.deterministic import facts_provider as FP
+        snap = self._snapshot("bearish", 29300.0, 29314.0)   # 14pt stop above
+        facts = FP.build_facts_from_snapshot(snap, {"direction": "bearish"},
+                                             self._gate(True), 29300.0)
+        self.assertEqual(facts["direction"], "short")
+        self.assertTrue(_author(facts).authorized)
+
+    def test_gate_block_no_trade(self):
+        from integrations.ninjatrader.deterministic import facts_provider as FP
+        snap = self._snapshot("bullish")
+        facts = FP.build_facts_from_snapshot(snap, {"direction": "bullish"},
+                                             self._gate(False), 29300.0)
+        self.assertFalse(_author(facts).authorized)   # commander/trigger/etc blocked
+
+    def test_neutral_decision_no_trade(self):
+        from integrations.ninjatrader.deterministic import facts_provider as FP
+        snap = self._snapshot("bullish")
+        facts = FP.build_facts_from_snapshot(snap, {"direction": "neutral"},
+                                             self._gate(True), 29300.0)
+        self.assertIsNone(facts["direction"])
+        self.assertFalse(_author(facts).authorized)
+
+    def test_stop_beyond_20_no_trade(self):
+        from integrations.ninjatrader.deterministic import facts_provider as FP
+        snap = self._snapshot("bullish", 29300.0, 29278.0)   # 22pt -> fc0b false + stop cap
+        facts = FP.build_facts_from_snapshot(snap, {"direction": "bullish"},
+                                             self._gate(True), 29300.0)
+        self.assertFalse(facts["fc0b_permits"])
+        self.assertFalse(_author(facts).authorized)
+
+
 class TestConstitution(unittest.TestCase):
     def test_25_only_demo_account(self):
         from integrations.ninjatrader.account_safety import check_account
