@@ -44,5 +44,23 @@
     "known": true
   },
   "redisarm": "token burned (one-use) + disarmed bridge source redeployed",
-  "no_live_account": true
+  "no_live_account": true,
+  "exit": {
+    "closed_by": "PROFIT_TARGET",
+    "fill_price": 29291.75,
+    "other_side": "STOP auto-cancelled by OCO",
+    "result_points": 5.0,
+    "gross_pnl_usd": 10.0,
+    "note": "5.00 pts x $2.00/pt = $10.00 gross, minus sim fees"
+  },
+  "final_state": {
+    "position": "FLAT",
+    "working_orders": 0,
+    "flatten_sent": "yes (no-op, already flat)"
+  },
+  "round_trip": {
+    "entry": 29286.75,
+    "exit": 29291.75,
+    "side": "LONG"
+  }
 }
