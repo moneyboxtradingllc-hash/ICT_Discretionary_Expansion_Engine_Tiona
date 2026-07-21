@@ -4,13 +4,12 @@
 **Account:** DEMO8458533 only · **Instrument:** Micro E-mini Nasdaq-100 (MNQ) · **Max:** 1 contract
 **Automated order submission:** DISABLED (foundation). No order is sent by the bot.
 
-> **Status (2026-07-21):** NinjaTrader 8 is **installed, launched, and running**;
-> its user-data dir is `C:\Users\jesus\OneDrive\Documents\NinjaTrader 8` (OneDrive-
-> redirected). Maurice is logged in. The account is **DEMO8458533**. The one
-> remaining action for the live read-only path is **compiling the bridge (§F)** and
-> confirming **Global Simulation Mode (§B)**. `MNQBridge.cs` has been deployed to the
-> AddOns folder and **compiles cleanly against the NT8 assemblies** (static build) —
-> it just needs to be compiled inside NT so it starts listening on `127.0.0.1:36901`.
+> **Status (2026-07-21):** NinjaTrader 8 is **installed, running, and the bridge is
+> live** on `127.0.0.1:36901`. The read-only MNQ path is **VALIDATED** (DEMO8458533
+> flat, MNQ SEP26 metadata verified, quotes + bars healthy). Global Simulation Mode
+> is **N/A on this edition** (see §B) — the safety proof is the **Simulation
+> environment + DEMO8458533-only enforcement**. Next: the DEMO8458533 smoke-order
+> mission gates on a 12-point preflight + a one-use authorization token.
 
 ---
 
@@ -26,9 +25,11 @@
 ## B. Confirm the simulation account & safety
 
 5. Open **Control Center → Accounts** and confirm **DEMO8458533** is listed.
-6. Enable **Global Simulation Mode** (Control Center → right-click connection area / Tools).
-   *(This is a NinjaTrader GUI safeguard. The bot's adapter ALSO enforces DEMO8458533
-   independently — do not rely on this alone.)*
+6. **Global Simulation Mode is N/A on this NinjaTrader edition** (no such menu item;
+   it is a multi-provider-mode feature, intentionally NOT enabled). The safety proof
+   instead is **positive evidence of the Simulation environment**: you are logged into
+   the Simulation environment and **DEMO8458533** is the connected account. The bridge
+   + adapter additionally enforce DEMO8458533 as the sole account (defense in depth).
 7. Confirm **no live/funded account** is connected or selected.
 
 ## C. Automated Trading Interface (ONLY if later required)
@@ -88,7 +89,7 @@ Please send back only these facts (no passwords, no API keys, no account numbers
 - [ ] Do **bid / ask / last** update on the MNQ chart? (yes/no)
 - [ ] Does **volume** update? (yes/no)
 - [ ] Do **historical bars** load on 1m/5m/15m? (yes/no)
-- [ ] **Global Simulation Mode** enabled? (screenshot or text confirmation)
+- [ ] Confirmed logged into the **Simulation environment** (not live/funded)
 - [ ] Account selector showing **DEMO8458533** (screenshot or text confirmation)
 - [ ] Did `MNQBridge.cs` **compile** cleanly? (yes/no + any error text)
 

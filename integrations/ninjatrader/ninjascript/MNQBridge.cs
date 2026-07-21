@@ -150,6 +150,9 @@ namespace NinjaTrader.NinjaScript.AddOns
                 case "ACCOUNT_STATE":
                     SendAccountState(stream, account);
                     break;
+                case "ENVIRONMENT_PROOF":
+                    SendEnvironmentProof(stream);
+                    break;
                 case "POSITION_UPDATE":
                     SendPosition(stream, account, instrument);
                     break;
@@ -265,6 +268,56 @@ namespace NinjaTrader.NinjaScript.AddOns
             foreach (Account a in Account.All)
                 if (a.Name == ALLOWED_ACCOUNT) return a;
             return null;
+        }
+
+        // Read-only proof of the connected environment: every account with its
+        // provider + connection status, so the Python side can positively prove
+        // it is the Simulation environment and that no live account is present.
+        private void SendEnvironmentProof(NetworkStream stream)
+        {
+            try
+            {
+                var accs = new StringBuilder();
+                foreach (Account a in Account.All)
+                {
+                    string prov = "";
+                    string connName = "";
+                    string connStatus = "None";
+                    try { prov = a.Provider.ToString(); } catch { }
+                    try {
+                        if (a.Connection != null)
+                        {
+                            connStatus = a.Connection.Status.ToString();
+                            if (a.Connection.Options != null) connName = a.Connection.Options.Name;
+                        }
+                    } catch { }
+                    if (accs.Length > 0) accs.Append(",");
+                    accs.AppendFormat(CultureInfo.InvariantCulture,
+                        "{{\"name\":\"{0}\",\"provider\":\"{1}\",\"connection\":\"{2}\",\"status\":\"{3}\"}}",
+                        Escape(a.Name), Escape(prov), Escape(connName), Escape(connStatus));
+                }
+                var conns = new StringBuilder();
+                try
+                {
+                    foreach (Connection c in Connection.Connections)
+                    {
+                        string nm = "";
+                        try { if (c.Options != null) nm = c.Options.Name; } catch { }
+                        if (conns.Length > 0) conns.Append(",");
+                        conns.AppendFormat(CultureInfo.InvariantCulture,
+                            "{{\"name\":\"{0}\",\"status\":\"{1}\"}}", Escape(nm), c.Status.ToString());
+                    }
+                }
+                catch { }
+                string payload = string.Format(CultureInfo.InvariantCulture,
+                    "{{\"allowed_account\":\"{0}\",\"arm_orders\":{1},\"accounts\":[{2}],\"connections\":[{3}]}}",
+                    ALLOWED_ACCOUNT, ArmOrders ? "true" : "false", accs.ToString(), conns.ToString());
+                SendEnvelope(stream, "ENVIRONMENT_PROOF", payload, ALLOWED_ACCOUNT, "", "");
+            }
+            catch (Exception ex)
+            {
+                SendEnvelope(stream, "ERROR", "{\"reason\":\"" + Escape(ex.Message) + "\"}", "", "", "");
+            }
         }
 
         // Read-only net position for the exact instrument. Flat -> qty 0.

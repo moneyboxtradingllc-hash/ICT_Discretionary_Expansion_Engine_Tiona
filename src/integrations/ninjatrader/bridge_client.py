@@ -138,6 +138,10 @@ class NinjaTraderBridgeClient:
         r = self._request("ACCOUNT_STATE", {})
         return (r or {}).get("payload", {}) if r else {"account": None, "known": False}
 
+    def environment_proof(self) -> dict:
+        r = self._request("ENVIRONMENT_PROOF", {})
+        return (r or {}).get("payload", {}) if r else {"accounts": [], "known": False}
+
     def position(self, instrument_name: str) -> dict:
         # The bridge reads the envelope-level `instrument` field.
         self.instrument = instrument_name

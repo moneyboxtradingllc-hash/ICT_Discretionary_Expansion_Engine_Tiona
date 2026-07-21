@@ -1,0 +1,125 @@
+{
+  "connected": true,
+  "ati_config": {
+    "enabled": true,
+    "default_account": "DEMO8458533",
+    "server_port": "36973"
+  },
+  "environment_proof_payload": {
+    "reason": "unknown message_type"
+  },
+  "reads": {
+    "account_state": {
+      "account": "DEMO8458533",
+      "cash_value": 50000
+    },
+    "position": {
+      "instrument": "MNQ SEP26",
+      "qty": 0,
+      "market_position": "Flat",
+      "avg_price": 0,
+      "flat": true,
+      "known": true
+    },
+    "order_summary": {
+      "working_order_count": 0,
+      "orders": [],
+      "known": true
+    },
+    "instrument_metadata": {
+      "instrument_name": "MNQ SEP26",
+      "root": "MNQ",
+      "tick_size": 0.25,
+      "point_value": 2,
+      "currency": "UsDollar"
+    },
+    "metadata_verified": true,
+    "quote": {
+      "instrument": "MNQ SEP26",
+      "last": 29293.5,
+      "bid": 29293.25,
+      "ask": 29293.5,
+      "volume": 1,
+      "have_last": true,
+      "have_bid": true,
+      "have_ask": true
+    }
+  },
+  "preflight": {
+    "go": false,
+    "checks": [
+      {
+        "n": 1,
+        "name": "environment_is_simulation",
+        "pass": false,
+        "detail": "DEMO8458533 not present in account list"
+      },
+      {
+        "n": 2,
+        "name": "account_is_demo8458533",
+        "pass": true,
+        "detail": "account_state.account='DEMO8458533'"
+      },
+      {
+        "n": 3,
+        "name": "no_live_account_reachable",
+        "pass": false,
+        "detail": "live_suspects=[]; bridge acts only on ['DEMO8458533']"
+      },
+      {
+        "n": 4,
+        "name": "allowlist_is_demo_only",
+        "pass": true,
+        "detail": "ALLOWED_ACCOUNTS=['DEMO8458533']"
+      },
+      {
+        "n": 5,
+        "name": "ati_default_is_demo",
+        "pass": true,
+        "detail": "ati_default_account='DEMO8458533'"
+      },
+      {
+        "n": 6,
+        "name": "position_known_and_flat",
+        "pass": true,
+        "detail": "known=True qty=0 flat=True"
+      },
+      {
+        "n": 7,
+        "name": "working_orders_known_zero",
+        "pass": true,
+        "detail": "known=True count=0"
+      },
+      {
+        "n": 8,
+        "name": "instrument_is_mnq_sep26_verified",
+        "pass": true,
+        "detail": "instrument='MNQ SEP26' verified=True"
+      },
+      {
+        "n": 9,
+        "name": "quantity_is_one",
+        "pass": true,
+        "detail": "intended_quantity=1"
+      },
+      {
+        "n": 10,
+        "name": "quote_path_healthy",
+        "pass": true,
+        "detail": "last=29293.5 bid=29293.25 ask=29293.5"
+      },
+      {
+        "n": 11,
+        "name": "reconciliation_clean",
+        "pass": true,
+        "detail": "internal flat == platform flat and zero working orders"
+      },
+      {
+        "n": 12,
+        "name": "smoke_authorization_valid_unused",
+        "pass": false,
+        "detail": "no smoke-authorization token present"
+      }
+    ]
+  }
+}
