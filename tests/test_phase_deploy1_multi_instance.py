@@ -109,7 +109,7 @@ class TestBrokerAdapters(unittest.TestCase):
 
     def test_available(self):
         # ninjatrader registered by NINJATRADER-MNQ-INTEGRATION-FOUNDATION
-        # (Sim101 MNQ, DISARMED); default remains paper.
+        # (DEMO8458533 MNQ, DISARMED); default remains paper.
         self.assertEqual(set(available_brokers()),
                          {"paper", "tradestation", "ninjatrader"})
 

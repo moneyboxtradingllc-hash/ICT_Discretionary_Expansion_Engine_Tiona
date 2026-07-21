@@ -14,7 +14,7 @@ position events. Evaluated options:
 | **ATI managed DLL** (`NinjaTrader.Client.dll`, verified present, .NET Fx 4.8) | Rejected as primary | Poll-based; **no OHLCV bar events, no historical bars, no volume stream**. Would also need `pythonnet` (not installed; Python 3.14 wheel risk). |
 | **ATI file interface** | Rejected | Fragile (race conditions, transient file deletion); no bars/volume/metadata. |
 | **Native NinjaScript bridge** | **Selected** | One authoritative, event-driven surface for data **and** execution; pure-Python loopback socket client (no pythonnet); one reconciliation point; one forensic journal. |
-| **Official Trader API** | Rejected | Entitlement-gated (NinjaTrader Brokerage); inappropriate for local Sim101; external dependency/cost. |
+| **Official Trader API** | Rejected | Entitlement-gated (NinjaTrader Brokerage); inappropriate for local DEMO8458533; external dependency/cost. |
 
 ## Shape
 
@@ -23,7 +23,7 @@ position events. Evaluated options:
     ├── market_data_provider.NinjaTraderMNQProvider  (BaseDataProvider)
     │       └── bar_gatekeeper.BarGatekeeper  (invariants + health states)
     ├── execution_adapter.NinjaTraderBrokerAdapter   (BrokerAdapter, DISARMED)
-    │       └── account_safety  (Sim101-only, MNQ-only, qty<=1, fail-closed)
+    │       └── account_safety  (DEMO8458533-only, MNQ-only, qty<=1, fail-closed)
     └── bridge_client.NinjaTraderBridgeClient
                 │  newline-delimited IPC envelopes (ipc_protocol)
                 │  127.0.0.1:36901  (loopback ONLY)
@@ -34,7 +34,7 @@ position events. Evaluated options:
 
 ## Safety (defense in depth)
 
-- **Account allowlist** = `{Sim101}` exactly, enforced in `account_safety` **and** in the
+- **Account allowlist** = `{DEMO8458533}` exactly, enforced in `account_safety` **and** in the
   NinjaScript bridge. Normalization only narrows, never broadens.
 - **Instrument allowlist** = the exact resolved MNQ expiry; **NQ explicitly denied** at
   both the resolver and the bridge.

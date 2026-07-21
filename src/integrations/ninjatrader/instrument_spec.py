@@ -62,7 +62,7 @@ class InstrumentSpec:
     resolver_provenance: str = ""        # how the expiry was resolved
     rollover_state: str = "unknown"      # active | rollover_window | expired | unknown
     data_connection: str = ""            # NT data connection name
-    order_connection: str = ""           # NT order routing (Sim101)
+    order_connection: str = ""           # NT order routing (DEMO8458533)
     metadata_verified: bool = False      # True only after reconcile_with_platform passes
 
     # ── internal consistency ────────────────────────────────────────────────

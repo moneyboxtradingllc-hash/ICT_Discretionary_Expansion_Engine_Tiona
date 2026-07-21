@@ -44,7 +44,7 @@ def _spec():
 
 def _intent(**over):
     base = dict(authorization_id="A1", intent_id="I1", thesis_id="T1",
-                instrument=ACTIVE, account="Sim101", direction="long",
+                instrument=ACTIVE, account="DEMO8458533", direction="long",
                 quantity=1, client_order_id="C1", timestamp=1.0,
                 current_position_state="flat", risk_authorization="R1",
                 stop_definition={"stop_price": 100.0})
@@ -87,7 +87,7 @@ class TestPreflight(unittest.TestCase):
 
     def test_04_gui_facts_remain_user_action_required(self):
         rep = PF.run_preflight()
-        for k in ("sim101_exists", "market_data_connection_available",
+        for k in ("sim_account_exists", "market_data_connection_available",
                   "global_simulation_mode"):
             self.assertEqual(rep["checks"][k]["status"], "user-action-required")
 
@@ -96,11 +96,12 @@ class TestPreflight(unittest.TestCase):
 # ACCOUNT SAFETY (5-9)
 # ======================================================================
 class TestAccountSafety(unittest.TestCase):
-    def test_05_sim101_passes(self):
-        self.assertTrue(A.check_account("Sim101"))
+    def test_05_demo_account_passes(self):
+        self.assertTrue(A.check_account("DEMO8458533"))
 
     def test_06_live_account_fails(self):
-        for bad in ("Live", "APEX-12345", "Playback101", "Sim101Live"):
+        for bad in ("Live", "APEX-12345", "Playback101", "DEMO8458533Live",
+                    "Sim101"):   # old placeholder is no longer allowlisted
             self.assertFalse(A.check_account(bad), bad)
 
     def test_07_blank_and_missing_fail(self):
@@ -109,14 +110,14 @@ class TestAccountSafety(unittest.TestCase):
         self.assertFalse(A.check_account(None))
 
     def test_08_normalization_cannot_broaden(self):
-        self.assertTrue(A.check_account(" sim101 "))     # narrow-only normalize OK
-        self.assertTrue(A.check_account("SIM101"))
-        self.assertFalse(A.check_account("Sim1010"))     # must NOT broaden
-        self.assertFalse(A.check_account("Sim101 Live"))
-        self.assertFalse(A.check_account("Sim101\tLive"))
+        self.assertTrue(A.check_account(" demo8458533 "))   # narrow-only normalize OK
+        self.assertTrue(A.check_account("Demo8458533"))
+        self.assertFalse(A.check_account("DEMO84585330"))    # must NOT broaden
+        self.assertFalse(A.check_account("DEMO8458533 Live"))
+        self.assertFalse(A.check_account("DEMO8458533\tLive"))
 
     def test_09_global_sim_mode_not_the_only_control(self):
-        # Adapter enforces Sim101 regardless of any GUI Global Simulation Mode.
+        # Adapter enforces DEMO8458533 regardless of any GUI Global Simulation Mode.
         a = NinjaTraderBrokerAdapter(resolved_expiry_name=ACTIVE)
         r = a.submit_order(_intent(account="Live"), position_state_known=True,
                            account_state_known=True, connection_healthy=True)
@@ -319,13 +320,13 @@ class TestMarketData(unittest.TestCase):
 # ======================================================================
 class TestIPC(unittest.TestCase):
     def _env(self, **o):
-        d = dict(message_id="m1", account="Sim101", instrument=ACTIVE, sequence=1)
+        d = dict(message_id="m1", account="DEMO8458533", instrument=ACTIVE, sequence=1)
         d.update(o)
         return P.build_envelope(d.pop("message_type", "ORDER_SUBMIT_REQUEST"),
                                 d.pop("payload", {"k": 1}), **d)
 
     def _ctx(self):
-        return P.ValidationContext(expected_account="Sim101", expected_instrument=ACTIVE)
+        return P.ValidationContext(expected_account="DEMO8458533", expected_instrument=ACTIVE)
 
     def test_33_version_mismatch_fails(self):
         env = self._env(); env["protocol_version"] = "9.9.9"
@@ -354,13 +355,13 @@ class TestIPC(unittest.TestCase):
 
     def test_38_stale_command_fails(self):
         env = self._env(sent_at=0.0)  # epoch -> very old
-        ctx = P.ValidationContext(expected_account="Sim101",
+        ctx = P.ValidationContext(expected_account="DEMO8458533",
                                   expected_instrument=ACTIVE, now=1_000_000.0)
         self.assertFalse(P.validate_envelope(env, ctx))
 
     def test_38b_future_dated_fails(self):
         env = self._env(sent_at=2_000_000.0)
-        ctx = P.ValidationContext(expected_account="Sim101",
+        ctx = P.ValidationContext(expected_account="DEMO8458533",
                                   expected_instrument=ACTIVE, now=1_000_000.0)
         self.assertFalse(P.validate_envelope(env, ctx))
 
@@ -517,7 +518,7 @@ class TestOrganismCompatibility(unittest.TestCase):
             "NinjaTraderMNQProvider(spec, S()).fetch_1m_candles('MNQ 09-26', 5)\n"
             "NinjaTraderBrokerAdapter(resolved_expiry_name='MNQ 09-26').submit_order("
             "{'authorization_id':'A','intent_id':'I','thesis_id':'T','instrument':'MNQ 09-26',"
-            "'account':'Sim101','direction':'long','quantity':1,'client_order_id':'C',"
+            "'account':'DEMO8458533','direction':'long','quantity':1,'client_order_id':'C',"
             "'timestamp':0.0,'current_position_state':'flat','risk_authorization':'R',"
             "'stop_definition':{'stop_price':1.0}}, position_state_known=True,"
             " account_state_known=True, connection_healthy=True)\n")
@@ -529,7 +530,7 @@ class TestOrganismCompatibility(unittest.TestCase):
 class TestFreshEntryConjunction(unittest.TestCase):
     def test_all_gates_pass_together(self):
         d = A.evaluate_fresh_entry(GateInputs(
-            account="Sim101", instrument=ACTIVE, resolved_expiry_name=ACTIVE,
+            account="DEMO8458533", instrument=ACTIVE, resolved_expiry_name=ACTIVE,
             quantity=1, connection_healthy=True, account_state_known=True,
             position_state_known=True, contract_expiry_certain=True))
         self.assertTrue(d)
@@ -537,7 +538,7 @@ class TestFreshEntryConjunction(unittest.TestCase):
     def test_any_uncertainty_denies(self):
         for flip in ("connection_healthy", "account_state_known",
                      "position_state_known", "contract_expiry_certain"):
-            kw = dict(account="Sim101", instrument=ACTIVE, resolved_expiry_name=ACTIVE,
+            kw = dict(account="DEMO8458533", instrument=ACTIVE, resolved_expiry_name=ACTIVE,
                       quantity=1, connection_healthy=True, account_state_known=True,
                       position_state_known=True, contract_expiry_certain=True)
             kw[flip] = None

@@ -2,102 +2,74 @@
   "artifact": "ninjatrader_preflight",
   "schema_version": 1,
   "integration_era": "MNQ_NINJATRADER_FOUNDATION",
-  "generated_by": "src/integrations/ninjatrader/preflight.py",
-  "generated_note": "This file is a hand-seeded snapshot of the machine audit performed during NINJATRADER-MNQ-INTEGRATION-FOUNDATION. Re-run preflight.py to regenerate with a live timestamp.",
+  "generated_at": "2026-07-20T23:56:36.255775-04:00",
   "machine": {
-    "os": "Windows 11 Pro 10.0.26200",
-    "python_version": "3.14.5",
-    "dotnet_core_runtime": "8.0.24",
-    "dotnet_desktop_runtime": "8.0.24"
+    "python_version": "3.14.5"
   },
-  "status_legend": [
-    "verified — proven by direct filesystem/interpreter evidence on this machine",
-    "user-action-required — a GUI/account/data fact only Maurice can confirm in NinjaTrader",
-    "unavailable — a required component is confirmed absent",
-    "unverified — not yet checked",
-    "blocked — a prerequisite prevents verification"
-  ],
   "checks": {
     "ninjatrader_installed": {
       "status": "verified",
       "install_dir": "C:\\Program Files\\NinjaTrader 8",
-      "executable": "C:\\Program Files\\NinjaTrader 8\\bin\\NinjaTrader.exe",
-      "evidence": "NinjaTrader.exe present in bin"
-    },
-    "ninjatrader_version": {
-      "status": "user-action-required",
-      "note": "Exact build/version string not readable from filesystem alone; confirm via Help > About in the running app. bin DLLs dated 2026-05-26."
-    },
-    "ninjatrader_user_data_initialized": {
-      "status": "user-action-required",
-      "path": "C:\\Users\\jesus\\Documents\\NinjaTrader 8",
-      "evidence": "Documents\\NinjaTrader 8 EXISTS but is EMPTY (no db/templates/workspaces/trace/log/incoming/outgoing subfolders).",
-      "interpretation": "NinjaTrader 8 has been installed but appears to have NEVER been launched/initialized. First launch creates the user-data tree and Sim101. Maurice must launch NT8 at least once."
+      "executable": "C:\\Program Files\\NinjaTrader 8\\bin\\NinjaTrader.exe"
     },
     "ninjatrader_client_dll": {
       "status": "verified",
-      "path": "C:\\Program Files\\NinjaTrader 8\\bin\\NinjaTrader.Client.dll",
-      "size_bytes": 86888,
-      "target_framework": ".NETFramework v4.8 (per NinjaTrader.Client.dll.config supportedRuntime)",
-      "note": "This is the ATI managed client assembly. It targets .NET Framework 4.8, NOT .NET Core/8."
+      "path": "C:\\Program Files\\NinjaTrader 8\\bin\\NinjaTrader.Client.dll"
     },
-    "ntdirect_dll": {
-      "status": "unavailable",
-      "note": "No NTDirect.dll found. Expected: NTDirect is the legacy NT7 unmanaged interface; NT8 uses the managed NinjaTrader.Client.dll instead. Not a blocker."
+    "ninjatrader_user_data_initialized": {
+      "status": "verified",
+      "path": "C:\\Users\\jesus\\OneDrive\\Documents\\NinjaTrader 8",
+      "children": [
+        "Config.xml",
+        "EBWebView",
+        "NTAutoUpdateLog_639166214106887171.txt",
+        "NTAutoUpdateLog_639201785904393649.txt",
+        "NTInstall_639166214106887171_attempt1.log",
+        "NTInstall_639201785904393649_attempt1.log",
+        "UI.xml",
+        "bin",
+        "cache",
+        "db",
+        "export",
+        "import",
+        "incoming",
+        "log",
+        "outgoing",
+        "strategyanalyzerlogs",
+        "templates",
+        "tmp",
+        "trace",
+        "workspaces"
+      ],
+      "note": "initialized"
     },
     "ati_file_interface_folders": {
-      "status": "unavailable",
-      "expected_paths": [
-        "C:\\Users\\jesus\\Documents\\NinjaTrader 8\\incoming",
-        "C:\\Users\\jesus\\Documents\\NinjaTrader 8\\outgoing"
-      ],
-      "note": "incoming/outgoing folders do not exist yet. They are created when the ATI file interface is used / NT8 is initialized. Consistent with 'never launched'."
-    },
-    "trace_log_dirs": {
-      "status": "unavailable",
-      "note": "Documents\\NinjaTrader 8\\trace and \\log do not exist yet (never launched)."
-    },
-    "custom_addons_strategies_dir": {
-      "status": "unavailable",
-      "expected_path": "C:\\Users\\jesus\\Documents\\NinjaTrader 8\\bin\\Custom",
-      "note": "Not present yet (never launched). This is where the NinjaScript bridge AddOn/Strategy would be imported."
-    },
-    "python_can_load_managed_dll": {
-      "status": "blocked",
-      "blocker": "pythonnet (import clr) is NOT installed, and interpreter is Python 3.14.5.",
-      "note": "NinjaTrader.Client.dll is .NET Framework 4.8; loading it from Python requires pythonnet with the .NET Framework CLR. Python 3.14 pythonnet wheel availability is uncertain. See architecture_decision.json — the selected architecture avoids depending on pythonnet for the market-data path."
+      "status": "verified",
+      "incoming": "C:\\Users\\jesus\\OneDrive\\Documents\\NinjaTrader 8\\incoming",
+      "outgoing": "C:\\Users\\jesus\\OneDrive\\Documents\\NinjaTrader 8\\outgoing"
     },
     "pythonnet_installed": {
-      "status": "unavailable",
-      "evidence": "import clr -> ModuleNotFoundError"
+      "status": "unavailable"
     },
-    "dotnet_framework_48_clr": {
-      "status": "user-action-required",
-      "note": "The in-box .NET Framework 4.x CLR ships with Windows 11 and is required to run NinjaTrader itself. Its presence is implied by NT running but was not independently probed."
+    "ninjatrader_running": {
+      "status": "verified",
+      "note": "detected via process table"
     },
-    "ati_enabled_in_ninjatrader": {
+    "sim_account_exists": {
       "status": "user-action-required",
-      "note": "GUI setting under Tools > Options > Automated Trading Interface. Cannot be read from filesystem. Maurice must confirm/enable ONLY if the ATI DLL path is selected."
-    },
-    "sim101_exists": {
-      "status": "user-action-required",
-      "note": "Sim101 is created on first NT8 launch. Documents folder is empty, so cannot confirm. Maurice must launch NT8 and confirm Sim101 appears in Control Center > Accounts."
+      "note": "GUI/account/connection fact \u2014 read via the bridge (when compiled) or confirm in NinjaTrader"
     },
     "market_data_connection_available": {
       "status": "user-action-required",
-      "note": "Requires a logged-in connection (e.g. free NinjaTrader/Continuum sim data). Cannot be confirmed from filesystem."
+      "note": "GUI/account/connection fact \u2014 read via the bridge (when compiled) or confirm in NinjaTrader"
+    },
+    "ati_enabled_in_ninjatrader": {
+      "status": "user-action-required",
+      "note": "GUI/account/connection fact \u2014 read via the bridge (when compiled) or confirm in NinjaTrader"
+    },
+    "global_simulation_mode": {
+      "status": "user-action-required",
+      "note": "GUI/account/connection fact \u2014 read via the bridge (when compiled) or confirm in NinjaTrader"
     }
-  },
-  "summary": {
-    "installed": true,
-    "initialized": false,
-    "ati_dll_present": true,
-    "pythonnet_available": false,
-    "blocking_for_live_readonly": [
-      "NT8 has never been launched (empty user-data dir)",
-      "No logged-in data connection confirmed",
-      "Sim101 existence unconfirmed",
-      "pythonnet not installed (only matters if ATI-DLL path chosen)"
-    ]
   }
 }

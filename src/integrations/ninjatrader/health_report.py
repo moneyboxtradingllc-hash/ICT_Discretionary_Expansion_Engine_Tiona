@@ -22,7 +22,7 @@ class IntegrationHealth:
     interface_selected: str = "ninjascript_bridge"
     interface_connected: Optional[bool] = None
     data_connection_name: str = "unknown"
-    sim101_visible: Optional[bool] = None
+    sim_account_visible: Optional[bool] = None
     global_sim_mode_user_confirmed: Optional[bool] = None
     active_mnq_expiry: str = "unresolved"
     tick_size: Optional[float] = None
@@ -49,7 +49,7 @@ def launcher_banner(active_mnq_expiry: str = "<unresolved>") -> str:
     armed = "ENABLED" if AUTOMATED_ORDER_SUBMISSION_ARMED else "DISABLED"
     return "\n".join([
         "======================================================================",
-        f"NINJATRADER ACCOUNT: Sim101",
+        f"NINJATRADER ACCOUNT: DEMO8458533",
         f"INSTRUMENT: {active_mnq_expiry}",
         f"AUTOMATED ORDER SUBMISSION: {armed}",
         f"MAX CONTRACTS: {MAX_CONTRACTS_FOUNDATION}",

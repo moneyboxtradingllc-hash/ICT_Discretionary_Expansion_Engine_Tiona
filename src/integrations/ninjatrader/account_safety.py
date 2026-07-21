@@ -7,10 +7,10 @@ Global Simulation Mode (which is a user-controlled GUI safeguard we do not
 trust as the only control — defense in depth).
 
 Rules:
-  * Account allowlist = {"Sim101"} EXACTLY. Nothing else.
+  * Account allowlist = {"DEMO8458533"} EXACTLY. Nothing else.
   * Normalization (whitespace/case) may only ever NARROW, never broaden, the
-    allowlist. "sim101", " Sim101 " are accepted as Sim101; "Sim1010",
-    "Sim101 Live", "Playback101" are rejected.
+    allowlist. "sim101", " DEMO8458533 " are accepted as DEMO8458533; "DEMO84585330",
+    "DEMO8458533 Live", "Playback101" are rejected.
   * Blank / missing / ambiguous / unknown account -> DENY.
   * Instrument allowlist = the single resolved active MNQ expiry. NQ denied.
   * Quantity ceiling = 1 contract, whole positive integer only.
@@ -24,7 +24,7 @@ from integrations.ninjatrader import MAX_CONTRACTS_FOUNDATION
 from integrations.ninjatrader.instrument_spec import DENIED_ROOTS, CANONICAL_SYMBOL
 
 # The ONLY account this integration may ever address in the foundation era.
-ALLOWED_ACCOUNTS = frozenset({"Sim101"})
+ALLOWED_ACCOUNTS = frozenset({"DEMO8458533"})
 
 
 @dataclass
@@ -48,7 +48,7 @@ def _canonical_account(raw) -> Optional[str]:
     stripped = raw.strip()
     if not stripped:
         return None
-    # Reject embedded whitespace ambiguity like "Sim101 Live" up front: only an
+    # Reject embedded whitespace ambiguity like "DEMO8458533 Live" up front: only an
     # exact case-insensitive match to an allowlisted name is acceptable.
     for allowed in ALLOWED_ACCOUNTS:
         if stripped.lower() == allowed.lower():

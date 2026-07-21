@@ -1,10 +1,32 @@
 {
-  "banner_account": "Sim101",
+  "banner_account": "DEMO8458533",
   "mode": "readonly",
   "active_mnq_expiry": "MNQ 09-26",
   "ninjatrader_installed": true,
+  "ninjatrader_running": true,
   "ninjatrader_client_dll_present": true,
-  "ninjatrader_user_data_initialized": false,
+  "ninjatrader_user_data_initialized": true,
+  "global_simulation_mode": {
+    "value": false,
+    "source": "C:\\Users\\jesus\\OneDrive\\Documents\\NinjaTrader 8\\Config.xml",
+    "note": "persisted config value; the running session is authoritative"
+  },
+  "bridge_probe": {
+    "connected": false,
+    "reason": "bridge not listening on 127.0.0.1:36901 \u2014 AddOn not compiled/running inside NinjaTrader",
+    "connection_state": {
+      "known": false
+    },
+    "account_state": {
+      "known": false
+    },
+    "instrument_metadata": {
+      "known": false
+    },
+    "position": {
+      "known": false
+    }
+  },
   "order_submission_denial_proof": {
     "submitted": false,
     "armed": false,
@@ -12,13 +34,13 @@
   },
   "health": {
     "ninjatrader_installed": true,
-    "ninjatrader_running": null,
+    "ninjatrader_running": true,
     "version": "unknown",
     "interface_selected": "ninjascript_bridge",
     "interface_connected": false,
     "data_connection_name": "unknown",
-    "sim101_visible": null,
-    "global_sim_mode_user_confirmed": null,
+    "sim_account_visible": null,
+    "global_sim_mode_user_confirmed": false,
     "active_mnq_expiry": "MNQ 09-26",
     "tick_size": 0.25,
     "point_value": 2.0,
@@ -28,9 +50,9 @@
     "warmup_bar_count": 0,
     "position_state": "unknown",
     "working_order_count": null,
-    "reconciliation_state": "unreconciled (read-only foundation)",
+    "reconciliation_state": "unreconciled (bridge not connected)",
     "order_submission_armed": false,
-    "last_error": "",
+    "last_error": "bridge not listening on 127.0.0.1:36901 \u2014 AddOn not compiled/running inside NinjaTrader",
     "last_heartbeat": "none",
     "integration_version": "0.1.0-foundation",
     "integration_era": "MNQ_NINJATRADER_FOUNDATION"

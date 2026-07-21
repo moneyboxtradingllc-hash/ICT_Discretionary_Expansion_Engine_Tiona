@@ -92,7 +92,7 @@ def resolve_active_mnq(candidates: list,
                        as_of: Optional[_dt.date] = None,
                        rollover_warn_days: int = ROLLOVER_WARN_DAYS,
                        data_connection: str = "",
-                       order_connection: str = "Sim101",
+                       order_connection: str = "DEMO8458533",
                        provenance: str = "bridge_instrument_list") -> ResolutionResult:
     """Pick the exact front-quarter MNQ expiry from `candidates`.
 

@@ -24,7 +24,7 @@ from integrations.ninjatrader.instrument_spec import InstrumentSpec
 
 @dataclass
 class CostModel:
-    """Configurable, honestly-labelled cost assumptions. Sim101 fills must be
+    """Configurable, honestly-labelled cost assumptions. DEMO8458533 fills must be
     MEASURED separately later; these are modeled placeholders."""
     commission_per_contract: Optional[float] = None   # None = UNKNOWN (labelled)
     slippage_ticks: float = 1.0                        # modeled entry+stop slippage in ticks
@@ -69,7 +69,7 @@ def assess(spec: InstrumentSpec,
     warnings = []
     if not cost.commission_known():
         warnings.append("commission UNKNOWN — modeled as 0 but flagged; do not "
-                        "treat as validated until Sim101 fills are measured")
+                        "treat as validated until DEMO8458533 fills are measured")
 
     distance = abs(float(entry_price) - float(stop_price))
     if distance <= 0:

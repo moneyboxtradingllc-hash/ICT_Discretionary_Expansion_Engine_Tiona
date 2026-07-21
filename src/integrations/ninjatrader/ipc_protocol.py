@@ -85,7 +85,7 @@ def parse_envelope(raw) -> dict:
 @dataclass
 class ValidationContext:
     """What the local endpoint expects. Any mismatch fails closed."""
-    expected_account: Optional[str] = None        # e.g. "Sim101" for command types
+    expected_account: Optional[str] = None        # e.g. "DEMO8458533" for command types
     expected_instrument: Optional[str] = None     # exact resolved MNQ expiry name
     now: Optional[float] = None
     stale_seconds: float = DEFAULT_STALE_SECONDS

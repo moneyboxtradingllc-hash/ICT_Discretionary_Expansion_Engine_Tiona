@@ -1,4 +1,4 @@
-"""Phase 9 — NinjaTrader Sim101 execution adapter (DISARMED in foundation).
+"""Phase 9 — NinjaTrader DEMO8458533 execution adapter (DISARMED in foundation).
 
 Sits behind the existing broker interface (broker.base.BrokerAdapter). It is a
 TRANSLATOR and STATE SYNCHRONIZER, never an originator:
@@ -6,7 +6,7 @@ TRANSLATOR and STATE SYNCHRONIZER, never an originator:
   * It cannot decide direction.
   * It cannot decide whether a trade is valid.
   * It cannot resize beyond the organism's authorized quantity.
-  * It enforces Sim101 + exact MNQ expiry + qty<=1 as DEFENSE IN DEPTH, even if
+  * It enforces DEMO8458533 + exact MNQ expiry + qty<=1 as DEFENSE IN DEPTH, even if
     upstream gates or NinjaTrader Global Simulation Mode are misconfigured.
 
 In the foundation mission automated submission is DISARMED
@@ -47,7 +47,7 @@ class SubmitResult:
 
 
 class NinjaTraderBrokerAdapter(BrokerAdapter):
-    """DISARMED Sim101 adapter. Proves the guard chain without sending orders."""
+    """DISARMED DEMO8458533 adapter. Proves the guard chain without sending orders."""
 
     def __init__(self, config=None, *, resolved_expiry_name: Optional[str] = None,
                  armed: bool = AUTOMATED_ORDER_SUBMISSION_ARMED,
@@ -70,7 +70,7 @@ class NinjaTraderBrokerAdapter(BrokerAdapter):
         return BrokerCapability(
             name="ninjatrader", supports_orders=False, paper_only=True,
             connected=self.is_connected(),
-            notes=(f"Sim101-only MNQ adapter v{INTEGRATION_VERSION}; automated "
+            notes=(f"DEMO8458533-only MNQ adapter v{INTEGRATION_VERSION}; automated "
                    f"submission DISARMED (foundation). Max {MAX_CONTRACTS_FOUNDATION} "
                    f"contract; live accounts forbidden."))
 
@@ -156,7 +156,7 @@ class NinjaTraderBrokerAdapter(BrokerAdapter):
             return SubmitResult(False, "duplicate client_order_id — idempotent no-op",
                                 order_ref=self._seen_intents[coid], idempotent_replay=True)
 
-        # 3) Defense-in-depth safety gates (Sim101 + MNQ + qty<=1 + certainty).
+        # 3) Defense-in-depth safety gates (DEMO8458533 + MNQ + qty<=1 + certainty).
         gate = self._safety_gate(order,
                                  position_state_known=position_state_known,
                                  account_state_known=account_state_known,

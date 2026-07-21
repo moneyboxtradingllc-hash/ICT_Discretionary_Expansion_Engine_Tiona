@@ -18,7 +18,25 @@ USERPROFILE = os.environ.get("USERPROFILE", os.path.expanduser("~"))
 
 INSTALL_DIR = os.path.join(PROGRAM_FILES, "NinjaTrader 8")
 BIN_DIR = os.path.join(INSTALL_DIR, "bin")
-DOC_DIR = os.path.join(USERPROFILE, "Documents", "NinjaTrader 8")
+
+
+def _resolve_user_data_dir() -> str:
+    """NT8's user-data dir lives under the *real* Documents folder, which on this
+    machine is OneDrive-redirected. Probe the likely locations and return the
+    first that exists (populated), else the classic path as the reported target."""
+    onedrive = os.environ.get("OneDrive") or os.environ.get("OneDriveConsumer") or ""
+    candidates = [
+        os.path.join(USERPROFILE, "Documents", "NinjaTrader 8"),
+        os.path.join(onedrive, "Documents", "NinjaTrader 8") if onedrive else "",
+        os.path.join(USERPROFILE, "OneDrive", "Documents", "NinjaTrader 8"),
+    ]
+    for c in candidates:
+        if c and os.path.isdir(c) and os.listdir(c):
+            return c
+    return candidates[0]
+
+
+DOC_DIR = _resolve_user_data_dir()
 
 ARTIFACT_PATH = os.path.join("data", "integration", "ninjatrader", "preflight.json")
 
@@ -34,6 +52,16 @@ def _pythonnet_available():
     try:
         import clr  # noqa: F401
         return True
+    except Exception:
+        return False
+
+
+def _ninjatrader_running() -> bool:
+    try:
+        import subprocess
+        out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq NinjaTrader.exe"],
+                             capture_output=True, text=True, timeout=10)
+        return "NinjaTrader.exe" in (out.stdout or "")
     except Exception:
         return False
 
@@ -59,7 +87,7 @@ def run_preflight() -> dict:
         "path": DOC_DIR,
         "children": doc_children,
         "note": ("Documents\\NinjaTrader 8 empty -> never launched; first launch "
-                 "creates user-data + Sim101") if not doc_children else "initialized",
+                 "creates user-data + DEMO8458533") if not doc_children else "initialized",
     }
     checks["ati_file_interface_folders"] = {
         "status": "verified" if _exists(os.path.join(DOC_DIR, "incoming")) else "unavailable",
@@ -69,12 +97,18 @@ def run_preflight() -> dict:
     checks["pythonnet_installed"] = {
         "status": "verified" if _pythonnet_available() else "unavailable",
     }
-    # GUI/account/data facts we cannot see from the filesystem.
-    for k in ("ninjatrader_running", "sim101_exists",
+    # NinjaTrader process is detectable without the GUI.
+    checks["ninjatrader_running"] = {
+        "status": "verified" if _ninjatrader_running() else "unavailable",
+        "note": "detected via process table",
+    }
+    # Account/connection/GUI facts still require the bridge or Maurice's eyes.
+    for k in ("sim_account_exists",
               "market_data_connection_available", "ati_enabled_in_ninjatrader",
               "global_simulation_mode"):
         checks[k] = {"status": "user-action-required",
-                     "note": "GUI/account/connection fact — confirm in NinjaTrader"}
+                     "note": "GUI/account/connection fact — read via the bridge "
+                             "(when compiled) or confirm in NinjaTrader"}
 
     return {
         "artifact": "ninjatrader_preflight",

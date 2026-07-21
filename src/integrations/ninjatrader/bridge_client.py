@@ -26,7 +26,7 @@ JOURNAL_PATH = os.path.join("data", "integration", "ninjatrader", "ipc_journal.j
 
 class NinjaTraderBridgeClient:
     def __init__(self, host: str = LOOPBACK_HOST, port: int = DEFAULT_PORT,
-                 timeout: float = 2.0, account: str = "Sim101",
+                 timeout: float = 2.0, account: str = "DEMO8458533",
                  instrument: str = "", journal_path: str = JOURNAL_PATH):
         # Refuse any non-loopback host: this client never speaks to a network.
         if host not in ("127.0.0.1", "localhost", "::1"):

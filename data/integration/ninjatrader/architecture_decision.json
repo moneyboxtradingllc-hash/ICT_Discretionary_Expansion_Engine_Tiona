@@ -3,7 +3,7 @@
   "integration_era": "MNQ_NINJATRADER_FOUNDATION",
   "decision": "NINJASCRIPT_BRIDGE_REQUIRED",
   "decision_token": "[NINJASCRIPT BRIDGE REQUIRED]",
-  "summary": "A single native NinjaScript bridge (AddOn) running inside NinjaTrader 8, exposing a loopback-only IPC to the Python organism, is the narrowest OFFICIALLY-SUPPORTED architecture that satisfies the full organism data+execution contract. It is the one surface that can deliver completed 1-minute OHLCV bars, historical warm-up bars, real volume, exact instrument metadata, and asynchronous account/order/execution/position events, while also accepting order commands to Sim101 in a later authorized mission.",
+  "summary": "A single native NinjaScript bridge (AddOn) running inside NinjaTrader 8, exposing a loopback-only IPC to the Python organism, is the narrowest OFFICIALLY-SUPPORTED architecture that satisfies the full organism data+execution contract. It is the one surface that can deliver completed 1-minute OHLCV bars, historical warm-up bars, real volume, exact instrument metadata, and asynchronous account/order/execution/position events, while also accepting order commands to DEMO8458533 in a later authorized mission.",
   "organism_contract_required": [
     "completed 1-minute OHLCV bars (event-driven, not polled last price)",
     "historical warm-up bars",
@@ -11,7 +11,7 @@
     "exact instrument metadata (tick size, point value, expiry, currency)",
     "bid/ask/last quotes with timestamps",
     "connection state",
-    "account state (Sim101)",
+    "account state (DEMO8458533)",
     "order + execution + position events for reconciliation"
   ],
   "options_audited": {
@@ -46,22 +46,22 @@
         "BarsRequest historical + OnBarUpdate completed realtime bars with volume",
         "Account / Order / Execution / Position objects and their event streams",
         "connection state",
-        "order submission to Sim101 (deferred to a later authorized mission)"
+        "order submission to DEMO8458533 (deferred to a later authorized mission)"
       ],
       "concerns": ["must be authored in C# NinjaScript and imported/compiled by Maurice inside NT8", "requires NT8 to have been launched at least once"],
       "verdict": "SELECTED — one authoritative, event-driven surface; one reconciliation point; one forensic journal; pure-Python socket client (no pythonnet)."
     },
     "D_official_trader_api": {
-      "concern": "NinjaTrader's cloud/brokerage Trader API is entitlement-gated (NinjaTrader Brokerage) and not appropriate for a local Sim101 desktop workflow; risks external dependency/cost.",
-      "verdict": "REJECTED — not available/appropriate for this free local Sim101 setup; would introduce external dependency."
+      "concern": "NinjaTrader's cloud/brokerage Trader API is entitlement-gated (NinjaTrader Brokerage) and not appropriate for a local DEMO8458533 desktop workflow; risks external dependency/cost.",
+      "verdict": "REJECTED — not available/appropriate for this free local DEMO8458533 setup; would introduce external dependency."
     }
   },
   "architecture": {
     "python_side": {
       "market_data": "src/integrations/ninjatrader/market_data_provider.py (BaseDataProvider) fed by BAR_CLOSED / HISTORICAL_BARS_RESPONSE envelopes via the bridge client; bars pass bar_gatekeeper invariants before reaching snapshot_builder.",
-      "execution": "src/integrations/ninjatrader/execution_adapter.py (BrokerAdapter) — disarmed by default; translates authorized intents to ORDER_SUBMIT_REQUEST; enforces Sim101 + MNQ + qty<=1 defense-in-depth; never originates or resizes trades.",
+      "execution": "src/integrations/ninjatrader/execution_adapter.py (BrokerAdapter) — disarmed by default; translates authorized intents to ORDER_SUBMIT_REQUEST; enforces DEMO8458533 + MNQ + qty<=1 defense-in-depth; never originates or resizes trades.",
       "ipc": "src/integrations/ninjatrader/ipc_protocol.py — envelope schema + validation (version, account, instrument, sequence, staleness, idempotency).",
-      "safety": "src/integrations/ninjatrader/account_safety.py — Sim101-only allowlist, fail-closed."
+      "safety": "src/integrations/ninjatrader/account_safety.py — DEMO8458533-only allowlist, fail-closed."
     },
     "ninjascript_side": {
       "bridge_source": "integrations/ninjatrader/ninjascript/MNQBridge.cs (delivered as source; Maurice imports into NT8 Documents\\NinjaTrader 8\\bin\\Custom\\AddOns).",
@@ -69,10 +69,10 @@
     }
   },
   "prerequisites_before_live_proof": [
-    "Launch NT8 once (initialize user-data dir + create Sim101)",
+    "Launch NT8 once (initialize user-data dir + create DEMO8458533)",
     "Log into a sim data connection",
     "Import + compile MNQBridge.cs AddOn",
-    "Confirm Sim101, exact MNQ expiry, and a healthy quote/bar path"
+    "Confirm DEMO8458533, exact MNQ expiry, and a healthy quote/bar path"
   ],
   "why_not_easiest": "The file interface (B) is easiest to code but was rejected for fragility. The bridge (C) was selected because existence, authority, wiring, reliability, and observability can each be proven — not because it is convenient."
 }

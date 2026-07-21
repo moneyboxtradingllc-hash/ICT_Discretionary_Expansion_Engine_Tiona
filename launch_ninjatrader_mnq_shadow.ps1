@@ -4,7 +4,7 @@
 #
 # Purpose: run the full organism's decisions on MNQ and record would-authorize
 # outcomes. ORDER SUBMISSION REMAINS DISABLED. This is NOT an armed execution
-# launcher. An armed launcher only exists after a separate Sim101 smoke-order
+# launcher. An armed launcher only exists after a separate DEMO8458533 smoke-order
 # authorization mission. This launcher NEVER calls OpenAI during the integration
 # test and NEVER routes to a live account.
 # ======================================================================
@@ -13,7 +13,7 @@ Set-Location -Path $PSScriptRoot
 
 # --- Integration-era fingerprint ---
 $env:INTEGRATION_ERA = "MNQ_NINJATRADER_FOUNDATION"
-$env:NINJATRADER_ACCOUNT_ALLOWLIST = "Sim101"
+$env:NINJATRADER_ACCOUNT_ALLOWLIST = "DEMO8458533"
 $env:NINJATRADER_MAX_CONTRACTS = "1"
 $env:NINJATRADER_AUTOMATED_SUBMISSION = "DISABLED"
 $env:OPENAI_DISABLED_FOR_INTEGRATION = "1"

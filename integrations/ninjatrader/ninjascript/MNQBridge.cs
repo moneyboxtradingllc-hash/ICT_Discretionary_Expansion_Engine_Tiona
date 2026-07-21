@@ -11,7 +11,7 @@
 //
 // SAFETY (foundation era):
 //   * Binds ONLY to 127.0.0.1. Never a routable interface.
-//   * Account is HARD-PINNED to "Sim101". Any other account is refused.
+//   * Account is HARD-PINNED to "DEMO8458533". Any other account is refused.
 //   * Instrument is HARD-PINNED to the exact resolved MNQ expiry. NQ refused.
 //   * ORDER SUBMISSION IS DISABLED in this foundation build (ArmOrders=false).
 //     ORDER_SUBMIT_REQUEST is acknowledged with an ERROR("orders disarmed").
@@ -41,7 +41,7 @@ namespace NinjaTrader.NinjaScript.AddOns
     {
         // ---- Foundation-era safety constants (defense in depth) ----
         private const string PROTOCOL_VERSION = "1.0.0";
-        private const string ALLOWED_ACCOUNT = "Sim101";
+        private const string ALLOWED_ACCOUNT = "DEMO8458533";
         private const int    MAX_CONTRACTS   = 1;
         private const bool   ArmOrders       = false;   // NEVER true in the foundation.
         private const string LoopbackAddress = "127.0.0.1";
@@ -58,7 +58,7 @@ namespace NinjaTrader.NinjaScript.AddOns
             if (State == State.SetDefaults)
             {
                 Name        = "MNQBridge";
-                Description = "Loopback IPC bridge to the Python organism (Sim101/MNQ, orders DISARMED).";
+                Description = "Loopback IPC bridge to the Python organism (DEMO8458533/MNQ, orders DISARMED).";
             }
             else if (State == State.Configure)
             {
@@ -153,12 +153,19 @@ namespace NinjaTrader.NinjaScript.AddOns
                 case "ORDER_SUBMIT_REQUEST":
                 case "ORDER_CANCEL_REQUEST":
                     // DEFENSE IN DEPTH: disarmed + account/instrument pinning.
+                    // ArmOrders is const false in the foundation build; the pinning
+                    // branches below become live only when a later armed mission
+                    // flips it. #pragma keeps NT's compile output warning-free.
+#pragma warning disable 162
                     if (!ArmOrders)
                         SendEnvelope(stream, "ERROR", "{\"reason\":\"orders disarmed in foundation build\"}", account, instrument, "");
                     else if (account != ALLOWED_ACCOUNT)
                         SendEnvelope(stream, "ERROR", "{\"reason\":\"account not allowlisted\"}", account, instrument, "");
+                    else if (instrument.Split(' ')[0] == "NQ")
+                        SendEnvelope(stream, "ERROR", "{\"reason\":\"NQ denied\"}", account, instrument, "");
                     else
                         SendEnvelope(stream, "ERROR", "{\"reason\":\"order path not implemented in foundation\"}", account, instrument, "");
+#pragma warning restore 162
                     break;
                 case "HEARTBEAT":
                     SendEnvelope(stream, "HEARTBEAT", "{}", account, instrument, "");
@@ -214,7 +221,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 
         private void SendAccountState(NetworkStream stream, string accountName)
         {
-            // Foundation: only ever report the Sim101 account.
+            // Foundation: only ever report the DEMO8458533 account.
             if (accountName != ALLOWED_ACCOUNT)
             {
                 SendEnvelope(stream, "ERROR", "{\"reason\":\"account not allowlisted\"}", accountName, "", "");
@@ -227,7 +234,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                 { if (a.Name == ALLOWED_ACCOUNT) { acct = a; break; } }
                 if (acct == null)
                 {
-                    SendEnvelope(stream, "ERROR", "{\"reason\":\"Sim101 not found\"}", accountName, "", "");
+                    SendEnvelope(stream, "ERROR", "{\"reason\":\"DEMO8458533 not found\"}", accountName, "", "");
                     return;
                 }
                 double cash = acct.Get(AccountItem.CashValue, Currency.UsDollar);

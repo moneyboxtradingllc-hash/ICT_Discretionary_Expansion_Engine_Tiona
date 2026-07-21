@@ -1,7 +1,7 @@
 """NINJATRADER-MNQ-INTEGRATION-FOUNDATION
 
 Narrow provider/adapter boundary between the existing (frozen) Python trading
-organism and NinjaTrader Desktop / Sim101, for Micro E-mini Nasdaq-100 (MNQ)
+organism and NinjaTrader Desktop / DEMO8458533, for Micro E-mini Nasdaq-100 (MNQ)
 simulation.
 
 Constitution (frozen — NOT modified by this package):
@@ -12,7 +12,7 @@ Constitution (frozen — NOT modified by this package):
     quantity, and cannot route to a live account.
 
 Safety posture of this package:
-  * Account allowlist = {"Sim101"} only; anything else fails CLOSED.
+  * Account allowlist = {"DEMO8458533"} only; anything else fails CLOSED.
   * Instrument allowlist = the resolved exact active MNQ expiry only; NQ denied.
   * Maximum order quantity = 1 MNQ contract during the foundation era.
   * Automated order submission is DISARMED. No order is sent from Python in the
