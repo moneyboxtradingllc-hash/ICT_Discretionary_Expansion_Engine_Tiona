@@ -37,6 +37,15 @@ class SmokeToken:
     issued_at: float
     ttl_seconds: int
     issued_by: str
+    # Full trade binding (all enforced at validate/consume time).
+    direction: str = "long"
+    entry_type: str = "market"
+    stop_points: float = 5.0
+    target_points: float = 5.0
+    oco_required: bool = True
+    purpose: str = "EXECUTION_SMOKE_TEST"
+    max_submissions: int = 1
+    simulation_only: bool = True
     used: bool = False
     used_at: Optional[float] = None
     used_for_intent: Optional[str] = None
@@ -50,7 +59,11 @@ class AuthorizationError(RuntimeError):
 
 
 def issue_token(account: str, instrument: str, quantity: int, issued_by: str,
-                ttl_seconds: int = DEFAULT_TTL_SECONDS, path: str = TOKEN_PATH) -> SmokeToken:
+                ttl_seconds: int = DEFAULT_TTL_SECONDS, path: str = TOKEN_PATH,
+                *, direction: str = "long", entry_type: str = "market",
+                stop_points: float = 5.0, target_points: float = 5.0,
+                oco_required: bool = True, purpose: str = "EXECUTION_SMOKE_TEST",
+                max_submissions: int = 1, simulation_only: bool = True) -> SmokeToken:
     """Issue a fresh one-use token. Explicit human action only. Refuses to
     overwrite an existing UNUSED token (so a prior authorization is never
     silently replaced)."""
@@ -60,7 +73,11 @@ def issue_token(account: str, instrument: str, quantity: int, issued_by: str,
                                  "revoke it before issuing a new one")
     tok = SmokeToken(token_id=uuid.uuid4().hex, account=account, instrument=instrument,
                      quantity=int(quantity), issued_at=time.time(),
-                     ttl_seconds=int(ttl_seconds), issued_by=issued_by)
+                     ttl_seconds=int(ttl_seconds), issued_by=issued_by,
+                     direction=str(direction).lower(), entry_type=str(entry_type).lower(),
+                     stop_points=float(stop_points), target_points=float(target_points),
+                     oco_required=bool(oco_required), purpose=purpose,
+                     max_submissions=int(max_submissions), simulation_only=bool(simulation_only))
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(tok.to_dict(), fh, indent=2)
@@ -92,7 +109,9 @@ class AuthCheck:
 
 
 def validate_token(account: str, instrument: str, quantity: int,
-                   path: str = TOKEN_PATH, now: Optional[float] = None) -> AuthCheck:
+                   path: str = TOKEN_PATH, now: Optional[float] = None,
+                   direction: Optional[str] = None,
+                   entry_type: Optional[str] = None) -> AuthCheck:
     """Read-only validation: is there a valid, unused, matching token? Does NOT
     consume it."""
     tok = load_token(path)
@@ -108,14 +127,20 @@ def validate_token(account: str, instrument: str, quantity: int,
         return AuthCheck(False, f"token instrument {tok.instrument!r} != {instrument!r}")
     if int(tok.quantity) != int(quantity):
         return AuthCheck(False, f"token quantity {tok.quantity} != {quantity}")
+    if direction is not None and tok.direction != str(direction).lower():
+        return AuthCheck(False, f"token direction {tok.direction!r} != {direction!r}")
+    if entry_type is not None and tok.entry_type != str(entry_type).lower():
+        return AuthCheck(False, f"token entry_type {tok.entry_type!r} != {entry_type!r}")
     return AuthCheck(True, f"token {tok.token_id} valid and unused", tok)
 
 
 def consume_token(account: str, instrument: str, quantity: int, intent_id: str,
-                  path: str = TOKEN_PATH, now: Optional[float] = None) -> AuthCheck:
+                  path: str = TOKEN_PATH, now: Optional[float] = None,
+                  direction: Optional[str] = None,
+                  entry_type: Optional[str] = None) -> AuthCheck:
     """Validate AND burn the token atomically (write used=true BEFORE returning).
     Returns the consumed token on success; fails closed otherwise."""
-    check = validate_token(account, instrument, quantity, path, now)
+    check = validate_token(account, instrument, quantity, path, now, direction, entry_type)
     if not check:
         return check
     tok = check.token

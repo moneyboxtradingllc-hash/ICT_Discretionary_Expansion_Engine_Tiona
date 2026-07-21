@@ -42,8 +42,11 @@ namespace NinjaTrader.NinjaScript.AddOns
         // ---- Foundation-era safety constants (defense in depth) ----
         private const string PROTOCOL_VERSION = "1.0.0";
         private const string ALLOWED_ACCOUNT = "DEMO8458533";
+        private const string ALLOWED_INSTRUMENT = "MNQ SEP26";  // exact pinned expiry
         private const int    MAX_CONTRACTS   = 1;
-        private const bool   ArmOrders       = false;   // NEVER true in the foundation.
+        private const double STOP_POINTS     = 5.0;   // protective stop distance
+        private const double TARGET_POINTS   = 5.0;   // profit target distance
+        private const bool   ArmOrders       = false; // physical disarm — flip ONLY at the authorized SEND step.
         private const string LoopbackAddress = "127.0.0.1";
         private const int    ListenPort      = 36901;   // loopback only
 
@@ -167,19 +170,22 @@ namespace NinjaTrader.NinjaScript.AddOns
                     break;
                 case "ORDER_SUBMIT_REQUEST":
                 case "ORDER_CANCEL_REQUEST":
-                    // DEFENSE IN DEPTH: disarmed + account/instrument pinning.
-                    // ArmOrders is const false in the foundation build; the pinning
-                    // branches below become live only when a later armed mission
-                    // flips it. #pragma keeps NT's compile output warning-free.
+                    // DEFENSE IN DEPTH: physical disarm (ArmOrders const false) +
+                    // account/instrument/qty/direction pinning. While disarmed the
+                    // bridge REFUSES every order request; the armed branch (which
+                    // becomes reachable only when ArmOrders is deliberately flipped
+                    // and NT recompiled) is where SubmitSmokeBracket runs.
 #pragma warning disable 162
                     if (!ArmOrders)
-                        SendEnvelope(stream, "ERROR", "{\"reason\":\"orders disarmed in foundation build\"}", account, instrument, "");
+                        SendEnvelope(stream, "ERROR", "{\"reason\":\"orders disarmed (ArmOrders=false)\"}", account, instrument, "");
+                    else if (mtype == "ORDER_CANCEL_REQUEST")
+                        FlattenAllowed(stream, account, instrument);
                     else if (account != ALLOWED_ACCOUNT)
                         SendEnvelope(stream, "ERROR", "{\"reason\":\"account not allowlisted\"}", account, instrument, "");
-                    else if (instrument.Split(' ')[0] == "NQ")
-                        SendEnvelope(stream, "ERROR", "{\"reason\":\"NQ denied\"}", account, instrument, "");
+                    else if (instrument != ALLOWED_INSTRUMENT)
+                        SendEnvelope(stream, "ERROR", "{\"reason\":\"instrument not the pinned MNQ expiry\"}", account, instrument, "");
                     else
-                        SendEnvelope(stream, "ERROR", "{\"reason\":\"order path not implemented in foundation\"}", account, instrument, "");
+                        SubmitSmokeBracket(stream, account, instrument, line);
 #pragma warning restore 162
                     break;
                 case "HEARTBEAT":
@@ -507,6 +513,92 @@ namespace NinjaTrader.NinjaScript.AddOns
             }
         }
 
+        // ARMED order path — reachable ONLY when ArmOrders is deliberately flipped
+        // true and NinjaTrader is recompiled. Submits exactly one LONG MARKET
+        // contract on DEMO8458533 and, on fill, attaches an OCO stop (5 pts below)
+        // and target (5 pts above); if protection cannot be established it flattens.
+        private void SubmitSmokeBracket(NetworkStream stream, string accountName, string instrumentName, string line)
+        {
+            try
+            {
+                string dir = ExtractJsonString(line, "direction").ToLower();
+                int qty = (int)ExtractJsonNumber(line, "quantity");
+                if (dir != "long" && dir != "buy")
+                { SendEnvelope(stream, "ERROR", "{\"reason\":\"direction not LONG\"}", accountName, instrumentName, ""); return; }
+                if (qty != MAX_CONTRACTS)
+                { SendEnvelope(stream, "ERROR", "{\"reason\":\"quantity must be exactly 1\"}", accountName, instrumentName, ""); return; }
+
+                Account acct = FindAllowedAccount();
+                Instrument instr = Instrument.GetInstrument(instrumentName);
+                if (acct == null || instr == null || instr.MasterInstrument == null)
+                { SendEnvelope(stream, "ERROR", "{\"reason\":\"account or instrument missing\"}", accountName, instrumentName, ""); return; }
+                if (instr.MasterInstrument.Name == "NQ")
+                { SendEnvelope(stream, "ERROR", "{\"reason\":\"NQ denied\"}", accountName, instrumentName, ""); return; }
+
+                string oco = "SMOKE-OCO-" + Guid.NewGuid().ToString("N");
+                EventHandler<ExecutionEventArgs> execHandler = null;
+                execHandler = (object s, ExecutionEventArgs e) =>
+                {
+                    try
+                    {
+                        if (e.Execution == null || e.Execution.Order == null) return;
+                        if (e.Execution.Order.Name != "SmokeEntry") return;
+                        if (e.Execution.Order.OrderState != OrderState.Filled) return;
+                        double fill = e.Execution.Order.AverageFillPrice;
+                        double stopPrice = instr.MasterInstrument.RoundToTickSize(fill - STOP_POINTS);
+                        double tgtPrice = instr.MasterInstrument.RoundToTickSize(fill + TARGET_POINTS);
+                        Order stop = acct.CreateOrder(instr, OrderAction.Sell, OrderType.StopMarket, OrderEntry.Manual, TimeInForce.Day, MAX_CONTRACTS, 0, stopPrice, oco, "SmokeStop", NinjaTrader.Core.Globals.MaxDate, null);
+                        Order tgt = acct.CreateOrder(instr, OrderAction.Sell, OrderType.Limit, OrderEntry.Manual, TimeInForce.Day, MAX_CONTRACTS, tgtPrice, 0, oco, "SmokeTarget", NinjaTrader.Core.Globals.MaxDate, null);
+                        try
+                        {
+                            acct.Submit(new[] { stop, tgt });
+                            SendEnvelope(stream, "EXECUTION_UPDATE", string.Format(CultureInfo.InvariantCulture,
+                                "{{\"fill\":{0},\"stop\":{1},\"target\":{2},\"oco\":\"{3}\",\"protection\":true}}",
+                                fill, stopPrice, tgtPrice, oco), accountName, instrumentName, "");
+                        }
+                        catch (Exception ez)
+                        {
+                            try { acct.Flatten(new[] { instr }); } catch { }
+                            SendEnvelope(stream, "ERROR", "{\"reason\":\"protection failed - EMERGENCY FLATTEN: " + Escape(ez.Message) + "\"}", accountName, instrumentName, "");
+                        }
+                        acct.ExecutionUpdate -= execHandler;
+                    }
+                    catch { }
+                };
+                acct.ExecutionUpdate += execHandler;
+
+                Order entry = acct.CreateOrder(instr, OrderAction.Buy, OrderType.Market, OrderEntry.Manual, TimeInForce.Day, MAX_CONTRACTS, 0, 0, "", "SmokeEntry", NinjaTrader.Core.Globals.MaxDate, null);
+                acct.Submit(new[] { entry });
+                SendEnvelope(stream, "ORDER_ACK", "{\"accepted\":true,\"entry\":\"submitted\"}", accountName, instrumentName, "");
+            }
+            catch (Exception ex)
+            {
+                SendEnvelope(stream, "ERROR", "{\"reason\":\"" + Escape(ex.Message) + "\"}", accountName, instrumentName, "");
+            }
+        }
+
+        private void FlattenAllowed(NetworkStream stream, string accountName, string instrumentName)
+        {
+            try
+            {
+                Account acct = FindAllowedAccount();
+                Instrument instr = Instrument.GetInstrument(instrumentName);
+                if (acct == null || instr == null)
+                { SendEnvelope(stream, "ERROR", "{\"reason\":\"account or instrument missing\"}", accountName, instrumentName, ""); return; }
+                // Cancel any working orders on this instrument, then flatten.
+                var toCancel = new List<Order>();
+                foreach (Order o in acct.Orders)
+                    if (o.Instrument != null && o.Instrument.FullName == instr.FullName) toCancel.Add(o);
+                if (toCancel.Count > 0) { try { acct.Cancel(toCancel); } catch { } }
+                acct.Flatten(new[] { instr });
+                SendEnvelope(stream, "ORDER_UPDATE", "{\"ok\":true,\"flattened\":true}", accountName, instrumentName, "");
+            }
+            catch (Exception ex)
+            {
+                SendEnvelope(stream, "ERROR", "{\"reason\":\"" + Escape(ex.Message) + "\"}", accountName, instrumentName, "");
+            }
+        }
+
         private void SendEnvelope(NetworkStream stream, string type, string payloadJson,
                                   string account, string instrument, string expiry)
         {
@@ -530,6 +622,23 @@ namespace NinjaTrader.NinjaScript.AddOns
         {
             if (string.IsNullOrEmpty(s)) return "";
             return s.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        }
+
+        private static double ExtractJsonNumber(string json, string key)
+        {
+            string needle = "\"" + key + "\"";
+            int i = json.IndexOf(needle, StringComparison.Ordinal);
+            if (i < 0) return 0;
+            i = json.IndexOf(':', i + needle.Length);
+            if (i < 0) return 0;
+            int j = i + 1;
+            while (j < json.Length && (json[j] == ' ')) j++;
+            int start = j;
+            while (j < json.Length && (char.IsDigit(json[j]) || json[j] == '.' || json[j] == '-')) j++;
+            double val;
+            if (double.TryParse(json.Substring(start, j - start), System.Globalization.NumberStyles.Any,
+                                CultureInfo.InvariantCulture, out val)) return val;
+            return 0;
         }
 
         private static string ExtractJsonString(string json, string key)

@@ -87,9 +87,9 @@
     "metadata_verified": true,
     "quote": {
       "instrument": "MNQ SEP26",
-      "last": 29291.5,
-      "bid": 29291.75,
-      "ask": 29292.25,
+      "last": 29287,
+      "bid": 29287.25,
+      "ask": 29287.75,
       "volume": 1,
       "have_last": true,
       "have_bid": true,
@@ -97,7 +97,7 @@
     }
   },
   "preflight": {
-    "go": false,
+    "go": true,
     "checks": [
       {
         "n": 1,
@@ -157,7 +157,7 @@
         "n": 10,
         "name": "quote_path_healthy",
         "pass": true,
-        "detail": "last=29291.5 bid=29291.75 ask=29292.25"
+        "detail": "last=29287 bid=29287.25 ask=29287.75"
       },
       {
         "n": 11,
@@ -168,8 +168,8 @@
       {
         "n": 12,
         "name": "smoke_authorization_valid_unused",
-        "pass": false,
-        "detail": "no smoke-authorization token present"
+        "pass": true,
+        "detail": "token c11afa488a99489abf784610b8c15dfc valid and unused"
       }
     ]
   }

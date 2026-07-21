@@ -181,9 +181,27 @@ class NinjaTraderBridgeClient:
     def buffered_bars(self) -> list:
         return []
 
-    # ── write surface — never reachable in the disarmed foundation ───────────
-    def submit(self, order: dict):  # pragma: no cover - orders disarmed
-        raise RuntimeError("order submission is disarmed in the foundation mission")
+    # ── write surface — disarmed until the armed SEND step ───────────────────
+    # These send ORDER_SUBMIT_REQUEST; the bridge refuses while ArmOrders=false
+    # (returns an ERROR "orders disarmed"), so an accidental call cannot fire.
+    def submit_market_entry(self, intent: dict) -> dict:
+        r = self._request("ORDER_SUBMIT_REQUEST", dict(intent))
+        payload = (r or {}).get("payload", {}) if r else {}
+        if (r or {}).get("message_type") == "ERROR" or "reason" in payload:
+            return {"accepted": False, "reason": payload.get("reason", "bridge refused")}
+        return payload
 
-    def protective_stop(self, position_ref, stop_definition):  # pragma: no cover
-        raise RuntimeError("protective-stop wire not active in the foundation mission")
+    def submit_oco(self, stop: dict, target: dict) -> dict:
+        r = self._request("ORDER_SUBMIT_REQUEST", {"oco": True, "stop": stop, "target": target})
+        payload = (r or {}).get("payload", {}) if r else {}
+        if (r or {}).get("message_type") == "ERROR" or "reason" in payload:
+            return {"ok": False, "reason": payload.get("reason", "bridge refused")}
+        return payload
+
+    def flatten(self, instrument: str) -> dict:
+        r = self._request("ORDER_CANCEL_REQUEST", {"flatten": True, "instrument": instrument})
+        payload = (r or {}).get("payload", {}) if r else {}
+        return {"ok": bool(payload.get("ok")), "reason": payload.get("reason", "")}
+
+    def submit(self, order: dict):  # pragma: no cover - legacy
+        raise RuntimeError("use submit_market_entry; order submission is latched off")
