@@ -36,6 +36,7 @@ class NinjaTraderBridgeClient:
         self.journal_path = journal_path
         self._sock: Optional[socket.socket] = None
         self._seq = 0
+        self._rbuf = b""
 
     # ── connection ───────────────────────────────────────────────────────────
     def connect(self) -> bool:
@@ -43,6 +44,15 @@ class NinjaTraderBridgeClient:
             s = socket.create_connection((self.host, self.port), timeout=self.timeout)
             s.settimeout(self.timeout)
             self._sock = s
+            self._rbuf = b""
+            # The bridge sends an unsolicited HELLO_ACK greeting on connect.
+            # Consume it here so request/response pairing is not shifted by one.
+            greeting = self._read_line()
+            if greeting is not None:
+                try:
+                    self._journal("in", P.parse_envelope(greeting))
+                except P.ProtocolError:
+                    pass
             return True
         except OSError:
             self._sock = None
@@ -78,15 +88,24 @@ class NinjaTraderBridgeClient:
         self._journal("out", env)
         try:
             self._sock.sendall((json.dumps(env) + "\n").encode("utf-8"))
-            data = self._read_line()
+            # Skip any unsolicited greeting/heartbeat frames; return the first
+            # real response line.
+            for _ in range(8):
+                data = self._read_line()
+                if data is None:
+                    return None
+                try:
+                    resp = P.parse_envelope(data)
+                except P.ProtocolError:
+                    return None
+                if resp.get("message_type") in ("HELLO_ACK", "HEARTBEAT"):
+                    self._journal("in", resp)
+                    continue
+                break
+            else:
+                return None
         except OSError:
             self.close()
-            return None
-        if data is None:
-            return None
-        try:
-            resp = P.parse_envelope(data)
-        except P.ProtocolError:
             return None
         self._journal("in", resp)
         vr = P.validate_envelope(resp)
@@ -95,13 +114,15 @@ class NinjaTraderBridgeClient:
         return resp
 
     def _read_line(self) -> Optional[str]:
-        buf = b""
-        while b"\n" not in buf:
+        # Buffered line reader: keeps any bytes past the first newline for the
+        # next read (a single recv may carry multiple frames).
+        while b"\n" not in self._rbuf:
             chunk = self._sock.recv(4096)
             if not chunk:
                 return None
-            buf += chunk
-        return buf.split(b"\n", 1)[0].decode("utf-8")
+            self._rbuf += chunk
+        line, self._rbuf = self._rbuf.split(b"\n", 1)
+        return line.decode("utf-8")
 
     # ── read surface (fail-closed when no bridge) ────────────────────────────
     def connection_state(self) -> dict:
@@ -118,12 +139,43 @@ class NinjaTraderBridgeClient:
         return (r or {}).get("payload", {}) if r else {"account": None, "known": False}
 
     def position(self, instrument_name: str) -> dict:
-        r = self._request("POSITION_UPDATE", {"instrument": instrument_name})
+        # The bridge reads the envelope-level `instrument` field.
+        self.instrument = instrument_name
+        r = self._request("POSITION_UPDATE", {})
         return (r or {}).get("payload", {}) if r else {"qty": 0, "known": False}
 
-    def working_orders(self) -> list:
+    def order_summary(self) -> dict:
         r = self._request("ORDER_UPDATE", {})
-        return (r or {}).get("payload", {}).get("orders", []) if r else []
+        return (r or {}).get("payload", {}) if r else {"working_order_count": None, "known": False}
+
+    def working_orders(self) -> list:
+        return self.order_summary().get("orders", [])
+
+    def quote(self, instrument_name: str) -> dict:
+        self.instrument = instrument_name
+        r = self._request("QUOTE_UPDATE", {})
+        return (r or {}).get("payload", {}) if r else {"known": False}
+
+    # ── BarSource interface (feeds NinjaTraderMNQProvider) ───────────────────
+    def historical_1m(self, instrument_name: str, lookback: int) -> list:
+        """Return up to `lookback` completed 1m candles in the provider's dict
+        shape. Sends HISTORICAL_BARS_REQUEST; empty list if unavailable."""
+        self.instrument = instrument_name
+        r = self._request("HISTORICAL_BARS_REQUEST", {})
+        payload = (r or {}).get("payload", {}) if r else {}
+        bars = payload.get("bars", []) or []
+        out = []
+        for b in bars[-lookback:] if lookback else bars:
+            out.append({
+                "timestamp": b.get("t"),
+                "open": b.get("o"), "high": b.get("h"), "low": b.get("l"),
+                "close": b.get("c"), "volume": b.get("v"),
+                "instrument": instrument_name,
+            })
+        return out
+
+    def buffered_bars(self) -> list:
+        return []
 
     # ── write surface — never reachable in the disarmed foundation ───────────
     def submit(self, order: dict):  # pragma: no cover - orders disarmed

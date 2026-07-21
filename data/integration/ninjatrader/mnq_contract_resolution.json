@@ -1,13 +1,45 @@
 {
+  "artifact": "mnq_contract_resolution",
+  "integration_era": "MNQ_NINJATRADER_FOUNDATION",
+  "account": "DEMO8458533",
+  "as_of": "2026-07-21",
+  "status": "PLATFORM_CONFIRMED",
   "resolved": true,
-  "reason": "resolved active MNQ expiry MNQ 09-26",
+  "reason": "platform-confirmed via live bridge INSTRUMENT_METADATA",
   "rollover_state": "active",
-  "warnings": [],
-  "rejected": [],
+  "platform_metadata": {
+    "instrument_name": "MNQ SEP26",
+    "root": "MNQ",
+    "tick_size": 0.25,
+    "point_value": 2,
+    "currency": "UsDollar"
+  },
+  "reconcile": {
+    "matches": true,
+    "mismatches": [],
+    "checked": {
+      "tick_size": {
+        "declared": 0.25,
+        "platform": 0.25
+      },
+      "point_value": {
+        "declared": 2.0,
+        "platform": 2
+      },
+      "tick_value": {
+        "declared": 0.5,
+        "platform": 0.5
+      },
+      "instrument_root": {
+        "platform": "MNQ"
+      }
+    },
+    "metadata_verified": true
+  },
   "spec": {
     "canonical_symbol": "MNQ",
-    "provider_symbol": "MNQ 09-26",
-    "ninjatrader_name": "MNQ 09-26",
+    "provider_symbol": "MNQ SEP26",
+    "ninjatrader_name": "MNQ SEP26",
     "expiry": "2026-09",
     "exchange": "CME",
     "currency": "USD",
@@ -20,15 +52,10 @@
     "session_template": "rth_0930_1130_ET",
     "timezone": "America/New_York",
     "session_identifier": "MNQ_RTH",
-    "resolver_provenance": "calendar_front_quarter_PENDING_platform_confirmation; front-quarter of 2 eligible; expiry 2026-09-18; 60d to expiry; as_of 2026-07-20",
+    "resolver_provenance": "",
     "rollover_state": "active",
-    "data_connection": "PENDING_PLATFORM_CONFIRM",
+    "data_connection": "live",
     "order_connection": "DEMO8458533",
-    "metadata_verified": false
-  },
-  "artifact": "mnq_contract_resolution",
-  "integration_era": "MNQ_NINJATRADER_FOUNDATION",
-  "as_of": "2026-07-20",
-  "status": "PENDING_PLATFORM_CONFIRMATION",
-  "note": "Front-quarter MNQ derived from the futures calendar as of 2026-07-20. The exact NinjaTrader display name, tick_size, and point_value MUST be reconciled against MasterInstrument metadata (INSTRUMENT_METADATA envelope) once NT8 is launched and a data connection is live. metadata_verified is False until then."
+    "metadata_verified": true
+  }
 }

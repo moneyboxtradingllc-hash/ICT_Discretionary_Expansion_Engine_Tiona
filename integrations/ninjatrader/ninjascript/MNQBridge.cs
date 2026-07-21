@@ -150,6 +150,18 @@ namespace NinjaTrader.NinjaScript.AddOns
                 case "ACCOUNT_STATE":
                     SendAccountState(stream, account);
                     break;
+                case "POSITION_UPDATE":
+                    SendPosition(stream, account, instrument);
+                    break;
+                case "ORDER_UPDATE":
+                    SendWorkingOrders(stream, account);
+                    break;
+                case "QUOTE_UPDATE":
+                    SendQuote(stream, instrument);
+                    break;
+                case "HISTORICAL_BARS_REQUEST":
+                    SendHistoricalBars(stream, instrument);
+                    break;
                 case "ORDER_SUBMIT_REQUEST":
                 case "ORDER_CANCEL_REQUEST":
                     // DEFENSE IN DEPTH: disarmed + account/instrument pinning.
@@ -248,10 +260,199 @@ namespace NinjaTrader.NinjaScript.AddOns
             }
         }
 
-        // NOTE: BAR_CLOSED / QUOTE_UPDATE / POSITION_UPDATE streaming via
-        // BarsRequest + MarketData subscriptions is wired in the next stage once
-        // Maurice confirms a live data connection. The read-only foundation
-        // proves connection/metadata/account readback first.
+        private Account FindAllowedAccount()
+        {
+            foreach (Account a in Account.All)
+                if (a.Name == ALLOWED_ACCOUNT) return a;
+            return null;
+        }
+
+        // Read-only net position for the exact instrument. Flat -> qty 0.
+        private void SendPosition(NetworkStream stream, string accountName, string instrumentName)
+        {
+            if (accountName != ALLOWED_ACCOUNT)
+            {
+                SendEnvelope(stream, "ERROR", "{\"reason\":\"account not allowlisted\"}", accountName, instrumentName, "");
+                return;
+            }
+            try
+            {
+                Account acct = FindAllowedAccount();
+                if (acct == null)
+                {
+                    SendEnvelope(stream, "ERROR", "{\"reason\":\"DEMO8458533 not found\"}", accountName, instrumentName, "");
+                    return;
+                }
+                int qty = 0;
+                string mp = "Flat";
+                double avg = 0;
+                foreach (Position p in acct.Positions)
+                {
+                    if (p.Instrument != null && p.Instrument.FullName == instrumentName)
+                    {
+                        mp = p.MarketPosition.ToString();
+                        int q = p.Quantity;
+                        qty = (p.MarketPosition == MarketPosition.Short) ? -q : q;
+                        avg = p.AveragePrice;
+                        break;
+                    }
+                }
+                bool flat = (qty == 0);
+                string payload = string.Format(CultureInfo.InvariantCulture,
+                    "{{\"instrument\":\"{0}\",\"qty\":{1},\"market_position\":\"{2}\",\"avg_price\":{3},\"flat\":{4},\"known\":true}}",
+                    Escape(instrumentName), qty, mp, avg, flat ? "true" : "false");
+                SendEnvelope(stream, "POSITION_UPDATE", payload, ALLOWED_ACCOUNT, instrumentName, "");
+            }
+            catch (Exception ex)
+            {
+                SendEnvelope(stream, "ERROR", "{\"reason\":\"" + Escape(ex.Message) + "\"}", accountName, instrumentName, "");
+            }
+        }
+
+        // Read-only count of live/working orders on the account.
+        private void SendWorkingOrders(NetworkStream stream, string accountName)
+        {
+            if (accountName != ALLOWED_ACCOUNT)
+            {
+                SendEnvelope(stream, "ERROR", "{\"reason\":\"account not allowlisted\"}", accountName, "", "");
+                return;
+            }
+            try
+            {
+                Account acct = FindAllowedAccount();
+                if (acct == null)
+                {
+                    SendEnvelope(stream, "ERROR", "{\"reason\":\"DEMO8458533 not found\"}", accountName, "", "");
+                    return;
+                }
+                int working = 0;
+                foreach (Order o in acct.Orders)
+                {
+                    switch (o.OrderState)
+                    {
+                        case OrderState.Working:
+                        case OrderState.Accepted:
+                        case OrderState.Submitted:
+                        case OrderState.TriggerPending:
+                        case OrderState.PartFilled:
+                        case OrderState.ChangePending:
+                        case OrderState.CancelPending:
+                            working++;
+                            break;
+                    }
+                }
+                string payload = string.Format(CultureInfo.InvariantCulture,
+                    "{{\"working_order_count\":{0},\"orders\":[],\"known\":true}}", working);
+                SendEnvelope(stream, "ORDER_UPDATE", payload, ALLOWED_ACCOUNT, "", "");
+            }
+            catch (Exception ex)
+            {
+                SendEnvelope(stream, "ERROR", "{\"reason\":\"" + Escape(ex.Message) + "\"}", accountName, "", "");
+            }
+        }
+
+        // Read-only snapshot of last/bid/ask/volume from the cached L1 data (needs
+        // an active subscription, e.g. an open MNQ chart). Nulls -> reported absent.
+        private void SendQuote(NetworkStream stream, string instrumentName)
+        {
+            try
+            {
+                Instrument instr = Instrument.GetInstrument(instrumentName);
+                if (instr == null)
+                {
+                    SendEnvelope(stream, "ERROR", "{\"reason\":\"instrument not found\"}", "", instrumentName, "");
+                    return;
+                }
+                double last = 0, bid = 0, ask = 0, vol = 0;
+                bool haveLast = false, haveBid = false, haveAsk = false;
+                try {
+                    var md = instr.MarketData;
+                    if (md != null)
+                    {
+                        if (md.Last != null) { last = md.Last.Price; vol = md.Last.Volume; haveLast = true; }
+                        if (md.Bid  != null) { bid  = md.Bid.Price;  haveBid = true; }
+                        if (md.Ask  != null) { ask  = md.Ask.Price;  haveAsk = true; }
+                    }
+                } catch { }
+                string payload = string.Format(CultureInfo.InvariantCulture,
+                    "{{\"instrument\":\"{0}\",\"last\":{1},\"bid\":{2},\"ask\":{3},\"volume\":{4},\"have_last\":{5},\"have_bid\":{6},\"have_ask\":{7}}}",
+                    Escape(instr.FullName), last, bid, ask, vol,
+                    haveLast ? "true" : "false", haveBid ? "true" : "false", haveAsk ? "true" : "false");
+                SendEnvelope(stream, "QUOTE_UPDATE", payload, "", instr.FullName, "");
+            }
+            catch (Exception ex)
+            {
+                SendEnvelope(stream, "ERROR", "{\"reason\":\"" + Escape(ex.Message) + "\"}", "", instrumentName, "");
+            }
+        }
+
+        // Read-only historical 1-minute bars (last ~1 day). Blocks up to a few
+        // seconds for the async BarsRequest callback.
+        private void SendHistoricalBars(NetworkStream stream, string instrumentName)
+        {
+            try
+            {
+                Instrument instr = Instrument.GetInstrument(instrumentName);
+                if (instr == null)
+                {
+                    SendEnvelope(stream, "ERROR", "{\"reason\":\"instrument not found\"}", "", instrumentName, "");
+                    return;
+                }
+                var done = new System.Threading.ManualResetEventSlim(false);
+                var sb = new StringBuilder();
+                int[] count = { 0 };
+                string[] err = { null };
+                DateTime to = DateTime.Now;
+                DateTime from = to.AddDays(-1);
+                BarsRequest req = new BarsRequest(instr, from, to);
+                req.BarsPeriod = new BarsPeriod { BarsPeriodType = BarsPeriodType.Minute, Value = 1 };
+                req.Request((request, errorCode, errorMessage) =>
+                {
+                    try
+                    {
+                        if (errorCode != ErrorCode.NoError)
+                        {
+                            err[0] = errorCode.ToString() + ":" + errorMessage;
+                        }
+                        else if (request != null && request.Bars != null)
+                        {
+                            int n = request.Bars.Count;
+                            int start = Math.Max(0, n - 30);   // last 30 bars is enough proof
+                            for (int i = start; i < n; i++)
+                            {
+                                if (sb.Length > 0) sb.Append(",");
+                                // Stamp with the machine-local offset so the time is
+                                // timezone-AWARE downstream (NT bar times are local).
+                                DateTime bt = DateTime.SpecifyKind(request.Bars.GetTime(i), DateTimeKind.Local);
+                                sb.AppendFormat(CultureInfo.InvariantCulture,
+                                    "{{\"t\":\"{0:o}\",\"o\":{1},\"h\":{2},\"l\":{3},\"c\":{4},\"v\":{5}}}",
+                                    bt, request.Bars.GetOpen(i),
+                                    request.Bars.GetHigh(i), request.Bars.GetLow(i),
+                                    request.Bars.GetClose(i), request.Bars.GetVolume(i));
+                            }
+                            count[0] = n;
+                        }
+                    }
+                    catch (Exception e2) { err[0] = e2.Message; }
+                    finally { done.Set(); }
+                });
+                done.Wait(5000);
+                try { req.Dispose(); } catch { }
+                if (err[0] != null)
+                {
+                    SendEnvelope(stream, "ERROR", "{\"reason\":\"" + Escape(err[0]) + "\"}", "", instr.FullName, "");
+                    return;
+                }
+                string payload = string.Format(CultureInfo.InvariantCulture,
+                    "{{\"instrument\":\"{0}\",\"total_bars\":{1},\"bars\":[{2}]}}",
+                    Escape(instr.FullName), count[0], sb.ToString());
+                SendEnvelope(stream, "HISTORICAL_BARS_RESPONSE", payload, "", instr.FullName, "");
+            }
+            catch (Exception ex)
+            {
+                SendEnvelope(stream, "ERROR", "{\"reason\":\"" + Escape(ex.Message) + "\"}", "", instrumentName, "");
+            }
+        }
 
         private void SendEnvelope(NetworkStream stream, string type, string payloadJson,
                                   string account, string instrument, string expiry)

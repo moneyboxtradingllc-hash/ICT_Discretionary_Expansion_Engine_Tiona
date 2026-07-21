@@ -66,14 +66,53 @@ def _probe_bridge(expiry: str) -> dict:
                 "instrument_metadata": {"known": False},
                 "position": {"known": False}}
     try:
-        return {"connected": True,
-                "connection_state": c.connection_state(),
-                "account_state": c.account_state(),
-                "instrument_metadata": c.instrument_metadata(expiry),
-                "position": c.position(expiry),
-                "working_orders": c.working_orders()}
+        conn = c.connection_state()
+        acct = c.account_state()
+        meta = c.instrument_metadata(expiry)
+        posn = c.position(expiry)
+        orders = c.order_summary()
+        quote = c.quote(expiry)
+        # Reconcile declared MNQ constants against platform MasterInstrument.
+        from integrations.ninjatrader.contract_resolver import resolve_active_mnq, ContractCandidate
+        reconcile = None
+        try:
+            from integrations.ninjatrader.instrument_spec import InstrumentSpec
+            spec = InstrumentSpec(provider_symbol=expiry, ninjatrader_name=expiry,
+                                  expiry="2026-09")
+            reconcile = spec.reconcile_with_platform(meta)
+        except Exception as exc:  # noqa: BLE001
+            reconcile = {"error": str(exc)}
+        # Pull historical 1m bars through the gatekeeping provider (snapshot input).
+        bars_report = _bars_through_provider(c, expiry, meta)
+        return {"connected": True, "connection_state": conn, "account_state": acct,
+                "instrument_metadata": meta, "metadata_reconcile": reconcile,
+                "position": posn, "order_summary": orders,
+                "working_orders": orders.get("orders", []), "quote": quote,
+                "bars": bars_report}
     finally:
         c.close()
+
+
+def _bars_through_provider(client, expiry: str, meta: dict) -> dict:
+    """MNQ -> bridge -> client -> MNQ provider (bar-gatekeeper) -> candles.
+    Proves the read-only market-data path end to end."""
+    try:
+        from integrations.ninjatrader.instrument_spec import InstrumentSpec
+        from integrations.ninjatrader.market_data_provider import NinjaTraderMNQProvider
+        spec = InstrumentSpec(
+            provider_symbol=expiry, ninjatrader_name=expiry, expiry="2026-09",
+            tick_size=float(meta.get("tick_size", 0.25)),
+            point_value=float(meta.get("point_value", 2.0)),
+            tick_value=float(meta.get("tick_size", 0.25)) * float(meta.get("point_value", 2.0)),
+            rollover_state="active")
+        provider = NinjaTraderMNQProvider(spec, client)
+        candles = provider.fetch_1m_candles(expiry, 30)
+        return {"ok": True, "count": len(candles), "health": provider.health(),
+                "first": candles[0]["timestamp"] if candles else None,
+                "last": candles[-1]["timestamp"] if candles else None,
+                "snapshot_input_ready": len(candles) > 0}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "reason": str(exc)}
 
 _RESOLUTION_PATH = os.path.join("data", "integration", "ninjatrader",
                                 "mnq_contract_resolution.json")
@@ -125,6 +164,11 @@ def main(argv=None):
     bridge = _probe_bridge(expiry)
     acct = bridge.get("account_state", {}) or {}
     pos = bridge.get("position", {}) or {}
+    orders = bridge.get("order_summary", {}) or {}
+    meta = bridge.get("instrument_metadata", {}) or {}
+    recon = bridge.get("metadata_reconcile", {}) or {}
+    bars = bridge.get("bars", {}) or {}
+    quote = bridge.get("quote", {}) or {}
 
     health = IntegrationHealth(
         ninjatrader_installed=installed,
@@ -133,15 +177,22 @@ def main(argv=None):
         interface_connected=bridge["connected"],
         sim_account_visible=(acct.get("account") == "DEMO8458533") if acct.get("known") else None,
         global_sim_mode_user_confirmed=gsm.get("value"),
-        active_mnq_expiry=expiry,
-        tick_size=0.25, point_value=2.0, tick_value=0.5,
+        active_mnq_expiry=(meta.get("instrument_name") or expiry),
+        tick_size=float(meta.get("tick_size", 0.25)),
+        point_value=float(meta.get("point_value", 2.0)),
+        tick_value=float(meta.get("tick_size", 0.25)) * float(meta.get("point_value", 2.0)),
+        latest_completed_bar=(bars.get("last") or "none"),
+        warmup_bar_count=int(bars.get("count", 0) or 0),
         position_state=("flat" if pos.get("known") and int(pos.get("qty", 0)) == 0
                         else ("known" if pos.get("known") else "unknown")),
-        working_order_count=(len(bridge["working_orders"]) if bridge.get("connected") else None),
-        reconciliation_state=("clean" if bridge["connected"] and pos.get("known")
+        working_order_count=orders.get("working_order_count"),
+        reconciliation_state=("clean" if bridge.get("connected") and pos.get("known")
+                              and orders.get("known")
                               else "unreconciled (bridge not connected)"),
-        last_error="" if bridge["connected"] else bridge.get("reason", ""),
+        last_error="" if bridge.get("connected") else bridge.get("reason", ""),
     )
+    if recon.get("metadata_verified"):
+        health.tick_value = round(health.tick_size * health.point_value, 10)
 
     denial = _submission_denial_proof(expiry)
     assert denial["submitted"] is False, "INVARIANT VIOLATED: order reported submitted"
@@ -176,9 +227,15 @@ def main(argv=None):
     print(f"Bridge connected: {bridge['connected']}" +
           ("" if bridge["connected"] else f"  ({bridge.get('reason','')})"))
     if bridge["connected"]:
+        print(f"  connection: {bridge.get('connection_state')}")
         print(f"  account_state: {acct}")
+        print(f"  instrument_metadata: {meta}")
+        print(f"  metadata_verified: {recon.get('metadata_verified')}  "
+              f"(mismatches: {recon.get('mismatches')})")
         print(f"  position: {pos}")
-        print(f"  instrument_metadata: {bridge.get('instrument_metadata')}")
+        print(f"  working_orders: {orders}")
+        print(f"  quote: {quote}")
+        print(f"  bars (MNQ->bridge->provider): {bars}")
     print(f"Order-submission denial proof: submitted={denial['submitted']} "
           f"reason={denial['denied_reason']!r}")
     print(f"Health report written: {_HEALTH_PATH}")
