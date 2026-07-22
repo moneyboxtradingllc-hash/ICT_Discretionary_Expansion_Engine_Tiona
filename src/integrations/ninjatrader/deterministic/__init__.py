@@ -44,7 +44,7 @@ SCALE_IN = False
 PYRAMIDING = False
 
 # Preserve the existing primary decision window (America/New_York).
-DECISION_WINDOW = ("09:30", "11:30")
+DECISION_WINDOW = ("09:30", "14:00")
 TIMEZONE = "America/New_York"
 
 # Modeled costs (honest placeholders; measured separately from Sim fills).

@@ -3,7 +3,7 @@
 Replays the deterministic lane over historical MNQ 1m bars using the SAME real
 mechanical pipeline the live loop uses (facts_provider.build_facts -> author),
 then simulates each authorized trade forward to its target / structural stop /
-end-of-day, honoring the live rules: 09:30-11:30 ET decision window, ONE open
+end-of-day, honoring the live rules: the configured ET decision window, ONE open
 position, MAX 2 trades/day, 16.5pt stop cap, 35pt fixed target, modeled costs.
 
 HONESTY NOTES (read the report footer):
