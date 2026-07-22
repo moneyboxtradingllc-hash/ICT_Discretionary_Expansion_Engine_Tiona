@@ -15,7 +15,7 @@ from dataclasses import dataclass, asdict, field
 from typing import Optional
 
 from integrations.ninjatrader.deterministic import (
-    MODE, AUTHOR, ACCOUNT, INSTRUMENT, QUANTITY, TARGET_POINTS, MAX_STOP_POINTS,
+    MODE, AUTHOR, ACCOUNT, INSTRUMENT, MAX_RISK_DOLLARS, TARGET_POINTS, MAX_STOP_POINTS,
     MAX_TRADES_PER_DAY, DAILY_LOSS_CEILING, DECISION_WINDOW, EVIDENCE_ERA,
 )
 
@@ -38,7 +38,7 @@ class SessionAuthority:
     author: str = AUTHOR
     account: str = ACCOUNT
     instrument: str = INSTRUMENT
-    quantity: int = QUANTITY
+    max_risk_usd: float = MAX_RISK_DOLLARS
     target_points: float = TARGET_POINTS
     max_stop_points: float = MAX_STOP_POINTS
     session_start: float = field(default_factory=time.time)
@@ -90,9 +90,9 @@ class SessionAuthority:
             return False, "working entry/exit orders exist"
         return True, "entry admissible"
 
-    def record_trade_opened(self, order_ids: list):
+    def record_trade_opened(self, order_ids: list, quantity: int = 0):
         self.trade_count += 1
-        self.active_position_qty = self.quantity
+        self.active_position_qty = int(quantity)   # actual risk-sized fill qty
         self.active_order_ids = list(order_ids)
         self.save()
 

@@ -1,8 +1,12 @@
-"""Deterministic risk engine — sizing, structural stop, fixed target, daily risk.
+"""Deterministic risk engine — RISK-BASED sizing, structural stop, fixed target.
 
 Pure math + fail-closed gates. No market opinions here; direction and the
 structural invalidation price are supplied by the author from mechanical
 structure. This module only validates and prices them.
+
+Sizing is risk-based: contracts = floor(MAX_RISK_DOLLARS / (stop_pts x $2)),
+capped at MAX_CONTRACTS. Tighter stop -> more size; wider stop -> less; a stop
+beyond MAX_STOP_POINTS is NO TRADE (never widened to fit).
 """
 from __future__ import annotations
 
@@ -10,9 +14,8 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from integrations.ninjatrader.deterministic import (
-    QUANTITY, TICK_SIZE, POINT_VALUE, DOLLARS_PER_POINT, TARGET_POINTS,
-    MAX_STOP_POINTS, MAX_GROSS_TRADE_RISK, DAILY_LOSS_CEILING,
-    COMMISSION_PER_CONTRACT, SLIPPAGE_TICKS,
+    TICK_SIZE, POINT_VALUE, TARGET_POINTS, MAX_STOP_POINTS, MAX_RISK_DOLLARS,
+    MAX_CONTRACTS, DAILY_LOSS_CEILING, COMMISSION_PER_CONTRACT, SLIPPAGE_TICKS,
 )
 
 LONG = "long"
@@ -23,9 +26,24 @@ def normalize_tick(price: float, tick: float = TICK_SIZE) -> float:
     return round(round(float(price) / tick) * tick, 6)
 
 
+def contracts_for_stop(stop_points) -> int:
+    """RISK-BASED size: the largest whole contract count whose worst-case loss
+    (stop_points x $POINT_VALUE) stays within MAX_RISK_DOLLARS, capped at
+    MAX_CONTRACTS. Returns 0 for a non-positive stop or a stop beyond the cap
+    (-> no trade). Never rounds up; risk is never allowed to exceed the budget."""
+    try:
+        sp = float(stop_points)
+    except (TypeError, ValueError):
+        return 0
+    if sp <= 0 or sp > MAX_STOP_POINTS + 1e-9:
+        return 0
+    raw = int(MAX_RISK_DOLLARS // (sp * POINT_VALUE))   # floor — never over budget
+    return max(0, min(raw, MAX_CONTRACTS))
+
+
 def check_quantity(qty) -> tuple:
-    """EXACTLY 15. Anything else (<15, >15, 0, fractional, negative) is rejected.
-    A zero result is never rounded up; quantity is never auto-reduced."""
+    """Validate a RISK-SIZED quantity: a whole number in [1, MAX_CONTRACTS].
+    Zero/negative/fractional/over-ceiling are rejected (never auto-adjusted)."""
     if isinstance(qty, bool) or qty is None:
         return False, f"quantity {qty!r} invalid"
     try:
@@ -35,9 +53,11 @@ def check_quantity(qty) -> tuple:
     if f != int(f):
         return False, f"fractional quantity {qty!r} rejected"
     q = int(f)
-    if q != QUANTITY:
-        return False, f"quantity {q} != required {QUANTITY} (exactly 15 or no trade)"
-    return True, f"quantity {QUANTITY}"
+    if q < 1:
+        return False, f"quantity {q} < 1 (no trade)"
+    if q > MAX_CONTRACTS:
+        return False, f"quantity {q} > MAX_CONTRACTS {MAX_CONTRACTS}"
+    return True, f"quantity {q} (1..{MAX_CONTRACTS})"
 
 
 def target_price(direction: str, avg_fill: float) -> float:
@@ -60,11 +80,11 @@ class StopAssessment:
 
 def assess_structural_stop(direction: str, reference_price: float,
                            structural_stop: float) -> StopAssessment:
-    """Validate a STRUCTURE-derived stop: correct side + within the 16.5-pt cap.
+    """Validate a STRUCTURE-derived stop: correct side + within the 25-pt cap.
 
     `reference_price` is the expected entry (pre-trade) or the actual average
     fill (post-fill re-check). The stop must invalidate the setup on the correct
-    side and be <= 16.50 points away. Never widened, never moved closer here.
+    side and be <= 25.00 points away. Never widened, never moved closer here.
     """
     stop = normalize_tick(structural_stop)
     if direction == LONG:
@@ -81,7 +101,7 @@ def assess_structural_stop(direction: str, reference_price: float,
     dist = round(dist, 6)
     if dist <= 0:
         return StopAssessment(False, "stop distance non-positive", stop, dist, False)
-    # Hard cap: > 16.50 rejects. Exactly 16.50 passes.
+    # Hard cap: > 25.00 rejects. Exactly 25.00 passes.
     if dist > MAX_STOP_POINTS + 1e-9:
         return StopAssessment(False,
                               f"structural stop distance {dist} > {MAX_STOP_POINTS} cap — REJECT",
@@ -106,35 +126,39 @@ class RiskDecision:
     warnings: list = field(default_factory=list)
 
 
-def _modeled_costs() -> tuple:
+def _modeled_costs(qty: int) -> tuple:
     known = COMMISSION_PER_CONTRACT is not None
-    commission = (float(COMMISSION_PER_CONTRACT) * QUANTITY) if known else 0.0
-    slippage = SLIPPAGE_TICKS * TICK_SIZE * POINT_VALUE * QUANTITY
+    commission = (float(COMMISSION_PER_CONTRACT) * qty) if known else 0.0
+    slippage = SLIPPAGE_TICKS * TICK_SIZE * POINT_VALUE * qty
     return commission + slippage, known
 
 
 def assess_trade(direction: str, reference_price: float, structural_stop: float,
                  realized_daily_loss: float) -> RiskDecision:
-    """Full pre-authorization risk assessment for a 15-contract trade.
+    """Full pre-authorization risk assessment with RISK-BASED sizing.
 
-    Rejects if: quantity != 15, stop wrong side, stop > 16.5pts, or
-    realized_loss + full trade risk + modeled costs would breach the $1000 ceiling.
+    Rejects if: stop wrong side, stop > 25pts (-> qty 0), sized quantity invalid,
+    or realized_loss + full trade risk + modeled costs would breach the $1000
+    ceiling. Quantity scales to the stop so per-trade risk stays near $500.
     """
     warnings = []
-    ok_q, why_q = check_quantity(QUANTITY)
-    if not ok_q:
-        return RiskDecision(False, why_q)
-
     stop = assess_structural_stop(direction, reference_price, structural_stop)
     if not stop.valid:
         return RiskDecision(False, stop.reason, stop_price=stop.stop_price,
                             stop_distance=stop.stop_distance)
 
+    qty = contracts_for_stop(stop.stop_distance)
+    ok_q, why_q = check_quantity(qty)
+    if not ok_q:
+        return RiskDecision(False, why_q, stop_price=stop.stop_price,
+                            stop_distance=stop.stop_distance)
+
+    dollars_per_point = POINT_VALUE * qty
     tgt = target_price(direction, reference_price)
-    gross_risk = round(stop.stop_distance * DOLLARS_PER_POINT, 2)
-    gross_reward = round(TARGET_POINTS * DOLLARS_PER_POINT, 2)
+    gross_risk = round(stop.stop_distance * dollars_per_point, 2)
+    gross_reward = round(TARGET_POINTS * dollars_per_point, 2)
     rr = round(TARGET_POINTS / stop.stop_distance, 4)
-    costs, known = _modeled_costs()
+    costs, known = _modeled_costs(qty)
     if not known:
         warnings.append("commission UNKNOWN — modeled 0 but flagged")
 
@@ -145,13 +169,13 @@ def assess_trade(direction: str, reference_price: float, structural_stop: float,
                             f"daily-loss ceiling: realized {realized_daily_loss} + risk "
                             f"{gross_risk} + costs {costs:.2f} = {projected:.2f} > "
                             f"{DAILY_LOSS_CEILING}",
-                            stop_price=stop.stop_price, target_price=tgt,
+                            quantity=qty, stop_price=stop.stop_price, target_price=tgt,
                             stop_distance=stop.stop_distance, gross_risk=gross_risk,
                             gross_reward=gross_reward, reward_to_risk=rr,
                             modeled_costs=costs, commission_known=known, warnings=warnings)
 
-    return RiskDecision(True, "risk approved for 15 contracts",
-                        quantity=QUANTITY, stop_price=stop.stop_price, target_price=tgt,
+    return RiskDecision(True, f"risk approved for {qty} contracts",
+                        quantity=qty, stop_price=stop.stop_price, target_price=tgt,
                         stop_distance=stop.stop_distance, gross_risk=gross_risk,
                         gross_reward=gross_reward, reward_to_risk=rr,
                         modeled_costs=costs, commission_known=known, warnings=warnings)

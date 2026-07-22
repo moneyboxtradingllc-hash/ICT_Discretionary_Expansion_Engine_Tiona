@@ -9,7 +9,8 @@ import json
 import os
 import time
 
-from integrations.ninjatrader.deterministic import EVIDENCE_ERA, MODE, AUTHOR, ACCOUNT, INSTRUMENT, QUANTITY
+from integrations.ninjatrader.deterministic import (
+    EVIDENCE_ERA, MODE, AUTHOR, ACCOUNT, INSTRUMENT, MAX_RISK_DOLLARS, MAX_STOP_POINTS)
 
 EVIDENCE_DIR = os.path.join("data", "integration", "ninjatrader", "deterministic", "evidence")
 
@@ -23,7 +24,8 @@ def record_scan(session_id: str, scan_num: int, payload: dict) -> str:
     os.makedirs(EVIDENCE_DIR, exist_ok=True)
     rec = {
         "era": EVIDENCE_ERA, "mode": MODE, "author": AUTHOR,
-        "account": ACCOUNT, "instrument": INSTRUMENT, "quantity": QUANTITY,
+        "account": ACCOUNT, "instrument": INSTRUMENT,
+        "sizing": "risk-based", "max_risk_usd": MAX_RISK_DOLLARS, "max_stop_pts": MAX_STOP_POINTS,
         "session_id": session_id, "scan": scan_num, "at": time.time(),
         "at_iso": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         **payload,

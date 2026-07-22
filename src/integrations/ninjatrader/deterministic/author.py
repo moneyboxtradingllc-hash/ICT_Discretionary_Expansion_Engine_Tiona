@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from integrations.ninjatrader.deterministic import MODE, AUTHOR, QUANTITY
+from integrations.ninjatrader.deterministic import MODE, AUTHOR
 from integrations.ninjatrader.deterministic import risk as R
 
 LONG, SHORT = "long", "short"
@@ -118,7 +118,7 @@ def evaluate(mechanical_facts: Optional[dict], *, account_known: bool,
               (f"dist={_stop.stop_distance}" if _stop else "no stop")),
         Check(16, "target_valid_correct_side", bool(risk and risk.target_price is not None),
               (f"target={risk.target_price}" if risk else "no target")),
-        Check(17, f"{QUANTITY}_contract_risk_fits", bool(risk and risk.approved) and can_enter,
+        Check(17, "risk_sized_and_fits", bool(risk and risk.approved) and can_enter,
               (risk.reason if risk else "no risk") + f" | session:{can_enter_reason}"),
         Check(18, "account_position_orders_known",
               bool(account_known and position_known and orders_known and reconciliation_ok),
@@ -138,6 +138,6 @@ def evaluate(mechanical_facts: Optional[dict], *, account_known: bool,
         d.risk = {"gross_risk": risk.gross_risk, "gross_reward": risk.gross_reward,
                   "reward_to_risk": risk.reward_to_risk, "stop_distance": risk.stop_distance,
                   "approved": risk.approved, "reason": risk.reason}
-    d.quantity = QUANTITY if all(c.passed for c in checks) else 0
+    d.quantity = (risk.quantity if (risk and all(c.passed for c in checks)) else 0)
     d.authorized = all(c.passed for c in checks)
     return d

@@ -16,8 +16,9 @@ from typing import Optional
 
 from integrations.ninjatrader.bridge_client import NinjaTraderBridgeClient
 from integrations.ninjatrader.deterministic import (
-    MODE, AUTHOR, ACCOUNT, INSTRUMENT, QUANTITY, TARGET_POINTS, MAX_STOP_POINTS,
-    MAX_TRADES_PER_DAY, DAILY_LOSS_CEILING, DECISION_WINDOW, TIMEZONE,
+    MODE, AUTHOR, ACCOUNT, INSTRUMENT, TARGET_POINTS, MAX_STOP_POINTS,
+    MAX_RISK_DOLLARS, MAX_CONTRACTS, MAX_TRADES_PER_DAY, DAILY_LOSS_CEILING,
+    DECISION_WINDOW, TIMEZONE,
 )
 from integrations.ninjatrader.deterministic import author as AUTH
 from integrations.ninjatrader.deterministic import facts_provider as FP
@@ -50,9 +51,10 @@ def _stop_requested() -> bool:
 def route_deterministic_order(client: NinjaTraderBridgeClient, decision) -> dict:
     """Send a 15-contract deterministic bracket. Bridge attaches the structural
     stop + 35pt target with fill-slippage re-check; Python verifies by polling."""
+    qty = int(decision.quantity)
     payload = {
         "mode": MODE, "author": AUTHOR, "account": ACCOUNT, "instrument": INSTRUMENT,
-        "direction": decision.direction, "quantity": QUANTITY,
+        "direction": decision.direction, "quantity": qty,
         "structural_stop_price": decision.structural_stop,
         "target_points": TARGET_POINTS, "max_stop_points": MAX_STOP_POINTS,
     }
@@ -60,12 +62,12 @@ def route_deterministic_order(client: NinjaTraderBridgeClient, decision) -> dict
     if not ack.get("accepted"):
         flat = client.flatten(INSTRUMENT)
         return {"transmitted": False, "reason": ack.get("reason"), "safety_flatten": flat}
-    # Poll fill + protection (position qty == +/-5, 2 working orders).
+    # Poll fill + protection (position qty == +/- sized qty, 2 working orders).
     deadline = time.time() + 12.0
     while time.time() < deadline:
         pos = client.position(INSTRUMENT)
         orders = client.order_summary()
-        if pos.get("known") and abs(int(pos.get("qty", 0))) == QUANTITY \
+        if pos.get("known") and abs(int(pos.get("qty", 0))) == qty \
                 and orders.get("working_order_count") == 2:
             return {"transmitted": True, "fill_price": pos.get("avg_price"),
                     "position": pos, "orders": orders}
@@ -73,7 +75,7 @@ def route_deterministic_order(client: NinjaTraderBridgeClient, decision) -> dict
     pos = client.position(INSTRUMENT)
     orders = client.order_summary()
     protected = orders.get("working_order_count") == 2
-    filled = pos.get("known") and abs(int(pos.get("qty", 0))) == QUANTITY
+    filled = pos.get("known") and abs(int(pos.get("qty", 0))) == qty
     if filled and protected:
         return {"transmitted": True, "fill_price": pos.get("avg_price"),
                 "position": pos, "orders": orders}
@@ -114,7 +116,7 @@ def one_scan(client: NinjaTraderBridgeClient, session: SessionAuthority, scan_nu
     if decision.authorized and can_enter and armed and in_window:
         routed = route_deterministic_order(client, decision)
         if routed.get("transmitted"):
-            session.record_trade_opened(order_ids=[f"det-{scan_num}"])
+            session.record_trade_opened(order_ids=[f"det-{scan_num}"], quantity=decision.quantity)
             verdict = "TRADE_OPENED"
         else:
             verdict = "TRADE_ROUTE_FAILED"
@@ -146,7 +148,8 @@ def one_scan(client: NinjaTraderBridgeClient, session: SessionAuthority, scan_nu
 def run(max_scans: Optional[int] = None):
     session = SessionAuthority.resume_or_new()
     print(f"MODE: {MODE}  AUTHOR: {AUTHOR}  SESSION: {session.session_id}")
-    print(f"ACCOUNT: {ACCOUNT}  INSTRUMENT: {INSTRUMENT}  CONTRACTS: {QUANTITY}  "
+    print(f"ACCOUNT: {ACCOUNT}  INSTRUMENT: {INSTRUMENT}  RISK/TRADE: ${MAX_RISK_DOLLARS} "
+          f"(size scales to stop, max {MAX_CONTRACTS} contracts)  "
           f"TARGET: {TARGET_POINTS}pt  MAX STOP: {MAX_STOP_POINTS}pt  "
           f"MAX TRADES: {MAX_TRADES_PER_DAY}  DAILY LOSS CEILING: ${DAILY_LOSS_CEILING}")
     print("OPENAI CALLS: DISABLED  ATM TEMPLATE: NOT USED  AUTOMATED SIM TRADING: ENABLED")

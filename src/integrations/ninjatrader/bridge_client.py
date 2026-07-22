@@ -161,11 +161,21 @@ class NinjaTraderBridgeClient:
         return (r or {}).get("payload", {}) if r else {"known": False}
 
     # ── BarSource interface (feeds NinjaTraderMNQProvider) ───────────────────
-    def historical_1m(self, instrument_name: str, lookback: int) -> list:
+    def historical_1m(self, instrument_name: str, lookback: int,
+                      days_back: Optional[int] = None, max_bars: Optional[int] = None) -> list:
         """Return up to `lookback` completed 1m candles in the provider's dict
-        shape. Sends HISTORICAL_BARS_REQUEST; empty list if unavailable."""
+        shape. Sends HISTORICAL_BARS_REQUEST; empty list if unavailable.
+
+        `days_back`/`max_bars` (optional) override the bridge's history window and
+        wire cap (defaults 5 days / last 400) — used to pull a full backtest set.
+        `lookback=0` returns every bar the bridge sent (no client-side slice)."""
         self.instrument = instrument_name
-        r = self._request("HISTORICAL_BARS_REQUEST", {})
+        req = {}
+        if days_back is not None:
+            req["days_back"] = int(days_back)
+        if max_bars is not None:
+            req["max_bars"] = int(max_bars)
+        r = self._request("HISTORICAL_BARS_REQUEST", req)
         payload = (r or {}).get("payload", {}) if r else {}
         bars = payload.get("bars", []) or []
         out = []

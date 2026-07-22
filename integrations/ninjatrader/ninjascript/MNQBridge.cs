@@ -46,10 +46,11 @@ namespace NinjaTrader.NinjaScript.AddOns
         private const int    MAX_CONTRACTS   = 1;
         private const double STOP_POINTS     = 5.0;   // smoke-test protective stop distance
         private const double TARGET_POINTS   = 5.0;   // smoke-test profit target distance
-        // Deterministic lane doctrine.
-        private const int    DET_QTY         = 15;    // exactly fifteen
+        // Deterministic lane doctrine (RISK-BASED sizing — Python sizes to the stop).
+        private const int    DET_MIN_QTY     = 1;     // accepted quantity range lower bound
+        private const int    DET_MAX_QTY     = 30;    // safety ceiling on contract count
         private const double DET_TARGET_PTS  = 35.0;  // fixed target
-        private const double DET_MAX_STOP    = 16.5;  // hard structural-stop cap ($495 at 15 contracts)
+        private const double DET_MAX_STOP    = 25.0;  // hard structural-stop cap
         private const bool   ArmOrders       = false; // physical disarm — flip ONLY at the authorized SEND step.
         private const string LoopbackAddress = "127.0.0.1";
         private const int    ListenPort      = 36901;   // loopback only
@@ -170,7 +171,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                     SendQuote(stream, instrument);
                     break;
                 case "HISTORICAL_BARS_REQUEST":
-                    SendHistoricalBars(stream, instrument);
+                    SendHistoricalBars(stream, instrument, line);
                     break;
                 case "ORDER_SUBMIT_REQUEST":
                 case "ORDER_CANCEL_REQUEST":
@@ -463,7 +464,7 @@ namespace NinjaTrader.NinjaScript.AddOns
 
         // Read-only historical 1-minute bars (last ~1 day). Blocks up to a few
         // seconds for the async BarsRequest callback.
-        private void SendHistoricalBars(NetworkStream stream, string instrumentName)
+        private void SendHistoricalBars(NetworkStream stream, string instrumentName, string line)
         {
             try
             {
@@ -473,12 +474,20 @@ namespace NinjaTrader.NinjaScript.AddOns
                     SendEnvelope(stream, "ERROR", "{\"reason\":\"instrument not found\"}", "", instrumentName, "");
                     return;
                 }
+                // Optional request params (defaults preserve the original behavior):
+                //   days_back : how far back to load 1m bars (default 5)
+                //   max_bars  : cap on bars serialized to the wire (default 400; send
+                //               a large value to stream the full window for backtests).
+                int daysBack = (int)ExtractJsonNumber(line, "days_back");
+                if (daysBack <= 0) daysBack = 5;
+                int maxBars = (int)ExtractJsonNumber(line, "max_bars");
+                if (maxBars <= 0) maxBars = 400;
                 var done = new System.Threading.ManualResetEventSlim(false);
                 var sb = new StringBuilder();
                 int[] count = { 0 };
                 string[] err = { null };
                 DateTime to = DateTime.Now;
-                DateTime from = to.AddDays(-5);   // enough history for structural analysis
+                DateTime from = to.AddDays(-daysBack);
                 BarsRequest req = new BarsRequest(instr, from, to);
                 req.BarsPeriod = new BarsPeriod { BarsPeriodType = BarsPeriodType.Minute, Value = 1 };
                 req.Request((request, errorCode, errorMessage) =>
@@ -492,7 +501,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                         else if (request != null && request.Bars != null)
                         {
                             int n = request.Bars.Count;
-                            int start = Math.Max(0, n - 400);  // deep history for structure engines
+                            int start = Math.Max(0, n - maxBars);  // maxBars from request (default 400)
                             for (int i = start; i < n; i++)
                             {
                                 if (sb.Length > 0) sb.Append(",");
@@ -511,7 +520,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                     catch (Exception e2) { err[0] = e2.Message; }
                     finally { done.Set(); }
                 });
-                done.Wait(5000);
+                done.Wait(60000);   // months of 1m bars can take longer to load
                 try { req.Dispose(); } catch { }
                 if (err[0] != null)
                 {
@@ -593,10 +602,10 @@ namespace NinjaTrader.NinjaScript.AddOns
             }
         }
 
-        // DETERMINISTIC lane bracket: exactly 15 contracts, LONG or SHORT, a
-        // STRUCTURAL stop price supplied by the strategy, and a fixed 35-pt target
-        // from the actual fill. On fill it re-checks the true stop distance vs the
-        // 16.5-pt cap and EMERGENCY-FLATTENS if slippage breached it.
+        // DETERMINISTIC lane bracket: a RISK-SIZED contract count (1..DET_MAX_QTY,
+        // supplied by the strategy), LONG or SHORT, a STRUCTURAL stop price, and a
+        // fixed 35-pt target from the actual fill. On fill it re-checks the true stop
+        // distance vs the 25-pt cap and EMERGENCY-FLATTENS if slippage breached it.
         private void SubmitDeterministicBracket(NetworkStream stream, string accountName, string instrumentName, string line)
         {
             try
@@ -606,8 +615,8 @@ namespace NinjaTrader.NinjaScript.AddOns
                 double structuralStop = ExtractJsonNumber(line, "structural_stop_price");
                 if (dir != "long" && dir != "short")
                 { SendEnvelope(stream, "ERROR", "{\"reason\":\"direction must be long or short\"}", accountName, instrumentName, ""); return; }
-                if (qty != DET_QTY)
-                { SendEnvelope(stream, "ERROR", "{\"reason\":\"quantity must be exactly 15\"}", accountName, instrumentName, ""); return; }
+                if (qty < DET_MIN_QTY || qty > DET_MAX_QTY)
+                { SendEnvelope(stream, "ERROR", "{\"reason\":\"quantity out of range (1.." + DET_MAX_QTY + ")\"}", accountName, instrumentName, ""); return; }
                 if (structuralStop <= 0)
                 { SendEnvelope(stream, "ERROR", "{\"reason\":\"structural stop price required\"}", accountName, instrumentName, ""); return; }
 
@@ -633,7 +642,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                         if (e.Execution.Order.Name != "DetEntry") return;
                         if (e.Execution.Order.OrderState != OrderState.Filled) return;
                         double fill = e.Execution.Order.AverageFillPrice;
-                        // Fill-slippage re-check against the 16.5-pt cap.
+                        // Fill-slippage re-check against the 25-pt cap.
                         double actualStopDist = Math.Abs(fill - stopPx);
                         if (actualStopDist > DET_MAX_STOP + 1e-9)
                         {
@@ -644,8 +653,8 @@ namespace NinjaTrader.NinjaScript.AddOns
                         double tgtPx = isLong
                             ? instr.MasterInstrument.RoundToTickSize(fill + DET_TARGET_PTS)
                             : instr.MasterInstrument.RoundToTickSize(fill - DET_TARGET_PTS);
-                        Order stop = acct.CreateOrder(instr, exitAction, OrderType.StopMarket, OrderEntry.Manual, TimeInForce.Day, DET_QTY, 0, stopPx, oco, "DetStop", NinjaTrader.Core.Globals.MaxDate, null);
-                        Order tgt = acct.CreateOrder(instr, exitAction, OrderType.Limit, OrderEntry.Manual, TimeInForce.Day, DET_QTY, tgtPx, 0, oco, "DetTarget", NinjaTrader.Core.Globals.MaxDate, null);
+                        Order stop = acct.CreateOrder(instr, exitAction, OrderType.StopMarket, OrderEntry.Manual, TimeInForce.Day, qty, 0, stopPx, oco, "DetStop", NinjaTrader.Core.Globals.MaxDate, null);
+                        Order tgt = acct.CreateOrder(instr, exitAction, OrderType.Limit, OrderEntry.Manual, TimeInForce.Day, qty, tgtPx, 0, oco, "DetTarget", NinjaTrader.Core.Globals.MaxDate, null);
                         try { acct.Submit(new[] { stop, tgt }); }
                         catch { try { acct.Flatten(new[] { instr }); } catch { } }
                         acct.ExecutionUpdate -= execHandler;
@@ -654,7 +663,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                 };
                 acct.ExecutionUpdate += execHandler;
 
-                Order entry = acct.CreateOrder(instr, entryAction, OrderType.Market, OrderEntry.Manual, TimeInForce.Day, DET_QTY, 0, 0, "", "DetEntry", NinjaTrader.Core.Globals.MaxDate, null);
+                Order entry = acct.CreateOrder(instr, entryAction, OrderType.Market, OrderEntry.Manual, TimeInForce.Day, qty, 0, 0, "", "DetEntry", NinjaTrader.Core.Globals.MaxDate, null);
                 acct.Submit(new[] { entry });
                 SendEnvelope(stream, "ORDER_ACK", "{\"accepted\":true,\"entry\":\"submitted\",\"lane\":\"deterministic\"}", accountName, instrumentName, "");
             }

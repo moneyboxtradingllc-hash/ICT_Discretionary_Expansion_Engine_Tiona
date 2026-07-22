@@ -77,6 +77,50 @@ def _structural_invalidation(na: dict, structure: dict, direction: str,
     return None
 
 
+def _zone_displacement_confirmed(snapshot: dict, direction: Optional[str],
+                                 price_level: dict) -> bool:
+    """Deterministic entry trigger for THIS lane (operator rule, 2026-07-22):
+    a candle that closes beyond the zone midpoint IN the trade direction is the
+    entry EVEN IF that close carries price past the zone's far edge — the ICT
+    displacement-out-of-zone entry. The candle must have overlapped the zone (so
+    it is the displacement candle, not a distant bar). Missing data -> False.
+
+    This SUPPLEMENTS, never weakens, the execution gate's own trigger: the gate's
+    in-zone confirmation still counts; this additionally rescues the confirmation
+    candles the gate was discarding because the confirming bar exited the zone
+    (measured: ~70% of valid confirmations were being thrown away this way).
+    """
+    if direction not in ("long", "short") or not isinstance(price_level, dict):
+        return False
+    if price_level.get("level_type") in (None, "no_zone") or price_level.get("invalidated"):
+        return False
+    try:
+        zlow, zhigh, mid = (price_level.get("zone_low"), price_level.get("zone_high"),
+                            price_level.get("midpoint"))
+        if zlow is None or zhigh is None or mid is None:
+            return False
+        zlow, zhigh, mid = float(zlow), float(zhigh), float(mid)
+        tfs = snapshot.get("timeframes", {}) or {}
+        last = None
+        for tf in ("1m", "3m"):
+            lc = (tfs.get(tf) or {}).get("last_candle")
+            if lc and all(lc.get(k) is not None for k in ("open", "high", "low", "close")):
+                last = lc
+                break
+        if last is None:
+            return False
+        o, h, l, c = (float(last["open"]), float(last["high"]),
+                      float(last["low"]), float(last["close"]))
+        overlaps_zone = (l <= zhigh) and (h >= zlow)   # candle interacted with the zone
+        if not overlaps_zone:
+            return False
+        if direction == "long":
+            return c > o and c > mid        # bullish close beyond midpoint
+        return c < o and c < mid            # bearish close beyond midpoint
+    except (TypeError, ValueError):
+        return False
+
+
 def build_facts_from_snapshot(snapshot: dict, decision: dict, gate: dict,
                               last_price: Optional[float]) -> dict:
     qual = snapshot.get("qualification", {}) or {}
@@ -103,10 +147,15 @@ def build_facts_from_snapshot(snapshot: dict, decision: dict, gate: dict,
                         if (direction and entry) else None)
 
     commander_permits = bool(gate.get("commander_permits_trade", False))
+    # Effective entry trigger: the gate's own in-zone confirmation OR the lane's
+    # zone-displacement confirmation (operator rule — a candle closing beyond the
+    # zone midpoint in-direction is the entry even if it exits the zone edge).
+    disp_confirmed = _zone_displacement_confirmed(snapshot, direction, pl)
+    eff_trigger = bool(gate.get("trigger_requirement_met", False) or disp_confirmed)
     # The mechanical (non-Brain) gate: every sub-authority the execution gate
     # checks EXCEPT brain_authorship, which this deterministic lane replaces.
-    mech_gate = all(bool(gate.get(k)) for k in (
-        "trigger_requirement_met", "narrative_permits_trade", "commander_permits_trade",
+    mech_gate = eff_trigger and all(bool(gate.get(k)) for k in (
+        "narrative_permits_trade", "commander_permits_trade",
         "council_permits_trade", "regime_permission_allowed", "no_promoted_rule_block"))
 
     setup_family = pb.get("selected_playbook")
@@ -117,12 +166,26 @@ def build_facts_from_snapshot(snapshot: dict, decision: dict, gate: dict,
     # Entry-location / chase authority, SEPARATE from the 20-pt structural stop
     # cap (which stays its own check in the risk engine). Indeterminable FC-0B
     # inputs -> None -> author fails closed (NO_TRADE).
-    fc_relation = ez.get("price_relation")
-    fc_entry = ez.get("current_price") if ez.get("current_price") is not None else entry
+    # Entry-location inputs: prefer trade_intent.entry_zone, but FALL BACK to the
+    # preferred candidate's price_level (same fallback fc_stop/fc_mid already use).
+    # entry_zone is frequently empty even when price is at the zone, which would
+    # otherwise leave FC-0B indeterminable (None) and block every authorization.
+    fc_relation = ez.get("price_relation") or pl.get("price_relation")
+    fc_entry = ez.get("current_price")
+    if fc_entry is None:
+        fc_entry = pl.get("current_price")
+    if fc_entry is None:
+        fc_entry = entry
     fc_stop = pl.get("invalidation_level")
     if fc_stop is None:
         fc_stop = ez.get("zone_low") if direction == "long" else ez.get("zone_high")
     fc_mid = pl.get("midpoint") if pl.get("midpoint") is not None else ez.get("midpoint")
+    # Operator rule: a confirmed zone-displacement entry DID touch the zone (the
+    # candle overlapped it), so treat it as touching_zone for FC-0B — this lifts the
+    # in-zone veto while the CHASE CAP still applies (a displacement that ran too far
+    # from the stop is still denied).
+    if disp_confirmed and str(fc_relation or "").lower() not in ("inside_zone", "touching_zone"):
+        fc_relation = "touching_zone"
     if fc_relation is None or fc_entry is None or fc_stop is None:
         fc0b = None   # FC-0B indeterminable -> NO_TRADE upstream
     else:
@@ -138,7 +201,7 @@ def build_facts_from_snapshot(snapshot: dict, decision: dict, gate: dict,
         "liquidity_evidence": bool(_any_tf(liq, "sweep_detected")),
         "structural_evidence": bool(_any_tf(structure, "bos") or _any_tf(structure, "mss")),
         "displacement_evidence": bool(_any_tf(exp, "displacement_detected")),
-        "trigger_confirmed": bool(gate.get("trigger_requirement_met", False)),
+        "trigger_confirmed": eff_trigger,
         "protected_zone_permits": bool(gate.get("narrative_permits_trade", False)),
         # Commander verdict consumed ONLY through the sanctioned gate adapter
         # (commander_permits_trade), never the raw matrix.
