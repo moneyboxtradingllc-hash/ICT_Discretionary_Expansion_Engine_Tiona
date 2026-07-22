@@ -6,12 +6,16 @@ authorship. Every opportunity it records is labelled mode+author.
 
 Frozen doctrine (this lane):
   * Account : DEMO8458533 (sim only)     * Instrument : MNQ SEP26
-  * Quantity: EXACTLY 5 contracts (5 or no trade — never auto-reduced)
+  * Quantity: EXACTLY 15 contracts (15 or no trade — never auto-reduced)
   * Target  : fixed 35.00 points from the actual average fill
-  * Stop    : the setup's STRUCTURAL invalidation; HARD cap 20.00 points
+  * Stop    : the setup's STRUCTURAL invalidation; HARD cap 16.50 points
   * Max simultaneous positions: 1   * Max trades/day: 2
-  * Daily realized-loss ceiling: $500 (gross-modeled pre-check)
+  * Daily realized-loss ceiling: $1000 (gross-modeled pre-check)
   * Scale-in / pyramiding: FORBIDDEN
+
+Risk basis: MNQ is $2/point/contract, so 15 contracts = $30/point. The 16.50pt
+stop cap holds max per-trade risk to $495 (< the $1000 daily ceiling, which
+covers the two configured trades/day at up to $990 total).
 """
 
 MODE = "DETERMINISTIC_MNQ_SIM_ONLY"
@@ -21,19 +25,19 @@ EVIDENCE_ERA = "MNQ_DETERMINISTIC_SIM_WEEK"
 ACCOUNT = "DEMO8458533"
 INSTRUMENT = "MNQ SEP26"
 
-QUANTITY = 5                     # exactly five — never more, never fewer
+QUANTITY = 15                    # exactly fifteen — never more, never fewer
 POINT_VALUE = 2.00              # $ per index point per contract
-DOLLARS_PER_POINT = POINT_VALUE * QUANTITY   # $10.00 per point at 5 contracts
+DOLLARS_PER_POINT = POINT_VALUE * QUANTITY   # $30.00 per point at 15 contracts
 TICK_SIZE = 0.25
 
 TARGET_POINTS = 35.00           # fixed profit distance
-MAX_STOP_POINTS = 20.00         # HARD structural-stop cap
-MAX_GROSS_TRADE_RISK = MAX_STOP_POINTS * DOLLARS_PER_POINT   # $200
-TARGET_GROSS_REWARD = TARGET_POINTS * DOLLARS_PER_POINT      # $350
-MIN_RR_AT_MAX_STOP = TARGET_POINTS / MAX_STOP_POINTS         # 1.75
+MAX_STOP_POINTS = 16.50         # HARD structural-stop cap (holds risk to $495)
+MAX_GROSS_TRADE_RISK = MAX_STOP_POINTS * DOLLARS_PER_POINT   # $495
+TARGET_GROSS_REWARD = TARGET_POINTS * DOLLARS_PER_POINT      # $1050
+MIN_RR_AT_MAX_STOP = TARGET_POINTS / MAX_STOP_POINTS         # 2.1212
 
 MAX_TRADES_PER_DAY = 2
-DAILY_LOSS_CEILING = 500.00     # realized-loss ceiling ($)
+DAILY_LOSS_CEILING = 1000.00    # realized-loss ceiling ($)
 
 MAX_SIMULTANEOUS_POSITIONS = 1
 SCALE_IN = False

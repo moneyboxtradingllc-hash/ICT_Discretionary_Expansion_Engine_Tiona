@@ -47,9 +47,9 @@ namespace NinjaTrader.NinjaScript.AddOns
         private const double STOP_POINTS     = 5.0;   // smoke-test protective stop distance
         private const double TARGET_POINTS   = 5.0;   // smoke-test profit target distance
         // Deterministic lane doctrine.
-        private const int    DET_QTY         = 5;     // exactly five
+        private const int    DET_QTY         = 15;    // exactly fifteen
         private const double DET_TARGET_PTS  = 35.0;  // fixed target
-        private const double DET_MAX_STOP    = 20.0;  // hard structural-stop cap
+        private const double DET_MAX_STOP    = 16.5;  // hard structural-stop cap ($495 at 15 contracts)
         private const bool   ArmOrders       = false; // physical disarm — flip ONLY at the authorized SEND step.
         private const string LoopbackAddress = "127.0.0.1";
         private const int    ListenPort      = 36901;   // loopback only
@@ -593,10 +593,10 @@ namespace NinjaTrader.NinjaScript.AddOns
             }
         }
 
-        // DETERMINISTIC lane bracket: exactly 5 contracts, LONG or SHORT, a
+        // DETERMINISTIC lane bracket: exactly 15 contracts, LONG or SHORT, a
         // STRUCTURAL stop price supplied by the strategy, and a fixed 35-pt target
         // from the actual fill. On fill it re-checks the true stop distance vs the
-        // 20-pt cap and EMERGENCY-FLATTENS if slippage breached it.
+        // 16.5-pt cap and EMERGENCY-FLATTENS if slippage breached it.
         private void SubmitDeterministicBracket(NetworkStream stream, string accountName, string instrumentName, string line)
         {
             try
@@ -607,7 +607,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                 if (dir != "long" && dir != "short")
                 { SendEnvelope(stream, "ERROR", "{\"reason\":\"direction must be long or short\"}", accountName, instrumentName, ""); return; }
                 if (qty != DET_QTY)
-                { SendEnvelope(stream, "ERROR", "{\"reason\":\"quantity must be exactly 5\"}", accountName, instrumentName, ""); return; }
+                { SendEnvelope(stream, "ERROR", "{\"reason\":\"quantity must be exactly 15\"}", accountName, instrumentName, ""); return; }
                 if (structuralStop <= 0)
                 { SendEnvelope(stream, "ERROR", "{\"reason\":\"structural stop price required\"}", accountName, instrumentName, ""); return; }
 
@@ -633,7 +633,7 @@ namespace NinjaTrader.NinjaScript.AddOns
                         if (e.Execution.Order.Name != "DetEntry") return;
                         if (e.Execution.Order.OrderState != OrderState.Filled) return;
                         double fill = e.Execution.Order.AverageFillPrice;
-                        // Fill-slippage re-check against the 20-pt cap.
+                        // Fill-slippage re-check against the 16.5-pt cap.
                         double actualStopDist = Math.Abs(fill - stopPx);
                         if (actualStopDist > DET_MAX_STOP + 1e-9)
                         {

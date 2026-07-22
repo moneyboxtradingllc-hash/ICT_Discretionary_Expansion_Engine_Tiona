@@ -1,7 +1,7 @@
 """DETERMINISTIC_MNQ_SIM_ONLY — the running scan/execution loop.
 
 Reconcile -> build MNQ snapshot -> assemble mechanical facts -> deterministic
-author (20-condition gate) -> record evidence -> route a 5-contract bracket to
+author (20-condition gate) -> record evidence -> route a 15-contract bracket to
 the bridge ONLY when authorized and admissible. Fail-closed everywhere.
 
 Runs until the STOP file appears, the daily trade limit or loss ceiling is hit,
@@ -48,7 +48,7 @@ def _stop_requested() -> bool:
 
 
 def route_deterministic_order(client: NinjaTraderBridgeClient, decision) -> dict:
-    """Send a 5-contract deterministic bracket. Bridge attaches the structural
+    """Send a 15-contract deterministic bracket. Bridge attaches the structural
     stop + 35pt target with fill-slippage re-check; Python verifies by polling."""
     payload = {
         "mode": MODE, "author": AUTHOR, "account": ACCOUNT, "instrument": INSTRUMENT,

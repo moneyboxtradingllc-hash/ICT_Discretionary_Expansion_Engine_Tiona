@@ -84,7 +84,7 @@ def evaluate(mechanical_facts: Optional[dict], *, account_known: bool,
     entry = f.get("expected_entry")
     invalidation = f.get("entry_invalidation")
 
-    # Risk assessment (stop side/cap + target + 5-contract risk + daily ceiling).
+    # Risk assessment (stop side/cap + target + 15-contract risk + daily ceiling).
     _valid_dir_prices = direction in (LONG, SHORT) and entry is not None and invalidation is not None
     _stop = (R.assess_structural_stop(direction, float(entry), float(invalidation))
              if _valid_dir_prices else None)
@@ -112,13 +112,13 @@ def evaluate(mechanical_facts: Optional[dict], *, account_known: bool,
         Check(13, "entry_invalidation_exists", invalidation is not None, str(invalidation)),
         Check(14, "invalidation_correct_side", bool(_stop and _stop.correct_side),
               _stop.reason if _stop else "no stop"),
-        Check(15, "stop_within_20pts",
+        Check(15, f"stop_within_{R.MAX_STOP_POINTS:g}pts",
               bool(_stop and _stop.valid and _stop.stop_distance is not None
                    and _stop.stop_distance <= R.MAX_STOP_POINTS + 1e-9),
               (f"dist={_stop.stop_distance}" if _stop else "no stop")),
         Check(16, "target_valid_correct_side", bool(risk and risk.target_price is not None),
               (f"target={risk.target_price}" if risk else "no target")),
-        Check(17, "five_contract_risk_fits", bool(risk and risk.approved) and can_enter,
+        Check(17, f"{QUANTITY}_contract_risk_fits", bool(risk and risk.approved) and can_enter,
               (risk.reason if risk else "no risk") + f" | session:{can_enter_reason}"),
         Check(18, "account_position_orders_known",
               bool(account_known and position_known and orders_known and reconciliation_ok),

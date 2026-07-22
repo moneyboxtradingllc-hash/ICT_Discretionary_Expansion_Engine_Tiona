@@ -185,7 +185,7 @@ class NinjaTraderBridgeClient:
     # These send ORDER_SUBMIT_REQUEST; the bridge refuses while ArmOrders=false
     # (returns an ERROR "orders disarmed"), so an accidental call cannot fire.
     def deterministic_order(self, payload: dict) -> dict:
-        """Send a 5-contract deterministic bracket (LONG/SHORT). Bridge refuses
+        """Send a 15-contract deterministic bracket (LONG/SHORT). Bridge refuses
         while disarmed or if account/instrument/qty/direction fail its pins."""
         r = self._request("DETERMINISTIC_ORDER", dict(payload))
         p = (r or {}).get("payload", {}) if r else {}

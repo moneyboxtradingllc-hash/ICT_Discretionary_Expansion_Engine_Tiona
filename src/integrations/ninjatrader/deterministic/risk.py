@@ -24,7 +24,7 @@ def normalize_tick(price: float, tick: float = TICK_SIZE) -> float:
 
 
 def check_quantity(qty) -> tuple:
-    """EXACTLY 5. Anything else (1-4, >5, 0, fractional, negative) is rejected.
+    """EXACTLY 15. Anything else (<15, >15, 0, fractional, negative) is rejected.
     A zero result is never rounded up; quantity is never auto-reduced."""
     if isinstance(qty, bool) or qty is None:
         return False, f"quantity {qty!r} invalid"
@@ -36,7 +36,7 @@ def check_quantity(qty) -> tuple:
         return False, f"fractional quantity {qty!r} rejected"
     q = int(f)
     if q != QUANTITY:
-        return False, f"quantity {q} != required {QUANTITY} (exactly 5 or no trade)"
+        return False, f"quantity {q} != required {QUANTITY} (exactly 15 or no trade)"
     return True, f"quantity {QUANTITY}"
 
 
@@ -60,11 +60,11 @@ class StopAssessment:
 
 def assess_structural_stop(direction: str, reference_price: float,
                            structural_stop: float) -> StopAssessment:
-    """Validate a STRUCTURE-derived stop: correct side + within the 20-pt cap.
+    """Validate a STRUCTURE-derived stop: correct side + within the 16.5-pt cap.
 
     `reference_price` is the expected entry (pre-trade) or the actual average
     fill (post-fill re-check). The stop must invalidate the setup on the correct
-    side and be <= 20.00 points away. Never widened, never moved closer here.
+    side and be <= 16.50 points away. Never widened, never moved closer here.
     """
     stop = normalize_tick(structural_stop)
     if direction == LONG:
@@ -81,7 +81,7 @@ def assess_structural_stop(direction: str, reference_price: float,
     dist = round(dist, 6)
     if dist <= 0:
         return StopAssessment(False, "stop distance non-positive", stop, dist, False)
-    # Hard cap: > 20.00 rejects. Exactly 20.00 passes.
+    # Hard cap: > 16.50 rejects. Exactly 16.50 passes.
     if dist > MAX_STOP_POINTS + 1e-9:
         return StopAssessment(False,
                               f"structural stop distance {dist} > {MAX_STOP_POINTS} cap — REJECT",
@@ -115,10 +115,10 @@ def _modeled_costs() -> tuple:
 
 def assess_trade(direction: str, reference_price: float, structural_stop: float,
                  realized_daily_loss: float) -> RiskDecision:
-    """Full pre-authorization risk assessment for a 5-contract trade.
+    """Full pre-authorization risk assessment for a 15-contract trade.
 
-    Rejects if: quantity != 5, stop wrong side, stop > 20pts, or
-    realized_loss + full trade risk + modeled costs would breach the $500 ceiling.
+    Rejects if: quantity != 15, stop wrong side, stop > 16.5pts, or
+    realized_loss + full trade risk + modeled costs would breach the $1000 ceiling.
     """
     warnings = []
     ok_q, why_q = check_quantity(QUANTITY)
@@ -150,7 +150,7 @@ def assess_trade(direction: str, reference_price: float, structural_stop: float,
                             gross_reward=gross_reward, reward_to_risk=rr,
                             modeled_costs=costs, commission_known=known, warnings=warnings)
 
-    return RiskDecision(True, "risk approved for 5 contracts",
+    return RiskDecision(True, "risk approved for 15 contracts",
                         quantity=QUANTITY, stop_price=stop.stop_price, target_price=tgt,
                         stop_distance=stop.stop_distance, gross_risk=gross_risk,
                         gross_reward=gross_reward, reward_to_risk=rr,

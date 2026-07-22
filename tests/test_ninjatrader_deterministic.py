@@ -42,32 +42,32 @@ def _author(f, **kw):
 
 
 class TestQuantity(unittest.TestCase):
-    def test_01_exactly_five_accepted(self):
-        self.assertTrue(R.check_quantity(5)[0])
+    def test_01_exactly_fifteen_accepted(self):
+        self.assertTrue(R.check_quantity(15)[0])
 
-    def test_02_one_to_four_rejected(self):
-        for q in (1, 2, 3, 4):
+    def test_02_below_fifteen_rejected(self):
+        for q in (1, 5, 10, 14):
             self.assertFalse(R.check_quantity(q)[0], q)
 
-    def test_03_above_five_rejected(self):
-        for q in (6, 10):
+    def test_03_above_fifteen_rejected(self):
+        for q in (16, 20, 30):
             self.assertFalse(R.check_quantity(q)[0], q)
 
     def test_03b_zero_fractional_negative_rejected(self):
-        for q in (0, 2.5, -5):
+        for q in (0, 2.5, -15):
             self.assertFalse(R.check_quantity(q)[0], q)
 
 
 class TestRiskMath(unittest.TestCase):
     def test_04_long_works(self):
-        d = R.assess_trade(LONG, 29300.0, 29284.25, 0.0)
+        d = R.assess_trade(LONG, 29300.0, 29284.25, 0.0)   # 15.75pt x $30
         self.assertTrue(d.approved)
-        self.assertEqual(d.gross_risk, 157.50)
+        self.assertEqual(d.gross_risk, 472.50)
 
     def test_05_short_works(self):
-        d = R.assess_trade(SHORT, 29300.0, 29317.50, 0.0)
+        d = R.assess_trade(SHORT, 29300.0, 29315.00, 0.0)  # 15.0pt x $30
         self.assertTrue(d.approved)
-        self.assertEqual(d.gross_risk, 175.00)
+        self.assertEqual(d.gross_risk, 450.00)
 
     def test_06_target_35_correct(self):
         self.assertEqual(R.target_price(LONG, 29300.0), 29335.0)
@@ -78,15 +78,15 @@ class TestRiskMath(unittest.TestCase):
         self.assertTrue(s.valid)
         self.assertEqual(s.stop_distance, 15.75)
 
-    def test_08_stop_over_20_rejected(self):
-        self.assertFalse(R.assess_structural_stop(LONG, 29300.0, 29278.0).valid)  # 22
-        self.assertFalse(R.assess_trade(LONG, 29300.0, 29278.0, 0.0).approved)
+    def test_08_stop_over_cap_rejected(self):
+        self.assertFalse(R.assess_structural_stop(LONG, 29300.0, 29282.0).valid)  # 18pt > 16.5
+        self.assertFalse(R.assess_trade(LONG, 29300.0, 29282.0, 0.0).approved)
 
-    def test_09_stop_exactly_20_accepted(self):
-        s = R.assess_structural_stop(LONG, 29300.0, 29280.0)
+    def test_09_stop_exactly_cap_accepted(self):
+        s = R.assess_structural_stop(LONG, 29300.0, 29283.5)   # exactly 16.5pt
         self.assertTrue(s.valid)
-        self.assertEqual(s.stop_distance, 20.0)
-        self.assertEqual(R.assess_trade(LONG, 29300.0, 29280.0, 0.0).gross_risk, 200.0)
+        self.assertEqual(s.stop_distance, 16.5)
+        self.assertEqual(R.assess_trade(LONG, 29300.0, 29283.5, 0.0).gross_risk, 495.0)
 
     def test_10_tick_normalization(self):
         self.assertEqual(R.normalize_tick(29284.13), 29284.25)
@@ -105,8 +105,8 @@ class TestRiskMath(unittest.TestCase):
         self.assertLess(R.target_price(SHORT, 29300.0), 29300.0)
 
     def test_max_risk_constants(self):
-        self.assertEqual(MAX_GROSS_TRADE_RISK, 200.0)
-        self.assertEqual(TARGET_POINTS / MAX_STOP_POINTS, 1.75)
+        self.assertEqual(MAX_GROSS_TRADE_RISK, 495.0)
+        self.assertAlmostEqual(TARGET_POINTS / MAX_STOP_POINTS, 35.0 / 16.5, places=6)
 
 
 class TestAuthor(unittest.TestCase):
@@ -120,7 +120,7 @@ class TestAuthor(unittest.TestCase):
     def test_short_authorizes(self):
         d = _author(_facts(direction="short", qualification_direction="short",
                            playbook_direction="short", decision_direction="short",
-                           entry_invalidation=29317.50))
+                           entry_invalidation=29315.00))
         self.assertTrue(d.authorized, d.blockers())
 
     def test_any_directional_disagreement_no_trade(self):
@@ -189,7 +189,8 @@ class TestSession(unittest.TestCase):
         self.assertFalse(s.can_enter()[0])
 
     def test_23b_risk_engine_blocks_when_remaining_room_small(self):
-        d = R.assess_trade(LONG, 29300.0, 29280.0, realized_daily_loss=350.0)  # 200 risk
+        # 15pt stop = $450 risk; realized $600 already => $1050+ > $1000 ceiling.
+        d = R.assess_trade(LONG, 29300.0, 29285.0, realized_daily_loss=600.0)
         self.assertFalse(d.approved)
 
     def test_16_17_duplicate_ids_rejected(self):
@@ -255,7 +256,7 @@ class TestFactsWiring(unittest.TestCase):
         self.assertTrue(facts["fc0b_permits"])       # real evaluate_fc0b permit
         d = _author(facts)
         self.assertTrue(d.authorized, d.blockers())
-        self.assertEqual(d.quantity, 5)
+        self.assertEqual(d.quantity, QUANTITY)
 
     def test_wired_short_authorizes(self):
         from integrations.ninjatrader.deterministic import facts_provider as FP
@@ -267,7 +268,7 @@ class TestFactsWiring(unittest.TestCase):
 
     def test_fc0b_reject_blocks_even_with_small_stop(self):
         # Price LEFT the zone (above_zone) -> FC-0B denies, even though the stop
-        # is only 12pt (well within the 20pt cap). Proves FC-0B is independent.
+        # is only 12pt (well within the 16.5pt cap). Proves FC-0B is independent.
         from integrations.ninjatrader.deterministic import facts_provider as FP
         snap = self._snapshot("bullish", 29300.0, 29288.0, relation="above_zone")
         facts = FP.build_facts_from_snapshot(snap, {"direction": "bullish"},
@@ -276,15 +277,15 @@ class TestFactsWiring(unittest.TestCase):
         self.assertFalse(_author(facts).authorized)
 
     def test_stop_cap_reject_independent_of_fc0b(self):
-        # Stop 22pt (>20 cap) but FC-0B PERMITS (in zone, chase within cap).
+        # Stop 22pt (>16.5 cap) but FC-0B PERMITS (in zone, chase within cap).
         from integrations.ninjatrader.deterministic import facts_provider as FP
         snap = self._snapshot("bullish", 29300.0, 29278.0)   # 22pt stop
         facts = FP.build_facts_from_snapshot(snap, {"direction": "bullish"},
                                              self._gate(True), 29300.0)
         self.assertTrue(facts["fc0b_permits"])       # FC-0B permits
         d = _author(facts)
-        self.assertFalse(d.authorized)               # blocked by the 20pt stop cap
-        self.assertTrue(any("stop_within_20pts" in b for b in d.blockers()))
+        self.assertFalse(d.authorized)               # blocked by the 16.5pt stop cap
+        self.assertTrue(any(f"stop_within_{MAX_STOP_POINTS:g}pts" in b for b in d.blockers()))
 
     def test_fc0b_unknown_is_no_trade(self):
         # No trade_intent/price_level -> FC-0B indeterminable -> None -> NO_TRADE.
