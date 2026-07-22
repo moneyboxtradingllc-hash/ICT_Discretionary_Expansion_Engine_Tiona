@@ -8,6 +8,7 @@ import os
 import re
 import sys
 import tempfile
+import time
 import unittest
 
 sys.stdout.reconfigure(encoding="utf-8")
@@ -18,7 +19,7 @@ from integrations.ninjatrader.deterministic import author as A                  
 from integrations.ninjatrader.deterministic import (TARGET_POINTS, MAX_STOP_POINTS,  # noqa: E402
     MAX_RISK_DOLLARS, MAX_CONTRACTS, POINT_VALUE, DAILY_LOSS_CEILING, MAX_TRADES_PER_DAY)
 from integrations.ninjatrader.deterministic.session import (SessionAuthority,    # noqa: E402
-    STOPPED_LOSS_CEILING)
+    ACTIVE, STOPPED_LOSS_CEILING, STOPPED_MANUAL)
 
 LONG, SHORT = "long", "short"
 
@@ -245,6 +246,27 @@ class TestSession(unittest.TestCase):
         # resume forces re-reconcile before entries
         self.assertFalse(resumed.last_reconcile_ok)
         self.assertFalse(resumed.can_enter()[0])
+
+    def test_24b_prior_day_session_resets_fresh(self):
+        s = self._s()
+        s.trade_count = 2
+        s.realized_pnl = -800.0
+        s.state = STOPPED_LOSS_CEILING
+        s.session_start = time.time() - 2 * 86400   # two days ago
+        s.save(self.p)
+        resumed = SessionAuthority.resume_or_new(self.p)
+        self.assertEqual(resumed.trade_count, 0)     # new trading day -> fresh
+        self.assertEqual(resumed.realized_pnl, 0.0)
+        self.assertEqual(resumed.state, ACTIVE)
+
+    def test_24c_same_day_stopped_session_stays_stopped(self):
+        s = self._s()
+        s.state = STOPPED_MANUAL                     # session_start defaults to now
+        s.trade_count = 1
+        s.save(self.p)
+        resumed = SessionAuthority.resume_or_new(self.p)
+        self.assertEqual(resumed.state, STOPPED_MANUAL)  # relaunch never bypasses
+        self.assertEqual(resumed.trade_count, 1)
 
     def test_reconcile_unknown_fails_closed(self):
         s = self._s()

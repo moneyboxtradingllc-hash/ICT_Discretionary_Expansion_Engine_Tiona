@@ -7,6 +7,7 @@ unknown, the session refuses new entries.
 """
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import os
 import time
@@ -16,8 +17,20 @@ from typing import Optional
 
 from integrations.ninjatrader.deterministic import (
     MODE, AUTHOR, ACCOUNT, INSTRUMENT, MAX_RISK_DOLLARS, TARGET_POINTS, MAX_STOP_POINTS,
-    MAX_TRADES_PER_DAY, DAILY_LOSS_CEILING, DECISION_WINDOW, EVIDENCE_ERA,
+    MAX_TRADES_PER_DAY, DAILY_LOSS_CEILING, DECISION_WINDOW, TIMEZONE, EVIDENCE_ERA,
 )
+
+
+def _same_et_day(ts: float) -> bool:
+    """True if timestamp `ts` falls on the current America/New_York calendar day.
+    On any error, return True (resume existing) so daily risk limits are never
+    accidentally reset by a relaunch."""
+    try:
+        from zoneinfo import ZoneInfo
+        z = ZoneInfo(TIMEZONE)
+        return _dt.datetime.fromtimestamp(ts, z).date() == _dt.datetime.now(z).date()
+    except Exception:
+        return True
 
 SESSION_PATH = os.path.join("data", "integration", "ninjatrader", "deterministic",
                             "session_state.json")
@@ -155,14 +168,17 @@ class SessionAuthority:
 
     @classmethod
     def resume_or_new(cls, path: str = SESSION_PATH) -> "SessionAuthority":
-        """Restart reconstruction: resume today's session if present, else new.
-        The caller MUST apply_reconciliation() from the bridge before entries."""
+        """Restart reconstruction: resume TODAY's session if present, else start a
+        fresh one. A saved session from a prior day (or none) yields a new session
+        so trade count / realized P&L / stopped-state reset for the new trading day.
+        A same-day STOPPED session is resumed as-is (a relaunch never bypasses the
+        day's trade or loss limits). Caller MUST apply_reconciliation() before entries."""
         existing = cls.load(path)
-        if existing is not None:
+        if existing is not None and _same_et_day(getattr(existing, "session_start", 0.0)):
             # Reconstructed state must be re-reconciled against the bridge before
             # any new entry, so force last_reconcile_ok False on resume.
             existing.last_reconcile_ok = False
             return existing
-        s = cls()
+        s = cls()          # new day (or no prior session) -> fresh ACTIVE session
         s.save(path)
         return s
