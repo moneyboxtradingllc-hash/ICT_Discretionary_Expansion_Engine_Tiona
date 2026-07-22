@@ -49,6 +49,7 @@ class SessionAuthority:
 
     trade_count: int = 0
     realized_pnl: float = 0.0          # session realized P&L ($); losses negative
+    open_realized_baseline: float = 0.0  # broker realized P&L captured at trade open
     active_position_qty: int = 0
     active_order_ids: list = field(default_factory=list)
     used_intent_ids: list = field(default_factory=list)
@@ -90,10 +91,12 @@ class SessionAuthority:
             return False, "working entry/exit orders exist"
         return True, "entry admissible"
 
-    def record_trade_opened(self, order_ids: list, quantity: int = 0):
+    def record_trade_opened(self, order_ids: list, quantity: int = 0,
+                            realized_baseline: float = 0.0):
         self.trade_count += 1
         self.active_position_qty = int(quantity)   # actual risk-sized fill qty
         self.active_order_ids = list(order_ids)
+        self.open_realized_baseline = float(realized_baseline)  # for close-delta P&L
         self.save()
 
     def record_trade_closed(self, realized_delta: float):

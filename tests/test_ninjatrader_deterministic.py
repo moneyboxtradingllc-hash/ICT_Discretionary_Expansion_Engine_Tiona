@@ -17,7 +17,8 @@ from integrations.ninjatrader.deterministic import risk as R                    
 from integrations.ninjatrader.deterministic import author as A                  # noqa: E402
 from integrations.ninjatrader.deterministic import (TARGET_POINTS, MAX_STOP_POINTS,  # noqa: E402
     MAX_RISK_DOLLARS, MAX_CONTRACTS, POINT_VALUE, DAILY_LOSS_CEILING, MAX_TRADES_PER_DAY)
-from integrations.ninjatrader.deterministic.session import SessionAuthority     # noqa: E402
+from integrations.ninjatrader.deterministic.session import (SessionAuthority,    # noqa: E402
+    STOPPED_LOSS_CEILING)
 
 LONG, SHORT = "long", "short"
 
@@ -208,6 +209,23 @@ class TestSession(unittest.TestCase):
         # 15pt stop = $450 risk; realized $600 already => $1050+ > $1000 ceiling.
         d = R.assess_trade(LONG, 29300.0, 29285.0, realized_daily_loss=600.0)
         self.assertFalse(d.approved)
+
+    def test_23c_realized_pnl_tracked_from_broker_delta(self):
+        # open captures broker baseline; close records the exact signed delta.
+        s = self._s()
+        s.record_trade_opened(order_ids=["x"], quantity=13, realized_baseline=100.0)
+        self.assertEqual(s.open_realized_baseline, 100.0)
+        self.assertEqual(s.active_position_qty, 13)
+        s.record_trade_closed(-474.0)          # loop passes broker_now - baseline
+        self.assertEqual(s.realized_pnl, -474.0)
+        self.assertEqual(s.realized_loss(), 474.0)
+        self.assertEqual(s.active_position_qty, 0)
+
+    def test_23d_loss_ceiling_stops_session_on_close(self):
+        s = self._s()
+        s.record_trade_opened(order_ids=["x"], quantity=10, realized_baseline=0.0)
+        s.record_trade_closed(-1000.0)         # breaches the $1000 daily ceiling
+        self.assertEqual(s.state, STOPPED_LOSS_CEILING)
 
     def test_16_17_duplicate_ids_rejected(self):
         s = self._s()

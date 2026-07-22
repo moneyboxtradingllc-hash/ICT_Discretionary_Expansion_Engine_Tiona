@@ -90,7 +90,18 @@ def one_scan(client: NinjaTraderBridgeClient, session: SessionAuthority, scan_nu
     orders = client.order_summary()
     acct = client.account_state()
     env = client.environment_proof()
+    prior_qty = session.active_position_qty          # BEFORE reconcile overwrites it
     session.apply_reconciliation(pos, orders)
+
+    # Detect a CLOSED trade (was positioned, now flat) and record the exact realized
+    # P&L from the broker (30s scans can't see the intrabar OCO fill). Delta =
+    # broker realized now - baseline captured at open. Updates the daily-loss ceiling.
+    if bool(pos.get("known")) and prior_qty != 0 and int(pos.get("qty", 0)) == 0:
+        realized_now = float(acct.get("realized_pnl", 0.0) or 0.0)
+        delta = round(realized_now - session.open_realized_baseline, 2)
+        session.record_trade_closed(delta)
+        print(f"[scan {scan_num}] TRADE CLOSED — realized ${delta:+.2f} "
+              f"(session realized ${session.realized_pnl:+.2f}, state {session.state})")
 
     account_known = bool(acct.get("account") == ACCOUNT)
     armed = env.get("arm_orders") is True
@@ -118,7 +129,8 @@ def one_scan(client: NinjaTraderBridgeClient, session: SessionAuthority, scan_nu
     if decision.authorized and can_enter and armed and in_window:
         routed = route_deterministic_order(client, decision)
         if routed.get("transmitted"):
-            session.record_trade_opened(order_ids=[f"det-{scan_num}"], quantity=decision.quantity)
+            session.record_trade_opened(order_ids=[f"det-{scan_num}"], quantity=decision.quantity,
+                                        realized_baseline=float(acct.get("realized_pnl", 0.0) or 0.0))
             verdict = "TRADE_OPENED"
         else:
             verdict = "TRADE_ROUTE_FAILED"

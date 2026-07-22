@@ -276,8 +276,11 @@ namespace NinjaTrader.NinjaScript.AddOns
                     return;
                 }
                 double cash = acct.Get(AccountItem.CashValue, Currency.UsDollar);
+                double realized = 0.0;
+                try { realized = acct.Get(AccountItem.RealizedProfitLoss, Currency.UsDollar); } catch { }
                 string payload = string.Format(CultureInfo.InvariantCulture,
-                    "{{\"account\":\"{0}\",\"cash_value\":{1}}}", ALLOWED_ACCOUNT, cash);
+                    "{{\"account\":\"{0}\",\"cash_value\":{1},\"realized_pnl\":{2}}}",
+                    ALLOWED_ACCOUNT, cash, realized);
                 SendEnvelope(stream, "ACCOUNT_STATE", payload, ALLOWED_ACCOUNT, "", "");
             }
             catch (Exception ex)
