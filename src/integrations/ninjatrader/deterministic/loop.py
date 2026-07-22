@@ -98,7 +98,9 @@ def one_scan(client: NinjaTraderBridgeClient, session: SessionAuthority, scan_nu
     can_enter, can_reason = session.can_enter()
 
     # 2. Build MNQ snapshot + mechanical facts from the REAL organism authorities.
-    bars = client.historical_1m(INSTRUMENT, 400)
+    # Warm up with ~2000 bars (~1.4 days): 400 starves the higher-timeframe
+    # structure/narrative engines so they never detect a setup.
+    bars = client.historical_1m(INSTRUMENT, 2000, days_back=10, max_bars=2500)
     quote = client.quote(INSTRUMENT)
     facts = FP.build_facts(bars, quote)
 
