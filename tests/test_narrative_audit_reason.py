@@ -55,11 +55,23 @@ class TestReasonMirrorsCascade(unittest.TestCase):
         self.assertEqual(r["driver_tf"], "5m")
 
     def test_exhaustion_rule_records_tf(self):
-        exp = {"3m": {"state": "exhaustion_risk"}}
+        # Operator ruling 2026-07-23: exhaustion needs >= 2 of 15m/5m/3m — a lone
+        # timeframe may no longer veto. Two still trigger rule2 and record both.
+        exp = {"5m": {"state": "exhaustion_risk"}, "3m": {"state": "exhaustion_risk"}}
         narr, r = self._check("bearish", "trending", {}, {}, exp, {})
         self.assertEqual(narr, "exhaustion_risk")
         self.assertEqual(r["rule"], "exhaustion_override(rule2)")
-        self.assertEqual(r["driver_tf"], "3m")
+        self.assertEqual(r["driver_tf"], "5m,3m")
+
+    def test_single_timeframe_exhaustion_does_not_veto(self):
+        # The ruling itself: one timeframe cannot stand the bot down, and the
+        # reason must agree with the narrative (no exhaustion_override).
+        for tf in ("15m", "5m", "3m"):
+            with self.subTest(tf=tf):
+                exp = {tf: {"state": "exhaustion_risk"}}
+                narr, r = self._check("bearish", "trending", {}, {}, exp, {})
+                self.assertNotEqual(narr, "exhaustion_risk")
+                self.assertNotEqual(r["rule"], "exhaustion_override(rule2)")
 
     def test_dangerous_rule(self):
         narr, r = self._check("neutral", "dangerous", {}, {}, {}, {})
@@ -83,9 +95,11 @@ class TestReasonMirrorsCascade(unittest.TestCase):
         self.assertEqual(r["rule"], "bias_conflicted")
 
     def test_cascade_priority_sweep_over_exhaustion(self):
-        # sweep (rule1) must win over exhaustion (rule2)
+        # sweep (rule1) must win over exhaustion (rule2). Uses TWO exhaustion
+        # timeframes so rule2 genuinely fires — with one it would not trigger
+        # at all and this would prove nothing.
         liq = {"5m": {"sweep_detected": True, "reclaim_detected": True}}
-        exp = {"3m": {"state": "exhaustion_risk"}}
+        exp = {"5m": {"state": "exhaustion_risk"}, "3m": {"state": "exhaustion_risk"}}
         narr, r = self._check("bearish", "trending", {}, liq, exp, {})
         self.assertEqual(narr, "liquidity_sweep_reversal")
         self.assertEqual(r["rule"], "sweep_reclaim(rule1)")
@@ -97,7 +111,10 @@ class TestReasonMirrorsCascade(unittest.TestCase):
         biases = ["bullish", "bearish", "conflicted", "neutral"]
         for st in states:
             for b in biases:
-                for exh in ({}, {"5m": {"state": "exhaustion_risk"}}):
+                for exh in ({},
+                            {"5m": {"state": "exhaustion_risk"}},                  # 1 TF: must NOT veto
+                            {"5m": {"state": "exhaustion_risk"},                    # 2 TFs: must veto
+                             "3m": {"state": "exhaustion_risk"}}):
                     for al in ("", "full_distribution_alignment", "accumulation_building"):
                         narr = _market_narrative(b, st, {}, {}, exh, {"alignment": al})
                         r = _narrative_reason(b, st, {}, {}, exh, {"alignment": al})
@@ -109,11 +126,13 @@ class TestReasonMirrorsCascade(unittest.TestCase):
 
 class TestBuildNarrativeSurfacesReason(unittest.TestCase):
     def test_reason_in_output(self):
-        out = build_narrative({}, {}, {"3m": {"state": "exhaustion_risk"}},
+        # >= 2 timeframes required (operator ruling 2026-07-23).
+        out = build_narrative({}, {}, {"5m": {"state": "exhaustion_risk"},
+                                       "3m": {"state": "exhaustion_risk"}},
                               {}, {}, "ny_open", {})
         self.assertEqual(out["market_narrative"], "exhaustion_risk")
         self.assertEqual(out["narrative_reason"], "exhaustion_override(rule2)")
-        self.assertEqual(out["narrative_driver_tf"], "3m")
+        self.assertEqual(out["narrative_driver_tf"], "5m,3m")
 
     def test_output_still_has_all_legacy_keys(self):
         out = build_narrative({}, {}, {}, {}, {}, "ny_open", {})

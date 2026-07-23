@@ -89,8 +89,18 @@ def _market_narrative(bias: str, market_state: str, structure: dict,
     if sweep_tf:
         return "liquidity_sweep_reversal"
 
-    # Exhaustion blocks everything
-    if any(expansion.get(tf, {}).get("state") == "exhaustion_risk" for tf in ["15m", "5m", "3m"]):
+    # Exhaustion blocks trading only on MULTI-timeframe agreement (>= 2 of
+    # 15m/5m/3m). A SINGLE timeframe may not veto an otherwise-aligned setup:
+    # this narrative is a hard no-trade disqualifier downstream
+    # (_NO_TRADE_NARRATIVES in trade_qualification_engine), so one lone
+    # exhaustion reading was standing the bot down through full MTF alignment,
+    # confirmed displacement and an identified liquidity draw. The >= 2 bar
+    # matches what _market_state already requires to call the environment
+    # "dangerous" (line 41) — this removes that inconsistency.
+    # _narrative_reason MUST mirror this bar or the audit record contradicts
+    # the narrative it explains. (Operator ruling, 2026-07-23.)
+    if sum(1 for tf in ["15m", "5m", "3m"]
+           if expansion.get(tf, {}).get("state") == "exhaustion_risk") >= 2:
         return "exhaustion_risk"
 
     # Dangerous state: PO3 can still describe what's happening but no trade narrative
@@ -351,7 +361,10 @@ def _narrative_reason(bias: str, market_state: str, structure: dict,
         return {"rule": "sweep_reclaim(rule1)", "driver_tf": sweep_tf}
     exh_tfs = [tf for tf in _tfs
                if expansion.get(tf, {}).get("state") == "exhaustion_risk"]
-    if exh_tfs:
+    # MUST mirror _market_narrative's >= 2 bar — a reason that fires on one
+    # timeframe while the narrative needs two makes the audit record contradict
+    # the decision it is supposed to explain.
+    if len(exh_tfs) >= 2:
         return {"rule": "exhaustion_override(rule2)", "driver_tf": ",".join(exh_tfs)}
     if market_state == "dangerous":
         return {"rule": "dangerous_state(rule3)", "driver_tf": None}
