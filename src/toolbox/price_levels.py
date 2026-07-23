@@ -4,6 +4,7 @@ Identifies the price zone connected to each tool candidate using available candl
 No execution, no order routing, no indicator recalculation.
 All inputs are pre-computed snapshot dicts (timeframes, structure, liquidity).
 """
+import os
 
 _TFS = ["15m", "5m", "3m", "1m"]
 
@@ -21,6 +22,55 @@ _FAMILY_TF_PRIORITY: dict[str, list] = {
     "opening_order_block": ["1m",  "3m",  "5m",  "15m"],
     "range_break_retest":  ["15m", "5m",  "3m",  "1m"],
 }
+
+# ── Zone SOURCE-TIMEFRAME policy (2026-07-23) ────────────────────────────────
+# The stop is anchored to the zone-defining candle's WICK (see _build_zone_for_
+# family: inv = candle low/high), so STOP WIDTH SCALES WITH THE SOURCE CANDLE'S
+# SIZE — i.e. with its timeframe. Measured on MNQ, 1m zones produce stops far
+# below the survivability floor (~2pt median against a 15pt minimum): they can
+# never size, and any that squeak through are tighter than the instrument's
+# noise — the profile behind the 2026-07-21 stop-out (18pt stop nicked at the
+# low, price then ran to target).
+#
+# 1m is dropped as a zone source. Per-family PRIORITY ORDERING is deliberately
+# UNTOUCHED — ordering encodes tool semantics (an ifvg sourced from 3m is a
+# different setup from one sourced from 15m), and reordering would change WHICH
+# setups the bot detects. Only the allowed SET is constrained, so this can not
+# silently change strategy beyond removing structurally unusable candidates.
+_DEFAULT_SOURCE_TFS = ("15m", "5m", "3m")
+
+# Per-symbol narrowing. Intentionally EMPTY: set each symbol from its OWN
+# measured stop-width-by-timeframe distribution, never borrowed numbers.
+_SYMBOL_SOURCE_TFS: dict[str, tuple] = {}
+
+
+def _symbol_root(symbol: str) -> str:
+    """'MNQ SEP26' / 'MNQU6' -> 'MNQ'. Tolerant of a missing symbol."""
+    s = (symbol or "").strip().upper()
+    return s.split()[0][:3] if s else ""
+
+
+def _allowed_source_tfs(symbol: str = "") -> tuple:
+    """Allowed zone SOURCE timeframes.
+
+    Precedence: per-symbol env > global env > per-symbol table > default.
+    A malformed or empty override falls back to the default, so a misconfigured
+    env can never blank the toolbox. Instant rollback to pre-fix behaviour:
+        ZONE_SOURCE_TFS="15m,5m,3m,1m"
+    """
+    root = _symbol_root(symbol)
+    for key in ((f"ZONE_SOURCE_TFS_{root}" if root else None), "ZONE_SOURCE_TFS"):
+        if not key:
+            continue
+        raw = os.getenv(key, "")
+        if raw:
+            parsed = tuple(t.strip() for t in raw.split(",") if t.strip() in _TFS)
+            if parsed:
+                return parsed
+    if root in _SYMBOL_SOURCE_TFS:
+        return _SYMBOL_SOURCE_TFS[root]
+    return _DEFAULT_SOURCE_TFS
+
 
 # Fibonacci OTE pocket bounds
 _OTE_LOW_PCT  = 0.62
@@ -384,7 +434,11 @@ def build_price_level(tool: str, snapshot: dict) -> dict:
     struct_all = snapshot.get("structure",  {})
     liq_all    = snapshot.get("liquidity",  {})
 
+    allowed_tfs = _allowed_source_tfs(snapshot.get("symbol", ""))
+
     for tf in _FAMILY_TF_PRIORITY.get(fam, ["15m", "5m", "3m", "1m"]):
+        if tf not in allowed_tfs:      # source-timeframe policy (set only, not order)
+            continue
         candles = tfs.get(tf, {}).get("recent_candles", [])
         if not candles:
             continue
