@@ -57,6 +57,22 @@ LEG_MAX_CANDLES      = 60   # beyond this it stops being the CURRENT leg
 LEG_FALLBACK_CANDLES = 20   # when structure offers no usable pivot — never unbounded
 
 
+# ── MANIPULATION — confluence lookback ────────────────────────────────────────
+# analyze_liquidity inspects only candles[-1], so it answers "is a sweep
+# completing on this bar". Manipulation is a PHASE and persists after the bar
+# that created it; a raid three candles back still shaped the current auction.
+# The confluence detectors scan this window instead of the closing bar.
+
+MANIP_LOOKBACK = 10
+
+# Swing context for the manipulation detectors. find_swings() over the full
+# history returns pivots from days ago, which is the same unbounded-window defect
+# LEG-SCOPE fixed in expansion: at the 2026-07-24 13:35 entry it compared a swing
+# low of 28427 against 28254.25 from an unrelated leg and reported the wrong
+# direction. Swings must be drawn from recent structure, not all of it.
+MANIP_CONTEXT = 40
+
+
 # ── ATR dead-band ─────────────────────────────────────────────────────────────
 # displacement_threshold = max(atr * K_ATR, F_DISP[tf])
 K_ATR = 0.50   # unchanged from legacy _displacement_detected

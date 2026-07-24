@@ -7,6 +7,7 @@ from volatility.atr_engine import calculate_atr
 from volatility.volatility_classifier import classify_volatility
 from volatility.expansion_detector import detect_expansion
 from structure.po3_engine import analyze_po3_snapshot
+from structure.manipulation_detector import detect_manipulation
 from market_commander.market_commander import build_market_commander_matrix  # MC Phase B1 (observe-only)
 from ai_layer.narrative_builder import build_narrative
 from ai_layer.confidence_engine import score_confidence
@@ -81,6 +82,12 @@ def build_snapshot(
         # VECTOR-3: tf enables magnitude gate. LEG-SCOPE: structure[tf] supplies
         # the pivot that bounds the conviction ratios to the current auction leg.
         expansion[tf] = detect_expansion(candles, atr_result, tf, structure.get(tf))
+        # MANIP-CONFLUENCE: manipulation is a phase, not a closing-bar event.
+        # Attached to liquidity so po3_engine keeps scoring from processed
+        # evidence rather than raw candles.
+        if isinstance(liquidity.get(tf), dict):
+            liquidity[tf]["manipulation"] = detect_manipulation(
+                candles, atr_result.get("atr"))
 
     # PERCEPTION-1 — expansion state hysteresis (VECTOR-3 analogue). The live
     # loop passes its persistent instance; one-shot callers get no stabilizer

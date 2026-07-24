@@ -72,15 +72,28 @@ def _score_phases(struct: dict, liq: dict, vol: dict, exp: dict) -> dict:
         accum += 10
 
     # ── Manipulation ──────────────────────────────────────────────────────────
-    manip = 0
-    if sweep:
-        manip += 40
-    if reclaim:
-        manip += 25
-    if failed_bo:
-        manip += 25
-    if sweep and reclaim:
-        manip += 10  # complete sweep+reclaim → high confidence manipulation
+    # Confluence, not "find a sweep". manipulation_detector scores external
+    # sweeps, internal raids, failure swings, failed breakouts, rejections and
+    # rapid reversals over a lookback window, and carries a per-component
+    # breakdown for audit. A sweep is one expression of manipulation; a failure
+    # swing needs no liquidity taken at all.
+    #
+    # Legacy fallback: callers that build `liq` by hand (and every existing test)
+    # supply no "manipulation" block, so the original sweep/reclaim/failed_bo
+    # scoring still applies for them — unchanged, bit for bit.
+    manip_block = liq.get("manipulation")
+    if isinstance(manip_block, dict) and "score" in manip_block:
+        manip = int(manip_block.get("score") or 0)
+    else:
+        manip = 0
+        if sweep:
+            manip += 40
+        if reclaim:
+            manip += 25
+        if failed_bo:
+            manip += 25
+        if sweep and reclaim:
+            manip += 10  # complete sweep+reclaim → high confidence manipulation
 
     # ── Distribution ──────────────────────────────────────────────────────────
     distrib = 0
