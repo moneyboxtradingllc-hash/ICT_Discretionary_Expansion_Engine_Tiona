@@ -28,6 +28,44 @@ def _range_acceleration(candles: list) -> float:
     return round(r_avg / o_avg, 3)
 
 
+def _leg_start_index(candles: list, struct: dict) -> int | None:
+    """Index at which the current auction leg began — the most recent structural
+    pivot. Returns None when structure offers no pivot that maps to these candles.
+
+    The swing prices come from find_swings() on this same series, so they should
+    equal a candle extreme exactly; the epsilon is float-safety, not tolerance.
+    """
+    if not isinstance(struct, dict) or not candles:
+        return None
+    found = []
+    for key, extreme in (("last_swing_high", "high"), ("last_swing_low", "low")):
+        lvl = struct.get(key)
+        if not isinstance(lvl, (int, float)):
+            continue
+        for i in range(len(candles) - 1, -1, -1):
+            if abs(float(candles[i][extreme]) - float(lvl)) <= 1e-6:
+                found.append(i)
+                break
+    return max(found) if found else None
+
+
+def _leg_slice(candles: list, struct: dict) -> list:
+    """The candles composing the current auction leg, always bounded.
+
+    Falls back to a fixed recent window rather than the full history when no
+    pivot is available — the unbounded window is the defect being fixed, so no
+    path may reintroduce it while leg scoping is enabled.
+    """
+    from structure import po3_config as cfg
+    if not cfg.leg_scope_enabled():
+        return candles
+    n = len(candles)
+    idx = _leg_start_index(candles, struct)
+    leg_len = (n - idx) if idx is not None else cfg.LEG_FALLBACK_CANDLES
+    leg_len = max(cfg.LEG_MIN_CANDLES, min(cfg.LEG_MAX_CANDLES, leg_len))
+    return candles[-leg_len:] if leg_len < n else candles
+
+
 def _follow_through(candles: list) -> int:
     """Count consecutive candles at the tail moving in the same direction."""
     if len(candles) < 2:
@@ -128,7 +166,8 @@ def _state(score: int, body_dom: float, dir_eff: float,
     return "early_expansion"
 
 
-def detect_expansion(candles: list, atr_result: dict, tf: str = None) -> dict:
+def detect_expansion(candles: list, atr_result: dict, tf: str = None,
+                     struct: dict = None) -> dict:
     """Detect expansion / displacement for one timeframe.
 
     VECTOR-3: when `tf` is supplied and the magnitude gate is enabled, two
@@ -142,6 +181,14 @@ def detect_expansion(candles: list, atr_result: dict, tf: str = None) -> dict:
 
     When `tf` is None or VECTOR3_MAGNITUDE_GATE=off, behaviour is bit-for-bit
     legacy. `magnitude_gated`/`kappa` are always emitted (additive keys).
+
+    LEG-SCOPE: `struct` (this timeframe's analyze_structure output) scopes the
+    conviction ratios — directional_efficiency, body_dominance,
+    range_acceleration — to the current auction leg instead of the whole
+    history. Without it they decay toward neutral as history grows and stop
+    describing present behaviour. Omitting `struct` still bounds the window
+    (LEG_FALLBACK_CANDLES); only PO3_LEG_SCOPED_METRICS=off restores the
+    unbounded legacy read.
     """
     if not candles or atr_result.get("atr") is None:
         return {
@@ -153,6 +200,8 @@ def detect_expansion(candles: list, atr_result: dict, tf: str = None) -> dict:
             "exhaustion_risk": "low",
             "kappa": 0.0,
             "magnitude_gated": True,
+            "leg_candles": 0,
+            "leg_scoped": False,
         }
 
     atr = atr_result["atr"]
@@ -166,9 +215,14 @@ def detect_expansion(candles: list, atr_result: dict, tf: str = None) -> dict:
     # ── ATR dead-band ─────────────────────────────────────────────────────────
     disp_threshold = max(atr * cfg.K_ATR, cfg.f_disp(tf)) if gate_on else atr * cfg.K_ATR
 
-    dir_eff = _directional_efficiency(candles)
-    body_dom = _body_dominance(candles)
-    range_accel = _range_acceleration(candles)
+    # ── Leg scope ─────────────────────────────────────────────────────────────
+    # Conviction ratios describe the CURRENT auction leg, not the whole dataset.
+    # follow-through / displacement / exhaustion are already tail-bounded and
+    # keep reading the full series.
+    leg = _leg_slice(candles, struct)
+    dir_eff = _directional_efficiency(leg)
+    body_dom = _body_dominance(leg)
+    range_accel = _range_acceleration(leg)
     follow_count = _follow_through(candles)
     displacement = _displacement_detected(candles, disp_threshold)
     exhaustion = _exhaustion_risk(candles)
@@ -200,4 +254,7 @@ def detect_expansion(candles: list, atr_result: dict, tf: str = None) -> dict:
         "exhaustion_risk": exhaustion,
         "kappa": kappa,
         "magnitude_gated": magnitude_gated,
+        # Telemetry: which slice the conviction ratios actually described.
+        "leg_candles": len(leg),
+        "leg_scoped": len(leg) < len(candles),
     }

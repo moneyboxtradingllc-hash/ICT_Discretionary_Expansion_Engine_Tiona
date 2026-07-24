@@ -26,6 +26,37 @@ def gate_enabled() -> bool:
     return os.getenv("VECTOR3_MAGNITUDE_GATE", "on").strip().lower() != "off"
 
 
+# ── LEG-SCOPE — contextual conviction metrics ─────────────────────────────────
+# Root problem these values solve: directional_efficiency, body_dominance and
+# range_acceleration were computed over the ENTIRE normalized history handed to
+# detect_expansion (~2000+ candles in the live lane). directional_efficiency is
+# net travel / sum of all candle ranges, so its denominator grows without bound
+# while the numerator cannot — it decays toward 0 regardless of price action.
+# Measured live on MNQ 2026-07-24: 0.015 over 2000 1m candles vs 0.104 over 100.
+#
+# Downstream that pinned _compression_score high and dir_eff low on every scan,
+# so PO3 scored accumulation +40 for free, denied distribution the +20 dir_eff
+# bonus, and made `clean_disp` (dir_eff >= 0.30) unreachable — distribution could
+# never clear PHASE_THRESHOLD. PO3 read "accumulation" on every timeframe of
+# every scan. The metrics must answer "is THIS move repricing efficiently?", not
+# "has the entire dataset been directional?".
+#
+# Fix: scope them to the current auction leg — the candles since the most recent
+# structural pivot — with a floor (a 2-candle "leg" is noise) and a ceiling
+# (beyond this it is no longer the CURRENT leg).
+#
+# Kill switch: PO3_LEG_SCOPED_METRICS=off restores the unbounded legacy window.
+
+def leg_scope_enabled() -> bool:
+    """Leg-scoped conviction metrics active unless disabled. Default ON."""
+    return os.getenv("PO3_LEG_SCOPED_METRICS", "on").strip().lower() != "off"
+
+
+LEG_MIN_CANDLES      = 8    # below this a "leg" is noise, not an auction leg
+LEG_MAX_CANDLES      = 60   # beyond this it stops being the CURRENT leg
+LEG_FALLBACK_CANDLES = 20   # when structure offers no usable pivot — never unbounded
+
+
 # ── ATR dead-band ─────────────────────────────────────────────────────────────
 # displacement_threshold = max(atr * K_ATR, F_DISP[tf])
 K_ATR = 0.50   # unchanged from legacy _displacement_detected

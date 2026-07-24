@@ -78,7 +78,9 @@ def build_snapshot(
         candles = all_normalized.get(tf, [])
         atr_result = calculate_atr(candles)
         volatility[tf] = classify_volatility(candles, atr_result)
-        expansion[tf] = detect_expansion(candles, atr_result, tf)   # VECTOR-3: tf enables magnitude gate
+        # VECTOR-3: tf enables magnitude gate. LEG-SCOPE: structure[tf] supplies
+        # the pivot that bounds the conviction ratios to the current auction leg.
+        expansion[tf] = detect_expansion(candles, atr_result, tf, structure.get(tf))
 
     # PERCEPTION-1 — expansion state hysteresis (VECTOR-3 analogue). The live
     # loop passes its persistent instance; one-shot callers get no stabilizer
