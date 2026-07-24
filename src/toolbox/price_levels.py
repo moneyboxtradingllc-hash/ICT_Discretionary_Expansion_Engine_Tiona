@@ -76,6 +76,9 @@ def _allowed_source_tfs(symbol: str = "") -> tuple:
 _OTE_LOW_PCT  = 0.62
 _OTE_HIGH_PCT = 0.79
 
+# Tolerance for matching a structure swing to the candle extreme that formed it (MNQ tick).
+_OB_ANCHOR_TOL = 0.25
+
 # RELATION-TRUTH (2026-07-06) — the old absolute constant is RETIRED.
 # `_TOUCH_TOLERANCE = 1.5` dated from the Phase-1L mock era (NQ-scale ~19,500
 # prices) and classified QQQ prices up to 1.5 points beyond a 0.06-0.66 pt
@@ -277,6 +280,57 @@ def _find_swing_zone(struct: dict, candles: list, direction: str) -> tuple | Non
     if direction == "bearish" and sh is not None:
         return sh - tol, sh + tol, sh + tol * 2.5
     return None
+
+
+def _ob_block_run(candles: list, struct: dict, direction: str,
+                  max_run: int = 12) -> list:
+    """The unbroken run of opposite-direction candles immediately preceding the
+    structure swing price rejected from. Returns the run oldest-first, or [].
+
+    Anchoring to the swing is the whole point. `_find_ob` walks back from the NEWEST
+    candle and takes the first opposite body it meets, which during a retracement
+    lands inside the retracement itself — producing an "order block" price has
+    already traded through, with an invalidation on the wrong side of entry.
+
+    Bearish setup -> run of bullish candles before the last swing HIGH.
+    Bullish setup -> run of bearish candles before the last swing LOW.
+    """
+    anchor = (struct.get("last_swing_high") if direction == "bearish"
+              else struct.get("last_swing_low"))
+    if anchor is None or not candles:
+        return []
+    key = "high" if direction == "bearish" else "low"
+    # The swing must correspond to a real candle extreme; one tick of tolerance.
+    idx = next((i for i in range(len(candles) - 1, -1, -1)
+                if abs(float(candles[i][key]) - float(anchor)) <= _OB_ANCHOR_TOL), None)
+    if idx is None:
+        return []   # swing not found among these candles -> fail closed
+    opp = "bullish" if direction == "bearish" else "bearish"
+    run = []
+    for c in reversed(candles[:idx]):
+        if c.get("direction") != opp or len(run) >= max_run:
+            break
+        run.append(c)
+    return list(reversed(run))
+
+
+def _find_ob_block(candles: list, struct: dict, direction: str) -> tuple | None:
+    """Multi-candle order block spanning the displacement-origin run.
+
+    Returns (zone_low, zone_high, invalidation_level) where the zone spans the run's
+    BODIES and invalidation is the run's extreme. The mean threshold (50% of the
+    block) falls out of _make_zone's midpoint.
+    """
+    run = _ob_block_run(candles, struct, direction)
+    if not run:
+        return None
+    body_lo = round(min(min(c["open"], c["close"]) for c in run), 2)
+    body_hi = round(max(max(c["open"], c["close"]) for c in run), 2)
+    if body_hi <= body_lo:
+        return None
+    inv = (max(c["high"] for c in run) if direction == "bearish"
+           else min(c["low"] for c in run))
+    return body_lo, body_hi, inv
 
 
 def _find_breaker_zone(candles: list, struct: dict, direction: str) -> tuple | None:

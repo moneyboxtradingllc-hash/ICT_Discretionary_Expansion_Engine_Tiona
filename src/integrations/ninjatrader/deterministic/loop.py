@@ -151,7 +151,12 @@ def one_scan(client: NinjaTraderBridgeClient, session: SessionAuthority, scan_nu
                      "decision_state": facts.get("_decision_state"),
                      "qual_status": facts.get("_qual_status"),
                      "commander": facts.get("commander_state"),
-                     "invalidation": facts.get("entry_invalidation")},
+                     "invalidation": facts.get("entry_invalidation"),
+                     # Diagnostics — why a NO_TRADE was a NO_TRADE.
+                     "fc0b_reason": facts.get("_fc0b_reason"),
+                     "fc0b_inputs": facts.get("_fc0b_inputs"),
+                     "zone": facts.get("_zone"),
+                     "swings": facts.get("_swings")},
         "blockers": decision.blockers(),
         "routed": routed,
     }

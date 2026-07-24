@@ -188,9 +188,12 @@ def build_facts_from_snapshot(snapshot: dict, decision: dict, gate: dict,
         fc_relation = "touching_zone"
     if fc_relation is None or fc_entry is None or fc_stop is None:
         fc0b = None   # FC-0B indeterminable -> NO_TRADE upstream
+        fc0b_reason = ("FC-0B indeterminable — "
+                       f"relation={fc_relation!r} entry={fc_entry!r} stop={fc_stop!r}")
     else:
         _fc_ok, _fc_reason = evaluate_fc0b("market", fc_relation, fc_entry, fc_stop, fc_mid)
         fc0b = bool(_fc_ok)
+        fc0b_reason = _fc_reason
 
     return {
         "setup_family": setup_family,
@@ -217,6 +220,28 @@ def build_facts_from_snapshot(snapshot: dict, decision: dict, gate: dict,
                        "(brain_authorship excluded; deterministic authorship)",
         "_decision_state": decision.get("decision"),
         "_qual_status": qual.get("status"),
+        # ── Diagnostics. Underscore keys are NOT mechanical facts — they are not
+        # in _REQUIRED_FACT_KEYS and the author never reads them. Recorded so a
+        # NO_TRADE can be explained after the fact (which FC-0B guard fired, where
+        # the zone actually was, which swing anchored the invalidation) without
+        # re-deriving zone/swing state from raw bars.
+        "_fc0b_reason": fc0b_reason,
+        "_fc0b_inputs": {"relation": fc_relation, "entry": fc_entry, "stop": fc_stop,
+                         "midpoint": fc_mid, "displacement_confirmed": disp_confirmed},
+        "_zone": {"tool": (pref_c.get("tool") if isinstance(pref_c, dict) else None),
+                  "level_type": pl.get("level_type"),
+                  "zone_low": pl.get("zone_low"), "zone_high": pl.get("zone_high"),
+                  "midpoint": pl.get("midpoint"),
+                  "price_relation": pl.get("price_relation"),
+                  "distance_to_zone": pl.get("distance_to_zone"),
+                  "invalidation_level": pl.get("invalidation_level"),
+                  "source_tf": pl.get("source_tf"),
+                  "entry_zone_low": ez.get("zone_low"),
+                  "entry_zone_high": ez.get("zone_high"),
+                  "entry_zone_relation": ez.get("price_relation")},
+        "_swings": {tf: {"hi": (structure.get(tf) or {}).get("last_swing_high"),
+                         "lo": (structure.get(tf) or {}).get("last_swing_low")}
+                    for tf in _TFS},
     }
 
 
