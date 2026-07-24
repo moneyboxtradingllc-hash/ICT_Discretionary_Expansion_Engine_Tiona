@@ -8,6 +8,7 @@ from volatility.volatility_classifier import classify_volatility
 from volatility.expansion_detector import detect_expansion
 from structure.po3_engine import analyze_po3_snapshot
 from structure.manipulation_detector import detect_manipulation
+from structure.market_context import analyze_market_context
 from market_commander.market_commander import build_market_commander_matrix  # MC Phase B1 (observe-only)
 from ai_layer.narrative_builder import build_narrative
 from ai_layer.confidence_engine import score_confidence
@@ -186,6 +187,16 @@ def build_snapshot(
     # Confidence-side authority unchanged (observe_only, confidence_modifier=0).
     # Phase 5F.2 grants regime CONSTRAINT authority via the permission matrix below.
     snapshot["market_regime"] = classify_regime(snapshot, all_normalized)
+
+    # ── MARKET-CONTEXT — stage 1 authority. Must follow classify_regime, which
+    # it consumes rather than duplicates. Adds what nothing upstream provides:
+    # retracement as an environment, the dealing range / premium-discount, and
+    # the authority downstream asks before assigning direction to a local event.
+    _ctx_series = next((all_normalized[tf] for tf in ("1m", "3m", "5m", "15m")
+                        if all_normalized.get(tf)), None)
+    snapshot["market_context"] = analyze_market_context(
+        structure, liquidity, expansion, po3, snapshot["market_regime"],
+        last_price=(_ctx_series[-1]["close"] if _ctx_series else None))
 
     # ── Phase NEWS-1 — News Intelligence pre-pass (gated NEWS_LAYER_ENABLED) ───
     # Attaches non-directional market-awareness context (scheduled events,
