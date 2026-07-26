@@ -88,6 +88,49 @@ def range_metrics(candles: list, window: int = RANGE_WINDOW) -> dict:
             "range_high": hi, "range_low": lo, "window": len(recent)}
 
 
+def range_state(candles: list, window: int = RANGE_WINDOW) -> dict:
+    """Is the range expanding or contracting? Compares the recent half-window
+    against the one before it, so the answer describes now rather than the
+    dataset average."""
+    if not candles or len(candles) < 8:
+        return {"range_state": "unknown", "recent_range": 0.0, "prior_range": 0.0,
+                "ratio": 1.0, "detail": "insufficient candles"}
+    recent = candles[-window:]
+    half = len(recent) // 2
+    new, old = recent[half:], recent[:half]
+    r_new = max(c["high"] for c in new) - min(c["low"] for c in new)
+    r_old = max(c["high"] for c in old) - min(c["low"] for c in old)
+    ratio = (r_new / r_old) if r_old > 0 else 1.0
+    state = "expanding" if ratio >= 1.20 else "contracting" if ratio <= 0.80 else "stable"
+    return {"range_state": state, "recent_range": round(r_new, 2),
+            "prior_range": round(r_old, 2), "ratio": round(ratio, 3),
+            "detail": f"recent {r_new:.2f} vs prior {r_old:.2f} = {ratio:.2f}x -> {state}"}
+
+
+def dealing_range(structure: dict, last_price: float,
+                  equilibrium_band: float = 0.10) -> dict:
+    """The operative range and where price sits inside it.
+
+    Owned here so regime and context cannot disagree about it — regime runs
+    first in snapshot_builder, so context consumes this rather than recomputing.
+    """
+    for tf in ("15m", "5m"):
+        st = (structure or {}).get(tf) or {}
+        hi, lo = st.get("last_swing_high"), st.get("last_swing_low")
+        if isinstance(hi, (int, float)) and isinstance(lo, (int, float)) and hi > lo:
+            mid = (hi + lo) / 2
+            if not isinstance(last_price, (int, float)):
+                return {"source_tf": tf, "high": hi, "low": lo, "midpoint": round(mid, 2),
+                        "position": None, "zone": "unknown"}
+            pos = (last_price - lo) / (hi - lo)
+            zone = ("premium" if pos > 0.5 + equilibrium_band else
+                    "discount" if pos < 0.5 - equilibrium_band else "equilibrium")
+            return {"source_tf": tf, "high": hi, "low": lo, "midpoint": round(mid, 2),
+                    "position": round(pos, 3), "zone": zone}
+    return {"source_tf": None, "high": None, "low": None, "midpoint": None,
+            "position": None, "zone": "unknown"}
+
+
 def htf_authority(structure_tf: dict, last_price: float, tf: str = "15m") -> dict:
     """Does the higher timeframe hold directional authority, and is it intact?
 

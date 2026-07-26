@@ -20,6 +20,9 @@ from regime_classification.structure_hierarchy import (
     SEQ_WINDOW,
 )
 from regime_classification.regime_features import extract_regime_features
+from regime_classification.regime_classifier import (
+    classify_regime, format_regime_telemetry,
+)
 
 
 def _c(o, h, l, c):
@@ -46,6 +49,20 @@ def _downtrend(cycles=6, start=28600.0, leg=60.0, pull=24.0):
         for _ in range(4):                      # pullback up — low == open
             nxt = px + pull / 4
             out.append(_c(px, nxt + 2, px, nxt)); px = nxt
+    return out
+
+
+def _uptrend(**kw):
+    return [_c(c["open"], c["high"], c["low"], c["close"])
+            for c in _mirror(_downtrend(**kw))]
+
+
+def _mirror(candles, axis=57000.0):
+    """Reflect a series about a price axis — an uptrend with the same geometry."""
+    out = []
+    for c in candles:
+        out.append({"open": axis - c["open"], "high": axis - c["low"],
+                    "low": axis - c["high"], "close": axis - c["close"]})
     return out
 
 
@@ -91,6 +108,26 @@ class TestRetracementDoesNotEraseTrend:
         assert "not violated" in f["htf_reasoning"].lower()
 
 
+class TestRetracementIsSymmetric:
+    """The authority model must not be bearish-only."""
+
+    def test_bullish_htf_with_bearish_ltf_is_a_bullish_retracement(self):
+        raw = {"15m": _uptrend(), "5m": _uptrend()}
+        snap = _snapshot("bullish", "bearish", swing_high=28900.0, swing_low=28200.0)
+        snap["structure"]["15m"]["state"] = "bullish_continuation"
+        f = extract_regime_features(snap, raw)
+        assert f["htf_authority"]["bias"] == "bullish"
+        assert f["htf_relationship"] == "retracement"
+        assert f["is_bullish"] is True, "a pullback must not erase bullish authority"
+        assert f["is_bearish"] is False
+
+    def test_bullish_authority_invalidates_below_its_swing_low(self):
+        auth = htf_authority({"bias": "bullish", "last_swing_low": 28200.0},
+                             last_price=28100.0)
+        assert auth["intact"] is False
+        assert classify_relationship(auth, "bearish")["relationship"] == "authority_violated"
+
+
 # ── B) Genuinely conflicting structure must still be neutral ─────────────────
 
 class TestUncertaintyIsPreserved:
@@ -111,6 +148,38 @@ class TestUncertaintyIsPreserved:
         rel = classify_relationship({"bias": "neutral", "intact": False}, "bullish")
         assert rel["relationship"] == "no_authority"
         assert "cannot be classified as retracement" in rel["reason"]
+
+
+class TestReversalRequiresStructuralEvidence:
+    """Timeframe disagreement is a retracement. A reversal needs the market to
+    actually break something."""
+
+    def test_disagreement_alone_does_not_produce_a_reversal_label(self):
+        raw = {"15m": _downtrend(), "5m": _downtrend()}
+        snap = _snapshot("bearish", "bullish")       # no sweep, no reclaim, no mss
+        result = classify_regime(snap, raw)
+        assert result["regime_label"] != "reversal_attempt"
+        assert result["htf_relationship"] == "retracement"
+
+    def test_reversal_attempt_requires_sweep_reclaim_and_mss(self):
+        raw = {"15m": _downtrend(), "5m": _downtrend()}
+        snap = _snapshot("bearish", "bullish")
+        snap["structure"]["15m"]["mss"] = True
+        snap["liquidity"] = {"5m": {"sweep_detected": True, "reclaim_detected": True}}
+        assert classify_regime(snap, raw)["regime_label"] == "reversal_attempt"
+
+    def test_mss_without_a_sweep_is_not_yet_a_reversal(self):
+        raw = {"15m": _downtrend(), "5m": _downtrend()}
+        snap = _snapshot("bearish", "bullish")
+        snap["structure"]["15m"]["mss"] = True
+        assert classify_regime(snap, raw)["regime_label"] != "reversal_attempt"
+
+    def test_violated_authority_is_reported_even_without_a_reversal_label(self):
+        """Losing authority and calling a reversal are different claims."""
+        raw = {"15m": _downtrend(), "5m": _downtrend()}
+        snap = _snapshot("bearish", "bullish", swing_high=28100.0)   # price above it
+        result = classify_regime(snap, raw)
+        assert result["htf_relationship"] == "authority_violated"
 
 
 # ── C) History length must not change the answer ─────────────────────────────

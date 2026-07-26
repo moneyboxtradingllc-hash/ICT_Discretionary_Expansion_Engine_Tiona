@@ -103,9 +103,21 @@ def _score_htf_bias(structure, market_regime):
     return bias, votes, net, components
 
 
-def _dealing_range(structure, liquidity, last_price):
+def _dealing_range(structure, liquidity, last_price, market_regime=None):
     """The operative range and where price sits inside it. Premium/discount is
-    how ICT expresses 'where is liquidity likely positioned'."""
+    how ICT expresses 'where is liquidity likely positioned'.
+
+    regime_features computes this first (it runs earlier in snapshot_builder) and
+    owns it; consume that when present so the two layers cannot disagree about
+    where the range is. The local derivation stays as a fallback for callers that
+    have no regime block.
+    """
+    shared = (market_regime or {}).get("dealing_range")
+    if isinstance(shared, dict) and shared.get("high") is not None:
+        liq = liquidity.get(shared.get("source_tf")) or {}
+        return {**shared,
+                "buy_side_liquidity": liq.get("nearest_buy_side_liquidity"),
+                "sell_side_liquidity": liq.get("nearest_sell_side_liquidity")}
     for tf in (HTF, OPERATIVE):
         st = structure.get(tf) or {}
         hi, lo = st.get("last_swing_high"), st.get("last_swing_low")
@@ -207,7 +219,7 @@ def analyze_market_context(structure: dict, liquidity: dict, expansion: dict,
     if local_bias == _NEUTRAL:
         local_bias = _bias_of(structure.get(LTF))
 
-    dealing_range = _dealing_range(structure, liquidity, last_price)
+    dealing_range = _dealing_range(structure, liquidity, last_price, market_regime)
     environment, env_detail = _environment(market_regime, htf_bias, local_bias, po3)
 
     if htf_bias in (_BULL, _BEAR) and local_bias in (_BULL, _BEAR):

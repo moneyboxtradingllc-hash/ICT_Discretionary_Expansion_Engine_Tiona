@@ -129,6 +129,11 @@ def _classify(snapshot: dict, raw_data=None) -> dict:
         "reasoning":           f.get("htf_reasoning"),
         "swing_sequence":      f.get("swing_sequence"),
         "swing_detail":        f.get("swing_detail"),
+        "bias_15m":            f.get("bias_15m"),
+        "bias_5m":             f.get("bias_5m"),
+        "range_state":         f.get("range_state"),
+        "range_state_detail":  f.get("range_state_detail"),
+        "dealing_range":       f.get("dealing_range"),
         "structure_features":  {
             "higher_highs": f.get("higher_highs"), "lower_highs": f.get("lower_highs"),
             "higher_lows":  f.get("higher_lows"),  "lower_lows":  f.get("lower_lows"),
@@ -170,3 +175,46 @@ def _safe_unknown(warnings: list) -> dict:
         "authority_level":     _AUTHORITY,
         "confidence_modifier": 0,
     }
+
+
+def format_regime_telemetry(regime: dict) -> str:
+    """Audit trail for the regime decision.
+
+    The aggregate label hides mistakes; the component breakdown exposes them.
+    Three defects this session were invisible in the label and obvious the
+    moment the components were printed, so every field that fed the decision is
+    rendered — including the ones that read zero.
+    """
+    r = regime or {}
+    sf = r.get("structure_features") or {}
+    dr = r.get("dealing_range") or {}
+    auth = r.get("htf_authority") or {}
+
+    lines = ["REGIME TELEMETRY:", ""]
+    lines.append(f"  15m structural bias : {r.get('bias_15m')}")
+    lines.append(f"  5m structural bias  : {r.get('bias_5m')}")
+    lines.append(f"  swing sequence      : {r.get('swing_sequence')}  ({r.get('swing_detail')})")
+    lines.append(f"    higher highs      : {sf.get('higher_highs')}")
+    lines.append(f"    lower highs       : {sf.get('lower_highs')}")
+    lines.append(f"    higher lows       : {sf.get('higher_lows')}")
+    lines.append(f"    lower lows        : {sf.get('lower_lows')}")
+    lines.append(f"  range               : {r.get('range_state')}  ({r.get('range_state_detail')})")
+    lines.append(f"  dealing range       : {dr.get('low')} - {dr.get('high')} "
+                 f"(mid {dr.get('midpoint')}) from {dr.get('source_tf')}")
+    lines.append(f"  premium/discount    : {dr.get('zone')}  (position {dr.get('position')})")
+    lines.append("")
+    lines.append(f"  authority           : {auth.get('detail')}")
+    lines.append(f"  relationship        : {r.get('htf_relationship')}")
+    lines.append("")
+    lines.append(f"  scores              : trend {r.get('trend_score')}  "
+                 f"chop {r.get('chop_score')}  reversal {r.get('reversal_score')}")
+    lines.append(f"  DECISION            : {r.get('regime_label')} "
+                 f"(family {r.get('regime_family')}, confidence {r.get('confidence')})")
+    for e in (r.get("evidence") or []):
+        lines.append(f"    because           : {e}")
+    for w in (r.get("warnings") or []):
+        lines.append(f"    warning           : {w}")
+    if r.get("reasoning"):
+        lines.append("")
+        lines.append(f"  reasoning           : {r['reasoning']}")
+    return "\n".join(lines)

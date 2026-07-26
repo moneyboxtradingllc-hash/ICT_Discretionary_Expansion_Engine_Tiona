@@ -5,6 +5,7 @@ OBSERVE_ONLY — no decision logic, no execution influence.
 """
 from regime_classification.structure_hierarchy import (
     swing_sequence, range_metrics, htf_authority, classify_relationship,
+    range_state, dealing_range,
 )
 
 # The vocabulary detect_expansion._state() actually emits.
@@ -88,6 +89,8 @@ def _extract(snapshot: dict, raw_data=None) -> dict:
     relationship = classify_relationship(authority, bias_5)
     seq = swing_sequence((raw_data or {}).get("15m") or ctx_candles)
     rng = range_metrics(ctx_candles)
+    rng_state = range_state(ctx_candles)
+    deal_range = dealing_range(structure, last_price)
     htf_authoritative = authority["bias"] in ("bullish", "bearish") and authority["intact"]
 
     # A retracement must not erase the dominant bias. Requiring 5m agreement meant
@@ -180,6 +183,11 @@ def _extract(snapshot: dict, raw_data=None) -> dict:
         "htf_relationship":        relationship["relationship"],
         "htf_reasoning":           relationship["reason"],
         "swing_detail":            seq["detail"],
+        "bias_15m":                bias_15,
+        "bias_5m":                 bias_5,
+        "range_state":             rng_state["range_state"],
+        "range_state_detail":      rng_state["detail"],
+        "dealing_range":           deal_range,
         "volatility_state":        vol_state,
         "expansion_state":         exp_state_15,
         "structure_bias":          structure_bias,
@@ -208,6 +216,10 @@ def _zero_features() -> dict:
         "htf_relationship": "no_authority",
         "htf_reasoning": "feature extraction failed — no authority claimed",
         "swing_detail": "feature extraction failed",
+        "bias_15m": "neutral", "bias_5m": "neutral",
+        "range_state": "unknown", "range_state_detail": "feature extraction failed",
+        "dealing_range": {"source_tf": None, "high": None, "low": None,
+                          "midpoint": None, "position": None, "zone": "unknown"},
         "volatility_state": "unknown", "expansion_state": "unknown",
         "structure_bias": "neutral",
         "chop_score": 0, "trend_score": 0, "reversal_score": 0,
