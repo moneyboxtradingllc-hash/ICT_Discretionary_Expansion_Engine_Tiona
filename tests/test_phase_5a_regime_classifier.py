@@ -100,7 +100,12 @@ class TestRegimeLabels(unittest.TestCase):
         snap = _snap(
             bias_15="bullish", bias_5="bullish",
             bos_15=True, bos_5=True,
-            exp_state="expanding", exp_score=70, disp_15=True,
+            # detect_expansion._state() emits healthy_expansion / mature_expansion /
+            # early_expansion / compression / exhaustion_risk. "expanding" belongs to
+            # the VOLATILITY vocabulary and was never producible here — the fixture
+            # asserted against a state production cannot generate, which is why
+            # is_expanding stayed permanently False without any test noticing.
+            exp_state="healthy_expansion", exp_score=70, disp_15=True,
         )
         result = classify_regime(snap)
         self.assertEqual(result["regime_label"], "expansion_up")
@@ -109,7 +114,12 @@ class TestRegimeLabels(unittest.TestCase):
         snap = _snap(
             bias_15="bearish", bias_5="bearish",
             bos_15=True, bos_5=True,
-            exp_state="expanding", exp_score=70, disp_15=True,
+            # detect_expansion._state() emits healthy_expansion / mature_expansion /
+            # early_expansion / compression / exhaustion_risk. "expanding" belongs to
+            # the VOLATILITY vocabulary and was never producible here — the fixture
+            # asserted against a state production cannot generate, which is why
+            # is_expanding stayed permanently False without any test noticing.
+            exp_state="healthy_expansion", exp_score=70, disp_15=True,
         )
         result = classify_regime(snap)
         self.assertEqual(result["regime_label"], "expansion_down")

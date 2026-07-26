@@ -122,6 +122,19 @@ def _classify(snapshot: dict, raw_data=None) -> dict:
         "reversal_score":      reversal,
         "evidence":            evidence,
         "warnings":            warnings,
+        # ── Hierarchy telemetry. The label alone cannot show whether a bearish
+        # read survived a bullish pullback or was erased by it; this can.
+        "htf_authority":       f.get("htf_authority"),
+        "htf_relationship":    f.get("htf_relationship"),
+        "reasoning":           f.get("htf_reasoning"),
+        "swing_sequence":      f.get("swing_sequence"),
+        "swing_detail":        f.get("swing_detail"),
+        "structure_features":  {
+            "higher_highs": f.get("higher_highs"), "lower_highs": f.get("lower_highs"),
+            "higher_lows":  f.get("higher_lows"),  "lower_lows":  f.get("lower_lows"),
+            "range_size":   f.get("range_size"),
+            "close_position_in_range": f.get("close_position_in_range"),
+        },
         "authority_level":     _AUTHORITY,
         "confidence_modifier": 0,
     }

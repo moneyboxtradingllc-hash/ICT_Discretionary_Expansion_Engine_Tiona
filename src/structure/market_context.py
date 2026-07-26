@@ -133,10 +133,20 @@ def _dealing_range(structure, liquidity, last_price):
 
 def _environment(market_regime, htf_bias, local_bias, po3):
     """Environment, with RETRACEMENT derived — a trending market whose current
-    leg opposes the dominant bias. No upstream label expresses that."""
+    leg opposes the dominant bias. No upstream label expresses that.
+
+    The retracement judgement itself belongs to the hierarchy in regime_features,
+    which owns the authority model and the invalidation level it rests on. This
+    consumes that verdict when present rather than re-deriving it from a
+    different timeframe, which would give two sources of truth that disagree.
+    """
     label = str((market_regime or {}).get("regime_label") or "")
-    opposed = (htf_bias in (_BULL, _BEAR) and local_bias in (_BULL, _BEAR)
-               and htf_bias != local_bias)
+    relationship = str((market_regime or {}).get("htf_relationship") or "")
+    if relationship:
+        opposed = relationship == "retracement"
+    else:
+        opposed = (htf_bias in (_BULL, _BEAR) and local_bias in (_BULL, _BEAR)
+                   and htf_bias != local_bias)
 
     if label in _REVERSING:
         return "reversal_conditions", f"regime={label}"
@@ -190,9 +200,12 @@ def analyze_market_context(structure: dict, liquidity: dict, expansion: dict,
     liquidity = liquidity or {}
 
     htf_bias, votes, net, bias_components = _score_htf_bias(structure, market_regime)
-    local_bias = _bias_of(structure.get(LTF)) or _NEUTRAL
+    # 5m is the PHASE timeframe in the hierarchy — 15m owns authority, 5m
+    # describes the phase inside it, 1m/3m are execution. Reading the local leg
+    # from 3m disagreed with regime_features, which uses 5m.
+    local_bias = _bias_of(structure.get(OPERATIVE))
     if local_bias == _NEUTRAL:
-        local_bias = _bias_of(structure.get(OPERATIVE))
+        local_bias = _bias_of(structure.get(LTF))
 
     dealing_range = _dealing_range(structure, liquidity, last_price)
     environment, env_detail = _environment(market_regime, htf_bias, local_bias, po3)

@@ -3,6 +3,13 @@ Phase 5A — Regime Feature Extractor.
 Derives scored feature signals from the assembled snapshot.
 OBSERVE_ONLY — no decision logic, no execution influence.
 """
+from regime_classification.structure_hierarchy import (
+    swing_sequence, range_metrics, htf_authority, classify_relationship,
+)
+
+# The vocabulary detect_expansion._state() actually emits.
+_EXPANDING_STATES   = ("early_expansion", "healthy_expansion", "mature_expansion")
+_CONTRACTING_STATES = ("compression",)
 
 
 def extract_regime_features(snapshot: dict, raw_data=None) -> dict:
@@ -12,12 +19,12 @@ def extract_regime_features(snapshot: dict, raw_data=None) -> dict:
     Never raises.
     """
     try:
-        return _extract(snapshot)
+        return _extract(snapshot, raw_data)
     except Exception:
         return _zero_features()
 
 
-def _extract(snapshot: dict) -> dict:
+def _extract(snapshot: dict, raw_data=None) -> dict:
     structure  = snapshot.get("structure",  {}) or {}
     volatility = snapshot.get("volatility", {}) or {}
     expansion  = snapshot.get("expansion",  {}) or {}
@@ -46,8 +53,13 @@ def _extract(snapshot: dict) -> dict:
     exp_state_5     = (e5.get("state") or "normal").lower()
     displacement_5  = bool(e5.get("displacement_detected", False))
 
-    is_expanding     = exp_state_15 == "expanding" or exp_state_5 == "expanding"
-    is_contracting   = exp_state_15 == "contracting" and exp_state_5 == "contracting"
+    # detect_expansion._state() emits compression / early_expansion /
+    # healthy_expansion / mature_expansion / exhaustion_risk. It has never
+    # returned "expanding" or "contracting", so both flags below were permanently
+    # False — trend_score's +15 and chop_score's +15 could not fire, and
+    # chop_score's `elif not is_expanding` +5 always did.
+    is_expanding     = exp_state_15 in _EXPANDING_STATES or exp_state_5 in _EXPANDING_STATES
+    is_contracting   = exp_state_15 in _CONTRACTING_STATES and exp_state_5 in _CONTRACTING_STATES
     displacement_any = displacement_15 or displacement_5
 
     sweep_reclaim_any = False
@@ -66,8 +78,27 @@ def _extract(snapshot: dict) -> dict:
     both_aligned_bear = bias_15 == "bearish" and bias_5 == "bearish"
     both_neutral      = bias_15 == "neutral"  and bias_5 == "neutral"
 
-    is_bullish = bias_15 == "bullish" and bias_5 in ("bullish", "neutral")
-    is_bearish = bias_15 == "bearish" and bias_5 in ("bearish", "neutral")
+    # ── Timeframe hierarchy ───────────────────────────────────────────────────
+    # 15m establishes directional authority and holds it until price violates the
+    # level that would invalidate the trend; 5m describes the phase inside that
+    # authority. Computed here because is_bullish / is_bearish depend on it.
+    ctx_candles = (raw_data or {}).get("5m") or (raw_data or {}).get("15m") or []
+    last_price = ctx_candles[-1]["close"] if ctx_candles else None
+    authority = htf_authority(s15, last_price, "15m")
+    relationship = classify_relationship(authority, bias_5)
+    seq = swing_sequence((raw_data or {}).get("15m") or ctx_candles)
+    rng = range_metrics(ctx_candles)
+    htf_authoritative = authority["bias"] in ("bullish", "bearish") and authority["intact"]
+
+    # A retracement must not erase the dominant bias. Requiring 5m agreement meant
+    # a pullback — definitionally 5m-opposed — flipped is_bearish to False, so
+    # trend_down could not fire even at trend_score 55 and the label fell to
+    # `unknown`. Authority is ADDED to the legacy agreement test, never subtracted,
+    # so nothing that previously read directional stops doing so.
+    is_bullish = (bias_15 == "bullish" and bias_5 in ("bullish", "neutral")) or \
+                 (htf_authoritative and authority["bias"] == "bullish")
+    is_bearish = (bias_15 == "bearish" and bias_5 in ("bearish", "neutral")) or \
+                 (htf_authoritative and authority["bias"] == "bearish")
 
     db = (ai_ctx.get("directional_bias") or "neutral").lower()
     directional_slope = (
@@ -79,8 +110,14 @@ def _extract(snapshot: dict) -> dict:
     po3_bear = po3_dist_15 in ("bearish", "down") or po3_dist_5 in ("bearish", "down")
 
     # ── Trend Score ───────────────────────────────────────────────────────────
+    # `both_aligned` previously gated the +35, so a retracement took the +15
+    # branch and the engine could not name a trend during a pullback inside one.
     trend_score = 0
     if both_aligned_bull or both_aligned_bear:
+        trend_score += 35
+    elif htf_authoritative and relationship["relationship"] == "retracement":
+        # A retracement is evidence of trend, not a contradiction of it. The HTF
+        # still owns direction; only the local phase differs.
         trend_score += 35
     elif bias_15 not in ("neutral", ""):
         trend_score += 15
@@ -129,12 +166,20 @@ def _extract(snapshot: dict) -> dict:
 
     return {
         # Public interface (12 fields from spec)
-        "range_size":              0.0,
+        "range_size":              float(rng["range_size"]),
         "atr_proxy":               float(exp_score_15),
         "directional_slope":       float(directional_slope),
-        "higher_highs":            0,
-        "lower_lows":              0,
-        "close_position_in_range": 0.0,
+        "higher_highs":            seq["higher_highs"],
+        "lower_highs":             seq["lower_highs"],
+        "higher_lows":             seq["higher_lows"],
+        "lower_lows":              seq["lower_lows"],
+        "swing_sequence":          seq["sequence"],
+        "close_position_in_range": float(rng["close_position_in_range"]),
+        # Hierarchy telemetry — authority and the phase inside it.
+        "htf_authority":           authority,
+        "htf_relationship":        relationship["relationship"],
+        "htf_reasoning":           relationship["reason"],
+        "swing_detail":            seq["detail"],
         "volatility_state":        vol_state,
         "expansion_state":         exp_state_15,
         "structure_bias":          structure_bias,
@@ -145,6 +190,7 @@ def _extract(snapshot: dict) -> dict:
         "is_bullish":              is_bullish,
         "is_bearish":              is_bearish,
         "is_expanding":            is_expanding,
+        "is_contracting":          is_contracting,
         "displacement_any":        displacement_any,
         "exp_score_15":            exp_score_15,
         "mss_any":                 mss_any,
@@ -155,11 +201,18 @@ def _extract(snapshot: dict) -> dict:
 def _zero_features() -> dict:
     return {
         "range_size": 0.0, "atr_proxy": 0.0, "directional_slope": 0.0,
-        "higher_highs": 0, "lower_lows": 0, "close_position_in_range": 0.0,
+        "higher_highs": 0, "lower_highs": 0, "higher_lows": 0, "lower_lows": 0,
+        "swing_sequence": "unknown", "close_position_in_range": 0.0,
+        "htf_authority": {"timeframe": None, "bias": "neutral", "invalidation": None,
+                          "intact": False, "detail": "feature extraction failed"},
+        "htf_relationship": "no_authority",
+        "htf_reasoning": "feature extraction failed — no authority claimed",
+        "swing_detail": "feature extraction failed",
         "volatility_state": "unknown", "expansion_state": "unknown",
         "structure_bias": "neutral",
         "chop_score": 0, "trend_score": 0, "reversal_score": 0,
         "is_bullish": False, "is_bearish": False, "is_expanding": False,
+        "is_contracting": False,
         "displacement_any": False, "exp_score_15": 0,
         "mss_any": False, "sweep_reclaim_any": False,
     }
