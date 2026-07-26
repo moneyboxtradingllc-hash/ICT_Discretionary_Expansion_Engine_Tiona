@@ -158,8 +158,14 @@ class TestWhichLimitGovernedIsReported:
     """On tight stops the CEILING governs, not the risk percentage. Knowing which
     is the difference between risking 3% and believing you are."""
 
-    def test_a_tight_stop_is_governed_by_margin(self):
-        """Not an invented cap — the account genuinely cannot hold 151 lots."""
+    def test_risk_governs_at_every_stop_width_on_real_specs(self):
+        """With the broker's actual $100 day margin, margin does not bind — the
+        3% rule is what sets size, which is the whole point."""
+        for stop in (5.0, 9.0, 25.0):
+            assert R.size_for_stop(stop, 50_000)["governed_by"] == "risk_budget"
+
+    def test_margin_binds_only_when_it_truly_cannot_afford(self, monkeypatch):
+        monkeypatch.setattr(R, "MARGIN_PER_CONTRACT", 5_000.0)
         s = R.size_for_stop(5.0, 50_000)
         assert s["governed_by"] == "margin"
         assert s["wanted"] > s["quantity"]
@@ -172,12 +178,23 @@ class TestWhichLimitGovernedIsReported:
         s = R.size_for_stop(9.0, 50_000)
         assert s["risk_at_stop"] == pytest.approx(s["quantity"] * 9.0 * POINT_VALUE)
 
-    def test_margin_makes_tight_stops_risk_less_not_more(self):
-        """Where margin binds, actual risk falls as the stop tightens — the
-        account cannot carry the size the risk rule would buy."""
-        tight = R.size_for_stop(5.0, 50_000)["risk_at_stop"]
-        wide = R.size_for_stop(25.0, 50_000)["risk_at_stop"]
-        assert tight < wide
+    def test_risk_is_constant_across_stop_widths(self):
+        """The property risk-based sizing is supposed to have: a tighter stop
+        buys more contracts for the SAME dollar risk."""
+        risks = [R.size_for_stop(s, 50_000)["risk_at_stop"] for s in (5.0, 9.0, 25.0)]
+        assert max(risks) - min(risks) < 50, risks
+
+    def test_intraday_size_is_flagged_as_unsafe_overnight(self):
+        """Day margin $100 vs initial $4,187.12 — a ~42x gap, and nothing in the
+        loop flattens automatically before the 16:00 close."""
+        s = R.size_for_stop(9.0, 50_000)
+        assert s["overnight_safe"] is False
+        assert s["quantity"] > s["overnight_max"]
+        assert "INTRADAY-ONLY" in s["overnight_warning"]
+
+    def test_overnight_is_unknown_rather_than_assumed_without_equity(self):
+        s = R.size_for_stop(9.0, None)
+        assert s["overnight_max"] is None and s["overnight_safe"] is None
 
     def test_sizing_detail_names_both_constraints(self):
         d = R.size_for_stop(9.0, 50_000)["detail"]

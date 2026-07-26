@@ -17,7 +17,7 @@ from integrations.ninjatrader.deterministic import (
     TICK_SIZE, POINT_VALUE, TARGET_POINTS, MAX_STOP_POINTS, MAX_RISK_DOLLARS,
     MAX_CONTRACTS, DAILY_LOSS_CEILING, COMMISSION_PER_CONTRACT, SLIPPAGE_TICKS,
     RISK_PCT_OF_EQUITY, HARD_MAX_RISK_PCT, DAILY_LOSS_PCT_OF_EQUITY,
-    COMPOUNDING_ENABLED, MARGIN_PER_CONTRACT, MARGIN_USAGE_PCT,
+    COMPOUNDING_ENABLED, MARGIN_PER_CONTRACT, MARGIN_USAGE_PCT, MARGIN_OVERNIGHT,
     MAX_CONTRACTS_HARD,
 )
 
@@ -121,11 +121,28 @@ def size_for_stop(stop_points, equity=None) -> dict:
     wanted = int(budget // (sp * POINT_VALUE))       # floor — never over budget
     qty = max(0, min(wanted, ceiling))
     governed = "margin" if wanted > ceiling else "risk_budget"
-    return {"quantity": qty, "wanted": wanted, "ceiling": ceiling,
-            "governed_by": governed,
-            "detail": (f"budget {budget_why} wants {wanted} at {sp}pt; "
-                       f"ceiling {ceiling_why} -> {qty} ({governed})"),
-            "risk_at_stop": round(qty * sp * POINT_VALUE, 2)}
+
+    # Overnight exposure. Day margin and initial margin differ by ~42x, so an
+    # intraday size cannot be carried past the close, and nothing in the loop
+    # forces flat automatically. Report the gap on every trade rather than
+    # discovering it as a margin call.
+    e = _equity(equity)
+    known = e is not None and MARGIN_OVERNIGHT > 0
+    overnight_max = int(e // MARGIN_OVERNIGHT) if known else None
+    out = {"quantity": qty, "wanted": wanted, "ceiling": ceiling,
+           "governed_by": governed,
+           "detail": (f"budget {budget_why} wants {wanted} at {sp}pt; "
+                      f"ceiling {ceiling_why} -> {qty} ({governed})"),
+           "risk_at_stop": round(qty * sp * POINT_VALUE, 2),
+           "overnight_max": overnight_max,
+           "overnight_safe": (qty <= overnight_max) if known else None}
+    if known and qty > overnight_max:
+        out["overnight_warning"] = (
+            f"{qty} contracts is INTRADAY-ONLY size: initial margin "
+            f"${MARGIN_OVERNIGHT:,.2f} allows {overnight_max} overnight on "
+            f"${e:,.2f}. Must be flat by the 16:00 close — the loop does not "
+            f"flatten automatically.")
+    return out
 
 
 def contracts_for_stop(stop_points, equity=None) -> int:

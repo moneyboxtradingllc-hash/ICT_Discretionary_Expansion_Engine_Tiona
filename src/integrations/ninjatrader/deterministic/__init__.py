@@ -78,9 +78,25 @@ COMPOUNDING_ENABLED     = True   # False restores flat MAX_RISK_DOLLARS sizing
 #
 # NOT MODELLED ANYWHERE: slippage at size. A 150-lot MNQ fill is not a 30-lot
 # fill, and nothing in this engine accounts for the difference.
-MARGIN_PER_CONTRACT   = 500.00   # $ day-trade margin per MNQ contract — VERIFY with broker
-MARGIN_USAGE_PCT      = 50.0     # max % of equity committed to margin
-MAX_CONTRACTS_HARD    = 500      # absolute backstop against bad equity data only
+# Broker-confirmed MNQ specs (operator, 2026-07-26): value/point $2.00,
+# tick 0.25/$0.50, RTH close 16:00, Sunday open 17:00.
+MARGIN_PER_CONTRACT   = 100.00     # DAY-TRADE margin per MNQ contract
+MARGIN_OVERNIGHT      = 4187.12    # INITIAL margin — applies to anything held past close
+MARGIN_USAGE_PCT      = 50.0       # max % of equity committed to day margin
+MAX_CONTRACTS_HARD    = 1000       # absolute backstop against bad equity data only
+
+# ── OVERNIGHT EXPOSURE ────────────────────────────────────────────────────────
+# Day margin ($100) and initial margin ($4,187.12) differ by ~42x, so a position
+# sized for intraday CANNOT be carried overnight. At $50k equity that is ~251
+# contracts day-tradeable against ~12 the account could actually hold on an
+# initial-margin basis.
+#
+# The deterministic loop has NO automatic end-of-day flatten. DECISION_WINDOW
+# closes entries at 14:00 but nothing forces flat before the 16:00 close;
+# stop_lane.py does it and is run manually. Compounding makes that gap far more
+# expensive than it was at a flat 30 contracts, so sizing reports overnight
+# exposure explicitly rather than leaving it implicit.
+OVERNIGHT_HOLD_ALLOWED = False     # doctrine: intraday only
 
 MAX_SIMULTANEOUS_POSITIONS = 1
 SCALE_IN = False
@@ -91,7 +107,12 @@ DECISION_WINDOW = ("09:30", "14:00")
 TIMEZONE = "America/New_York"
 
 # Modeled costs (honest placeholders; measured separately from Sim fills).
-COMMISSION_PER_CONTRACT = None   # UNKNOWN -> labelled, not silently zero
+# Broker-confirmed MNQ fees (operator, 2026-07-26): exchange $0.35 + NFA $0.01 +
+# clearing $0.19 = $0.55 per side, $1.10 round turn. _modeled_costs multiplies
+# this by quantity once, so it must be the ROUND-TURN cost per contract.
+# Previously None, which modelled costs as zero and merely flagged it — tolerable
+# at 30 contracts, materially wrong at 250.
+COMMISSION_PER_CONTRACT = 1.10   # $ round turn per contract
 SLIPPAGE_TICKS = 1.0
 
 OPENAI_DISABLED = True
