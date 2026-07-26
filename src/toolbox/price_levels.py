@@ -206,22 +206,36 @@ def _no_zone(direction: str, current: float | None) -> dict:
 
 # ── Zone finders ──────────────────────────────────────────────────────────────
 
-def _find_fvg(candles: list, direction: str) -> tuple | None:
-    """
-    Scan recent candles for a 3-candle imbalance gap.
+def find_fvgs(candles: list, direction: str) -> list:
+    """Every 3-candle imbalance gap in `candles`, newest first.
+
     Bullish FVG: candle[i].high < candle[i+2].low
     Bearish FVG: candle[i].low  > candle[i+2].high
-    Returns (zone_low, zone_high) of the most recent gap, or None.
+    Returns [{"index", "low", "high", "size"}]. Public because the displacement
+    detector scores imbalance CREATION as evidence of institutional commitment
+    and must not re-implement the rule.
     """
+    out = []
     if len(candles) < 3:
-        return None
+        return out
     for i in range(len(candles) - 3, -1, -1):
         c1, c3 = candles[i], candles[i + 2]
         if direction == "bullish" and c1["high"] < c3["low"]:
-            return c1["high"], c3["low"]
-        if direction == "bearish" and c1["low"] > c3["high"]:
-            return c3["high"], c1["low"]
-    return None
+            out.append({"index": i, "low": c1["high"], "high": c3["low"],
+                        "size": round(c3["low"] - c1["high"], 2)})
+        elif direction == "bearish" and c1["low"] > c3["high"]:
+            out.append({"index": i, "low": c3["high"], "high": c1["low"],
+                        "size": round(c1["low"] - c3["high"], 2)})
+    return out
+
+
+def _find_fvg(candles: list, direction: str) -> tuple | None:
+    """Most recent 3-candle imbalance gap as (zone_low, zone_high), or None."""
+    gaps = find_fvgs(candles, direction)
+    if not gaps:
+        return None
+    g = gaps[0]
+    return g["low"], g["high"]
 
 
 def _find_ob(candles: list, direction: str) -> tuple | None:

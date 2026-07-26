@@ -96,8 +96,17 @@ def _score_phases(struct: dict, liq: dict, vol: dict, exp: dict) -> dict:
             manip += 10  # complete sweep+reclaim → high confidence manipulation
 
     # ── Distribution ──────────────────────────────────────────────────────────
+    # The displacement term was a bare bool worth 30 or 10, so a 1.4x nudge and a
+    # 2.1x drive that left three gaps scored identically. When the confluence
+    # block is present its score scales that same 30-point term, preserving the
+    # ceiling. Legacy fallback for hand-built expansion dicts and every existing
+    # test, which supply no block.
     distrib = 0
-    distrib += 30 if clean_disp else (10 if disp else 0)
+    disp_block = exp.get("displacement")
+    if isinstance(disp_block, dict) and "score" in disp_block:
+        distrib += round(30 * min(100, int(disp_block.get("score") or 0)) / 100)
+    else:
+        distrib += 30 if clean_disp else (10 if disp else 0)
     if not gated and exp_state in ("healthy_expansion", "mature_expansion"):
         distrib += 25
     if not gated and dir_eff >= 0.40:

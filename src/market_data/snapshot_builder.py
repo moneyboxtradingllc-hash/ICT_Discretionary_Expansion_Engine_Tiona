@@ -8,6 +8,7 @@ from volatility.volatility_classifier import classify_volatility
 from volatility.expansion_detector import detect_expansion
 from structure.po3_engine import analyze_po3_snapshot
 from structure.manipulation_detector import detect_manipulation
+from structure.displacement_detector import detect_displacement
 from structure.market_context import analyze_market_context
 from regime_classification.structure_hierarchy import (
     htf_authority, classify_relationship,
@@ -76,6 +77,15 @@ def build_snapshot(
     # Liquidity analysis runs on the full normalized history per timeframe
     liquidity = {tf: analyze_liquidity(all_normalized.get(tf, [])) for tf in TIMEFRAMES}
 
+    # Standing directional authority, derived from `structure` alone so it is
+    # available to every layer below without inverting the dependency chain.
+    _ctx_series = next((all_normalized[tf] for tf in ("1m", "3m", "5m", "15m")
+                        if all_normalized.get(tf)), None)
+    _last_price = _ctx_series[-1]["close"] if _ctx_series else None
+    _authority = htf_authority(structure.get("15m"), _last_price, "15m")
+    _relationship = classify_relationship(
+        _authority, str((structure.get("5m") or {}).get("bias") or "neutral").lower())
+
     # Volatility and expansion: ATR computed first, feeds both classifiers
     volatility = {}
     expansion = {}
@@ -92,6 +102,12 @@ def build_snapshot(
         if isinstance(liquidity.get(tf), dict):
             liquidity[tf]["manipulation"] = detect_manipulation(
                 candles, atr_result.get("atr"))
+        # DISPLACEMENT-CONFLUENCE: displacement_detected is a bare bool and
+        # cannot separate a nudge from a drive that tears gaps in the tape.
+        if isinstance(expansion.get(tf), dict):
+            expansion[tf]["displacement"] = detect_displacement(
+                candles, structure.get(tf), atr_result.get("atr"), expansion[tf],
+                authority=_authority)
 
     # PERCEPTION-1 — expansion state hysteresis (VECTOR-3 analogue). The live
     # loop passes its persistent instance; one-shot callers get no stabilizer
@@ -112,19 +128,9 @@ def build_snapshot(
     )
     session = anchor["session_label"] if anchor else "unknown"
 
-    # ── Standing directional authority, established BEFORE PO3.
-    # htf_authority derives from `structure` alone, which is already computed, so
-    # PO3 can be reconciled against it without inverting the dependency chain
-    # (PO3 -> regime -> context). Reconciliation is additive: it annotates how
-    # each phase sits inside the authority and never rewrites the phase itself.
-    _ctx_series = next((all_normalized[tf] for tf in ("1m", "3m", "5m", "15m")
-                        if all_normalized.get(tf)), None)
-    _last_price = _ctx_series[-1]["close"] if _ctx_series else None
-    _authority = htf_authority(structure.get("15m"), _last_price, "15m")
-    _relationship = classify_relationship(
-        _authority, str((structure.get("5m") or {}).get("bias") or "neutral").lower())
-
-    # PO3 phase analysis — runs on already-computed mechanical evidence
+    # PO3 phase analysis — runs on already-computed mechanical evidence.
+    # Reconciled against the authority established above: additive only, it
+    # annotates how each phase sits inside the authority and never rewrites it.
     po3 = analyze_po3_snapshot(structure, liquidity, volatility, expansion,
                                authority=_authority,
                                relationship=_relationship["relationship"])
