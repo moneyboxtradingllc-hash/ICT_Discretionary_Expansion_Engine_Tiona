@@ -17,7 +17,7 @@ from integrations.ninjatrader.deterministic import (
     TICK_SIZE, POINT_VALUE, TARGET_POINTS, MAX_STOP_POINTS, MAX_RISK_DOLLARS,
     MAX_CONTRACTS, DAILY_LOSS_CEILING, COMMISSION_PER_CONTRACT, SLIPPAGE_TICKS,
     RISK_PCT_OF_EQUITY, HARD_MAX_RISK_PCT, DAILY_LOSS_PCT_OF_EQUITY,
-    COMPOUNDING_ENABLED, CONTRACTS_PER_10K_EQUITY, MAX_CONTRACTS_FLOOR,
+    COMPOUNDING_ENABLED, MARGIN_PER_CONTRACT, MARGIN_USAGE_PCT,
     MAX_CONTRACTS_HARD,
 )
 
@@ -81,31 +81,32 @@ def daily_loss_ceiling(equity=None) -> tuple:
 
 
 def contract_ceiling(equity=None) -> tuple:
-    """Maximum contracts at this equity. Returns (ceiling, reason).
+    """How many contracts the ACCOUNT CAN HOLD. Returns (ceiling, reason).
 
-    Scales so compounding does not plateau, never below the legacy fixed ceiling
-    and never above an absolute backstop. Unknown equity uses the legacy floor.
+    Not a risk rule — risk is governed by the 3% budget alone. This is margin:
+    a $50k account cannot carry 151 MNQ contracts whatever the risk math says,
+    because the broker rejects it first. Applying it here makes a real constraint
+    explicit instead of surfacing as a rejected order.
     """
     e = _equity(equity)
     if not COMPOUNDING_ENABLED or e is None:
-        return MAX_CONTRACTS, f"fixed ceiling {MAX_CONTRACTS}"
-    scaled = int(e / 10_000.0 * CONTRACTS_PER_10K_EQUITY)
-    ceiling = max(MAX_CONTRACTS_FLOOR, min(scaled, MAX_CONTRACTS_HARD))
-    note = ""
-    if scaled > MAX_CONTRACTS_HARD:
-        note = f" (scaled {scaled} clamped to hard backstop {MAX_CONTRACTS_HARD})"
-    elif scaled < MAX_CONTRACTS_FLOOR:
-        note = f" (scaled {scaled} raised to floor {MAX_CONTRACTS_FLOOR})"
-    return ceiling, (f"{ceiling} = {CONTRACTS_PER_10K_EQUITY:g} per $10k of "
-                     f"${e:,.2f}{note}")
+        return MAX_CONTRACTS, f"legacy fixed ceiling {MAX_CONTRACTS} (equity unknown)"
+    if MARGIN_PER_CONTRACT <= 0:
+        return MAX_CONTRACTS_HARD, f"no margin configured — backstop {MAX_CONTRACTS_HARD}"
+    usable = e * MARGIN_USAGE_PCT / 100.0
+    affordable = int(usable // MARGIN_PER_CONTRACT)
+    ceiling = max(0, min(affordable, MAX_CONTRACTS_HARD))
+    return ceiling, (f"{ceiling} affordable = {MARGIN_USAGE_PCT:g}% of ${e:,.2f} "
+                     f"(${usable:,.2f}) / ${MARGIN_PER_CONTRACT:,.2f} margin")
 
 
 def size_for_stop(stop_points, equity=None) -> dict:
     """Contract count with the constraint that produced it named.
 
-    On tight stops the CONTRACT CEILING governs, not the risk percentage — at 3%
-    of equity a 5pt stop asks for 151 contracts. Knowing which limit bound the
-    trade is the difference between "risking 3%" and "believing you are".
+    Contracts follow from the risk budget: whatever 3% of equity buys at this
+    stop. Margin can still bind on very tight stops, and when it does the trade
+    risks LESS than the budget — so which limit governed is reported rather than
+    assumed. "Risking 3%" and "believing you are" should never be confused.
     """
     try:
         sp = float(stop_points)
@@ -119,7 +120,7 @@ def size_for_stop(stop_points, equity=None) -> dict:
     ceiling, ceiling_why = contract_ceiling(equity)
     wanted = int(budget // (sp * POINT_VALUE))       # floor — never over budget
     qty = max(0, min(wanted, ceiling))
-    governed = "contract_ceiling" if wanted > ceiling else "risk_budget"
+    governed = "margin" if wanted > ceiling else "risk_budget"
     return {"quantity": qty, "wanted": wanted, "ceiling": ceiling,
             "governed_by": governed,
             "detail": (f"budget {budget_why} wants {wanted} at {sp}pt; "
@@ -144,9 +145,15 @@ def contracts_for_stop(stop_points, equity=None) -> int:
     return size_for_stop(stop_points, equity)["quantity"]
 
 
-def check_quantity(qty) -> tuple:
-    """Validate a RISK-SIZED quantity: a whole number in [1, MAX_CONTRACTS].
-    Zero/negative/fractional/over-ceiling are rejected (never auto-adjusted)."""
+def check_quantity(qty, equity=None) -> tuple:
+    """Validate a RISK-SIZED quantity: a whole number in [1, ceiling].
+
+    The ceiling is what the ACCOUNT CAN MARGIN at this equity, not a fixed 30 —
+    a fixed number here would reject compounded sizes the risk rule legitimately
+    produced. Omitting equity keeps the legacy fixed ceiling for existing callers.
+    Zero/negative/fractional/over-ceiling are rejected, never auto-adjusted.
+    """
+    ceiling, ceiling_why = contract_ceiling(equity)
     if isinstance(qty, bool) or qty is None:
         return False, f"quantity {qty!r} invalid"
     try:
@@ -158,9 +165,9 @@ def check_quantity(qty) -> tuple:
     q = int(f)
     if q < 1:
         return False, f"quantity {q} < 1 (no trade)"
-    if q > MAX_CONTRACTS:
-        return False, f"quantity {q} > MAX_CONTRACTS {MAX_CONTRACTS}"
-    return True, f"quantity {q} (1..{MAX_CONTRACTS})"
+    if q > ceiling:
+        return False, f"quantity {q} exceeds what the account can margin: {ceiling_why}"
+    return True, f"quantity {q} (1..{ceiling})"
 
 
 def target_price(direction: str, avg_fill: float) -> float:
@@ -267,7 +274,7 @@ def assess_trade(direction: str, reference_price: float, structural_stop: float,
             f"{ceiling:.2f} can be authorized. Raise DAILY_LOSS_PCT_OF_EQUITY.")
 
     qty = sizing["quantity"]
-    ok_q, why_q = check_quantity(qty)
+    ok_q, why_q = check_quantity(qty, equity)
     if not ok_q:
         return RiskDecision(False, why_q, stop_price=stop.stop_price,
                             stop_distance=stop.stop_distance)

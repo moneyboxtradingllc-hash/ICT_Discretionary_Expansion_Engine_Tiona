@@ -62,20 +62,25 @@ HARD_MAX_RISK_PCT       = 3.00   # absolute ceiling — config can never exceed 
 DAILY_LOSS_PCT_OF_EQUITY = 6.50  # daily realized-loss ceiling as % of equity
 COMPOUNDING_ENABLED     = True   # False restores flat MAX_RISK_DOLLARS sizing
 
-# Contract ceiling scales with equity so compounding does not plateau. A FIXED
-# MAX_CONTRACTS=30 froze size at ~$75k: the budget kept growing while the
-# contract count did not, so risk stopped compounding exactly as the account got
-# big enough for it to matter.
+# CONTRACT COUNT FOLLOWS FROM RISK. The 3% budget is the risk rule; contracts are
+# whatever that budget buys at the structural stop. No arbitrary contract ceiling
+# truncates it — a cap that binds below 3% would silently contradict the risk
+# rule and make "3%" a number that never actually happens.
 #
-# This ceiling is doing more work than it appears. At 3% of equity a TIGHT stop
-# demands enormous size — $1,511 against a 5pt stop is 151 MNQ contracts, roughly
-# $3M notional on a $50k account. The dollar risk is still 3%, but the leverage
-# is not modest, and slippage at that size is NOT modelled anywhere in this
-# engine. The cap, not the risk percentage, is what actually governs size on
-# tight stops; risk.py reports which of the two bound each trade.
-CONTRACTS_PER_10K_EQUITY = 6.0   # scaled ceiling; 30 at $50k, 60 at $100k
-MAX_CONTRACTS_FLOOR      = 30    # never below the legacy fixed ceiling
-MAX_CONTRACTS_HARD       = 200   # absolute backstop regardless of equity
+# The one limit that remains is not arbitrary: MARGIN. A $50k account cannot hold
+# 151 MNQ contracts no matter what the risk math says — the broker rejects it
+# first. This is a real constraint the account would hit anyway, so the engine
+# applies it explicitly rather than discovering it as a rejected order.
+#
+# MARGIN_PER_CONTRACT must match the BROKER's actual day-trade requirement for
+# MNQ; it varies by broker and by session (intraday vs overnight). Set it wrong
+# and sizing is wrong.
+#
+# NOT MODELLED ANYWHERE: slippage at size. A 150-lot MNQ fill is not a 30-lot
+# fill, and nothing in this engine accounts for the difference.
+MARGIN_PER_CONTRACT   = 500.00   # $ day-trade margin per MNQ contract — VERIFY with broker
+MARGIN_USAGE_PCT      = 50.0     # max % of equity committed to margin
+MAX_CONTRACTS_HARD    = 500      # absolute backstop against bad equity data only
 
 MAX_SIMULTANEOUS_POSITIONS = 1
 SCALE_IN = False

@@ -146,19 +146,22 @@ class TestExistingCallersAreUnchanged:
         from integrations.ninjatrader.deterministic import MAX_CONTRACTS_HARD
         assert R.contracts_for_stop(0.25, 10_000_000) == MAX_CONTRACTS_HARD
 
-    def test_the_ceiling_never_drops_below_the_legacy_floor(self):
-        from integrations.ninjatrader.deterministic import MAX_CONTRACTS_FLOOR
-        for eq in (1_000, 10_000, 25_000, 50_000):
-            assert R.contract_ceiling(eq)[0] >= MAX_CONTRACTS_FLOOR
+    def test_the_ceiling_is_what_the_account_can_margin(self):
+        from integrations.ninjatrader.deterministic import (
+            MARGIN_PER_CONTRACT, MARGIN_USAGE_PCT)
+        for eq in (25_000, 50_000, 100_000):
+            expected = int((eq * MARGIN_USAGE_PCT / 100.0) // MARGIN_PER_CONTRACT)
+            assert R.contract_ceiling(eq)[0] == expected
 
 
 class TestWhichLimitGovernedIsReported:
     """On tight stops the CEILING governs, not the risk percentage. Knowing which
     is the difference between risking 3% and believing you are."""
 
-    def test_a_tight_stop_is_governed_by_the_contract_ceiling(self):
+    def test_a_tight_stop_is_governed_by_margin(self):
+        """Not an invented cap — the account genuinely cannot hold 151 lots."""
         s = R.size_for_stop(5.0, 50_000)
-        assert s["governed_by"] == "contract_ceiling"
+        assert s["governed_by"] == "margin"
         assert s["wanted"] > s["quantity"]
 
     def test_a_wide_stop_is_governed_by_the_risk_budget(self):
@@ -169,9 +172,9 @@ class TestWhichLimitGovernedIsReported:
         s = R.size_for_stop(9.0, 50_000)
         assert s["risk_at_stop"] == pytest.approx(s["quantity"] * 9.0 * POINT_VALUE)
 
-    def test_the_ceiling_makes_tight_stops_risk_less_not_more(self):
-        """A real consequence of capping: in the capped region, actual risk falls
-        as the stop tightens, inverting risk-based sizing."""
+    def test_margin_makes_tight_stops_risk_less_not_more(self):
+        """Where margin binds, actual risk falls as the stop tightens — the
+        account cannot carry the size the risk rule would buy."""
         tight = R.size_for_stop(5.0, 50_000)["risk_at_stop"]
         wide = R.size_for_stop(25.0, 50_000)["risk_at_stop"]
         assert tight < wide
