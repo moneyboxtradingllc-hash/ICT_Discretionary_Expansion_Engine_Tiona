@@ -153,6 +153,10 @@ def one_scan(client: NinjaTraderBridgeClient, session: SessionAuthority, scan_nu
                      "commander": facts.get("commander_state"),
                      "invalidation": facts.get("entry_invalidation"),
                      # Diagnostics — why a NO_TRADE was a NO_TRADE.
+                     # gate_blockers names which authority refused; without it
+                     # final_gate_authorizes is a bare False covering six of them.
+                     "gate_permissions": facts.get("_gate_permissions"),
+                     "gate_blockers": facts.get("_gate_blockers"),
                      "fc0b_reason": facts.get("_fc0b_reason"),
                      "fc0b_inputs": facts.get("_fc0b_inputs"),
                      "zone": facts.get("_zone"),
@@ -190,10 +194,15 @@ def run(max_scans: Optional[int] = None):
         else:
             try:
                 rec = one_scan(client, session, scan_num)
+                # Name the refusing authority inline. `final_gate_authorizes:False`
+                # covers six independent authorities; printing it alone is how a
+                # hidden veto stays hidden.
+                _gb = (rec.get("snapshot") or {}).get("gate_blockers") or []
+                _auth = f" | gate_refused={','.join(_gb)}" if _gb else ""
                 print(f"[scan {scan_num}] {rec['verdict']} | window={rec['in_decision_window']} "
                       f"armed={rec['bridge_armed']} trades={rec['trade_count']} "
                       f"pnl=${rec['realized_pnl']} | top_blocker="
-                      f"{(rec['blockers'][0] if rec['blockers'] else 'none')}")
+                      f"{(rec['blockers'][0] if rec['blockers'] else 'none')}{_auth}")
             finally:
                 client.close()
             if session.state != ACTIVE:

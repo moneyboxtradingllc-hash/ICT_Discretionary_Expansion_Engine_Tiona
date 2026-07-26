@@ -154,9 +154,21 @@ def build_facts_from_snapshot(snapshot: dict, decision: dict, gate: dict,
     eff_trigger = bool(gate.get("trigger_requirement_met", False) or disp_confirmed)
     # The mechanical (non-Brain) gate: every sub-authority the execution gate
     # checks EXCEPT brain_authorship, which this deterministic lane replaces.
-    mech_gate = eff_trigger and all(bool(gate.get(k)) for k in (
-        "narrative_permits_trade", "commander_permits_trade",
-        "council_permits_trade", "regime_permission_allowed", "no_promoted_rule_block"))
+    _GATE_KEYS = ("narrative_permits_trade", "commander_permits_trade",
+                  "council_permits_trade", "regime_permission_allowed",
+                  "no_promoted_rule_block")
+    mech_gate = eff_trigger and all(bool(gate.get(k)) for k in _GATE_KEYS)
+
+    # ATTRIBUTION. mech_gate collapses six independent authorities into one
+    # boolean, and the author records only that boolean — so a NO_TRADE said
+    # `final_gate_authorizes: False` without naming which authority refused. The
+    # regime permission matrix vetoed live for weeks behind exactly this.
+    # Every authority is now recorded individually, and the ones that refused are
+    # named, so a hidden veto announces itself on the scan it happens rather than
+    # in a replay months later.
+    _permissions = {k: bool(gate.get(k)) for k in _GATE_KEYS}
+    _permissions["trigger_requirement_met"] = bool(eff_trigger)
+    _gate_blockers = sorted(k for k, v in _permissions.items() if not v)
 
     setup_family = pb.get("selected_playbook")
     if setup_family in (None, "", "no_playbook"):
@@ -225,6 +237,8 @@ def build_facts_from_snapshot(snapshot: dict, decision: dict, gate: dict,
         # NO_TRADE can be explained after the fact (which FC-0B guard fired, where
         # the zone actually was, which swing anchored the invalidation) without
         # re-deriving zone/swing state from raw bars.
+        "_gate_permissions": _permissions,
+        "_gate_blockers": _gate_blockers,
         "_fc0b_reason": fc0b_reason,
         "_fc0b_inputs": {"relation": fc_relation, "entry": fc_entry, "stop": fc_stop,
                          "midpoint": fc_mid, "displacement_confirmed": disp_confirmed},
