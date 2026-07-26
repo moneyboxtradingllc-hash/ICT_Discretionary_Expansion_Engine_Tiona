@@ -71,7 +71,7 @@ def _facts_complete(f: dict) -> Optional[str]:
 def evaluate(mechanical_facts: Optional[dict], *, account_known: bool,
              position_known: bool, orders_known: bool, reconciliation_ok: bool,
              realized_daily_loss: float, can_enter: bool,
-             can_enter_reason: str = "") -> AuthorDecision:
+             can_enter_reason: str = "", equity=None) -> AuthorDecision:
     d = AuthorDecision(MODE, AUTHOR, authorized=False)
     f = mechanical_facts or {}
 
@@ -88,7 +88,10 @@ def evaluate(mechanical_facts: Optional[dict], *, account_known: bool,
     _valid_dir_prices = direction in (LONG, SHORT) and entry is not None and invalidation is not None
     _stop = (R.assess_structural_stop(direction, float(entry), float(invalidation))
              if _valid_dir_prices else None)
-    risk = (R.assess_trade(direction, float(entry), float(invalidation), realized_daily_loss)
+    # `equity` compounds the risk budget; omitted, sizing stays on the flat
+    # MAX_RISK_DOLLARS so every existing caller is unchanged.
+    risk = (R.assess_trade(direction, float(entry), float(invalidation),
+                           realized_daily_loss, equity=equity)
             if _valid_dir_prices else None)
 
     def _dir_agree(k):

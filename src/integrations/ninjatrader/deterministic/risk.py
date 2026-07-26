@@ -16,6 +16,8 @@ from typing import Optional
 from integrations.ninjatrader.deterministic import (
     TICK_SIZE, POINT_VALUE, TARGET_POINTS, MAX_STOP_POINTS, MAX_RISK_DOLLARS,
     MAX_CONTRACTS, DAILY_LOSS_CEILING, COMMISSION_PER_CONTRACT, SLIPPAGE_TICKS,
+    RISK_PCT_OF_EQUITY, HARD_MAX_RISK_PCT, DAILY_LOSS_PCT_OF_EQUITY,
+    COMPOUNDING_ENABLED,
 )
 
 LONG = "long"
@@ -26,18 +28,73 @@ def normalize_tick(price: float, tick: float = TICK_SIZE) -> float:
     return round(round(float(price) / tick) * tick, 6)
 
 
-def contracts_for_stop(stop_points) -> int:
+def _equity(equity) -> Optional[float]:
+    """Usable account equity, or None. Anything non-positive or unparseable is
+    treated as unknown so sizing falls back to the fixed budget."""
+    try:
+        e = float(equity)
+    except (TypeError, ValueError):
+        return None
+    return e if e > 0 else None
+
+
+def risk_budget(equity=None) -> tuple:
+    """Per-trade dollar risk. Returns (budget, reason).
+
+    Compounds with the account: budget = equity x RISK_PCT_OF_EQUITY, so size
+    grows as the balance grows and shrinks on drawdown. HARD_MAX_RISK_PCT caps
+    the CONFIG — whatever the percentage is set to, per-trade risk can never
+    exceed that share of the balance.
+
+    Unknown equity falls back to the flat MAX_RISK_DOLLARS, never to something
+    larger.
+    """
+    e = _equity(equity)
+    if not COMPOUNDING_ENABLED:
+        return MAX_RISK_DOLLARS, f"flat budget ${MAX_RISK_DOLLARS:.2f} (compounding off)"
+    if e is None:
+        return MAX_RISK_DOLLARS, (f"flat budget ${MAX_RISK_DOLLARS:.2f} "
+                                  f"(equity unknown — fail-safe)")
+    pct = min(RISK_PCT_OF_EQUITY, HARD_MAX_RISK_PCT)
+    capped = pct < RISK_PCT_OF_EQUITY
+    budget = round(e * pct / 100.0, 2)
+    reason = (f"${budget:.2f} = {pct:.2f}% of equity ${e:,.2f}"
+              + (f" (config {RISK_PCT_OF_EQUITY:.2f}% capped at "
+                 f"{HARD_MAX_RISK_PCT:.2f}%)" if capped else ""))
+    return budget, reason
+
+
+def daily_loss_ceiling(equity=None) -> tuple:
+    """Daily realized-loss ceiling. Returns (ceiling, reason).
+
+    Must scale with the same equity the per-trade budget uses. The ceiling is
+    checked PRE-trade against the full proposed risk, so a fixed ceiling below a
+    compounded trade risk rejects every trade forever.
+    """
+    e = _equity(equity)
+    if not COMPOUNDING_ENABLED or e is None:
+        return DAILY_LOSS_CEILING, f"flat ceiling ${DAILY_LOSS_CEILING:.2f}"
+    ceiling = round(e * DAILY_LOSS_PCT_OF_EQUITY / 100.0, 2)
+    return ceiling, (f"${ceiling:.2f} = {DAILY_LOSS_PCT_OF_EQUITY:.2f}% of "
+                     f"equity ${e:,.2f}")
+
+
+def contracts_for_stop(stop_points, equity=None) -> int:
     """RISK-BASED size: the largest whole contract count whose worst-case loss
-    (stop_points x $POINT_VALUE) stays within MAX_RISK_DOLLARS, capped at
+    (stop_points x $POINT_VALUE) stays within the risk budget, capped at
     MAX_CONTRACTS. Returns 0 for a non-positive stop or a stop beyond the cap
-    (-> no trade). Never rounds up; risk is never allowed to exceed the budget."""
+    (-> no trade). Never rounds up; risk is never allowed to exceed the budget.
+
+    `equity` compounds the budget; omitted, the flat MAX_RISK_DOLLARS applies.
+    """
     try:
         sp = float(stop_points)
     except (TypeError, ValueError):
         return 0
     if sp <= 0 or sp > MAX_STOP_POINTS + 1e-9:
         return 0
-    raw = int(MAX_RISK_DOLLARS // (sp * POINT_VALUE))   # floor — never over budget
+    budget, _ = risk_budget(equity)
+    raw = int(budget // (sp * POINT_VALUE))             # floor — never over budget
     return max(0, min(raw, MAX_CONTRACTS))
 
 
@@ -134,7 +191,7 @@ def _modeled_costs(qty: int) -> tuple:
 
 
 def assess_trade(direction: str, reference_price: float, structural_stop: float,
-                 realized_daily_loss: float) -> RiskDecision:
+                 realized_daily_loss: float, equity=None) -> RiskDecision:
     """Full pre-authorization risk assessment with RISK-BASED sizing.
 
     Rejects if: stop wrong side, stop > 25pts (-> qty 0), sized quantity invalid,
@@ -147,7 +204,23 @@ def assess_trade(direction: str, reference_price: float, structural_stop: float,
         return RiskDecision(False, stop.reason, stop_price=stop.stop_price,
                             stop_distance=stop.stop_distance)
 
-    qty = contracts_for_stop(stop.stop_distance)
+    budget, budget_why = risk_budget(equity)
+    ceiling, ceiling_why = daily_loss_ceiling(equity)
+    warnings.append(f"risk budget {budget_why}")
+
+    # Coherence: the ceiling is checked against the FULL proposed risk before the
+    # trade, so a ceiling below one trade's risk rejects every trade forever. Say
+    # so plainly instead of emitting an endless stream of anonymous refusals.
+    if budget > ceiling + 1e-9:
+        return RiskDecision(
+            False,
+            f"UNTRADEABLE CONFIG: per-trade budget {budget_why} exceeds the daily "
+            f"ceiling {ceiling_why} — no trade can ever be authorized. Raise "
+            f"DAILY_LOSS_PCT_OF_EQUITY above RISK_PCT_OF_EQUITY.",
+            stop_price=stop.stop_price, stop_distance=stop.stop_distance,
+            warnings=warnings)
+
+    qty = contracts_for_stop(stop.stop_distance, equity)
     ok_q, why_q = check_quantity(qty)
     if not ok_q:
         return RiskDecision(False, why_q, stop_price=stop.stop_price,
@@ -164,11 +237,11 @@ def assess_trade(direction: str, reference_price: float, structural_stop: float,
 
     # Daily-loss ceiling: realized loss + full proposed risk + modeled costs.
     projected = float(realized_daily_loss) + gross_risk + costs
-    if projected > DAILY_LOSS_CEILING + 1e-9:
+    if projected > ceiling + 1e-9:
         return RiskDecision(False,
                             f"daily-loss ceiling: realized {realized_daily_loss} + risk "
                             f"{gross_risk} + costs {costs:.2f} = {projected:.2f} > "
-                            f"{DAILY_LOSS_CEILING}",
+                            f"{ceiling:.2f} ({ceiling_why})",
                             quantity=qty, stop_price=stop.stop_price, target_price=tgt,
                             stop_distance=stop.stop_distance, gross_risk=gross_risk,
                             gross_reward=gross_reward, reward_to_risk=rr,

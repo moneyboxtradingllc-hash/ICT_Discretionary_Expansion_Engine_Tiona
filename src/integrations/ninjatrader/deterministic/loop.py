@@ -21,6 +21,7 @@ from integrations.ninjatrader.deterministic import (
     DECISION_WINDOW, TIMEZONE,
 )
 from integrations.ninjatrader.deterministic import author as AUTH
+from integrations.ninjatrader.deterministic import risk as RISK
 from integrations.ninjatrader.deterministic import facts_provider as FP
 from integrations.ninjatrader.deterministic import evidence as EV
 from integrations.ninjatrader.deterministic.session import SessionAuthority, ACTIVE, STOPPED_MANUAL
@@ -121,7 +122,9 @@ def one_scan(client: NinjaTraderBridgeClient, session: SessionAuthority, scan_nu
         position_known=bool(pos.get("known")), orders_known=bool(orders.get("known")),
         reconciliation_ok=session.last_reconcile_ok,
         realized_daily_loss=session.realized_loss(),
-        can_enter=can_enter, can_enter_reason=can_reason)
+        can_enter=can_enter, can_enter_reason=can_reason,
+        # Live equity from the bridge — this is what makes risk compound.
+        equity=acct.get("cash_value"))
 
     verdict = "NO_TRADE"
     routed = None
@@ -145,6 +148,11 @@ def one_scan(client: NinjaTraderBridgeClient, session: SessionAuthority, scan_nu
         "position": pos, "orders": orders,
         "trade_count": session.trade_count, "realized_pnl": session.realized_pnl,
         "author": decision.to_dict(),
+        # Compounding audit: the equity sizing was actually based on, and the
+        # budget/ceiling it produced. Without this a size change is unexplainable.
+        "equity": acct.get("cash_value"),
+        "risk_budget": RISK.risk_budget(acct.get("cash_value"))[1],
+        "daily_ceiling": RISK.daily_loss_ceiling(acct.get("cash_value"))[1],
         "snapshot": {"bars": len(bars), "last": quote.get("last"),
                      "setup_family": facts.get("setup_family"),
                      "mech_direction": facts.get("direction"),
