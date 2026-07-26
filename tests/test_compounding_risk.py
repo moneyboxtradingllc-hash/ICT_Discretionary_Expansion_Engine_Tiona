@@ -43,10 +43,13 @@ class TestRiskCompounds:
         """Compounding runs both ways — a smaller account risks less."""
         assert R.risk_budget(20_000)[0] < R.risk_budget(50_000)[0]
 
-    def test_contracts_grow_with_equity_until_the_ceiling(self):
-        few = R.contracts_for_stop(9.0, 25_000)
-        more = R.contracts_for_stop(9.0, 50_000)
-        assert more > few
+    def test_contracts_grow_with_equity(self):
+        """On a wide stop the budget governs, so size tracks equity directly."""
+        assert R.contracts_for_stop(25.0, 100_000) > R.contracts_for_stop(25.0, 25_000)
+
+    def test_the_contract_ceiling_grows_too(self):
+        """A fixed ceiling froze compounding at ~$75k; it must scale."""
+        assert R.contract_ceiling(250_000)[0] > R.contract_ceiling(50_000)[0]
 
     def test_the_reason_states_the_arithmetic(self):
         _, why = R.risk_budget(50_000)
@@ -105,15 +108,22 @@ class TestDailyCeilingScalesWithIt:
 
 
 class TestIncoherentConfigIsReportedNotSilent:
-    def test_budget_above_the_daily_ceiling_is_named(self, monkeypatch):
-        """A fixed $1000 ceiling against a 3% ($1,511) budget would reject every
-        trade forever and look like a broken bot rather than a risk limit."""
+    def test_budget_above_the_daily_ceiling_is_warned_not_auto_rejected(self, monkeypatch):
+        """The setting is incoherent, but not necessarily untradeable: the
+        contract ceiling often truncates actual risk far below the budget, and
+        the real test is actual risk. Warn; let the arithmetic decide."""
         monkeypatch.setattr(R, "DAILY_LOSS_PCT_OF_EQUITY", 0.5)
         monkeypatch.setattr(R, "RISK_PCT_OF_EQUITY", 3.0)
         d = R.assess_trade("short", 28540.0, 28552.25, 0.0, equity=50_000)
+        assert any("CONFIG:" in w and "DAILY_LOSS_PCT_OF_EQUITY" in w
+                   for w in d.warnings)
+
+    def test_actual_risk_over_the_ceiling_still_rejects(self, monkeypatch):
+        """A wide stop that the ceiling does NOT truncate must be refused."""
+        monkeypatch.setattr(R, "DAILY_LOSS_PCT_OF_EQUITY", 0.5)
+        d = R.assess_trade("short", 28540.0, 28565.0, 0.0, equity=50_000)
         assert d.approved is False
-        assert "UNTRADEABLE CONFIG" in d.reason
-        assert "DAILY_LOSS_PCT_OF_EQUITY" in d.reason
+        assert "daily-loss ceiling" in d.reason
 
     def test_the_budget_used_is_always_reported(self):
         d = R.assess_trade("short", 28540.0, 28552.25, 0.0, equity=50_000)
@@ -132,5 +142,40 @@ class TestExistingCallersAreUnchanged:
     def test_omitting_equity_preserves_legacy_sizing(self):
         assert R.contracts_for_stop(12.0) == int(MAX_RISK_DOLLARS // (12.0 * POINT_VALUE))
 
-    def test_the_contract_ceiling_still_binds(self):
-        assert R.contracts_for_stop(0.25, 10_000_000) == MAX_CONTRACTS
+    def test_an_absolute_backstop_still_binds(self):
+        from integrations.ninjatrader.deterministic import MAX_CONTRACTS_HARD
+        assert R.contracts_for_stop(0.25, 10_000_000) == MAX_CONTRACTS_HARD
+
+    def test_the_ceiling_never_drops_below_the_legacy_floor(self):
+        from integrations.ninjatrader.deterministic import MAX_CONTRACTS_FLOOR
+        for eq in (1_000, 10_000, 25_000, 50_000):
+            assert R.contract_ceiling(eq)[0] >= MAX_CONTRACTS_FLOOR
+
+
+class TestWhichLimitGovernedIsReported:
+    """On tight stops the CEILING governs, not the risk percentage. Knowing which
+    is the difference between risking 3% and believing you are."""
+
+    def test_a_tight_stop_is_governed_by_the_contract_ceiling(self):
+        s = R.size_for_stop(5.0, 50_000)
+        assert s["governed_by"] == "contract_ceiling"
+        assert s["wanted"] > s["quantity"]
+
+    def test_a_wide_stop_is_governed_by_the_risk_budget(self):
+        s = R.size_for_stop(25.0, 50_000)
+        assert s["governed_by"] == "risk_budget"
+
+    def test_actual_risk_is_reported_not_assumed(self):
+        s = R.size_for_stop(9.0, 50_000)
+        assert s["risk_at_stop"] == pytest.approx(s["quantity"] * 9.0 * POINT_VALUE)
+
+    def test_the_ceiling_makes_tight_stops_risk_less_not_more(self):
+        """A real consequence of capping: in the capped region, actual risk falls
+        as the stop tightens, inverting risk-based sizing."""
+        tight = R.size_for_stop(5.0, 50_000)["risk_at_stop"]
+        wide = R.size_for_stop(25.0, 50_000)["risk_at_stop"]
+        assert tight < wide
+
+    def test_sizing_detail_names_both_constraints(self):
+        d = R.size_for_stop(9.0, 50_000)["detail"]
+        assert "budget" in d and "ceiling" in d

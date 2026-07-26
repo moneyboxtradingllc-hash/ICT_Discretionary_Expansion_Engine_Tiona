@@ -17,7 +17,8 @@ from integrations.ninjatrader.deterministic import (
     TICK_SIZE, POINT_VALUE, TARGET_POINTS, MAX_STOP_POINTS, MAX_RISK_DOLLARS,
     MAX_CONTRACTS, DAILY_LOSS_CEILING, COMMISSION_PER_CONTRACT, SLIPPAGE_TICKS,
     RISK_PCT_OF_EQUITY, HARD_MAX_RISK_PCT, DAILY_LOSS_PCT_OF_EQUITY,
-    COMPOUNDING_ENABLED,
+    COMPOUNDING_ENABLED, CONTRACTS_PER_10K_EQUITY, MAX_CONTRACTS_FLOOR,
+    MAX_CONTRACTS_HARD,
 )
 
 LONG = "long"
@@ -79,6 +80,53 @@ def daily_loss_ceiling(equity=None) -> tuple:
                      f"equity ${e:,.2f}")
 
 
+def contract_ceiling(equity=None) -> tuple:
+    """Maximum contracts at this equity. Returns (ceiling, reason).
+
+    Scales so compounding does not plateau, never below the legacy fixed ceiling
+    and never above an absolute backstop. Unknown equity uses the legacy floor.
+    """
+    e = _equity(equity)
+    if not COMPOUNDING_ENABLED or e is None:
+        return MAX_CONTRACTS, f"fixed ceiling {MAX_CONTRACTS}"
+    scaled = int(e / 10_000.0 * CONTRACTS_PER_10K_EQUITY)
+    ceiling = max(MAX_CONTRACTS_FLOOR, min(scaled, MAX_CONTRACTS_HARD))
+    note = ""
+    if scaled > MAX_CONTRACTS_HARD:
+        note = f" (scaled {scaled} clamped to hard backstop {MAX_CONTRACTS_HARD})"
+    elif scaled < MAX_CONTRACTS_FLOOR:
+        note = f" (scaled {scaled} raised to floor {MAX_CONTRACTS_FLOOR})"
+    return ceiling, (f"{ceiling} = {CONTRACTS_PER_10K_EQUITY:g} per $10k of "
+                     f"${e:,.2f}{note}")
+
+
+def size_for_stop(stop_points, equity=None) -> dict:
+    """Contract count with the constraint that produced it named.
+
+    On tight stops the CONTRACT CEILING governs, not the risk percentage — at 3%
+    of equity a 5pt stop asks for 151 contracts. Knowing which limit bound the
+    trade is the difference between "risking 3%" and "believing you are".
+    """
+    try:
+        sp = float(stop_points)
+    except (TypeError, ValueError):
+        return {"quantity": 0, "governed_by": "invalid_stop", "detail": "stop not numeric"}
+    if sp <= 0 or sp > MAX_STOP_POINTS + 1e-9:
+        return {"quantity": 0, "governed_by": "stop_cap",
+                "detail": f"stop {sp} outside (0, {MAX_STOP_POINTS}]"}
+
+    budget, budget_why = risk_budget(equity)
+    ceiling, ceiling_why = contract_ceiling(equity)
+    wanted = int(budget // (sp * POINT_VALUE))       # floor — never over budget
+    qty = max(0, min(wanted, ceiling))
+    governed = "contract_ceiling" if wanted > ceiling else "risk_budget"
+    return {"quantity": qty, "wanted": wanted, "ceiling": ceiling,
+            "governed_by": governed,
+            "detail": (f"budget {budget_why} wants {wanted} at {sp}pt; "
+                       f"ceiling {ceiling_why} -> {qty} ({governed})"),
+            "risk_at_stop": round(qty * sp * POINT_VALUE, 2)}
+
+
 def contracts_for_stop(stop_points, equity=None) -> int:
     """RISK-BASED size: the largest whole contract count whose worst-case loss
     (stop_points x $POINT_VALUE) stays within the risk budget, capped at
@@ -93,9 +141,7 @@ def contracts_for_stop(stop_points, equity=None) -> int:
         return 0
     if sp <= 0 or sp > MAX_STOP_POINTS + 1e-9:
         return 0
-    budget, _ = risk_budget(equity)
-    raw = int(budget // (sp * POINT_VALUE))             # floor — never over budget
-    return max(0, min(raw, MAX_CONTRACTS))
+    return size_for_stop(stop_points, equity)["quantity"]
 
 
 def check_quantity(qty) -> tuple:
@@ -206,21 +252,21 @@ def assess_trade(direction: str, reference_price: float, structural_stop: float,
 
     budget, budget_why = risk_budget(equity)
     ceiling, ceiling_why = daily_loss_ceiling(equity)
+    sizing = size_for_stop(stop.stop_distance, equity)
     warnings.append(f"risk budget {budget_why}")
+    warnings.append(f"sizing {sizing['detail']}")
 
-    # Coherence: the ceiling is checked against the FULL proposed risk before the
-    # trade, so a ceiling below one trade's risk rejects every trade forever. Say
-    # so plainly instead of emitting an endless stream of anonymous refusals.
+    # A budget above the daily ceiling is an incoherent SETTING, but not
+    # necessarily an untradeable one: the contract ceiling often truncates actual
+    # risk well below the budget, and the real test below uses actual risk. Warn
+    # so the misconfiguration is visible; let the arithmetic decide.
     if budget > ceiling + 1e-9:
-        return RiskDecision(
-            False,
-            f"UNTRADEABLE CONFIG: per-trade budget {budget_why} exceeds the daily "
-            f"ceiling {ceiling_why} — no trade can ever be authorized. Raise "
-            f"DAILY_LOSS_PCT_OF_EQUITY above RISK_PCT_OF_EQUITY.",
-            stop_price=stop.stop_price, stop_distance=stop.stop_distance,
-            warnings=warnings)
+        warnings.append(
+            f"CONFIG: per-trade budget ({budget_why}) exceeds the daily ceiling "
+            f"({ceiling_why}) — only trades the contract ceiling truncates below "
+            f"{ceiling:.2f} can be authorized. Raise DAILY_LOSS_PCT_OF_EQUITY.")
 
-    qty = contracts_for_stop(stop.stop_distance, equity)
+    qty = sizing["quantity"]
     ok_q, why_q = check_quantity(qty)
     if not ok_q:
         return RiskDecision(False, why_q, stop_price=stop.stop_price,

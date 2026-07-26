@@ -57,10 +57,25 @@ DAILY_LOSS_CEILING = 1000.00    # realized-loss ceiling ($) — fallback when eq
 #
 # Equity unknown (bridge down, zero, or absent) falls back to the fixed dollar
 # constants above — never to a larger number.
-RISK_PCT_OF_EQUITY      = 1.00   # per-trade risk as % of equity
+RISK_PCT_OF_EQUITY      = 3.00   # per-trade risk as % of equity (operator: at the cap)
 HARD_MAX_RISK_PCT       = 3.00   # absolute ceiling — config can never exceed this
-DAILY_LOSS_PCT_OF_EQUITY = 2.00  # daily realized-loss ceiling as % of equity
+DAILY_LOSS_PCT_OF_EQUITY = 6.50  # daily realized-loss ceiling as % of equity
 COMPOUNDING_ENABLED     = True   # False restores flat MAX_RISK_DOLLARS sizing
+
+# Contract ceiling scales with equity so compounding does not plateau. A FIXED
+# MAX_CONTRACTS=30 froze size at ~$75k: the budget kept growing while the
+# contract count did not, so risk stopped compounding exactly as the account got
+# big enough for it to matter.
+#
+# This ceiling is doing more work than it appears. At 3% of equity a TIGHT stop
+# demands enormous size — $1,511 against a 5pt stop is 151 MNQ contracts, roughly
+# $3M notional on a $50k account. The dollar risk is still 3%, but the leverage
+# is not modest, and slippage at that size is NOT modelled anywhere in this
+# engine. The cap, not the risk percentage, is what actually governs size on
+# tight stops; risk.py reports which of the two bound each trade.
+CONTRACTS_PER_10K_EQUITY = 6.0   # scaled ceiling; 30 at $50k, 60 at $100k
+MAX_CONTRACTS_FLOOR      = 30    # never below the legacy fixed ceiling
+MAX_CONTRACTS_HARD       = 200   # absolute backstop regardless of equity
 
 MAX_SIMULTANEOUS_POSITIONS = 1
 SCALE_IN = False
