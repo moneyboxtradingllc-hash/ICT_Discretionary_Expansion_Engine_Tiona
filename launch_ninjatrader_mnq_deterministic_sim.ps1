@@ -12,6 +12,24 @@ $env:DETERMINISTIC_MAX_RISK = "500"   # risk-based sizing target (informational)
 $env:OPENAI_DISABLED_FOR_INTEGRATION = "1"
 $env:PYTHONPATH = "src"
 
+# ── REGIME CLASSIFIER IS OBSERVE-ONLY (operator decision, 2026-07-26) ──
+# regime_classifier.py has always been observe_only with confidence_modifier 0.
+# Phase 5F.2 then added regime_permission_matrix.py — a SEPARATE execution
+# authority defaulting to "true" — which re-armed the veto under a different
+# name. It vetoes on the regime LABEL, and that label falls to `range_rotation`
+# whenever trend_score misses 55, which it does during distribution.
+#
+# Replayed 2026-07-24: PO3 distribution + bearish narrative + valid block + valid
+# OTE, rejected because regime read `range_rotation` and _REVERSAL_ONLY_REGIMES
+# permits only reversal families. Distribution and range rotation cannot both
+# describe the trading timeframe.
+#
+# The regime classifier consumes a far narrower evidence set than the narrative
+# pipeline and must not outrank it. It stays a source of EVIDENCE: disagreement
+# should adjust confidence, never veto execution. Do not remove this line without
+# an explicit architecture decision.
+$env:REGIME_AUTHORITY_ENABLED = "false"
+
 Write-Host "======================================================================"
 Write-Host "MODE: DETERMINISTIC_MNQ_SIM_ONLY"
 Write-Host "AUTHOR: deterministic_sim_author"
