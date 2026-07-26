@@ -98,6 +98,15 @@ MAX_CONTRACTS_HARD    = 1000       # absolute backstop against bad equity data o
 # exposure explicitly rather than leaving it implicit.
 OVERNIGHT_HOLD_ALLOWED = False     # doctrine: intraday only
 
+# Forced flat before the 16:00 close. Entries already stop at 14:00, but nothing
+# previously closed an OPEN position, and a compounded 83-lot position carried
+# overnight needs $347,531 of initial margin against a $50k account. The window
+# starts early enough to retry across several 30s scans if a flatten fails, and
+# runs past the close so a late or hung scan still acts.
+FLATTEN_AT      = "15:50"
+FLATTEN_UNTIL   = "16:15"
+AUTO_FLATTEN_ENABLED = True
+
 MAX_SIMULTANEOUS_POSITIONS = 1
 SCALE_IN = False
 PYRAMIDING = False

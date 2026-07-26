@@ -18,7 +18,8 @@ from integrations.ninjatrader.bridge_client import NinjaTraderBridgeClient
 from integrations.ninjatrader.deterministic import (
     MODE, AUTHOR, ACCOUNT, INSTRUMENT, TARGET_POINTS, MAX_STOP_POINTS,
     MAX_RISK_DOLLARS, MAX_CONTRACTS, MAX_TRADES_PER_DAY, DAILY_LOSS_CEILING,
-    DECISION_WINDOW, TIMEZONE,
+    DECISION_WINDOW, TIMEZONE, FLATTEN_AT, FLATTEN_UNTIL,
+    AUTO_FLATTEN_ENABLED,
 )
 from integrations.ninjatrader.deterministic import author as AUTH
 from integrations.ninjatrader.deterministic import risk as RISK
@@ -43,6 +44,53 @@ def _in_decision_window(now=None) -> bool:
     now = now or _now_et()
     hm = now.strftime("%H:%M")
     return DECISION_WINDOW[0] <= hm <= DECISION_WINDOW[1]
+
+
+def _in_flatten_window(now=None) -> bool:
+    """Inside the forced-flat window before the session close."""
+    now = now or _now_et()
+    if now.weekday() >= 5:            # futures are shut; nothing to close
+        return False
+    return FLATTEN_AT <= now.strftime("%H:%M") <= FLATTEN_UNTIL
+
+
+def force_flat_if_due(client, session, pos, orders, scan_num) -> Optional[dict]:
+    """Close any open position before the session close.
+
+    Intraday size cannot be carried overnight: day margin is $100 a contract
+    against $4,187.12 initial, so a compounded 83-lot position needs $347,531
+    against a $50k account. Entries already stop at 14:00, but nothing closed an
+    OPEN position — stop_lane.py does, and it is run by hand.
+
+    Retries every scan across the window, because one failed flatten must not be
+    the end of the attempt. A failure here is the most serious event this loop
+    can produce, so it is shouted rather than logged quietly.
+    """
+    if not AUTO_FLATTEN_ENABLED or not _in_flatten_window():
+        return None
+    if not bool(pos.get("known")):
+        print(f"[scan {scan_num}] !! FLATTEN WINDOW but position UNKNOWN — "
+              f"cannot confirm flat before the close. CHECK MANUALLY.")
+        return {"attempted": False, "reason": "position unknown"}
+
+    qty = int(pos.get("qty", 0) or 0)
+    working = int((orders or {}).get("working_order_count", 0) or 0)
+    if qty == 0 and working == 0:
+        return {"attempted": False, "reason": "already flat, no working orders"}
+
+    print(f"[scan {scan_num}] FLATTEN WINDOW — closing {qty} contracts "
+          f"({working} working orders) before the {FLATTEN_UNTIL} cutoff")
+    result = client.flatten(INSTRUMENT)
+    ok = bool(result.get("ok"))
+    if ok:
+        session.stop_new_entries(STOPPED_MANUAL)
+        print(f"[scan {scan_num}] FLATTENED — {result}")
+    else:
+        print(f"[scan {scan_num}] !! FLATTEN FAILED: {result.get('reason')!r} — "
+              f"{qty} contracts still open. Retrying next scan. FLATTEN MANUALLY "
+              f"IF THIS PERSISTS.")
+    return {"attempted": True, "ok": ok, "qty_before": qty,
+            "working_before": working, "result": result}
 
 
 def _stop_requested() -> bool:
@@ -104,6 +152,14 @@ def one_scan(client: NinjaTraderBridgeClient, session: SessionAuthority, scan_nu
         print(f"[scan {scan_num}] TRADE CLOSED — realized ${delta:+.2f} "
               f"(session realized ${session.realized_pnl:+.2f}, state {session.state})")
 
+    # 1b. Forced flat before the close. Runs BEFORE any entry evaluation so a
+    # scan can never open size in the same pass it is meant to be closing.
+    flatten_action = force_flat_if_due(client, session, pos, orders, scan_num)
+    if flatten_action and flatten_action.get("attempted"):
+        pos = client.position(INSTRUMENT)          # re-read; state just changed
+        orders = client.order_summary()
+        session.apply_reconciliation(pos, orders)
+
     account_known = bool(acct.get("account") == ACCOUNT)
     armed = env.get("arm_orders") is True
     in_window = _in_decision_window()
@@ -148,6 +204,7 @@ def one_scan(client: NinjaTraderBridgeClient, session: SessionAuthority, scan_nu
         "position": pos, "orders": orders,
         "trade_count": session.trade_count, "realized_pnl": session.realized_pnl,
         "author": decision.to_dict(),
+        "flatten_action": flatten_action,
         # Compounding audit: the equity sizing was actually based on, and the
         # budget/ceiling it produced. Without this a size change is unexplainable.
         "equity": acct.get("cash_value"),
