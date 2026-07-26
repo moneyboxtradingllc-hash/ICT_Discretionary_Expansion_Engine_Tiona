@@ -9,6 +9,9 @@ from volatility.expansion_detector import detect_expansion
 from structure.po3_engine import analyze_po3_snapshot
 from structure.manipulation_detector import detect_manipulation
 from structure.market_context import analyze_market_context
+from regime_classification.structure_hierarchy import (
+    htf_authority, classify_relationship,
+)
 from market_commander.market_commander import build_market_commander_matrix  # MC Phase B1 (observe-only)
 from ai_layer.narrative_builder import build_narrative
 from ai_layer.confidence_engine import score_confidence
@@ -109,8 +112,22 @@ def build_snapshot(
     )
     session = anchor["session_label"] if anchor else "unknown"
 
+    # ── Standing directional authority, established BEFORE PO3.
+    # htf_authority derives from `structure` alone, which is already computed, so
+    # PO3 can be reconciled against it without inverting the dependency chain
+    # (PO3 -> regime -> context). Reconciliation is additive: it annotates how
+    # each phase sits inside the authority and never rewrites the phase itself.
+    _ctx_series = next((all_normalized[tf] for tf in ("1m", "3m", "5m", "15m")
+                        if all_normalized.get(tf)), None)
+    _last_price = _ctx_series[-1]["close"] if _ctx_series else None
+    _authority = htf_authority(structure.get("15m"), _last_price, "15m")
+    _relationship = classify_relationship(
+        _authority, str((structure.get("5m") or {}).get("bias") or "neutral").lower())
+
     # PO3 phase analysis — runs on already-computed mechanical evidence
-    po3 = analyze_po3_snapshot(structure, liquidity, volatility, expansion)
+    po3 = analyze_po3_snapshot(structure, liquidity, volatility, expansion,
+                               authority=_authority,
+                               relationship=_relationship["relationship"])
 
     # VECTOR-3 — stateful stability layer. The pure engine above re-derives phases
     # and alignment from scratch each scan; the manager (when the live loop passes
@@ -192,11 +209,9 @@ def build_snapshot(
     # it consumes rather than duplicates. Adds what nothing upstream provides:
     # retracement as an environment, the dealing range / premium-discount, and
     # the authority downstream asks before assigning direction to a local event.
-    _ctx_series = next((all_normalized[tf] for tf in ("1m", "3m", "5m", "15m")
-                        if all_normalized.get(tf)), None)
     snapshot["market_context"] = analyze_market_context(
         structure, liquidity, expansion, po3, snapshot["market_regime"],
-        last_price=(_ctx_series[-1]["close"] if _ctx_series else None))
+        last_price=_last_price)
 
     # ── Phase NEWS-1 — News Intelligence pre-pass (gated NEWS_LAYER_ENABLED) ───
     # Attaches non-directional market-awareness context (scheduled events,

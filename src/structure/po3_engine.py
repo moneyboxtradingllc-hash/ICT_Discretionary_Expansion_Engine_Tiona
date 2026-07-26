@@ -173,6 +173,61 @@ def _directions(phase: str, sweep_dir, bias: str) -> tuple:
     return manip_dir, manip_src, dist_dir, dist_src
 
 
+# ── Authority reconciliation ──────────────────────────────────────────────────
+
+# How each phase sits inside a standing directional authority. PO3 answers "what
+# phase are we in"; authority answers "inside what". Neither overrides the other.
+#
+# This is deliberately ADDITIVE. It does not touch phase, phase_scores, or the
+# sweep-derived directions: AB-2C removed the structure-bias fallback so that
+# structure bias could never author a PO3 direction, and reconciliation must not
+# reintroduce it by the back door. The reading below is a separate field that
+# downstream may consult; the phase itself is unchanged.
+
+def reconcile_phase(phase: str, authority: dict, relationship: str) -> dict:
+    """Read a PO3 phase inside the standing authority.
+
+    The case that motivated this: at the 2026-07-24 entry PO3 reported
+    `accumulation` while context reported a retracement under intact bearish
+    authority. Both were right and they looked contradictory. Accumulation
+    during a retracement is re-accumulation before continuation, not a bullish
+    base — and nothing in the output said so.
+    """
+    bias = (authority or {}).get("bias", "neutral")
+    intact = bool((authority or {}).get("intact"))
+
+    if bias not in ("bullish", "bearish") or not intact:
+        return {"reading": "unqualified", "coherent": None,
+                "note": ("no standing directional authority — phase stands on its "
+                         "own evidence")}
+
+    counter = "bullish" if bias == "bearish" else "bearish"
+
+    if phase == "accumulation":
+        if relationship == "retracement":
+            return {"reading": "re_accumulation_for_continuation", "coherent": True,
+                    "note": (f"accumulation inside a {bias} retracement — inventory "
+                             f"rebuilt before continuation, not a {counter} base")}
+        return {"reading": "accumulation_within_authority", "coherent": True,
+                "note": f"balance inside standing {bias} authority"}
+
+    if phase == "distribution":
+        return {"reading": "repricing_with_authority", "coherent": True,
+                "note": f"repricing in the direction of {bias} authority"}
+
+    if phase == "manipulation":
+        return {"reading": "liquidity_engineering_within_authority", "coherent": True,
+                "note": f"engineered liquidity inside standing {bias} authority"}
+
+    if phase == "transition":
+        return {"reading": "authority_challenged", "coherent": False,
+                "note": (f"transition against standing {bias} authority — a phase "
+                         "change here contests the dominant read")}
+
+    return {"reading": "unqualified", "coherent": None,
+            "note": f"phase {phase!r} carries no authority interpretation"}
+
+
 # ── Notes ─────────────────────────────────────────────────────────────────────
 
 def _notes(phase: str, comp: int, dir_eff: float,
@@ -316,7 +371,17 @@ def _po3_alignment(results: dict) -> str:
 # ── Snapshot Entry Point ──────────────────────────────────────────────────────
 
 def analyze_po3_snapshot(structure: dict, liquidity: dict,
-                          volatility: dict, expansion: dict) -> dict:
+                          volatility: dict, expansion: dict,
+                          authority: dict = None,
+                          relationship: str = None) -> dict:
+    """Per-timeframe PO3 phases, optionally reconciled against standing authority.
+
+    `authority` / `relationship` come from the hierarchy in
+    regime_classification.structure_hierarchy, which derives them from structure
+    alone — so they are available before this runs and no dependency is inverted.
+    When omitted, output is bit-for-bit unchanged: reconciliation is additive and
+    never rewrites a phase, a score, or a direction.
+    """
     results = {
         tf: analyze_po3(
             structure.get(tf, {}),
@@ -326,5 +391,13 @@ def analyze_po3_snapshot(structure: dict, liquidity: dict,
         )
         for tf in TIMEFRAMES
     }
+    if authority is not None:
+        for tf in TIMEFRAMES:
+            results[tf]["authority_reading"] = reconcile_phase(
+                results[tf].get("phase", "no_phase"), authority, relationship or "")
+        results["authority"] = {"bias": authority.get("bias"),
+                                "intact": authority.get("intact"),
+                                "relationship": relationship,
+                                "detail": authority.get("detail")}
     results["alignment"] = _po3_alignment(results)
     return results
