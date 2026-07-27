@@ -163,9 +163,14 @@ class TestLayer1Intelligence(unittest.TestCase):
         self.assertEqual(m["participation"]["decision"], "STAND_DOWN")
 
     def test_05_liquidity_vacuum_cannot_be_outvoted(self):
+        # `liquidity_vacuum` is a VOLATILITY state, never a regime_label —
+        # classify_regime cannot emit it. The fixture previously put it in
+        # regime_label, which is where the guardian used to look, so the test
+        # passed against a veto that could never fire on real data.
         m = build_market_commander_matrix(rich_directional(
-            market_regime={"regime_label": "liquidity_vacuum", "confidence": 84,
-                           "volatility_state": "stable", "expansion_state": "healthy_expansion"}))
+            market_regime={"regime_label": "trend_up", "confidence": 84,
+                           "volatility_state": "liquidity_vacuum",
+                           "expansion_state": "healthy_expansion"}))
         self.assertEqual(m["environment"]["family"], FAM_HOSTILE)
         self.assertEqual(m["environment"]["type"], "LIQUIDITY_VACUUM")
         self.assertEqual(m["participation"]["decision"], "STAND_DOWN")

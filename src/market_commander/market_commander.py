@@ -540,10 +540,16 @@ def _guardian(view):
         return {"kind": "veto", "family": FAM_HOSTILE, "member": "NEWS_CHAOS",
                 "supports": [f"news_context.risk_state={nc.get('risk_state')}"]}
     mr = view.get("market_regime") or {}
-    regime = (mr.get("regime_label") or "").lower()
-    if regime == "liquidity_vacuum" or view.get("liquidity_vacuum") is True:
+    # `liquidity_vacuum` is a VOLATILITY state (volatility_classifier), never a
+    # regime_label — classify_regime can only emit trend_up/trend_down/
+    # range_rotation/chop/expansion_up/expansion_down/reversal_attempt/
+    # high_volatility/low_volatility/unknown. Testing regime_label against it
+    # meant this veto could never fire: a safety guardian that had never once
+    # been reachable. market_regime carries volatility_state; that is the source.
+    vol_state = (mr.get("volatility_state") or "").lower()
+    if vol_state == "liquidity_vacuum" or view.get("liquidity_vacuum") is True:
         return {"kind": "veto", "family": FAM_HOSTILE, "member": "LIQUIDITY_VACUUM",
-                "supports": ["liquidity_vacuum signalled"]}
+                "supports": [f"volatility_state={vol_state or 'flagged'}"]}
     # Deadness must be ANCHORED on low volatility/regime — compression with normal
     # volatility is a ROTATIONAL/CONSOLIDATION tape, not a dead one. The anchor plus
     # >= DEAD_CONFIRM_SUPPORTS total CONFIRMS; anchor alone SUSPECTS.
@@ -600,19 +606,34 @@ def _resolve_member(family, view):
 
 
 def _regime_family(view):
+    """Map the regime read onto a family.
+
+    Five of the values this tested against were unmatchable, borrowed from two
+    other vocabularies: `accumulation` and `distribution` are PO3 PHASES,
+    `liquidity_vacuum` is a VOLATILITY state, and `consolidation` and `dead` are
+    emitted by nothing at all. regime_label can only ever be one of the ten
+    labels classify_regime produces, so those branches were dead code.
+
+    PO3 is NOT bridged in here. It already reaches family scoring through
+    _w_po3, which maps distribution to DIRECTIONAL — routing the same phase to
+    TRANSITIONAL here would have the two disagree about the same evidence.
+    """
     mr = view.get("market_regime") or {}
     regime = (mr.get("regime_label") or "unknown").lower()
-    exp_state = (mr.get("expansion_state") or "").lower()
-    if regime in ("expansion_up", "expansion_down", "trend_up", "trend_down", "high_volatility"):
-        return FAM_DIRECTIONAL
-    if regime in ("range_rotation", "chop", "consolidation"):
-        return FAM_ROTATIONAL
-    if regime in ("accumulation", "distribution", "reversal_attempt"):
-        return FAM_TRANSITIONAL
-    if regime in ("low_volatility", "dead"):
-        return FAM_INERT
-    if regime == "liquidity_vacuum":
+    vol_state = (mr.get("volatility_state") or "").lower()
+
+    # Hostile first: a liquidity vacuum outranks whatever the trend read says.
+    if vol_state == "liquidity_vacuum":
         return FAM_HOSTILE
+    if regime in ("expansion_up", "expansion_down", "trend_up", "trend_down",
+                  "high_volatility"):
+        return FAM_DIRECTIONAL
+    if regime in ("range_rotation", "chop"):
+        return FAM_ROTATIONAL
+    if regime == "reversal_attempt":
+        return FAM_TRANSITIONAL
+    if regime == "low_volatility":
+        return FAM_INERT
     return FAM_UNKNOWN
 
 
