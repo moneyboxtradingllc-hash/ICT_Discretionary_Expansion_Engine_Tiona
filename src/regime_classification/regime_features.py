@@ -85,7 +85,13 @@ def _extract(snapshot: dict, raw_data=None) -> dict:
     # authority. Computed here because is_bullish / is_bearish depend on it.
     ctx_candles = (raw_data or {}).get("5m") or (raw_data or {}).get("15m") or []
     last_price = ctx_candles[-1]["close"] if ctx_candles else None
-    authority = htf_authority(s15, last_price, "15m")
+    # DOCTRINE: direction comes from Liquidity and PO3, never from structure.
+    # `structure` is passed for CONFIRMATION reporting only. narrative_authority
+    # is built later in snapshot_builder than this runs, so the liquidity draw is
+    # usually absent here and PO3 authors instead — authority #2 of the order.
+    authority = htf_authority(s15, last_price, "15m",
+                              narrative=snapshot.get("narrative_authority"),
+                              po3=po3, liquidity=liquidity)
     relationship = classify_relationship(authority, bias_5)
     seq = swing_sequence((raw_data or {}).get("15m") or ctx_candles)
     rng = range_metrics(ctx_candles)

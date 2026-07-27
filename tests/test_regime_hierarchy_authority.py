@@ -70,8 +70,16 @@ def _flat(n=40, base=28000.0):
     return [_c(base, base + 4, base - 4, base) for _ in range(n)]
 
 
-def _snapshot(bias_15, bias_5, swing_high=28650.0, swing_low=28200.0):
+def _snapshot(bias_15, bias_5, swing_high=28650.0, swing_low=28200.0,
+              authored=None, invalidation=None):
+    """`authored` is the direction LIQUIDITY/PO3 publish. Structure bias is
+    confirmation only and can never author direction (doctrine, 2026-07-27)."""
+    authored = authored if authored is not None else bias_15
     return {
+        "po3": {"15m": {"phase": "distribution",
+                        "delivery_direction": authored if authored in
+                        ("bullish", "bearish") else None}},
+        "narrative_authority": {"invalidation_level": invalidation},
         "structure": {
             "15m": {"bias": bias_15, "state": "bearish_continuation", "bos": True,
                     "mss": False, "last_swing_high": swing_high, "last_swing_low": swing_low},
@@ -82,7 +90,7 @@ def _snapshot(bias_15, bias_5, swing_high=28650.0, swing_low=28200.0):
         "expansion": {"15m": {"state": "early_expansion", "expansion_score": 40,
                               "displacement_detected": True},
                       "5m": {"state": "early_expansion", "displacement_detected": False}},
-        "liquidity": {}, "po3": {}, "ai_context": {"directional_bias": "bearish"},
+        "liquidity": {}, "ai_context": {"directional_bias": "bearish"},
     }
 
 
@@ -91,20 +99,20 @@ def _snapshot(bias_15, bias_5, swing_high=28650.0, swing_low=28200.0):
 class TestRetracementDoesNotEraseTrend:
     def test_bearish_htf_with_bullish_ltf_keeps_directional_authority(self):
         raw = {"15m": _downtrend(), "5m": _downtrend()}
-        f = extract_regime_features(_snapshot("bearish", "bullish"), raw)
+        f = extract_regime_features(_snapshot("bearish", "bullish", invalidation=28650.0), raw)
         assert f["htf_authority"]["bias"] == "bearish"
         assert f["htf_authority"]["intact"] is True
         assert f["htf_relationship"] == "retracement"
 
     def test_retracement_earns_the_same_trend_weight_as_agreement(self):
         raw = {"15m": _downtrend(), "5m": _downtrend()}
-        aligned = extract_regime_features(_snapshot("bearish", "bearish"), raw)
-        pulled_back = extract_regime_features(_snapshot("bearish", "bullish"), raw)
+        aligned = extract_regime_features(_snapshot("bearish", "bearish", invalidation=28650.0), raw)
+        pulled_back = extract_regime_features(_snapshot("bearish", "bullish", invalidation=28650.0), raw)
         assert pulled_back["trend_score"] == aligned["trend_score"]
 
     def test_reasoning_states_why_it_is_a_retracement(self):
         raw = {"15m": _downtrend(), "5m": _downtrend()}
-        f = extract_regime_features(_snapshot("bearish", "bullish"), raw)
+        f = extract_regime_features(_snapshot("bearish", "bullish", invalidation=28650.0), raw)
         assert "not violated" in f["htf_reasoning"].lower()
 
 
@@ -122,8 +130,9 @@ class TestRetracementIsSymmetric:
         assert f["is_bearish"] is False
 
     def test_bullish_authority_invalidates_below_its_swing_low(self):
-        auth = htf_authority({"bias": "bullish", "last_swing_low": 28200.0},
-                             last_price=28100.0)
+        auth = htf_authority(None, last_price=28100.0,
+                             po3={"15m": {"delivery_direction": "bullish"}},
+                             narrative={"invalidation_level": 28200.0})
         assert auth["intact"] is False
         assert classify_relationship(auth, "bearish")["relationship"] == "authority_violated"
 
@@ -133,14 +142,15 @@ class TestRetracementIsSymmetric:
 class TestUncertaintyIsPreserved:
     def test_neutral_htf_yields_no_authority(self):
         raw = {"15m": _flat(), "5m": _flat()}
-        f = extract_regime_features(_snapshot("neutral", "bullish"), raw)
+        f = extract_regime_features(_snapshot("neutral", "bullish", authored="neutral"), raw)
         assert f["htf_authority"]["bias"] == "neutral"
         assert f["htf_relationship"] == "no_authority"
 
     def test_violated_authority_is_not_a_retracement(self):
         """Price through the HTF invalidation is not a pullback."""
-        auth = htf_authority({"bias": "bearish", "last_swing_high": 28500.0},
-                             last_price=28600.0)
+        auth = htf_authority(None, last_price=28600.0,
+                             po3={"15m": {"delivery_direction": "bearish"}},
+                             narrative={"invalidation_level": 28500.0})
         assert auth["intact"] is False
         assert classify_relationship(auth, "bullish")["relationship"] == "authority_violated"
 
@@ -156,28 +166,31 @@ class TestReversalRequiresStructuralEvidence:
 
     def test_disagreement_alone_does_not_produce_a_reversal_label(self):
         raw = {"15m": _downtrend(), "5m": _downtrend()}
-        snap = _snapshot("bearish", "bullish")       # no sweep, no reclaim, no mss
+        snap = _snapshot("bearish", "bullish", invalidation=28650.0)       # no sweep, no reclaim, no mss
         result = classify_regime(snap, raw)
         assert result["regime_label"] != "reversal_attempt"
         assert result["htf_relationship"] == "retracement"
 
     def test_reversal_attempt_requires_sweep_reclaim_and_mss(self):
         raw = {"15m": _downtrend(), "5m": _downtrend()}
-        snap = _snapshot("bearish", "bullish")
+        snap = _snapshot("bearish", "bullish", invalidation=28650.0)
         snap["structure"]["15m"]["mss"] = True
         snap["liquidity"] = {"5m": {"sweep_detected": True, "reclaim_detected": True}}
         assert classify_regime(snap, raw)["regime_label"] == "reversal_attempt"
 
     def test_mss_without_a_sweep_is_not_yet_a_reversal(self):
         raw = {"15m": _downtrend(), "5m": _downtrend()}
-        snap = _snapshot("bearish", "bullish")
+        snap = _snapshot("bearish", "bullish", invalidation=28650.0)
         snap["structure"]["15m"]["mss"] = True
         assert classify_regime(snap, raw)["regime_label"] != "reversal_attempt"
 
     def test_violated_authority_is_reported_even_without_a_reversal_label(self):
         """Losing authority and calling a reversal are different claims."""
         raw = {"15m": _downtrend(), "5m": _downtrend()}
-        snap = _snapshot("bearish", "bullish", swing_high=28100.0)   # price above it
+        # Invalidation now follows the liquidity objective, not a structure
+        # swing. Price closes near 28,384; an invalidation below that puts price
+        # through it and revokes the bearish authority.
+        snap = _snapshot("bearish", "bullish", invalidation=28300.0)
         result = classify_regime(snap, raw)
         assert result["htf_relationship"] == "authority_violated"
 
@@ -197,7 +210,7 @@ class TestHistoryLengthInvariance:
 
     def test_regime_features_are_history_invariant(self):
         recent = _downtrend(40)
-        snap = _snapshot("bearish", "bullish")
+        snap = _snapshot("bearish", "bullish", invalidation=28650.0)
         short = extract_regime_features(snap, {"15m": _flat(30) + recent,
                                                "5m": _flat(30) + recent})
         long_ = extract_regime_features(snap, {"15m": _flat(3000) + recent,
@@ -231,7 +244,7 @@ class TestFeaturesAreDerivedNotLiteral:
 
     def test_extractor_surfaces_all_four_swing_counters(self):
         raw = {"15m": _downtrend(), "5m": _downtrend()}
-        f = extract_regime_features(_snapshot("bearish", "bearish"), raw)
+        f = extract_regime_features(_snapshot("bearish", "bearish", invalidation=28650.0), raw)
         for k in ("higher_highs", "lower_highs", "higher_lows", "lower_lows"):
             assert k in f
         assert not all(f[k] == 0 for k in ("higher_highs", "lower_highs",
@@ -244,13 +257,13 @@ class TestExpansionVocabulary:
     @pytest.mark.parametrize("state", ["early_expansion", "healthy_expansion",
                                        "mature_expansion"])
     def test_real_expansion_states_register_as_expanding(self, state):
-        snap = _snapshot("bearish", "bearish")
+        snap = _snapshot("bearish", "bearish", invalidation=28650.0)
         snap["expansion"]["15m"]["state"] = state
         f = extract_regime_features(snap, {"15m": _downtrend(), "5m": _downtrend()})
         assert f["is_expanding"] is True, f"{state} must count as expanding"
 
     def test_compression_is_not_expanding(self):
-        snap = _snapshot("bearish", "bearish")
+        snap = _snapshot("bearish", "bearish", invalidation=28650.0)
         snap["expansion"]["15m"]["state"] = "compression"
         snap["expansion"]["5m"]["state"] = "compression"
         f = extract_regime_features(snap, {"15m": _flat(), "5m": _flat()})
@@ -259,8 +272,61 @@ class TestExpansionVocabulary:
 
     def test_the_fictional_vocabulary_no_longer_registers(self):
         """"expanding" belongs to volatility, not expansion. It must not count."""
-        snap = _snapshot("bearish", "bearish")
+        snap = _snapshot("bearish", "bearish", invalidation=28650.0)
         snap["expansion"]["15m"]["state"] = "expanding"
         snap["expansion"]["5m"]["state"] = "expanding"
         f = extract_regime_features(snap, {"15m": _flat(), "5m": _flat()})
         assert f["is_expanding"] is False
+
+
+class TestStructureCanNeverAuthorDirection:
+    """Doctrine, 2026-07-27. Direction comes from Liquidity and PO3. Structure
+    requires confirmed pivots before it updates, so it is retrospective by
+    construction — measured live at 09:49 with price 28,481 while every
+    higher-timeframe swing sat 150-220 points above it. It confirms completed
+    movement; it never declares emerging direction."""
+
+    def test_structure_bias_alone_yields_no_authority(self):
+        for bias in ("bullish", "bearish"):
+            a = htf_authority({"bias": bias, "last_swing_high": 28650.0,
+                               "last_swing_low": 28200.0}, last_price=28400.0)
+            assert a["bias"] == "neutral", f"structure {bias} must not author"
+            assert a["source"] is None
+
+    def test_liquidity_draw_authors_first(self):
+        a = htf_authority({"bias": "bullish"}, 28400.0,
+                          narrative={"active_liquidity_draw":
+                                     {"side": "sell_side", "level": 28300.0}},
+                          po3={"15m": {"delivery_direction": "bullish"}})
+        assert a["bias"] == "bearish", "the liquidity objective outranks PO3"
+        assert a["source"] == "liquidity.active_liquidity_draw"
+
+    def test_po3_authors_when_no_draw_exists(self):
+        a = htf_authority({"bias": "bullish"}, 28400.0,
+                          po3={"15m": {"delivery_direction": "bearish"}})
+        assert a["bias"] == "bearish"
+        assert a["source"].startswith("po3.")
+
+    def test_narrative_direction_is_the_last_resort(self):
+        a = htf_authority({"bias": "bullish"}, 28400.0,
+                          narrative={"narrative_direction": "bearish"})
+        assert a["bias"] == "bearish"
+        assert a["source"] == "narrative.narrative_direction"
+
+    def test_structure_is_still_reported_as_confirmation(self):
+        a = htf_authority({"bias": "bearish", "bos": True, "mss": False}, 28400.0,
+                          po3={"15m": {"delivery_direction": "bearish"}})
+        c = a["confirmation"]
+        assert c["structure_bias"] == "bearish" and c["bos"] is True
+        assert "does not author" in c["note"]
+
+    def test_invalidation_never_comes_from_a_structure_swing(self):
+        """Structure swings lag and produced 37-77pt stops against a 25pt cap."""
+        a = htf_authority({"bias": "bearish", "last_swing_high": 28650.0}, 28400.0,
+                          po3={"15m": {"delivery_direction": "bearish"}})
+        assert a["invalidation"] != 28650.0
+
+    def test_no_objective_is_an_honest_absence(self):
+        a = htf_authority({"bias": "bearish"}, 28400.0, po3={}, narrative={})
+        assert a["bias"] == "neutral"
+        assert "no live liquidity objective" in a["detail"]

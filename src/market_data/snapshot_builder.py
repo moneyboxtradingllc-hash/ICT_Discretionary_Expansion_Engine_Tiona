@@ -6,7 +6,7 @@ from structure.liquidity_engine import analyze_liquidity
 from volatility.atr_engine import calculate_atr
 from volatility.volatility_classifier import classify_volatility
 from volatility.expansion_detector import detect_expansion
-from structure.po3_engine import analyze_po3_snapshot
+from structure.po3_engine import analyze_po3_snapshot, reconcile_phase
 from structure.manipulation_detector import detect_manipulation
 from structure.displacement_detector import detect_displacement
 from structure.market_context import analyze_market_context
@@ -82,6 +82,11 @@ def build_snapshot(
     _ctx_series = next((all_normalized[tf] for tf in ("1m", "3m", "5m", "15m")
                         if all_normalized.get(tf)), None)
     _last_price = _ctx_series[-1]["close"] if _ctx_series else None
+    # DOCTRINE: Liquidity and PO3 author direction; structure confirms only.
+    # Neither exists yet at this point in the build (po3 is computed below,
+    # narrative_authority later still), so this early authority is deliberately
+    # neutral — it feeds displacement's coherence note, which is reported and
+    # never enforced. The authoritative read is recomputed after PO3.
     _authority = htf_authority(structure.get("15m"), _last_price, "15m")
     _relationship = classify_relationship(
         _authority, str((structure.get("5m") or {}).get("bias") or "neutral").lower())
@@ -131,9 +136,29 @@ def build_snapshot(
     # PO3 phase analysis — runs on already-computed mechanical evidence.
     # Reconciled against the authority established above: additive only, it
     # annotates how each phase sits inside the authority and never rewrites it.
-    po3 = analyze_po3_snapshot(structure, liquidity, volatility, expansion,
-                               authority=_authority,
-                               relationship=_relationship["relationship"])
+    po3 = analyze_po3_snapshot(structure, liquidity, volatility, expansion)
+
+    # Authoritative read: PO3 now exists and can author direction (authority #2).
+    # Liquidity's active_liquidity_draw (authority #1) lives in
+    # narrative_authority, which is built further down, so it reaches this only
+    # on the paths where narrative already exists. Structure is passed for
+    # CONFIRMATION reporting and can never author direction.
+    # narrative_authority does not exist yet (it is built further down and its
+    # own _build reads po3, so it cannot precede this). PO3 authors here.
+    _authority = htf_authority(structure.get("15m"), _last_price, "15m",
+                               po3=po3, liquidity=liquidity)
+    _relationship = classify_relationship(
+        _authority, str((structure.get("5m") or {}).get("bias") or "neutral").lower())
+    for _tf in ("15m", "5m", "3m", "1m"):
+        if isinstance(po3.get(_tf), dict):
+            po3[_tf]["authority_reading"] = reconcile_phase(
+                po3[_tf].get("phase", "no_phase"), _authority,
+                _relationship["relationship"])
+    po3["authority"] = {"bias": _authority.get("bias"),
+                        "intact": _authority.get("intact"),
+                        "source": _authority.get("source"),
+                        "relationship": _relationship["relationship"],
+                        "detail": _authority.get("detail")}
 
     # VECTOR-3 — stateful stability layer. The pure engine above re-derives phases
     # and alignment from scratch each scan; the manager (when the live loop passes

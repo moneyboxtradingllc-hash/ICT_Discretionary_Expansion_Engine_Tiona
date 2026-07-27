@@ -131,31 +131,102 @@ def dealing_range(structure: dict, last_price: float,
             "position": None, "zone": "unknown"}
 
 
-def htf_authority(structure_tf: dict, last_price: float, tf: str = "15m") -> dict:
-    """Does the higher timeframe hold directional authority, and is it intact?
+def _draw_direction(narrative: dict):
+    """Direction implied by the active liquidity objective — what price is
+    attacking. The primary directional authority."""
+    draw = (narrative or {}).get("active_liquidity_draw")
+    if not isinstance(draw, dict):
+        return None, None
+    side = str(draw.get("side") or "").lower()
+    if side == "sell_side":
+        return _BEAR, draw
+    if side == "buy_side":
+        return _BULL, draw
+    return None, draw
 
-    Authority survives a counter-move; it dies when price closes through the
-    structural level that would invalidate the trend. For a bearish HTF that is
-    the last swing high — until price takes it, a rally is a retracement.
+
+def _po3_direction(po3: dict, tf: str):
+    """Direction implied by the institutional campaign. Second authority.
+
+    Reads PO3's own sweep-derived outputs only. AB-2C removed the structure-bias
+    fallback deliberately and this must not reintroduce it.
+    """
+    block = (po3 or {}).get(tf) or {}
+    for key in ("delivery_direction", "distribution_direction", "manipulation_direction"):
+        d = str(block.get(key) or "").lower()
+        if d in (_BULL, _BEAR):
+            return d, f"po3.{tf}.{key}"
+    return None, None
+
+
+def htf_authority(structure_tf: dict = None, last_price: float = None,
+                  tf: str = "15m", narrative: dict = None, po3: dict = None,
+                  liquidity: dict = None) -> dict:
+    """Standing directional authority, sourced top-down per doctrine.
+
+        1. LIQUIDITY  — what is price attacking (active_liquidity_draw)
+        2. PO3        — what institutional phase is delivering
+        3. NARRATIVE  — is the campaign confirming
+        4. STRUCTURE  — CONFIRMATION ONLY, never authors direction
+
+    Structure requires confirmed pivots before it can update, so it is
+    retrospective by construction and lags the live auction. It previously
+    authored direction here, which meant the authority model — and everything
+    consuming it: market_context, PO3 reconciliation, the order-block anchor —
+    inherited that lag. Measured on 2026-07-27 at 09:49, price 28,481 while
+    every higher-timeframe swing sat 150-220 points above it.
+
+    Structure is still REPORTED, as confirmation evidence. It is never consulted
+    for direction, and no fallback path may restore it.
+
+    Returns bias/intact/invalidation plus the source that authored it. Neutral
+    when no live objective exists — an honest absence, not a failure.
     """
     st = structure_tf or {}
-    bias = str(st.get("bias") or _NEUTRAL).lower()
+    confirmation = {"structure_bias": str(st.get("bias") or _NEUTRAL).lower(),
+                    "bos": bool(st.get("bos")), "mss": bool(st.get("mss")),
+                    "note": "structure confirms completed movement; it does not author direction"}
+
+    bias, source, detail_src = _NEUTRAL, None, ""
+    d, draw = _draw_direction(narrative)
+    if d:
+        bias, source = d, "liquidity.active_liquidity_draw"
+        detail_src = f"draw {draw.get('side')} @ {draw.get('level')}"
+    if bias == _NEUTRAL:
+        d, src = _po3_direction(po3, tf)
+        if d:
+            bias, source, detail_src = d, src, src
+    if bias == _NEUTRAL:
+        nd = str((narrative or {}).get("narrative_direction") or "").lower()
+        if nd in (_BULL, _BEAR):
+            bias, source, detail_src = nd, "narrative.narrative_direction", nd
+
     if bias not in (_BULL, _BEAR):
         return {"timeframe": tf, "bias": _NEUTRAL, "invalidation": None,
-                "intact": False, "detail": f"{tf} structure bias is {bias} — no authority"}
+                "intact": False, "source": None, "confirmation": confirmation,
+                "detail": ("no live liquidity objective, PO3 delivery direction or "
+                           "narrative direction — no directional authority")}
 
-    invalidation = st.get("last_swing_high") if bias == _BEAR else st.get("last_swing_low")
+    # Invalidation follows the objective, NOT a structure swing. Structure swings
+    # lag and produced 37-77pt stops against a 25pt cap.
+    invalidation = (narrative or {}).get("invalidation_level")
+    if not isinstance(invalidation, (int, float)):
+        invalidation = ((narrative or {}).get("protected_high") if bias == _BEAR
+                        else (narrative or {}).get("protected_low"))
+
     if not isinstance(invalidation, (int, float)) or not isinstance(last_price, (int, float)):
-        return {"timeframe": tf, "bias": bias, "invalidation": invalidation,
-                "intact": True,
-                "detail": f"{tf} {bias} authority; invalidation level unavailable, assumed intact"}
+        return {"timeframe": tf, "bias": bias, "invalidation": None, "intact": True,
+                "source": source, "confirmation": confirmation,
+                "detail": (f"{bias} authority from {source} ({detail_src}); "
+                           f"no invalidation level published, assumed intact")}
 
     intact = last_price < invalidation if bias == _BEAR else last_price > invalidation
     side = "below" if bias == _BEAR else "above"
-    return {"timeframe": tf, "bias": bias, "invalidation": invalidation, "intact": intact,
-            "detail": (f"{tf} {bias} authority {'intact' if intact else 'VIOLATED'} — "
-                       f"price {last_price} {'is' if intact else 'is NOT'} {side} "
-                       f"invalidation {invalidation}")}
+    return {"timeframe": tf, "bias": bias, "invalidation": invalidation,
+            "intact": intact, "source": source, "confirmation": confirmation,
+            "detail": (f"{bias} authority from {source} ({detail_src}) "
+                       f"{'intact' if intact else 'VIOLATED'} — price {last_price} "
+                       f"{'is' if intact else 'is NOT'} {side} invalidation {invalidation}")}
 
 
 def classify_relationship(authority: dict, ltf_bias: str) -> dict:
