@@ -30,6 +30,24 @@ $env:PYTHONPATH = "src"
 # an explicit architecture decision.
 $env:REGIME_AUTHORITY_ENABLED = "false"
 
+# ── LEG-SCOPED METRICS OFF UNTIL THRESHOLDS ARE RECALIBRATED ──
+# directional_efficiency was genuinely broken (unbounded window, decayed toward
+# zero as history grew) and LEG-SCOPE corrects it. But every threshold that
+# consumes it was calibrated against the BROKEN value: _score_phases uses
+# dir_eff < 0.25, >= 0.30, >= 0.40 and compression > 60. Correcting the metric
+# without recalibrating those moved all of them out of range.
+#
+# Measured A/B on 2026-07-24 12:56, the one tradeable setup in the sample:
+#   leg-scope OFF -> liquidity_sweep_reversal, ready_for_execution, 5.75pt stop
+#   leg-scope ON  -> no setup at all, qual no_trade, stand_down
+#
+# A wrong metric with matched thresholds is a coherent system. A correct metric
+# with mismatched thresholds is not, and it detects less. Half-fixed is worse
+# than either whole. The corrected implementation stays in the code behind this
+# switch; turn it on together with recalibrated thresholds, using live data
+# rather than a replay fit.
+$env:PO3_LEG_SCOPED_METRICS = "off"
+
 Write-Host "======================================================================"
 Write-Host "MODE: DETERMINISTIC_MNQ_SIM_ONLY"
 Write-Host "AUTHOR: deterministic_sim_author"

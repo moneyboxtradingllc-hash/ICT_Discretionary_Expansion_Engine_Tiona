@@ -112,3 +112,25 @@ class TestTheLauncherPreservesTheDecision:
         text = open(path, encoding="utf-8").read()
         assert 'REGIME_AUTHORITY_ENABLED = "false"' in text, (
             "the deterministic launcher must disable regime execution authority")
+
+
+class TestLegScopeStaysOffUntilRecalibrated:
+    """LEG-SCOPE corrects directional_efficiency, but every threshold consuming
+    it was calibrated against the broken value. Measured A/B at 2026-07-24 12:56:
+    off -> liquidity_sweep_reversal, ready_for_execution, 5.75pt stop;
+    on  -> no setup at all. Half-fixed detects less than either whole state."""
+
+    def test_the_launcher_disables_leg_scoped_metrics(self):
+        path = os.path.join(os.path.dirname(__file__), "..",
+                            "launch_ninjatrader_mnq_deterministic_sim.ps1")
+        text = open(path, encoding="utf-8").read()
+        assert 'PO3_LEG_SCOPED_METRICS = "off"' in text, (
+            "leg-scoped metrics must stay off until the thresholds that consume "
+            "directional_efficiency are recalibrated against the corrected value")
+
+    def test_the_corrected_implementation_is_still_available(self):
+        """Off is a deferral, not a deletion — the fix must remain reachable."""
+        from structure import po3_config as cfg
+        from volatility.expansion_detector import _leg_slice
+        assert callable(_leg_slice)
+        assert hasattr(cfg, "leg_scope_enabled")
