@@ -5,6 +5,7 @@ No execution, no order routing, no indicator recalculation.
 All inputs are pre-computed snapshot dicts (timeframes, structure, liquidity).
 """
 import os
+from datetime import datetime
 
 _TFS = ["15m", "5m", "3m", "1m"]
 
@@ -206,11 +207,52 @@ def _no_zone(direction: str, current: float | None) -> dict:
 
 # ── Zone finders ──────────────────────────────────────────────────────────────
 
+def _minutes_between(c_a, c_b):
+    """Minutes between two candles, or None when timestamps are unusable."""
+    ta, tb = c_a.get("timestamp"), c_b.get("timestamp")
+    if not ta or not tb:
+        return None
+    try:
+        return abs((datetime.fromisoformat(str(tb))
+                    - datetime.fromisoformat(str(ta))).total_seconds()) / 60.0
+    except (ValueError, TypeError):
+        return None
+
+
+def _bar_span_tolerance(candles: list) -> float | None:
+    """Max minutes a genuine 3-candle window may span.
+
+    Derived from the series' own median bar interval, so it works on any
+    timeframe without being told which one. None when timestamps are unusable —
+    callers then fall back to the timestamp-free rule.
+    """
+    deltas = []
+    for a, b in zip(candles, candles[1:]):
+        d = _minutes_between(a, b)
+        if d and d > 0:
+            deltas.append(d)
+    if len(deltas) < 3:
+        return None
+    deltas.sort()
+    median = deltas[len(deltas) // 2]
+    return median * 3.0          # two bar-widths plus slack
+
+
 def find_fvgs(candles: list, direction: str) -> list:
     """Every 3-candle imbalance gap in `candles`, newest first.
 
     Bullish FVG: candle[i].high < candle[i+2].low
     Bearish FVG: candle[i].low  > candle[i+2].high
+
+    SESSION BOUNDARIES ARE EXCLUDED. The three candles must be contiguous in
+    time. Without that check the rule treats the last bar before a session close
+    and the first bar after the reopen as adjacent, manufacturing a phantom gap
+    out of the break itself — on MNQ that is ~33 points across the nightly
+    17:00-18:00 close and ~195 points across a weekend. Those phantoms became the
+    preferred toolbox zone, their edge became the structural invalidation, and
+    the risk engine then rejected a 300-point stop. The bot looked fearful; it
+    was being handed a level manufactured by a clock.
+
     Returns [{"index", "low", "high", "size"}]. Public because the displacement
     detector scores imbalance CREATION as evidence of institutional commitment
     and must not re-implement the rule.
@@ -218,8 +260,13 @@ def find_fvgs(candles: list, direction: str) -> list:
     out = []
     if len(candles) < 3:
         return out
+    tol = _bar_span_tolerance(candles)
     for i in range(len(candles) - 3, -1, -1):
         c1, c3 = candles[i], candles[i + 2]
+        if tol is not None:
+            span = _minutes_between(c1, c3)
+            if span is None or span > tol:
+                continue          # spans a session break — not an imbalance
         if direction == "bullish" and c1["high"] < c3["low"]:
             out.append({"index": i, "low": c1["high"], "high": c3["low"],
                         "size": round(c3["low"] - c1["high"], 2)})
