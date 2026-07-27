@@ -307,11 +307,25 @@ class TestStructureCanNeverAuthorDirection:
         assert a["bias"] == "bearish"
         assert a["source"].startswith("po3.")
 
-    def test_narrative_direction_is_the_last_resort(self):
+    def test_narrative_direction_is_not_an_authority(self):
+        """It reads like a third tier but it is a STRUCTURE CONDUIT.
+        narrative_engine's witness-mode branch sets `direction = struct_dir`
+        whenever the AI and delivery lenses are silent — the normal case with the
+        brain off — and narrative sat in that mode on 8 of 17 Friday RTH samples.
+        Admitting it would re-promote structure under another abstraction."""
         a = htf_authority({"bias": "bullish"}, 28400.0,
                           narrative={"narrative_direction": "bearish"})
+        assert a["bias"] == "neutral"
+        assert a["source"] is None
+
+    def test_a_draw_still_authors_even_when_narrative_direction_exists(self):
+        """Removing the tier must not disable the liquidity objective itself."""
+        a = htf_authority({"bias": "bullish"}, 28400.0,
+                          narrative={"narrative_direction": "bullish",
+                                     "active_liquidity_draw":
+                                     {"side": "sell_side", "level": 28300.0}})
         assert a["bias"] == "bearish"
-        assert a["source"] == "narrative.narrative_direction"
+        assert a["source"] == "liquidity.active_liquidity_draw"
 
     def test_structure_is_still_reported_as_confirmation(self):
         a = htf_authority({"bias": "bearish", "bos": True, "mss": False}, 28400.0,

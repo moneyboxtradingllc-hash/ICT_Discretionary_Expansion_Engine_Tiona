@@ -166,8 +166,12 @@ def htf_authority(structure_tf: dict = None, last_price: float = None,
 
         1. LIQUIDITY  — what is price attacking (active_liquidity_draw)
         2. PO3        — what institutional phase is delivering
-        3. NARRATIVE  — is the campaign confirming
-        4. STRUCTURE  — CONFIRMATION ONLY, never authors direction
+           STRUCTURE  — CONFIRMATION ONLY, never authors direction
+
+    narrative_direction is deliberately NOT an authority tier. It reads as one,
+    but narrative_engine falls back to `direction = struct_dir` in witness mode
+    (AI and delivery lenses silent — the normal case with the brain off), so
+    admitting it would launder structure back into direction.
 
     Structure requires confirmed pivots before it can update, so it is
     retrospective by construction and lags the live auction. It previously
@@ -196,10 +200,16 @@ def htf_authority(structure_tf: dict = None, last_price: float = None,
         d, src = _po3_direction(po3, tf)
         if d:
             bias, source, detail_src = d, src, src
-    if bias == _NEUTRAL:
-        nd = str((narrative or {}).get("narrative_direction") or "").lower()
-        if nd in (_BULL, _BEAR):
-            bias, source, detail_src = nd, "narrative.narrative_direction", nd
+
+    # NO narrative_direction tier. It looks like a third authority but it is a
+    # structure conduit: _structure_lens reads ai_context.directional_bias, which
+    # is derived from structure, and narrative_engine's witness-mode branch sets
+    # `direction = struct_dir` outright whenever the AI and delivery lenses are
+    # silent — the normal case with the brain off. Measured Friday RTH: narrative
+    # sat in structure-only witness mode on 8 of 17 samples.
+    #
+    # Admitting it here would re-promote structure under a different abstraction,
+    # which is precisely what the doctrine forbids. Only Liquidity and PO3 author.
 
     if bias not in (_BULL, _BEAR):
         return {"timeframe": tf, "bias": _NEUTRAL, "invalidation": None,
