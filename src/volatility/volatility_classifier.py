@@ -64,10 +64,27 @@ def classify_volatility(candles: list, atr_result: dict) -> dict:
             "range_acceleration": 1.0,
         }
 
+    # Volatility describes CURRENT conditions, so the conviction ratios read a
+    # bounded recent window. Unsliced they run over the whole normalized history
+    # (~2000 candles live) and decay toward zero as history grows — the same
+    # defect LEG-SCOPE fixed in expansion_detector, which carries a duplicate of
+    # _directional_efficiency that was fixed there and missed here.
+    #
+    # The consequence was not a skewed number but two unreachable states:
+    # _state() guards `explosive` and `expanding` behind `dir_eff < 0.20` and
+    # `< 0.30`, and with dir_eff pinned near 0.04 both guards were always true.
+    # Anything scoring above 65 became `toxic`, anything above 55 `unstable`,
+    # and `expanding` was never emitted at all — which in turn made
+    # narrative_builder's `vol_15m in ("expanding", "stable")` a half-dead test.
+    from structure import po3_config as cfg
+    window = candles
+    if cfg.leg_scope_enabled() and len(candles) > cfg.LEG_MAX_CANDLES:
+        window = candles[-cfg.LEG_MAX_CANDLES:]
+
     atr_trend = atr_result["atr_trend"]
-    range_accel = _range_acceleration(candles)
-    dir_eff = _directional_efficiency(candles)
-    body_dom = _body_dominance(candles)
+    range_accel = _range_acceleration(window)
+    dir_eff = _directional_efficiency(window)
+    body_dom = _body_dominance(window)
     score = _score(atr_trend, range_accel, body_dom, dir_eff)
 
     return {
