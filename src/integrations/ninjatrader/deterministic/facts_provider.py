@@ -22,6 +22,8 @@ from __future__ import annotations
 import sys
 from typing import Optional
 
+from integrations.ninjatrader.deterministic.funnel import funnel_trace
+
 # Bullish/bearish -> long/short. Anything else (neutral/conflicted) -> unknown.
 _BULL_BEAR = {"bullish": "long", "bearish": "short"}
 _TFS = ("1m", "3m", "5m", "15m")
@@ -328,6 +330,9 @@ def build_facts_from_snapshot(snapshot: dict, decision: dict, gate: dict,
         # re-deriving zone/swing state from raw bars.
         "_gate_permissions": _permissions,
         "_gate_blockers": _gate_blockers,
+        # The whole chain, and the FIRST stage that refused. gate_blockers names
+        # who said no; this says how far the read actually got before anyone did.
+        "_funnel": funnel_trace(snapshot, decision, gate),
         "_fc0b_reason": fc0b_reason,
         "_fc0b_inputs": {"relation": fc_relation, "entry": fc_entry, "stop": fc_stop,
                          "midpoint": fc_mid, "displacement_confirmed": disp_confirmed},

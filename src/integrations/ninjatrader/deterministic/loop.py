@@ -25,6 +25,7 @@ from integrations.ninjatrader.deterministic import author as AUTH
 from integrations.ninjatrader.deterministic import risk as RISK
 from integrations.ninjatrader.deterministic import facts_provider as FP
 from integrations.ninjatrader.deterministic import evidence as EV
+from integrations.ninjatrader.deterministic.funnel import funnel_console
 from integrations.ninjatrader.deterministic.session import SessionAuthority, ACTIVE, STOPPED_MANUAL
 
 STOP_FILE = os.path.join("data", "integration", "ninjatrader", "deterministic", "STOP")
@@ -222,6 +223,7 @@ def one_scan(client: NinjaTraderBridgeClient, session: SessionAuthority, scan_nu
                      # final_gate_authorizes is a bare False covering six of them.
                      "gate_permissions": facts.get("_gate_permissions"),
                      "gate_blockers": facts.get("_gate_blockers"),
+                     "funnel": facts.get("_funnel"),
                      "fc0b_reason": facts.get("_fc0b_reason"),
                      "fc0b_inputs": facts.get("_fc0b_inputs"),
                      "zone": facts.get("_zone"),
@@ -268,6 +270,12 @@ def run(max_scans: Optional[int] = None):
                       f"armed={rec['bridge_armed']} trades={rec['trade_count']} "
                       f"pnl=${rec['realized_pnl']} | top_blocker="
                       f"{(rec['blockers'][0] if rec['blockers'] else 'none')}{_auth}")
+                # How far the read got before anything refused. A NO_TRADE that
+                # died at `authority` and one held a single scan short on setup
+                # age are the same word on the line above and nothing alike.
+                _fn = (rec.get("snapshot") or {}).get("funnel")
+                if _fn:
+                    print("        " + funnel_console(_fn).replace("\n", "\n  "))
             finally:
                 client.close()
             if session.state != ACTIVE:
