@@ -52,10 +52,36 @@ def _swing_tracker():
     return _SWING_TRACKER
 
 
+_SETUP_TRACKER = None
+_PREV_SNAPSHOT = None
+_PREV_QUAL = None
+_BARS_IN_STATE = 0
+
+
+def _setup_tracker():
+    """Persistent setup lifecycle for this lane — same rationale as the swings.
+
+    The execution gate enforces a minimum setup age, read from
+    snapshot["setup_lifecycle"]["age_scans"] and only when that block is active.
+    This lane never produced the block, so age was 0 on every scan and the age
+    requirement could not be satisfied: 129 of 133 scans on 2026-07-24 blocked on
+    "setup age requirement not met (required=2, actual=0)".
+    """
+    global _SETUP_TRACKER
+    if _SETUP_TRACKER is None:
+        from setup_lifecycle.setup_tracker import SetupTracker
+        _SETUP_TRACKER = SetupTracker()
+    return _SETUP_TRACKER
+
+
 def reset_swing_tracker():
-    """Drop the tracker — for tests and for a clean session start."""
-    global _SWING_TRACKER
+    """Drop all per-session lane state — for tests and a clean session start."""
+    global _SWING_TRACKER, _SETUP_TRACKER, _PREV_SNAPSHOT, _PREV_QUAL, _BARS_IN_STATE
     _SWING_TRACKER = None
+    _SETUP_TRACKER = None
+    _PREV_SNAPSHOT = None
+    _PREV_QUAL = None
+    _BARS_IN_STATE = 0
 
 
 def build_mnq_snapshot(bars: list):
@@ -79,11 +105,41 @@ def build_mnq_snapshot(bars: list):
     #   persistent  protected_swings 105   active_liquidity_draw 117
     snapshot = build_snapshot(tfs, symbol="MNQ SEP26",
                               swing_tracker=_swing_tracker())
-    # Same sanctioned seam scan_loop uses — populates trade_intent.entry_zone,
-    # the input to the real FC-0B verdict.
+    # Order and publication both matter, and this lane got both wrong.
+    #
+    # evaluate_gate and build_intent do not receive the decision as an argument —
+    # they read snapshot["decision_authority"]["decision"]. This lane called
+    # make_decision into a LOCAL variable and never published it, and it built
+    # the intent before deciding at all. So the key the gate reads never existed,
+    # normalize_decision(None) returned "stand_down", and the gate was told to
+    # stand down on every scan no matter what the market did.
+    #
+    # Measured on 2026-07-24 RTH: decision_authority returned
+    # ready_for_execution on 7 scans while the gate's blocking_factors read
+    # "decision_authority decision=stand_down" on all 133 — the lane could not
+    # authorize a trade under any conditions.
+    #
+    # scan_loop is the reference: transition, setup lifecycle, decide, publish,
+    # gate, then build intent. state_transition must precede the setup tracker
+    # (SetupTracker.update documents that dependency) and both must precede the
+    # gate, which reads setup_lifecycle.age_scans.
+    global _PREV_SNAPSHOT, _PREV_QUAL, _BARS_IN_STATE
+    from state_transitions.transition_engine import analyze_transition
+
+    _cur_qual = str((snapshot.get("qualification") or {}).get("status")
+                    or "no_trade").lower()
+    _BARS_IN_STATE = _BARS_IN_STATE + 1 if _cur_qual == _PREV_QUAL else 1
+    snapshot["state_transition"] = analyze_transition(
+        snapshot, _PREV_SNAPSHOT, _BARS_IN_STATE)
+    _PREV_SNAPSHOT, _PREV_QUAL = snapshot, _cur_qual
+
+    snapshot["setup_lifecycle"] = _setup_tracker().update(snapshot, "MNQ SEP26")
+
+    snapshot["decision_authority"] = make_decision(snapshot)
+    snapshot["execution_gate"] = evaluate_gate(snapshot)
     snapshot["trade_intent"] = build_intent(snapshot, "MNQ SEP26")
-    decision = make_decision(snapshot)
-    gate = evaluate_gate(snapshot)
+    decision = snapshot["decision_authority"]
+    gate = snapshot["execution_gate"]
     # Hard invariant for this lane: the Brain must never have been invoked.
     if "openai" in sys.modules:
         raise RuntimeError("openai imported during deterministic MNQ scan — aborting")
