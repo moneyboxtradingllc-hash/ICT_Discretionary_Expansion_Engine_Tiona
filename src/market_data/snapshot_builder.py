@@ -355,7 +355,15 @@ def build_snapshot(
             thesis_state,
         )
         if lifecycle_enabled():
-            engine = thesis_engine or ThesisLifecycleEngine()
+            # The symbol MUST be passed. ThesisLifecycleEngine falls back to
+            # SCAN_SYMBOL/"QQQ", and its cross-instrument reload guard compares
+            # the stored thesis's symbol against that same default — so an
+            # unnamed engine on an MNQ session identifies as QQQ, matches a
+            # stored QQQ thesis, and resurrects it. The guard passes precisely
+            # because both sides are the same wrong default. scan_loop and
+            # replay_session already pass it; this fallback did not.
+            engine = thesis_engine or ThesisLifecycleEngine(
+                symbol=symbol or snapshot.get("symbol"))
             snapshot["thesis_lifecycle"] = engine.update(
                 candidate, extract_evidence(snapshot, candidate), snapshot.get("timestamp"),
             )

@@ -37,6 +37,7 @@ Rollback: THESIS_LIFECYCLE_MODE=shadow (or unset).
 """
 import json
 import os
+import re
 import uuid
 from datetime import datetime
 
@@ -102,6 +103,41 @@ def _max_age_scans() -> int:
         return max(0, int(os.getenv("THESIS_MAX_AGE_SCANS", "240")))
     except (TypeError, ValueError):
         return 240
+
+
+def _max_reload_age_minutes() -> int:
+    """Wall-clock idle time after which a persisted thesis is not resurrected.
+
+    Default 720 (12h): an intraday restart still recovers its thesis, an
+    overnight or multi-day gap never does. 0 disables the check.
+    """
+    try:
+        return max(0, int(os.getenv("THESIS_MAX_RELOAD_AGE_MINUTES", "720")))
+    except (TypeError, ValueError):
+        return 720
+
+
+def _minutes_since(stamp) -> "float | None":
+    """Minutes between `stamp` and now, or None if it cannot be read.
+
+    Tolerant of the NinjaTrader 7-digit fractional second ("…:00.0000000-04:00"),
+    which datetime.fromisoformat rejects, and of naive stamps.
+    """
+    if not stamp:
+        return None
+    text = str(stamp).strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    # trim over-long fractional seconds to the 6 digits fromisoformat accepts
+    m = re.match(r"^(.*\.\d{6})\d+(.*)$", text)
+    if m:
+        text = m.group(1) + m.group(2)
+    try:
+        when = datetime.fromisoformat(text)
+    except (TypeError, ValueError):
+        return None
+    now = datetime.now(when.tzinfo) if when.tzinfo else datetime.now()
+    return (now - when).total_seconds() / 60.0
 
 
 def _decay_step() -> int:
@@ -316,6 +352,19 @@ class ThesisLifecycleEngine:
             if cap and int(active.get("age_scans", 0)) > cap:
                 active["status"] = STATUS_EXPIRED
                 active["invalidated_reason"] = "expired on reload (max age exceeded)"
+                self._active = active
+                return
+            # age_scans counts scans, not time, so a thesis that sat on disk for
+            # weeks is indistinguishable from one opened three scans ago. Observed
+            # 2026-07-24: a thesis created 2026-06-15 reloaded with age_scans=10,
+            # far under the cap, and was carried into a live session 39 days later.
+            # A thesis is an intraday object; the clock has to be consulted too.
+            stale_after = _max_reload_age_minutes()
+            idle = _minutes_since(active.get("last_updated_at"))
+            if stale_after and idle is not None and idle > stale_after:
+                active["status"] = STATUS_EXPIRED
+                active["invalidated_reason"] = (
+                    f"expired on reload (idle {int(idle)} min > {stale_after} min)")
                 self._active = active
                 return
             self._active = active
