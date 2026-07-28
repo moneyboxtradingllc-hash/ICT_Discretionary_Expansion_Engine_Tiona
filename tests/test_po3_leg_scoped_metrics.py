@@ -27,6 +27,20 @@ from volatility.expansion_detector import (
 from structure import po3_config as cfg
 
 
+@pytest.fixture(autouse=True)
+def _flag_is_explicit(monkeypatch):
+    """These tests assert leg-scope behaviour, so they must state the flag.
+
+    The live launch script exports PO3_LEG_SCOPED_METRICS=off (the fix is shipped
+    but parked until its thresholds are recalibrated on forward sessions). Without
+    this, running the suite the way production runs turned 8 tests red for reasons
+    unrelated to any change under test. Clearing the var pins them to the CODE
+    default, which is what they are actually about; the off-path test overrides it
+    below.
+    """
+    monkeypatch.delenv("PO3_LEG_SCOPED_METRICS", raising=False)
+
+
 def _candle(o, h, l, c):
     return {"open": o, "high": h, "low": l, "close": c,
             "range": h - l, "body_size": abs(c - o),

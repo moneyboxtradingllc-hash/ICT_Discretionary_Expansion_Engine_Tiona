@@ -22,6 +22,15 @@ from volatility.volatility_classifier import classify_volatility, _state
 from structure import po3_config as cfg
 
 
+@pytest.fixture(autouse=True)
+def _flag_is_explicit(monkeypatch):
+    """Pin to the code default; the live launch script exports 'off'.
+
+    See the companion fixture in test_po3_leg_scoped_metrics.py.
+    """
+    monkeypatch.delenv("PO3_LEG_SCOPED_METRICS", raising=False)
+
+
 def _c(o, h, l, c):
     return {"open": o, "high": h, "low": l, "close": c, "range": h - l,
             "body_size": abs(c - o), "upper_wick": h - max(o, c),

@@ -17,14 +17,28 @@ _TFS = ("15m", "5m", "3m", "1m")
 
 def _candles(snapshot: dict) -> dict:
     """Recent candle context per TF (bodies/wicks/close). Live snapshots carry
-    timeframes; trimmed archives do not — absence is reported in degraded[]."""
+    timeframes; trimmed archives do not — absence is reported in degraded[].
+
+    The producer key is `recent_candles`. This read `candles`, which no producer
+    emits, so every live scan silently fell through to the single-bar fallback:
+    the brain was handed one candle per timeframe instead of a five-bar window,
+    and `available` stayed True because last_candle existed — so degraded[] never
+    reported it. Verified on 2026-07-24 RTH: recent_candles held 5 bars on all
+    four timeframes on every scan while the payload carried 1.
+
+    `candles` is kept as a secondary read so archives written under the old key
+    still resolve.
+    """
     tfs = snapshot.get("timeframes", {}) or {}
-    out, have_any = {}, False
+    out, have_any, thin = {}, False, []
     for tf in _TFS:
         t = tfs.get(tf, {}) or {}
-        recent = t.get("candles") or ([t["last_candle"]] if t.get("last_candle") else [])
+        recent = (t.get("recent_candles") or t.get("candles")
+                  or ([t["last_candle"]] if t.get("last_candle") else []))
         if recent:
             have_any = True
+            if len(recent) < 2:
+                thin.append(tf)
             c = recent[-1]
             out[tf] = {
                 "recent": recent[-5:],
@@ -34,7 +48,7 @@ def _candles(snapshot: dict) -> dict:
                 "body":  (round(abs(c["close"] - c["open"]), 4)
                           if c.get("close") is not None and c.get("open") is not None else None),
             }
-    return {"by_tf": out, "available": have_any}
+    return {"by_tf": out, "available": have_any, "single_bar_only": thin}
 
 
 def _current_price(snapshot: dict, candles: dict) -> "float | None":
@@ -113,6 +127,9 @@ def build_brain_input(snapshot: dict, stance_history: dict) -> dict:
         candles = _candles(snapshot)
         if not candles["available"]:
             degraded.append("candles_unavailable")
+        elif candles["single_bar_only"]:
+            # One bar is not a window; the brain cannot read sequence from it.
+            degraded.append("single_bar_only:" + ",".join(candles["single_bar_only"]))
         price = _current_price(snapshot, candles)
         if price is None:
             degraded.append("current_price_unavailable")

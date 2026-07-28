@@ -133,10 +133,39 @@ def dealing_range(structure: dict, last_price: float,
 
 def _draw_direction(narrative: dict):
     """Direction implied by the active liquidity objective — what price is
-    attacking. The primary directional authority."""
-    draw = (narrative or {}).get("active_liquidity_draw")
+    attacking. The primary directional authority.
+
+    compute_liquidity_draw has two paths and only one is liquidity-derived:
+
+      RAID-IMPLIED   "opposite pool is the objective" — sourced from a protected
+                     swing, i.e. an actual raid. Genuinely liquidity.
+      DIRECTION-LED  "<dir> delivery toward resting stops" — keyed on
+                     narrative_direction, which in witness mode IS structure
+                     (narrative_engine sets `direction = struct_dir` when the AI
+                     and delivery lenses are silent).
+
+    The direction-led path is therefore a structure conduit whenever narrative is
+    in witness mode, and admitting it would let structure author direction — the
+    one thing the doctrine forbids outright. Measured 2026-07-24 RTH: 61 of 117
+    draws were direction-led with narrative in witness mode on 70 of 133 scans.
+
+    Raid-implied draws are always accepted. Direction-led draws are accepted only
+    when narrative was NOT structure-only on that scan.
+    """
+    narrative = narrative or {}
+    draw = narrative.get("active_liquidity_draw")
     if not isinstance(draw, dict):
         return None, None
+
+    basis = str(draw.get("basis") or "").lower()
+    raid_implied = "opposite pool" in basis
+    if not raid_implied:
+        witness = any("witness mode" in str(w)
+                      for w in (narrative.get("warnings") or []))
+        if witness:
+            return None, {**draw, "rejected": "direction-led draw under a "
+                                              "structure-only narrative"}
+
     side = str(draw.get("side") or "").lower()
     if side == "sell_side":
         return _BEAR, draw

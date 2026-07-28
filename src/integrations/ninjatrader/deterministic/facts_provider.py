@@ -35,6 +35,29 @@ def _any_tf(d: dict, key: str) -> bool:
     return any(bool((d.get(tf) or {}).get(key)) for tf in _TFS)
 
 
+_SWING_TRACKER = None
+
+
+def _swing_tracker():
+    """Module-level persistent tracker for this lane.
+
+    Held here rather than in loop.py so every entry point into
+    build_mnq_snapshot — live loop, backtest, replay harness — shares one
+    tracker, the same way scan_loop holds one for its lane.
+    """
+    global _SWING_TRACKER
+    if _SWING_TRACKER is None:
+        from narrative_authority.protected_swings import ProtectedSwingTracker
+        _SWING_TRACKER = ProtectedSwingTracker()
+    return _SWING_TRACKER
+
+
+def reset_swing_tracker():
+    """Drop the tracker — for tests and for a clean session start."""
+    global _SWING_TRACKER
+    _SWING_TRACKER = None
+
+
 def build_mnq_snapshot(bars: list):
     """Run the real mechanical pipeline on MNQ 1m bars. Returns
     (snapshot, decision, gate). No OpenAI (Brain gated off by default)."""
@@ -45,7 +68,17 @@ def build_mnq_snapshot(bars: list):
     from execution_gate.execution_gate import evaluate_gate
 
     tfs = build_timeframes(bars or [])
-    snapshot = build_snapshot(tfs, symbol="MNQ SEP26")
+    # The protected-swing tracker is STATEFUL BY DESIGN: "a protected level
+    # persists until violated, not until the next scan forgets the sweep."
+    # scan_loop and replay_session both hold a persistent instance; this lane
+    # passed none, so build_snapshot constructed a fresh tracker every scan and
+    # threw it away — the persistence layer had no persistence here.
+    #
+    # Measured on 2026-07-24 RTH, 133 scans:
+    #   transient   protected_swings  14   active_liquidity_draw  66
+    #   persistent  protected_swings 105   active_liquidity_draw 117
+    snapshot = build_snapshot(tfs, symbol="MNQ SEP26",
+                              swing_tracker=_swing_tracker())
     # Same sanctioned seam scan_loop uses — populates trade_intent.entry_zone,
     # the input to the real FC-0B verdict.
     snapshot["trade_intent"] = build_intent(snapshot, "MNQ SEP26")

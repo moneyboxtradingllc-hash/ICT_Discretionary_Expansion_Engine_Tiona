@@ -293,6 +293,34 @@ def build_snapshot(
     snapshot["narrative_authority"] = build_narrative_authority(
         snapshot, snapshot["protected_swings"])
 
+    # ── AUTHORITY, RESOLVED. The earlier read (right after PO3) could only see
+    # authority #2, because narrative_authority — which owns
+    # active_liquidity_draw, authority #1 — is assembled here and its own _build
+    # reads po3, so it cannot precede it. The draw therefore existed on 117 of
+    # 133 replayed scans and never reached the authority model, which reported
+    # neutral on every one of them.
+    #
+    # Recomputed here with the draw available, and republished so the snapshot
+    # carries the resolved read rather than the provisional one.
+    _authority = htf_authority(structure.get("15m"), _last_price, "15m",
+                               narrative=snapshot["narrative_authority"],
+                               po3=po3, liquidity=liquidity)
+    _relationship = classify_relationship(
+        _authority, str((structure.get("5m") or {}).get("bias") or "neutral").lower())
+    snapshot["directional_authority"] = {
+        **_authority, "relationship": _relationship["relationship"],
+        "reasoning": _relationship["reason"]}
+    for _tf in ("15m", "5m", "3m", "1m"):
+        if isinstance(po3.get(_tf), dict):
+            po3[_tf]["authority_reading"] = reconcile_phase(
+                po3[_tf].get("phase", "no_phase"), _authority,
+                _relationship["relationship"])
+    po3["authority"] = {"bias": _authority.get("bias"),
+                        "intact": _authority.get("intact"),
+                        "source": _authority.get("source"),
+                        "relationship": _relationship["relationship"],
+                        "detail": _authority.get("detail")}
+
     # HTF-MEM-1: conflict WARNING flags (context, not veto) — HTF bias vs the
     # narrative direction, computed pre-Brain so the Brain sees the warning too.
     if isinstance(htf_context, dict) and htf_context.get("htf_bias") in ("bullish", "bearish"):
