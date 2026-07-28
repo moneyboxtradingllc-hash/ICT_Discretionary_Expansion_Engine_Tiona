@@ -49,6 +49,24 @@ data/ai_brain/*
 data/instances/
 data/global_memory/
 
+# NinjaTrader bridge IPC journal — every envelope in both directions, so it grows
+# without bound during a session. Measured 553 MB on 2026-07-28, which is well
+# past GitHub's 100 MB hard limit: a single `git add -A` would wedge the repo for
+# both remotes. Runtime evidence, never committed.
+data/integration/ninjatrader/*.jsonl
+data/integration/ninjatrader/*_result.json
+
+# Per-session runtime state produced by the live lanes — shadow reads, ops
+# incidents, performance tables, recommendations, governance ledger, HTF memory.
+# All per-instance; committing them would make two machines fight over history.
+data/ai_shadow/
+data/ops/
+data/performance/
+data/performance_quarantine_*/
+data/recommendations/
+data/rule_governance/ledger/
+data/htf_memory/
+
 snapshots/*
 !snapshots/.gitkeep
 
