@@ -197,13 +197,21 @@ class TestNoForbiddenFilesModified(unittest.TestCase):
         # HEALTHY LLM Brain authors a complete conversion; fails closed to
         # legacy on every degraded source. Locked by
         # tests/test_ai_auth2_sovereignty.py.
+        # TOPSTEP-MLL — fifth deliberate, scoped revision: a NEW file,
+        # risk/topstep_limits.py, modelling the prop-firm trailing maximum loss
+        # limit. It is additive and inert unless TOPSTEP_ACCOUNT_SIZE is set;
+        # percent-of-equity sizing reads the notional balance, which on a
+        # "50K Combine" is fiction — the real risk capital is $2,000. It changes
+        # no existing risk authority. Locked by tests/test_topstep_limits.py and
+        # tests/test_topstep_sizing_wired.py.
         allowed = ("paper_execution/order_builder.py",
                    "paper_execution/execution_engine.py",
                    "decision_authority/decision_engine.py",
                    "execution_gate/execution_gate.py",
                    "intent_scoring/intent_scorer.py",
                    "qualification/trade_qualification_engine.py",
-                   "risk/risk_governor.py")
+                   "risk/risk_governor.py",
+                   "risk/topstep_limits.py")
         offenders = [f for f in changed
                      if any(p in f for p in forbidden)
                      and not any(a in f for a in allowed)]

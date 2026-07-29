@@ -25,6 +25,49 @@ LONG = "long"
 SHORT = "short"
 
 
+# ── PROP-FIRM TRAILING DRAWDOWN (opt-in) ──────────────────────────────────────
+# Percent-of-equity sizing reads the NOTIONAL balance, and on a prop account that
+# number is fiction. A "50K Combine" is a $2,000 risk account: 0.35% of 50,000 is
+# $175, which sounds conservative against fifty thousand and is 8.75% of the
+# money that actually exists. Worse, the real ceiling TRAILS — it follows the
+# highest end-of-day balance — so the room available shrinks as the account wins.
+#
+# Enabled only by setting TOPSTEP_ACCOUNT_SIZE (e.g. "50K"). Unset, nothing here
+# runs and sizing is bit-for-bit what it was; a self-funded NinjaTrader account
+# has no trailing floor to model.
+def _topstep_cap(stop_points: float, equity) -> tuple:
+    """(cap, reason) — contracts allowed by the trailing drawdown, or (None, why).
+
+    None means "no opinion": either not configured, or equity is unknown, in
+    which case the existing unknown-equity fallback already governs.
+    """
+    import os
+
+    label = os.getenv("TOPSTEP_ACCOUNT_SIZE", "").strip()
+    if not label:
+        return None, "not a prop account"
+    e = _equity(equity)
+    if e is None:
+        return None, "equity unknown; existing fallback governs"
+    try:
+        from risk.topstep_limits import (
+            load_state, max_contracts_within_mll, spec_for,
+        )
+        spec = spec_for(label)
+        state = load_state(spec)
+        cap = max_contracts_within_mll(
+            spec, state, balance=e, stop_points=float(stop_points),
+            point_value=POINT_VALUE)
+        threshold = state.highest_eod_balance - spec.max_loss_limit
+        return cap, (f"{spec.label} trailing MLL: floor ${min(threshold, spec.starting_balance):,.2f}, "
+                     f"room ${e - min(threshold, spec.starting_balance):,.2f}")
+    except Exception as exc:  # noqa: BLE001
+        # Fail CLOSED and loudly. A prop guard that silently disappears when
+        # misconfigured is worse than one that was never wired: the operator
+        # believes they are protected.
+        return 0, f"TOPSTEP GUARD FAILED ({type(exc).__name__}: {exc}) — refusing to size"
+
+
 def normalize_tick(price: float, tick: float = TICK_SIZE) -> float:
     return round(round(float(price) / tick) * tick, 6)
 
@@ -119,8 +162,17 @@ def size_for_stop(stop_points, equity=None) -> dict:
     budget, budget_why = risk_budget(equity)
     ceiling, ceiling_why = contract_ceiling(equity)
     wanted = int(budget // (sp * POINT_VALUE))       # floor — never over budget
-    qty = max(0, min(wanted, ceiling))
-    governed = "margin" if wanted > ceiling else "risk_budget"
+
+    # Three independent limits, and the binding one is NAMED rather than
+    # inferred. They bind at different times: percent-of-equity governs a healthy
+    # account, margin governs very tight stops, and the trailing drawdown governs
+    # once a prop account's buffer has been spent. None subsumes the others.
+    mll_cap, mll_why = _topstep_cap(sp, equity)
+    limits = {"risk_budget": wanted, "margin": ceiling}
+    if mll_cap is not None:
+        limits["topstep_mll"] = mll_cap
+    governed = min(limits, key=lambda k: limits[k])
+    qty = max(0, min(limits.values()))
 
     # Overnight exposure. Day margin and initial margin differ by ~42x, so an
     # intraday size cannot be carried past the close, and nothing in the loop
@@ -131,8 +183,11 @@ def size_for_stop(stop_points, equity=None) -> dict:
     overnight_max = int(e // MARGIN_OVERNIGHT) if known else None
     out = {"quantity": qty, "wanted": wanted, "ceiling": ceiling,
            "governed_by": governed,
+           "topstep_cap": mll_cap, "topstep_detail": mll_why,
            "detail": (f"budget {budget_why} wants {wanted} at {sp}pt; "
-                      f"ceiling {ceiling_why} -> {qty} ({governed})"),
+                      f"ceiling {ceiling_why}"
+                      + (f"; {mll_why} allows {mll_cap}" if mll_cap is not None else "")
+                      + f" -> {qty} ({governed})"),
            "risk_at_stop": round(qty * sp * POINT_VALUE, 2),
            "overnight_max": overnight_max,
            "overnight_safe": (qty <= overnight_max) if known else None}

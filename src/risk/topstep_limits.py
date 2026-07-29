@@ -168,21 +168,30 @@ def evaluate(spec: TopstepSpec, state: TopstepState, *, balance: float,
     )
 
 
+#: Fraction of the REMAINING buffer a single trade's worst case may consume.
+#: 0.125 is not invented — it is the operator's own practice: a $250 stop on a
+#: 50K Combine, whose Maximum Loss Limit is $2,000. The notional account size is
+#: irrelevant to that decision; a "50K Combine" is a $2,000 risk account, and
+#: 250/2000 = 1/8. Eight consecutive full stops to the floor.
+#: It scales by construction — the same fraction on a 150K's $4,500 buffer is
+#: $562.50 — so the rule survives an account upgrade without being re-derived.
+DEFAULT_BUFFER_FRACTION = 0.125
+
+
 def max_contracts_within_mll(spec: TopstepSpec, state: TopstepState, *,
                              balance: float, stop_points: float,
                              point_value: float, unrealized: float = 0.0,
-                             buffer_fraction: float = 0.25) -> int:
+                             buffer_fraction: float = DEFAULT_BUFFER_FRACTION) -> int:
     """Largest size whose FULL STOP still leaves the account alive.
 
-    This is the pre-trade question the bot never asked. Sizing by percent-of-
-    equity is blind to a trailing floor: on a 150K account 0.35% is $525, which
-    looks modest and is 12% of the entire $4,500 buffer.
+    This is the pre-trade question the bot never asked. Percent-of-equity sizing
+    is blind to a trailing floor because it reads the notional balance: 0.35% of
+    a 50K Combine is $175, which sounds conservative against $50,000 and is 8.75%
+    of the $2,000 that actually exists.
 
     `buffer_fraction` reserves part of the remaining room rather than betting all
-    of it on one trade — at the 0.25 default a worst-case loss may consume at most
-    a quarter of what is left, so it takes four consecutive full stops to reach
-    the floor rather than one. Returns 0 when even a single contract would risk
-    more than that, which is a refusal, not an error.
+    of it on one trade. Returns 0 when even one contract would risk more than
+    that — a refusal, not an error.
     """
     if stop_points <= 0 or point_value <= 0:
         return 0
