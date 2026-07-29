@@ -98,7 +98,32 @@ def _stop_requested() -> bool:
     return os.path.exists(STOP_FILE)
 
 
-def route_deterministic_order(client: NinjaTraderBridgeClient, decision) -> dict:
+# ── VENUE SELECTION ───────────────────────────────────────────────────────────
+# The lane's logic is venue-agnostic; only the transport differs. NinjaTrader
+# stays the default so an existing operator's behaviour is untouched, and a
+# TopstepX operator sets DETERMINISTIC_VENUE=topstepx. Both clients answer the
+# same ten calls, because the fail-closed author reads account_known,
+# position_known, orders_known and armed straight off them — a transport that
+# answered a slightly different shape would degrade those gates to "unknown"
+# rather than fail, and an unknown gate is a refusal that looks like a quiet
+# market.
+VENUE = os.getenv("DETERMINISTIC_VENUE", "ninjatrader").strip().lower()
+
+
+def _venue_client():
+    if VENUE == "topstepx":
+        from integrations.ninjatrader.deterministic.topstepx_lane_client import (
+            TopstepXLaneClient)
+        return TopstepXLaneClient()
+    if VENUE not in ("ninjatrader", ""):
+        raise RuntimeError(
+            f"DETERMINISTIC_VENUE={VENUE!r} is not a venue this lane can route to. "
+            f"Use 'ninjatrader' or 'topstepx'.")
+    return NinjaTraderBridgeClient(port=PORT, timeout=6.0, account=ACCOUNT,
+                                   instrument=INSTRUMENT)
+
+
+def route_deterministic_order(client, decision) -> dict:
     """Send a 15-contract deterministic bracket. Bridge attaches the structural
     stop + 35pt target with fill-slippage re-check; Python verifies by polling."""
     qty = int(decision.quantity)
@@ -134,7 +159,7 @@ def route_deterministic_order(client: NinjaTraderBridgeClient, decision) -> dict
             "filled": filled, "protected": protected, "flatten": flat}
 
 
-def one_scan(client: NinjaTraderBridgeClient, session: SessionAuthority, scan_num: int) -> dict:
+def one_scan(client, session: SessionAuthority, scan_num: int) -> dict:
     # 1. Reconcile live state (fail closed if unknown).
     pos = client.position(INSTRUMENT)
     orders = client.order_summary()
@@ -243,6 +268,15 @@ def run(max_scans: Optional[int] = None):
           f"TARGET: {TARGET_POINTS}pt  MAX STOP: {MAX_STOP_POINTS}pt  "
           f"MAX TRADES: {MAX_TRADES_PER_DAY}  DAILY LOSS CEILING: ${DAILY_LOSS_CEILING}")
     print("OPENAI CALLS: DISABLED  ATM TEMPLATE: NOT USED  AUTOMATED SIM TRADING: ENABLED")
+    # Which venue, and whether it can actually send. An operator who thinks they
+    # are on TopstepX while the lane talks to NinjaTrader would see a bot that
+    # never trades and no reason why.
+    if VENUE == "topstepx":
+        from integrations.ninjatrader.deterministic.topstepx_lane_client import _armed
+        print(f"VENUE: TOPSTEPX (no NinjaTrader)  ORDERS ARMED: "
+              f"{'YES' if _armed() else 'NO (set TOPSTEPX_ARM_ORDERS=true)'}")
+    else:
+        print(f"VENUE: NINJATRADER bridge port {PORT}")
 
     scan_num = 0
     while True:
@@ -253,11 +287,11 @@ def run(max_scans: Optional[int] = None):
         if max_scans is not None and scan_num >= max_scans:
             break
         scan_num += 1
-        client = NinjaTraderBridgeClient(port=PORT, timeout=6.0, account=ACCOUNT, instrument=INSTRUMENT)
+        client = _venue_client()
         if not client.connect():
             EV.record_scan(session.session_id, scan_num,
                            {"verdict": "NO_TRADE", "blockers": ["bridge_not_connected"]})
-            print(f"[scan {scan_num}] bridge not connected — NO TRADE")
+            print(f"[scan {scan_num}] {VENUE} not connected — NO TRADE")
         else:
             try:
                 rec = one_scan(client, session, scan_num)

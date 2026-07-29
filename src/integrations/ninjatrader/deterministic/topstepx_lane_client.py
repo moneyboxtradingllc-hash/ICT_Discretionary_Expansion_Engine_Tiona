@@ -1,0 +1,248 @@
+"""TopstepX transport for the deterministic lane — no NinjaTrader anywhere.
+
+The lane was written against NinjaTraderBridgeClient and calls ten methods on it.
+Rather than rewrite the loop, this presents the SAME ten and answers them from
+the ProjectX Gateway API. The loop does not learn a second way to trade; it keeps
+the one it has and the venue underneath changes.
+
+That matters beyond convenience: the lane's fail-closed author reads
+account_known, position_known, orders_known and armed off these calls. A transport
+that answered a slightly different shape would not fail — it would silently
+degrade those gates into "unknown", and an unknown gate is a refusal that looks
+like a quiet market.
+
+WHERE THE TWO VENUES GENUINELY DIFFER, AND WHAT IS DONE ABOUT IT
+
+  quote — ProjectX REST has no quote endpoint (real-time prices live on the
+      SignalR market hub, which this lane does not use). `last` is therefore the
+      close of the most recent CLOSED bar. That is honest for a 1-minute lane
+      whose decisions are made on closed bars anyway, and it is reported as
+      `derived_from: last_closed_bar` rather than passed off as a tick.
+
+  realized_pnl — no trade-level P&L endpoint is published in the swagger. It is
+      derived as balance minus the prior session's close, which is exactly the
+      quantity Topstep measures its own daily loss limit against, so the bot's
+      notion of "today's P&L" and the venue's now agree by construction.
+
+  arm_orders — NinjaTrader's bridge owns an ArmOrders switch that physically
+      refuses orders while false. TopstepX has no equivalent, so the safety has
+      to live here: orders are refused unless TOPSTEPX_ARM_ORDERS=true. It
+      defaults OFF, so importing or running this transport arms nothing.
+
+  working_order_count — the lane proves protection by seeing exactly 2 working
+      orders after a fill. A ProjectX bracket produces precisely that (the stop
+      and the target), so the check transfers unchanged.
+"""
+from __future__ import annotations
+
+import os
+from datetime import datetime, timezone
+from typing import Optional
+
+from broker.topstepx_adapter import TopstepXBrokerAdapter
+from broker.topstepx_client import TopstepXError
+
+__all__ = ["TopstepXLaneClient", "topstepx_lane_enabled"]
+
+
+def topstepx_lane_enabled() -> bool:
+    """True when the lane should route through TopstepX instead of NinjaTrader."""
+    return os.getenv("DETERMINISTIC_VENUE", "ninjatrader").strip().lower() == "topstepx"
+
+
+def _armed() -> bool:
+    return os.getenv("TOPSTEPX_ARM_ORDERS", "false").strip().lower() in ("1", "true", "yes", "on")
+
+
+class TopstepXLaneClient:
+    """Speaks NinjaTraderBridgeClient's surface, backed by TopstepX."""
+
+    def __init__(self, adapter: Optional[TopstepXBrokerAdapter] = None) -> None:
+        self._adapter = adapter or TopstepXBrokerAdapter()
+        self._connected = False
+        self._bars_cache: list[dict] = []
+        self._prior_close: Optional[float] = None
+
+    # ── lifecycle ─────────────────────────────────────────────────────────────
+    def connect(self) -> bool:
+        try:
+            self._adapter.connect()
+        except Exception as exc:  # noqa: BLE001 — the loop treats False as "no trade"
+            print(f"[topstepx] connect failed: {type(exc).__name__}: {exc}")
+            self._connected = False
+            return False
+        self._connected = True
+        self._prior_close = self._load_prior_close()
+        return True
+
+    def is_connected(self) -> bool:
+        return self._connected
+
+    def close(self) -> None:
+        self._connected = False
+
+    def _load_prior_close(self) -> Optional[float]:
+        """Yesterday's closing balance, from the Topstep durable state if present.
+
+        Without it, realized P&L for the day cannot be computed and the lane is
+        told `known: False` rather than being handed a zero that would read as
+        'flat on the day'.
+        """
+        label = os.getenv("TOPSTEP_ACCOUNT_SIZE", "").strip()
+        if not label:
+            return None
+        try:
+            from risk.topstep_limits import load_state, spec_for
+            return load_state(spec_for(label)).prior_day_close
+        except Exception:  # noqa: BLE001 — absence is reported, never invented
+            return None
+
+    # ── reads ─────────────────────────────────────────────────────────────────
+    def account_state(self) -> dict:
+        if not self._connected:
+            return {"account": None, "known": False}
+        try:
+            a = self._adapter.get_account()
+        except TopstepXError as exc:
+            return {"account": None, "known": False, "error": str(exc)}
+        realized = (None if self._prior_close is None
+                    else round(float(a["cash_value"]) - float(self._prior_close), 2))
+        return {"account": a["account"], "account_id": a["account_id"],
+                "cash_value": a["cash_value"], "balance": a["balance"],
+                "realized_pnl": realized if realized is not None else 0.0,
+                "realized_pnl_known": realized is not None,
+                "simulated": a["simulated"], "can_trade": a["can_trade"],
+                "known": True}
+
+    def environment_proof(self) -> dict:
+        if not self._connected:
+            return {"accounts": [], "known": False}
+        a = self._adapter.get_account()
+        return {"accounts": [a["account"]], "arm_orders": _armed(),
+                "venue": "topstepx", "simulated": a["simulated"], "known": True}
+
+    def connection_state(self) -> dict:
+        return {"connected": self._connected, "known": True, "venue": "topstepx"}
+
+    def instrument_metadata(self, instrument_name: str) -> dict:
+        if not self._connected:
+            return {"known": False}
+        a = self._adapter.get_account()
+        return {"known": True, "instrument": a["instrument"],
+                "contract_id": a["contract_id"], "tick_size": a["tick_size"],
+                "point_value": a["tick_value"] / a["tick_size"] if a["tick_size"] else None}
+
+    def position(self, instrument_name: str = "") -> dict:
+        """Signed quantity, matching the bridge: positive long, negative short."""
+        if not self._connected:
+            return {"qty": 0, "known": False}
+        try:
+            p = self._adapter.get_position()
+        except TopstepXError as exc:
+            return {"qty": 0, "known": False, "error": str(exc)}
+        if p.get("flat"):
+            return {"qty": 0, "known": True, "avg_price": None, "flat": True}
+        size = int(p.get("size") or 0)
+        signed = size if p.get("side") == "long" else -size
+        return {"qty": signed, "known": True, "avg_price": p.get("avg_price"),
+                "flat": False, "side": p.get("side")}
+
+    def order_summary(self) -> dict:
+        if not self._connected:
+            return {"working_order_count": None, "known": False}
+        account, contract = self._adapter._require()   # noqa: SLF001 — same package intent
+        try:
+            orders = self._adapter._client.open_orders(account.id, contract.id)
+        except TopstepXError as exc:
+            return {"working_order_count": None, "known": False, "error": str(exc)}
+        return {"working_order_count": len(orders), "orders": orders, "known": True}
+
+    def working_orders(self) -> list:
+        return self.order_summary().get("orders", []) or []
+
+    def quote(self, instrument_name: str = "") -> dict:
+        """Last CLOSED bar's close. See the module docstring — not a tick."""
+        bars = self._bars_cache or self.historical_1m(instrument_name, 5)
+        if not bars:
+            return {"known": False}
+        return {"last": bars[-1]["close"], "known": True,
+                "derived_from": "last_closed_bar",
+                "as_of": bars[-1]["timestamp"]}
+
+    def historical_1m(self, instrument_name: str = "", lookback: int = 400,
+                      days_back: Optional[int] = None,
+                      max_bars: Optional[int] = None) -> list:
+        if not self._connected:
+            return []
+        minutes = int((days_back or 5) * 24 * 60)
+        try:
+            bars = self._adapter.bars_1m(minutes_back=minutes)
+        except TopstepXError as exc:
+            print(f"[topstepx] bar fetch failed: {exc}")
+            return []
+        for b in bars:
+            b["instrument"] = instrument_name or "MNQ"
+        if max_bars:
+            bars = bars[-int(max_bars):]
+        self._bars_cache = bars
+        return bars[-lookback:] if lookback else bars
+
+    def buffered_bars(self) -> list:
+        return []
+
+    # ── writes ────────────────────────────────────────────────────────────────
+    def deterministic_order(self, payload: dict) -> dict:
+        """Route the lane's bracket. Refuses unless explicitly armed.
+
+        The structural stop arrives as a PRICE and ProjectX brackets take TICKS
+        from the fill, so the distance is measured against the last closed bar.
+        A market entry can slip past that, which is why the loop then polls for
+        the position and exactly two working orders rather than trusting the ack.
+        """
+        if not self._connected:
+            return {"accepted": False, "reason": "topstepx not connected"}
+        if not _armed():
+            return {"accepted": False,
+                    "reason": "orders disarmed (set TOPSTEPX_ARM_ORDERS=true)"}
+
+        direction = str(payload.get("direction") or "").lower()
+        qty = int(payload.get("quantity") or 0)
+        stop_price = payload.get("structural_stop_price")
+        target_points = float(payload.get("target_points") or 0.0)
+
+        quote = self.quote()
+        if not quote.get("known") or stop_price is None:
+            return {"accepted": False, "reason": "no reference price for bracket distance"}
+        ref = float(quote["last"])
+        stop_points = abs(ref - float(stop_price))
+        if stop_points <= 0:
+            return {"accepted": False,
+                    "reason": f"structural stop {stop_price} equals reference {ref}"}
+
+        try:
+            out = self._adapter.submit_order({
+                "direction": direction, "quantity": qty,
+                "stop_points": stop_points, "target_points": target_points,
+                "tag": payload.get("tag"),
+            })
+        except Exception as exc:  # noqa: BLE001
+            return {"accepted": False, "reason": f"{type(exc).__name__}: {exc}"}
+        return {"accepted": True, "order_id": out.get("order_id"),
+                "stop_points": stop_points, "target_points": target_points,
+                "reference_price": ref, "venue": "topstepx"}
+
+    def flatten(self, instrument_name: str = "") -> dict:
+        if not self._connected:
+            return {"flattened": False, "reason": "not connected"}
+        try:
+            return self._adapter.flatten()
+        except Exception as exc:  # noqa: BLE001
+            return {"flattened": False, "reason": f"{type(exc).__name__}: {exc}"}
+
+    def submit_market_entry(self, intent: dict) -> dict:
+        return self.deterministic_order(intent)
+
+    def submit_oco(self, stop: dict, target: dict) -> dict:
+        return {"accepted": False,
+                "reason": "brackets are attached to the entry on TopstepX; "
+                          "a separate OCO is never submitted"}

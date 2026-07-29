@@ -290,6 +290,25 @@ class TopstepXClient:
                  "opened_at": p.get("creationTimestamp")}
                 for p in (out.get("positions") or [])]
 
+    def open_orders(self, account_id: int, contract_id: Optional[str] = None) -> list[dict]:
+        """Working orders. After a bracket entry fills, the stop and target are
+        the two that remain — which is how the lane proves a position is
+        protected rather than assuming the bracket attached."""
+        out = self._post("/api/Order/searchOpen", {"accountId": int(account_id)})
+        rows = []
+        for o in (out.get("orders") or []):
+            if contract_id and o.get("contractId") != contract_id:
+                continue
+            rows.append({"id": o.get("id"), "contract_id": o.get("contractId"),
+                         "status": int(o.get("status") or 0),
+                         "type": int(o.get("type") or 0),
+                         "side": int(o.get("side") or 0),
+                         "size": int(o.get("size") or 0),
+                         "limit_price": o.get("limitPrice"),
+                         "stop_price": o.get("stopPrice"),
+                         "parent_order_id": o.get("parentOrderId")})
+        return rows
+
     # ── writes ────────────────────────────────────────────────────────────────
     def place_bracket_market_order(self, *, account_id: int, contract: TopstepXContract,
                                    side: str, size: int, stop_points: float,
