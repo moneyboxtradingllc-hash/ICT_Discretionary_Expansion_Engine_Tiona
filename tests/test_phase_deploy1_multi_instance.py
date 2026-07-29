@@ -109,9 +109,12 @@ class TestBrokerAdapters(unittest.TestCase):
 
     def test_available(self):
         # ninjatrader registered by NINJATRADER-MNQ-INTEGRATION-FOUNDATION
-        # (DEMO8458533 MNQ, DISARMED); default remains paper.
+        # (DEMO8458533 MNQ, DISARMED); topstepx registered for operators on
+        # Topstep's own platform, which has no NinjaTrader bridge. Registration
+        # arms nothing: topstepx refuses a non-simulated account unless the
+        # operator explicitly sets TOPSTEPX_ALLOW_LIVE. Default remains paper.
         self.assertEqual(set(available_brokers()),
-                         {"paper", "tradestation", "ninjatrader"})
+                         {"paper", "tradestation", "ninjatrader", "topstepx"})
 
     def test_stub_adapters_not_connected_and_refuse(self):
         for b in ("tradestation",):

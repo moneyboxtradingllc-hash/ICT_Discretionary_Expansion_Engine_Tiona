@@ -2,6 +2,9 @@
 .env
 *.env
 *.env.*
+# ...but the TEMPLATE carries no secrets and must ship, or a second operator has
+# no way to know which variables the bot requires.
+!.env.template
 
 # ── Python bytecode ────────────────────────────────────────────────────────────
 __pycache__/

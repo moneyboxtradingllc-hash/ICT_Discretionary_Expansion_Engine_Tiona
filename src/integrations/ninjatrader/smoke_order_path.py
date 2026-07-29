@@ -31,8 +31,11 @@ from integrations.ninjatrader import smoke_authorization as auth
 # transmit_latch=True into transmit().
 TRANSMIT_LATCH = False
 
-ACCOUNT = "DEMO8458533"
-INSTRUMENT = "MNQ SEP26"
+from integrations.ninjatrader.deterministic import (
+    ACCOUNT as _CFG_ACCOUNT, INSTRUMENT as _CFG_INSTRUMENT)
+
+ACCOUNT = _CFG_ACCOUNT   # per-operator config, see .env.template
+INSTRUMENT = _CFG_INSTRUMENT   # per-operator config, see .env.template
 TICK = 0.25
 DIRECTION = "long"
 ENTRY_TYPE = "market"

@@ -33,8 +33,11 @@ from integrations.ninjatrader import smoke_authorization as auth             # n
 from integrations.ninjatrader import smoke_order_path as OP                  # noqa: E402
 from integrations.ninjatrader.smoke_preflight_run import gather_and_run      # noqa: E402
 
-ACCOUNT = "DEMO8458533"
-INSTRUMENT = "MNQ SEP26"
+from integrations.ninjatrader.deterministic import (
+    ACCOUNT as _CFG_ACCOUNT, INSTRUMENT as _CFG_INSTRUMENT)
+
+ACCOUNT = _CFG_ACCOUNT   # per-operator config, see .env.template
+INSTRUMENT = _CFG_INSTRUMENT   # per-operator config, see .env.template
 ARTIFACT = os.path.join("data", "integration", "ninjatrader", "smoke_send_result.json")
 
 

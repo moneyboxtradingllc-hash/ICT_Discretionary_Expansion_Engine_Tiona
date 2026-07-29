@@ -18,8 +18,11 @@ from integrations.ninjatrader.account_safety import ALLOWED_ACCOUNTS, check_acco
 from integrations.ninjatrader import environment_proof
 from integrations.ninjatrader import smoke_authorization as auth
 
-EXPECTED_ACCOUNT = "DEMO8458533"
-EXPECTED_INSTRUMENT = "MNQ SEP26"
+from integrations.ninjatrader.deterministic import (
+    ACCOUNT as _CFG_ACCOUNT, INSTRUMENT as _CFG_INSTRUMENT)
+
+EXPECTED_ACCOUNT = _CFG_ACCOUNT   # per-operator config, see .env.template
+EXPECTED_INSTRUMENT = _CFG_INSTRUMENT   # per-operator config, see .env.template
 EXPECTED_QUANTITY = 1
 
 

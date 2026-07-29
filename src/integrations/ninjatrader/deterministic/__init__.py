@@ -5,7 +5,7 @@ calls the AI Brain / OpenAI and never claims mechanical authorship is AI
 authorship. Every opportunity it records is labelled mode+author.
 
 Frozen doctrine (this lane):
-  * Account : DEMO8458533 (sim only)     * Instrument : MNQ SEP26
+  * Account : from NT_ACCOUNT (.env)     * Instrument : from NT_INSTRUMENT
   * Sizing  : RISK-BASED — contracts = floor($500 / (stop_pts x $2)), capped at
               MAX_CONTRACTS. Tighter stop -> more size; wider stop -> less; the
               per-trade dollar risk is pinned near MAX_RISK_DOLLARS.
@@ -21,12 +21,43 @@ stop so worst-case loss stays within MAX_RISK_DOLLARS ($500): e.g. 12pt->20,
 16.5pt->15, 20pt->12, 25pt->10 contracts. Two trades/day => up to ~$1000 ceiling.
 """
 
+import os
+
+from dotenv import load_dotenv
+
+load_dotenv()   # does NOT override anything already set in the shell
+
 MODE = "DETERMINISTIC_MNQ_SIM_ONLY"
 AUTHOR = "deterministic_sim_author"
 EVIDENCE_ERA = "MNQ_DETERMINISTIC_SIM_WEEK"
 
-ACCOUNT = "DEMO8458533"
-INSTRUMENT = "MNQ SEP26"
+# ── PER-OPERATOR CONFIG ───────────────────────────────────────────────────────
+# The account and instrument belong to the machine, not to the repository. They
+# were hardcoded here and in four smoke modules, so a second operator had to edit
+# tracked files — and every sync overwrote their account with someone else's.
+#
+# ACCOUNT is not cosmetic. loop.py compares it against the account the bridge
+# reports (`account_known`), and that flows into the 20-check fail-closed author.
+# A mismatch means the lane refuses to trade. That is the correct behaviour, but
+# it is silent — it looks like a bot that simply never finds a setup. So an unset
+# account fails LOUDLY at import instead of defaulting to somebody else's.
+#
+# Set these in .env (gitignored, per machine). See .env.template.
+ACCOUNT = os.getenv("NT_ACCOUNT", "").strip()
+INSTRUMENT = os.getenv("NT_INSTRUMENT", "").strip()
+
+if not ACCOUNT or not INSTRUMENT:
+    _missing = ", ".join(n for n, v in (("NT_ACCOUNT", ACCOUNT),
+                                        ("NT_INSTRUMENT", INSTRUMENT)) if not v)
+    raise RuntimeError(
+        f"Deterministic lane is not configured: {_missing} is unset.\n"
+        f"Copy .env.template to .env and fill in your NinjaTrader account id and\n"
+        f"instrument, e.g.\n"
+        f"    NT_ACCOUNT=DEMO8458533\n"
+        f"    NT_INSTRUMENT=MNQ SEP26\n"
+        f"Defaulting these would point your bot at another operator's account, so\n"
+        f"there is deliberately no default."
+    )
 
 POINT_VALUE = 2.00              # $ per index point per contract (MNQ)
 TICK_SIZE = 0.25

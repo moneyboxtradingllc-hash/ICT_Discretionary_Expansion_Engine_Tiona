@@ -22,7 +22,10 @@ from integrations.ninjatrader import smoke_preflight as PRE                # noq
 from integrations.ninjatrader.bridge_client import NinjaTraderBridgeClient  # noqa: E402
 from integrations.ninjatrader.instrument_spec import InstrumentSpec        # noqa: E402
 
-INSTRUMENT = "MNQ SEP26"
+from integrations.ninjatrader.deterministic import (
+    ACCOUNT as _CFG_ACCOUNT, INSTRUMENT as _CFG_INSTRUMENT)
+
+INSTRUMENT = _CFG_INSTRUMENT   # per-operator config, see .env.template
 ARTIFACT = os.path.join("data", "integration", "ninjatrader", "smoke_preflight.json")
 
 

@@ -27,6 +27,16 @@ def _registry():
             _REGISTRY["ninjatrader"] = NinjaTraderBrokerAdapter
         except Exception:  # noqa: BLE001 — integration package optional
             pass
+        # TOPSTEPX — Topstep's own platform has no NinjaTrader bridge, so this
+        # adapter is the entire transport for an operator there: execution AND
+        # market data. Registered for explicit `broker: topstepx`; the default
+        # stays paper. It refuses a non-simulated account unless the operator
+        # sets TOPSTEPX_ALLOW_LIVE, so registering it arms nothing by itself.
+        try:
+            from broker.topstepx_adapter import TopstepXBrokerAdapter
+            _REGISTRY["topstepx"] = TopstepXBrokerAdapter
+        except Exception:  # noqa: BLE001 — optional like the others
+            pass
     return _REGISTRY
 
 
