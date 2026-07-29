@@ -306,3 +306,74 @@ class TestTheBarWindowIsUnambiguous:
             TopstepXLaneClient)
         assert TopstepXLaneClient._bar_age_minutes("not-a-date") is None
         assert TopstepXLaneClient._bar_age_minutes(None) is None
+
+
+class TestTheVenueOwnsTheIdentity:
+    """The guard demanded NT_ACCOUNT unconditionally, which broke TopstepX at
+    import — and invited a far worse workaround than the crash.
+
+    On TopstepX, acct["account"] is the TopstepX account NAME. loop.py computes
+    account_known = (acct["account"] == ACCOUNT). With a placeholder in
+    NT_ACCOUNT that is False on every scan, and the 20-check fail-closed author
+    refuses every trade in silence: a lane that looks like it simply never finds
+    a setup. The crash was loud; the workaround would not have been.
+    """
+
+    def _reload(self, monkeypatch, venue, **env):
+        # load_dotenv() runs again on reload and would re-populate NT_ACCOUNT
+        # from the developer's own .env, so "unset" could never be simulated on
+        # a configured machine. Neutralised here so the test sees exactly the
+        # environment it declares.
+        # Patched on `dotenv` itself, not on the lane module: reload re-executes
+        # `from dotenv import load_dotenv`, which would rebind the real function
+        # and quietly undo a module-level patch.
+        import dotenv
+        monkeypatch.setattr(dotenv, "load_dotenv", lambda *a, **k: False)
+        import integrations.ninjatrader.deterministic as d
+        for k in ("NT_ACCOUNT", "NT_INSTRUMENT", "TOPSTEPX_ACCOUNT_NAME",
+                  "TOPSTEPX_CONTRACT"):
+            monkeypatch.delenv(k, raising=False)
+        monkeypatch.setenv("DETERMINISTIC_VENUE", venue)
+        for k, v in env.items():
+            monkeypatch.setenv(k, v)
+        import importlib
+        return importlib.reload(d)
+
+    def test_topstepx_needs_no_ninjatrader_config_at_all(self, monkeypatch):
+        d = self._reload(monkeypatch, "topstepx",
+                         TOPSTEPX_ACCOUNT_NAME="PRAC-V2-562817-71602583",
+                         TOPSTEPX_CONTRACT="MNQ")
+        assert d.ACCOUNT == "PRAC-V2-562817-71602583"
+        assert d.INSTRUMENT == "MNQ"
+
+    def test_account_known_is_true_on_the_topstepx_path(self, env, monkeypatch):
+        """The whole point: the comparison must be like-for-like.
+
+        Without this the lane connects, reads bars, decides — and refuses
+        everything, with no error anywhere to explain why.
+        """
+        d = self._reload(monkeypatch, "topstepx",
+                         TOPSTEPX_ACCOUNT_NAME="PRAC-50K",
+                         TOPSTEPX_CONTRACT="MNQ")
+        monkeypatch.setenv("TOPSTEPX_USERNAME", "tiona")
+        monkeypatch.setenv("TOPSTEPX_API_KEY", "k")
+        reported = _client(Venue()).account_state()["account"]
+        assert reported == d.ACCOUNT          # exactly what loop.py compares
+
+    def test_missing_topstepx_config_names_topstepx_variables(self, monkeypatch):
+        with pytest.raises(RuntimeError) as exc:
+            self._reload(monkeypatch, "topstepx")
+        msg = str(exc.value)
+        assert "TOPSTEPX_ACCOUNT_NAME" in msg
+        assert "Do NOT set NT_ACCOUNT" in msg      # kills the placeholder idea
+
+    def test_ninjatrader_still_demands_its_own_config(self, monkeypatch):
+        with pytest.raises(RuntimeError) as exc:
+            self._reload(monkeypatch, "ninjatrader")
+        assert "NT_ACCOUNT" in str(exc.value)
+
+    def test_ninjatrader_identity_is_unchanged(self, monkeypatch):
+        d = self._reload(monkeypatch, "ninjatrader",
+                         NT_ACCOUNT="DEMO8458533", NT_INSTRUMENT="MNQ SEP26")
+        assert d.ACCOUNT == "DEMO8458533"
+        assert d.INSTRUMENT == "MNQ SEP26"

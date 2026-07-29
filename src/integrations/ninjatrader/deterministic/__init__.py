@@ -43,18 +43,47 @@ EVIDENCE_ERA = "MNQ_DETERMINISTIC_SIM_WEEK"
 # account fails LOUDLY at import instead of defaulting to somebody else's.
 #
 # Set these in .env (gitignored, per machine). See .env.template.
-ACCOUNT = os.getenv("NT_ACCOUNT", "").strip()
-INSTRUMENT = os.getenv("NT_INSTRUMENT", "").strip()
+#
+# THE IDENTITY IS PER-VENUE. This guard originally demanded NT_ACCOUNT
+# unconditionally, which broke the TopstepX lane at import: that operator has no
+# NinjaTrader account to name. Worse than the crash was the workaround it invited
+# — putting a placeholder in NT_ACCOUNT. On TopstepX `acct["account"]` is the
+# TopstepX account NAME, so `account_known` would have compared it against that
+# placeholder, come back False on every scan, and the fail-closed author would
+# have refused every trade in silence. A lane that looks like it simply never
+# finds a setup is the exact failure this comment block exists to prevent, and
+# the guard was creating it.
+#
+# So ACCOUNT resolves to whatever identity the CONFIGURED VENUE reports, and the
+# comparison in loop.py is like-for-like by construction.
+VENUE = os.getenv("DETERMINISTIC_VENUE", "ninjatrader").strip().lower()
+
+if VENUE == "topstepx":
+    # The TopstepX adapter independently resolves this name by EXACT match,
+    # refuses an ambiguous match, refuses a non-simulated account without an
+    # explicit opt-in, and refuses one Topstep has disabled — a stricter identity
+    # check than the NinjaTrader path can make, done before a single bar is read.
+    ACCOUNT = os.getenv("TOPSTEPX_ACCOUNT_NAME", "").strip()
+    INSTRUMENT = os.getenv("TOPSTEPX_CONTRACT", "").strip()
+    _REQUIRED = (("TOPSTEPX_ACCOUNT_NAME", ACCOUNT), ("TOPSTEPX_CONTRACT", INSTRUMENT))
+    _HINT = ("    TOPSTEPX_ACCOUNT_NAME=PRAC-V2-XXXXXX-XXXXXXX\n"
+             "    TOPSTEPX_CONTRACT=MNQ\n"
+             "Do NOT set NT_ACCOUNT on this venue — there is no NinjaTrader\n"
+             "account to name, and a placeholder would make account_known False\n"
+             "on every scan and silently refuse every trade.")
+else:
+    ACCOUNT = os.getenv("NT_ACCOUNT", "").strip()
+    INSTRUMENT = os.getenv("NT_INSTRUMENT", "").strip()
+    _REQUIRED = (("NT_ACCOUNT", ACCOUNT), ("NT_INSTRUMENT", INSTRUMENT))
+    _HINT = ("    NT_ACCOUNT=DEMO8458533\n"
+             "    NT_INSTRUMENT=MNQ SEP26")
 
 if not ACCOUNT or not INSTRUMENT:
-    _missing = ", ".join(n for n, v in (("NT_ACCOUNT", ACCOUNT),
-                                        ("NT_INSTRUMENT", INSTRUMENT)) if not v)
+    _missing = ", ".join(n for n, v in _REQUIRED if not v)
     raise RuntimeError(
-        f"Deterministic lane is not configured: {_missing} is unset.\n"
-        f"Copy .env.template to .env and fill in your NinjaTrader account id and\n"
-        f"instrument, e.g.\n"
-        f"    NT_ACCOUNT=DEMO8458533\n"
-        f"    NT_INSTRUMENT=MNQ SEP26\n"
+        f"Deterministic lane is not configured for venue {VENUE!r}: "
+        f"{_missing} is unset.\n"
+        f"Copy .env.template to .env and fill it in, e.g.\n{_HINT}\n"
         f"Defaulting these would point your bot at another operator's account, so\n"
         f"there is deliberately no default."
     )
