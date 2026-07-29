@@ -157,11 +157,16 @@ class TopstepXBrokerAdapter(BrokerAdapter):
         return {"known": True, "flat": True, "contract_id": wanted, "size": 0,
                 "side": "flat", "avg_price": 0.0}
 
-    def bars_1m(self, minutes_back: int = 1500) -> list[dict]:
-        """Closed 1-minute bars — the lane's market data, since there is no NT feed."""
+    def bars_1m(self, minutes_back: int = 1500, limit: int = 2000) -> list[dict]:
+        """Closed 1-minute bars — the lane's market data, since there is no NT feed.
+
+        `limit` is exposed because the window and the cap must agree: asking for
+        a wide window with a small cap leaves it to the venue to decide which
+        bars to drop, and nothing documents which end it truncates.
+        """
         _, contract = self._require()
         return self._client.bars(contract.id, minutes_back=minutes_back,
-                                 unit="minute", unit_number=1)
+                                 unit="minute", unit_number=1, limit=limit)
 
     # ── writes ────────────────────────────────────────────────────────────────
     def submit_order(self, order: dict) -> dict:

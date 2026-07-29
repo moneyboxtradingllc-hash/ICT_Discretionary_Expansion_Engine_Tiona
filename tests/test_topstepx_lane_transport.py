@@ -22,8 +22,26 @@ MNQ = {"id": "CON.F.US.MNQ.U26", "name": "MNQU26", "description": "Micro Nasdaq"
        "tickSize": 0.25, "tickValue": 0.5, "activeContract": True}
 ACCT = {"id": 77, "name": "PRAC-50K", "balance": 50_000.0,
         "canTrade": True, "simulated": True}
-BARS = [{"t": f"2026-07-28T13:{m:02d}:00Z", "o": 100 + m, "h": 101 + m,
-         "l": 99 + m, "c": 100.5 + m, "v": 10} for m in range(30, 40)]
+def _live_bars(n=10):
+    """Bars ending ~now.
+
+    Fixed-date fixtures would be permanently stale, and the transport now REFUSES
+    a stale window — correctly, since stale bars are indistinguishable from a
+    quiet market downstream. A fixture standing in for a live feed has to age
+    like one.
+    """
+    from datetime import datetime, timedelta, timezone
+    end = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    out = []
+    for i in range(n, 0, -1):
+        t = end - timedelta(minutes=i - 1)
+        out.append({"t": t.strftime("%Y-%m-%dT%H:%M:00Z"),
+                    "o": 100 + i, "h": 101 + i, "l": 99 + i,
+                    "c": 100.5 + i, "v": 10})
+    return out
+
+
+BARS = _live_bars()
 
 
 class Venue:
@@ -244,3 +262,47 @@ class TestDisconnectedIsSafe:
                                      "target_points": 35.0})
         assert ack["accepted"] is False
         assert not venue.called("/api/Order/place")
+
+
+class TestTheBarWindowIsUnambiguous:
+    """The lane asks for 2000 bars over a 10-day window. MNQ prints ~1380 a day,
+    so a naive translation requests ~13,800 and caps at 2000 — and nothing
+    documents which 2000 come back. Warming up on ten-day-old bars would have the
+    lane trading a market that no longer exists."""
+
+    def test_the_window_is_sized_to_the_bars_wanted(self, env):
+        venue = Venue()
+        c = _client(venue)
+        c.historical_1m("MNQ", 2000, days_back=10, max_bars=2500)
+        sent = venue.sent("/api/History/retrieveBars")
+        from datetime import datetime
+        start = datetime.fromisoformat(sent["startTime"].replace("Z", "+00:00"))
+        end = datetime.fromisoformat(sent["endTime"].replace("Z", "+00:00"))
+        minutes = (end - start).total_seconds() / 60.0
+        assert minutes < 10 * 24 * 60          # NOT the naive 10-day window
+        assert sent["limit"] >= 2500           # cap matches what was asked for
+
+    def test_the_partial_bar_is_still_refused(self, env):
+        venue = Venue()
+        _client(venue).historical_1m("MNQ", 2000, days_back=10)
+        assert venue.sent("/api/History/retrieveBars")["includePartialBar"] is False
+
+    def test_a_stale_window_is_refused_rather_than_traded(self, env, monkeypatch):
+        """Stale bars are indistinguishable from a quiet market downstream."""
+        import integrations.ninjatrader.deterministic.topstepx_lane_client as mod
+        monkeypatch.setattr(mod.TopstepXLaneClient, "_bar_age_minutes",
+                            staticmethod(lambda _s: 240.0))
+        assert _client(Venue()).historical_1m("MNQ", 100) == []
+
+    def test_fresh_bars_pass(self, env, monkeypatch):
+        import integrations.ninjatrader.deterministic.topstepx_lane_client as mod
+        monkeypatch.setattr(mod.TopstepXLaneClient, "_bar_age_minutes",
+                            staticmethod(lambda _s: 1.0))
+        assert len(_client(Venue()).historical_1m("MNQ", 100)) == len(BARS)
+
+    def test_an_unreadable_timestamp_does_not_halt_trading(self, env):
+        """Unparseable must read as a parsing problem, not as staleness."""
+        from integrations.ninjatrader.deterministic.topstepx_lane_client import (
+            TopstepXLaneClient)
+        assert TopstepXLaneClient._bar_age_minutes("not-a-date") is None
+        assert TopstepXLaneClient._bar_age_minutes(None) is None

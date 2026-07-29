@@ -50,6 +50,12 @@ def topstepx_lane_enabled() -> bool:
     return os.getenv("DETERMINISTIC_VENUE", "ninjatrader").strip().lower() == "topstepx"
 
 
+#: How old the newest bar may be before the lane refuses to act on the window.
+#: Generous enough to survive a slow poll or a thin minute, tight enough that a
+#: closed market or a mis-truncated window cannot masquerade as live data.
+_STALE_BAR_MINUTES = 15.0
+
+
 def _armed() -> bool:
     return os.getenv("TOPSTEPX_ARM_ORDERS", "false").strip().lower() in ("1", "true", "yes", "on")
 
@@ -174,18 +180,56 @@ class TopstepXLaneClient:
                       max_bars: Optional[int] = None) -> list:
         if not self._connected:
             return []
-        minutes = int((days_back or 5) * 24 * 60)
+
+        # Size the WINDOW to the bars actually wanted, and set the limit to
+        # match. The lane asks for a 10-day window and 2000 bars; MNQ prints
+        # ~1380 a day, so a naive translation requests ~13,800 and caps at 2000 —
+        # and nothing documents WHICH 2000 come back. If ProjectX truncates from
+        # the start, the lane would warm up on bars from ten days ago and trade a
+        # market that no longer exists. Asking for roughly what is needed removes
+        # the ambiguity instead of betting on it.
+        want = max(int(lookback or 0), int(max_bars or 0)) or 400
+        minutes = int(want * 3)          # headroom for the daily break/weekends
         try:
-            bars = self._adapter.bars_1m(minutes_back=minutes)
+            bars = self._adapter.bars_1m(minutes_back=minutes, limit=want + 200)
         except TopstepXError as exc:
             print(f"[topstepx] bar fetch failed: {exc}")
             return []
+
+        # And verify it anyway. A stale window is indistinguishable from a quiet
+        # market downstream, so freshness is asserted here rather than inferred
+        # from a chart later. No bars is a NO TRADE, which is the safe answer.
+        if bars:
+            age = self._bar_age_minutes(bars[-1]["timestamp"])
+            if age is not None and age > _STALE_BAR_MINUTES:
+                print(f"[topstepx] REFUSING BARS: newest is {age:.0f} min old "
+                      f"({bars[-1]['timestamp']}). Market closed, or the venue "
+                      f"truncated the window from the wrong end. No trade.")
+                return []
         for b in bars:
             b["instrument"] = instrument_name or "MNQ"
         if max_bars:
             bars = bars[-int(max_bars):]
         self._bars_cache = bars
         return bars[-lookback:] if lookback else bars
+
+    @staticmethod
+    def _bar_age_minutes(stamp) -> Optional[float]:
+        """Minutes since `stamp`, or None if it cannot be read.
+
+        Unreadable never means stale — an unparseable timestamp must not silently
+        halt trading, it must be visible as a parsing problem instead.
+        """
+        if not stamp:
+            return None
+        text = str(stamp).strip().replace("Z", "+00:00")
+        try:
+            when = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - when).total_seconds() / 60.0
 
     def buffered_bars(self) -> list:
         return []
