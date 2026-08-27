@@ -95,3 +95,9 @@ data/integration/ninjatrader/smoke_authorization.json
 data/integration/ninjatrader/deterministic/session_state.json
 data/integration/ninjatrader/deterministic/STOP
 data/integration/ninjatrader/deterministic/evidence/
+
+# Topstep durable account state (trailing-drawdown high-water mark + prior-day
+# close, written by risk/topstep_limits.py). It is per-account and per-machine:
+# committing it would push one operator's balance history to the shared remote
+# and hand it to the other on their next pull.
+data/topstep/
