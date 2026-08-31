@@ -92,12 +92,57 @@ data/replay/
 data/integration/ninjatrader/smoke_authorization.json
 
 # Deterministic lane runtime state (session + stop flag + evidence stream)
-data/integration/ninjatrader/deterministic/session_state.json
-data/integration/ninjatrader/deterministic/STOP
-data/integration/ninjatrader/deterministic/evidence/
+data/integration/topstepx/deterministic/session_state.json
+data/integration/topstepx/deterministic/STOP
+data/integration/topstepx/deterministic/evidence/
 
-# Topstep durable account state (trailing-drawdown high-water mark + prior-day
-# close, written by risk/topstep_limits.py). It is per-account and per-machine:
-# committing it would push one operator's balance history to the shared remote
-# and hand it to the other on their next pull.
+# TOPSTEPX-DATA-PROVIDER — locally accumulated Topstep candle cache.
+# Runtime data, not source: it grows one line per minute of market time
+# and is rebuilt by simply running the provider.
+data/market_data/
+
+# DECON-3: retired QQQ/Alpaca evidence is local forensic history, not tracked
+archive/legacy_alpaca_qqq/performance_QQQ/
+archive/legacy_alpaca_qqq/htf_memory_QQQ.json
+
+# Durable production session state — never committed (PRODUCTION-AUTHORIZATION-CLI)
+data/integration/topstepx/session_auth_*.json
+# Retired authorization records. Same policy, one directory deeper: the pattern
+# above is anchored, so retiring a record by MOVING it was silently taking it
+# out of scope. An authorization record is never committed, retired or not.
+data/integration/topstepx/retired_authorizations/session_auth_*.json
+# Flight-recorder submission stream — same class as trade_mission_*.json below:
+# raw durable session state, not an evidence report. The postmortems that cite
+# it are committed; the runtime stream it summarises stays local.
+data/integration/topstepx/submissions_*.jsonl
+data/integration/topstepx/trade_mission_*.json
+data/integration/topstepx/mission_voids_*.json
+data/integration/topstepx/active_execution_context.json
+data/integration/topstepx/slippage_observations.jsonl
+data/integration/topstepx/session_*.json
+
+# Session-replay archives: raw runtime + account-derived evidence, never committed
+data/replay_sessions/
+
+# Terra migration evaluation output (counterfactual, local only)
+data/replay_sessions/_terra_eval/
+
+# ── TIONA SANITIZED SYNC (2026-08-31) ────────────────────────────────────────
+# Restored from this repository's own history: Topstep durable account state
+# (trailing-drawdown high-water mark + prior-day close, written by
+# risk/topstep_limits.py). It is per-account and per-machine: committing it
+# would push one operator's balance history to the shared remote and hand it to
+# the other on their next pull.
 data/topstep/
+
+# BLANKET RUNTIME EXCLUSION. The upstream repository tracked 88 files under
+# data/ -- execution smoke results, session records, missions, preflight
+# artifacts, readiness reports -- several of which embedded a live brokerage
+# account id and fingerprint. None of that is application source, and evidence
+# from one operator's account has no meaning in another's repository. The code
+# recreates whatever it needs at runtime.
+#
+# Negations below re-admit only structural placeholders, never content.
+data/
+!data/.gitkeep
+!data/**/.gitkeep

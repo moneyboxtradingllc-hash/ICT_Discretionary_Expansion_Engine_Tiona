@@ -32,6 +32,30 @@ def _c(o, h, l, c):
             "direction": "bullish" if c > o else ("bearish" if c < o else "neutral")}
 
 
+
+# ── CLASS G (STEP 4B.12 §4 UNIT 1) ───────────────────────────────────────────
+# The fixtures below (_flat / _downtrend / _uptrend) carry NO timestamps. They
+# model a candle PATTERN, not a market history, so canonical cadence and
+# source-member provenance cannot be supplied for them even in principle.
+#
+# `find_swings` is fail-closed by design: with no evidence it certifies nothing.
+# These tests therefore request legacy array-neighbour geometry DELIBERATELY,
+# through explicitly named wrappers so the assumption is visible at every call
+# site rather than hidden behind a default.
+#
+# They assert what the geometry does. They do NOT assert that production would
+# be entitled to believe it.
+
+def regime_features_geometry_only(*args, **kwargs):
+    kwargs.setdefault("allow_uncadenced", True)
+    return extract_regime_features(*args, **kwargs)
+
+
+def swing_sequence_geometry_only(*args, **kwargs):
+    kwargs.setdefault("allow_uncadenced", True)
+    return swing_sequence(*args, **kwargs)
+
+
 def _downtrend(cycles=6, start=28600.0, leg=60.0, pull=24.0):
     """Impulse-down / pullback-up cycles with genuine fractal pivots.
 
@@ -99,20 +123,20 @@ def _snapshot(bias_15, bias_5, swing_high=28650.0, swing_low=28200.0,
 class TestRetracementDoesNotEraseTrend:
     def test_bearish_htf_with_bullish_ltf_keeps_directional_authority(self):
         raw = {"15m": _downtrend(), "5m": _downtrend()}
-        f = extract_regime_features(_snapshot("bearish", "bullish", invalidation=28650.0), raw)
+        f = regime_features_geometry_only(_snapshot("bearish", "bullish", invalidation=28650.0), raw)
         assert f["htf_authority"]["bias"] == "bearish"
         assert f["htf_authority"]["intact"] is True
         assert f["htf_relationship"] == "retracement"
 
     def test_retracement_earns_the_same_trend_weight_as_agreement(self):
         raw = {"15m": _downtrend(), "5m": _downtrend()}
-        aligned = extract_regime_features(_snapshot("bearish", "bearish", invalidation=28650.0), raw)
-        pulled_back = extract_regime_features(_snapshot("bearish", "bullish", invalidation=28650.0), raw)
+        aligned = regime_features_geometry_only(_snapshot("bearish", "bearish", invalidation=28650.0), raw)
+        pulled_back = regime_features_geometry_only(_snapshot("bearish", "bullish", invalidation=28650.0), raw)
         assert pulled_back["trend_score"] == aligned["trend_score"]
 
     def test_reasoning_states_why_it_is_a_retracement(self):
         raw = {"15m": _downtrend(), "5m": _downtrend()}
-        f = extract_regime_features(_snapshot("bearish", "bullish", invalidation=28650.0), raw)
+        f = regime_features_geometry_only(_snapshot("bearish", "bullish", invalidation=28650.0), raw)
         assert "not violated" in f["htf_reasoning"].lower()
 
 
@@ -123,7 +147,7 @@ class TestRetracementIsSymmetric:
         raw = {"15m": _uptrend(), "5m": _uptrend()}
         snap = _snapshot("bullish", "bearish", swing_high=28900.0, swing_low=28200.0)
         snap["structure"]["15m"]["state"] = "bullish_continuation"
-        f = extract_regime_features(snap, raw)
+        f = regime_features_geometry_only(snap, raw)
         assert f["htf_authority"]["bias"] == "bullish"
         assert f["htf_relationship"] == "retracement"
         assert f["is_bullish"] is True, "a pullback must not erase bullish authority"
@@ -142,7 +166,7 @@ class TestRetracementIsSymmetric:
 class TestUncertaintyIsPreserved:
     def test_neutral_htf_yields_no_authority(self):
         raw = {"15m": _flat(), "5m": _flat()}
-        f = extract_regime_features(_snapshot("neutral", "bullish", authored="neutral"), raw)
+        f = regime_features_geometry_only(_snapshot("neutral", "bullish", authored="neutral"), raw)
         assert f["htf_authority"]["bias"] == "neutral"
         assert f["htf_relationship"] == "no_authority"
 
@@ -200,8 +224,8 @@ class TestReversalRequiresStructuralEvidence:
 class TestHistoryLengthInvariance:
     def test_swing_sequence_is_window_bounded(self):
         recent = _downtrend(40)
-        short = swing_sequence(_flat(30) + recent)
-        long_ = swing_sequence(_flat(3000) + recent)
+        short = swing_sequence_geometry_only(_flat(30) + recent)
+        long_ = swing_sequence_geometry_only(_flat(3000) + recent)
         assert short == long_
 
     def test_range_metrics_are_window_bounded(self):
@@ -211,28 +235,28 @@ class TestHistoryLengthInvariance:
     def test_regime_features_are_history_invariant(self):
         recent = _downtrend(40)
         snap = _snapshot("bearish", "bullish", invalidation=28650.0)
-        short = extract_regime_features(snap, {"15m": _flat(30) + recent,
+        short = regime_features_geometry_only(snap, {"15m": _flat(30) + recent,
                                                "5m": _flat(30) + recent})
-        long_ = extract_regime_features(snap, {"15m": _flat(3000) + recent,
+        long_ = regime_features_geometry_only(snap, {"15m": _flat(3000) + recent,
                                                "5m": _flat(3000) + recent})
         for k in ("trend_score", "chop_score", "higher_highs", "lower_lows",
                   "range_size", "close_position_in_range", "htf_relationship"):
             assert short[k] == long_[k], k
 
     def test_window_never_exceeds_its_bound(self):
-        assert swing_sequence(_downtrend(500))["window"] <= SEQ_WINDOW
+        assert swing_sequence_geometry_only(_downtrend(500))["window"] <= SEQ_WINDOW
 
 
 # ── D) Hardcoded feature values must not return ──────────────────────────────
 
 class TestFeaturesAreDerivedNotLiteral:
     def test_swing_counters_respond_to_structure(self):
-        down = swing_sequence(_downtrend())
+        down = swing_sequence_geometry_only(_downtrend())
         assert down["lower_highs"] > 0 or down["lower_lows"] > 0
         assert down["sequence"] != "unknown"
 
     def test_a_downtrend_and_flat_tape_do_not_produce_identical_features(self):
-        assert swing_sequence(_downtrend()) != swing_sequence(_flat())
+        assert swing_sequence_geometry_only(_downtrend()) != swing_sequence_geometry_only(_flat())
 
     def test_range_size_is_not_zero_on_real_movement(self):
         assert range_metrics(_downtrend())["range_size"] > 0
@@ -244,7 +268,7 @@ class TestFeaturesAreDerivedNotLiteral:
 
     def test_extractor_surfaces_all_four_swing_counters(self):
         raw = {"15m": _downtrend(), "5m": _downtrend()}
-        f = extract_regime_features(_snapshot("bearish", "bearish", invalidation=28650.0), raw)
+        f = regime_features_geometry_only(_snapshot("bearish", "bearish", invalidation=28650.0), raw)
         for k in ("higher_highs", "lower_highs", "higher_lows", "lower_lows"):
             assert k in f
         assert not all(f[k] == 0 for k in ("higher_highs", "lower_highs",
@@ -259,14 +283,14 @@ class TestExpansionVocabulary:
     def test_real_expansion_states_register_as_expanding(self, state):
         snap = _snapshot("bearish", "bearish", invalidation=28650.0)
         snap["expansion"]["15m"]["state"] = state
-        f = extract_regime_features(snap, {"15m": _downtrend(), "5m": _downtrend()})
+        f = regime_features_geometry_only(snap, {"15m": _downtrend(), "5m": _downtrend()})
         assert f["is_expanding"] is True, f"{state} must count as expanding"
 
     def test_compression_is_not_expanding(self):
         snap = _snapshot("bearish", "bearish", invalidation=28650.0)
         snap["expansion"]["15m"]["state"] = "compression"
         snap["expansion"]["5m"]["state"] = "compression"
-        f = extract_regime_features(snap, {"15m": _flat(), "5m": _flat()})
+        f = regime_features_geometry_only(snap, {"15m": _flat(), "5m": _flat()})
         assert f["is_expanding"] is False
         assert f["is_contracting"] is True
 
@@ -275,7 +299,7 @@ class TestExpansionVocabulary:
         snap = _snapshot("bearish", "bearish", invalidation=28650.0)
         snap["expansion"]["15m"]["state"] = "expanding"
         snap["expansion"]["5m"]["state"] = "expanding"
-        f = extract_regime_features(snap, {"15m": _flat(), "5m": _flat()})
+        f = regime_features_geometry_only(snap, {"15m": _flat(), "5m": _flat()})
         assert f["is_expanding"] is False
 
 

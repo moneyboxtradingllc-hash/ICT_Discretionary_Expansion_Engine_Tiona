@@ -18,8 +18,8 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from integrations.ninjatrader.deterministic import loop as L
-from integrations.ninjatrader.deterministic import FLATTEN_AT, FLATTEN_UNTIL
+from integrations.topstepx.deterministic import loop as L
+from integrations.topstepx.deterministic import FLATTEN_AT, FLATTEN_UNTIL
 
 ET = ZoneInfo("America/New_York")
 MON, SAT, SUN = 27, 25, 26          # 2026-07

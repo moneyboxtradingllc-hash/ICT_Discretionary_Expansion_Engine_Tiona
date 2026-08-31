@@ -22,7 +22,7 @@ def _entry_record(**over) -> dict:
     rec = {
         "trade_id": "T-1001",
         "timestamp": "20260615T113000",
-        "symbol": "QQQ",
+        "symbol": "MNQ",
         "side": "buy",
         "intent_type": "expansion_continuation",
         "order_status": "closed",
@@ -77,14 +77,14 @@ class _Isolated(unittest.TestCase):
 
     def _journal(self, **over):
         from paper_execution.trade_journal import append_trade
-        append_trade(_entry_record(**over), "QQQ")
+        append_trade(_entry_record(**over), "MNQ")
 
 
 class TestAssembler(_Isolated):
     def test_pure_assembly_maps_entry_and_recon(self):
         from adaptive_learning.outcome_assembler import assemble_closed_trade_outcome
         out = assemble_closed_trade_outcome(_recon(), _entry_record(), None)
-        self.assertEqual(out["instrument"], "QQQ")
+        self.assertEqual(out["instrument"], "MNQ")
         self.assertEqual(out["entry_timestamp"], "20260615T113000")
         self.assertEqual(out["source_type"], "closed_trade")
         self.assertEqual(out["session"], "afternoon")
@@ -103,7 +103,7 @@ class TestRuntimeWiring(_Isolated):
         from adaptive_learning.outcome_assembler import record_closed_trade_scar
         from ai_retrieval.vector_store import load_records
         self._journal()
-        tel = record_closed_trade_scar(_recon(), "QQQ")
+        tel = record_closed_trade_scar(_recon(), "MNQ")
         self.assertTrue(tel["memory_written"], tel)
         self.assertEqual(len(tel["memory_id"]), 64)
         self.assertEqual(tel["validation_errors"], [])
@@ -113,7 +113,7 @@ class TestRuntimeWiring(_Isolated):
         from adaptive_learning.outcome_assembler import record_closed_trade_scar
         from ai_retrieval.vector_store import load_records
         self._journal(order_status="filled")
-        tel = record_closed_trade_scar(_recon(status="open"), "QQQ")
+        tel = record_closed_trade_scar(_recon(status="open"), "MNQ")
         self.assertFalse(tel["memory_written"])
         self.assertIn("not_closed", tel["validation_errors"])
         self.assertEqual(len(load_records()), 0)
@@ -122,8 +122,8 @@ class TestRuntimeWiring(_Isolated):
         from adaptive_learning.outcome_assembler import record_closed_trade_scar
         from ai_retrieval.vector_store import load_records
         self._journal()
-        first = record_closed_trade_scar(_recon(), "QQQ")
-        second = record_closed_trade_scar(_recon(), "QQQ")
+        first = record_closed_trade_scar(_recon(), "MNQ")
+        second = record_closed_trade_scar(_recon(), "MNQ")
         self.assertTrue(first["memory_written"])
         self.assertFalse(second["memory_written"])
         self.assertTrue(second["duplicate_skipped"])
@@ -136,9 +136,9 @@ class TestRuntimeWiring(_Isolated):
         from adaptive_learning.outcome_assembler import record_closed_trade_scar
         from ai_retrieval.vector_store import load_records
         self._journal()
-        record_closed_trade_scar(_recon(), "QQQ")
+        record_closed_trade_scar(_recon(), "MNQ")
         # simulate restart: store file persists; new reconciliation pass
-        tel = record_closed_trade_scar(_recon(), "QQQ")
+        tel = record_closed_trade_scar(_recon(), "MNQ")
         self.assertTrue(tel["duplicate_skipped"])
         self.assertEqual(len(load_records()), 1)
 
@@ -146,7 +146,7 @@ class TestRuntimeWiring(_Isolated):
         from adaptive_learning.outcome_assembler import record_closed_trade_scar
         from ai_retrieval.retrieval import retrieve_analogs
         self._journal()
-        record_closed_trade_scar(_recon(), "QQQ")
+        record_closed_trade_scar(_recon(), "MNQ")
         ctx = {"timestamp": "2026-06-16T15:30:00+00:00", "session": "afternoon",
                "market_regime": {"regime_label": "expansion_up", "volatility_state": "stable"},
                "narrative_authority": {"narrative_direction": "bullish",
@@ -164,7 +164,7 @@ class TestRuntimeWiring(_Isolated):
         from ai_retrieval.vector_store import load_records
         # entry record with no realized_r and recon with none -> rejected
         self._journal(realized_r=None)
-        tel = record_closed_trade_scar(_recon(realized_r=None), "QQQ")
+        tel = record_closed_trade_scar(_recon(realized_r=None), "MNQ")
         self.assertFalse(tel["memory_written"])
         self.assertIn("missing_realized_r", tel["validation_errors"])
         self.assertEqual(len(load_records()), 0)
@@ -172,7 +172,7 @@ class TestRuntimeWiring(_Isolated):
     def test_7_telemetry_populated(self):
         from adaptive_learning.outcome_assembler import record_closed_trade_scar
         self._journal()
-        tel = record_closed_trade_scar(_recon(), "QQQ")
+        tel = record_closed_trade_scar(_recon(), "MNQ")
         for k in ("memory_written", "memory_id", "source_type",
                   "duplicate_skipped", "validation_errors"):
             self.assertIn(k, tel)
@@ -183,12 +183,12 @@ class TestRuntimeWiring(_Isolated):
         from ai_retrieval.vector_store import load_records
         self._journal()
         for _ in range(5):                       # repeated scans over same close
-            record_closed_trade_scar(_recon(), "QQQ")
+            record_closed_trade_scar(_recon(), "MNQ")
         self.assertEqual(len(load_records()), 1)  # exactly one scar net
 
     def test_entry_record_not_found(self):
         from adaptive_learning.outcome_assembler import record_closed_trade_scar
-        tel = record_closed_trade_scar(_recon(trade_id="GHOST"), "QQQ")  # no journal
+        tel = record_closed_trade_scar(_recon(trade_id="GHOST"), "MNQ")  # no journal
         self.assertFalse(tel["memory_written"])
         self.assertIn("entry_record_not_found", tel["validation_errors"])
 

@@ -183,8 +183,19 @@ class TestSoftRepair(_Base):
 
 class TestPromptMandate(unittest.TestCase):
     def test_schema_lines_carry_inline_mandate(self):
-        self.assertIn("'none' is ONLY legal when narrative_direction is "
-                      "conflicted/neutral", BRAIN_SYSTEM_PROMPT)
+        """SEPARATE-DIRECTION-FROM-ENTRY-ELIGIBILITY (2026-08-06) migrated this.
+
+        The mandate used to read "'none' is ONLY legal when narrative_direction
+        is conflicted/neutral", which made a directional stand-down illegal and
+        forced every un-tradeable directional read to `conflicted`. The mandate
+        still binds ENTRY-proposing reads; it no longer binds a stand-down.
+        """
+        self.assertIn("'none' is legal when narrative_direction is "
+                      "conflicted/neutral, OR for a directional stand_down",
+                      BRAIN_SYSTEM_PROMPT)
+        self.assertIn("AND you are proposing an entry,\nyou MUST choose a "
+                      "CONCRETE playbook and a CONCRETE tool family",
+                      BRAIN_SYSTEM_PROMPT)
 
     def test_incomplete_answer_warning_present(self):
         self.assertIn("INCOMPLETE answer and will be sent back for repair",

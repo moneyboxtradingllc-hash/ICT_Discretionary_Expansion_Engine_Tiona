@@ -15,7 +15,17 @@ import json
 import os
 from datetime import datetime, timezone
 
-from deployment.instance_context import GLOBAL_MEMORY_DIR
+from deployment import instance_context
+
+
+def _root() -> str:
+    """Resolved per call, not bound at import.
+
+    Binding the constant at import time meant an env redirect set by the test
+    harness arrived too late, so the suite wrote real lessons into the live
+    data/global_memory/ store.
+    """
+    return os.getenv("GLOBAL_MEMORY_DIR") or instance_context.GLOBAL_MEMORY_DIR
 
 # fields that must NEVER appear in a global lesson (they are instance-scoped)
 _FORBIDDEN_KEYS = {
@@ -25,7 +35,7 @@ _FORBIDDEN_KEYS = {
 
 
 def _store() -> str:
-    return os.path.join(GLOBAL_MEMORY_DIR, "global_lessons.jsonl")
+    return os.path.join(_root(), "global_lessons.jsonl")
 
 
 def record_lesson(lesson: str, tags: "list | None" = None,
@@ -37,7 +47,7 @@ def record_lesson(lesson: str, tags: "list | None" = None,
             return False   # guard: instance-scoped data may not enter global memory
         rec = {"lesson": lesson, "tags": tags or [],
                "recorded_at": datetime.now(timezone.utc).isoformat(), **extra}
-        os.makedirs(GLOBAL_MEMORY_DIR, exist_ok=True)
+        os.makedirs(_root(), exist_ok=True)
         with open(_store(), "a", encoding="utf-8") as fh:
             fh.write(json.dumps(rec, default=str) + "\n")
         return True

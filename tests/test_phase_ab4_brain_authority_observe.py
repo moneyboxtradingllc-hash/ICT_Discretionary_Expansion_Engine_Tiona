@@ -78,10 +78,25 @@ class _Base(unittest.TestCase):
 
 
 class T1_T2_RetrievalReachesBrain(_Base):
+    """ONE SCAN -> ONE RETRIEVAL RESULT (2026-08-07).
+
+    `run_narrative_brain` used to retrieve for itself whenever the snapshot
+    carried no analogs, at `min_similarity=0.0` and with no enablement gate.
+    The caller now owns retrieval and the Brain consumes what it is given, so
+    these tests supply the result exactly as the production scan cycle does.
+    """
+
+    def _scanned_snapshot(self):
+        from ai_retrieval.retrieval import retrieve_analogs
+        snap = _snapshot()
+        snap["ai_retrieval"] = retrieve_analogs(snap, persist_log=False,
+                                                min_similarity=0.0)
+        return snap
+
     def _seed(self):
         for ts in ("a", "b"):
             vector_store.add_record(make_record(
-                timestamp=ts, symbol="QQQ", regime="range_rotation",
+                timestamp=ts, symbol="MNQ", regime="range_rotation",
                 narrative_direction="bearish", narrative_phase="manipulation",
                 delivery_direction="bearish", delivery_direction_source="sweep_semantics",
                 direction_source="sweep_semantics", trade_taken=True,
@@ -89,12 +104,14 @@ class T1_T2_RetrievalReachesBrain(_Base):
 
     def test_T1_retrieval_populates_memory_matches(self):
         self._seed()
-        res = run_narrative_brain(_snapshot(), "QQQ", StanceMemory(persist=False))
+        res = run_narrative_brain(self._scanned_snapshot(), "MNQ",
+                                  StanceMemory(persist=False))
         self.assertGreaterEqual(len(res["output"]["memory_matches"]), 1)
 
     def test_T2_brain_reasoning_includes_retrieval_evidence(self):
         self._seed()
-        res = run_narrative_brain(_snapshot(), "QQQ", StanceMemory(persist=False))
+        res = run_narrative_brain(self._scanned_snapshot(), "MNQ",
+                                  StanceMemory(persist=False))
         out = res["output"]
         self.assertIn("analog", out["reason"].lower() + out["dominant_reasoning"].lower())
         self.assertTrue(out["supporting_analogs"] or out["conflicting_analogs"])
@@ -102,7 +119,7 @@ class T1_T2_RetrievalReachesBrain(_Base):
 
 class T3_SchemaPopulated(_Base):
     def test_expanded_package_present_and_valid(self):
-        res = run_narrative_brain(_snapshot(), "QQQ", StanceMemory(persist=False))
+        res = run_narrative_brain(_snapshot(), "MNQ", StanceMemory(persist=False))
         out = res["output"]
         ok, reason = validate_brain_output(out)
         self.assertTrue(ok, reason)
@@ -129,7 +146,7 @@ class T5_StanceSurvivesRestart(_Base):
 
 class T6_T7_T8_T9_ObserveOnly(_Base):
     def test_T6_brain_block_marked_observe_only(self):
-        res = run_narrative_brain(_snapshot(), "QQQ", StanceMemory(persist=False))
+        res = run_narrative_brain(_snapshot(), "MNQ", StanceMemory(persist=False))
         self.assertEqual(res["authority"], "observe_only")
 
     def test_T7_T8_T9_no_authority_imports(self):
@@ -147,7 +164,7 @@ class T6_T7_T8_T9_ObserveOnly(_Base):
 
     def test_disabled_is_inert(self):
         os.environ.pop("AI_BRAIN_ENABLED", None)
-        res = run_narrative_brain(_snapshot(), "QQQ", StanceMemory(persist=False))
+        res = run_narrative_brain(_snapshot(), "MNQ", StanceMemory(persist=False))
         self.assertFalse(res["enabled"])
 
 
@@ -155,7 +172,7 @@ class T10_T11_Replay(_Base):
     """June 10/11 replay: both AIs observe, brain never authorizes."""
     def test_brain_provenance_non_structure(self):
         snap = _snapshot()
-        res = run_narrative_brain(snap, "QQQ", StanceMemory(persist=False))
+        res = run_narrative_brain(snap, "MNQ", StanceMemory(persist=False))
         prov = res["output"]["direction_provenance"]
         # delivery-led synthesis → not structure-derived
         self.assertFalse(prov["structure_derived"])

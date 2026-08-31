@@ -17,6 +17,7 @@ before tuning on purpose: the point is to see WHY a move was classified, not
 merely whether the final label matched.
 """
 from structure.structure_engine import find_swings
+from structure.direction_vote import resolve_direction_vote
 from structure import po3_config as cfg
 
 # Component weights — operator-specified starting values, unvalidated.
@@ -170,7 +171,8 @@ def _rapid_reversal(window, atr):
 
 # ── Confluence ────────────────────────────────────────────────────────────────
 
-def detect_manipulation(candles: list, atr: float = None) -> dict:
+def detect_manipulation(candles: list, atr: float = None, *,
+                        swing_evidence: dict = None) -> dict:
     """Score manipulation by confluence over a lookback window.
 
     Returns score (0-100, capped), a classification band, and a per-component
@@ -189,6 +191,7 @@ def detect_manipulation(candles: list, atr: float = None) -> dict:
 
     if not candles or len(candles) < _MIN_CANDLES:
         return {"score": 0, "classification": "none", "direction": None,
+                "direction_conflicted": False,
                 "components": [], "lookback": 0,
                 "reason": f"insufficient candles ({len(candles) if candles else 0})"}
 
@@ -196,7 +199,18 @@ def detect_manipulation(candles: list, atr: float = None) -> dict:
     # Swings come from RECENT structure. find_swings over the full history
     # returns pivots from unrelated legs — the same unbounded-window defect
     # LEG-SCOPE fixed in expansion.
-    highs, lows = find_swings(candles[-cfg.MANIP_CONTEXT:])
+    # STEP 4B.12 §4 UNIT 1 — canonical evidence, projected onto THIS detector's
+    # existing horizon. Measured: 12 swing occurrences withheld, 446 output
+    # exposures, and the current snapshot's swing set moves 9 -> 4.
+    #
+    # The projection is what keeps the repair honest. Handing this detector a
+    # swing list computed over the whole history would grant it pivots it could
+    # never previously confirm -- fixing authority by widening the field of view.
+    # Same eyes, same 40 buckets, better proof about what they saw.
+    from market_data.swing_evidence import project_swing_evidence
+    _ctx = candles[-cfg.MANIP_CONTEXT:]
+    highs, lows = find_swings(
+        _ctx, evidence=project_swing_evidence(swing_evidence, _ctx))
 
     present, detail, d = _external_sweep(window, highs, lows)
     add("external_sweep", present, W_EXTERNAL_SWEEP, detail,
@@ -223,11 +237,13 @@ def detect_manipulation(candles: list, atr: float = None) -> dict:
     score = min(100, raw)
     classification = ("manipulation_confirmed" if score >= CONFIRMED_AT else
                       "manipulation_possible" if score >= POSSIBLE_AT else "none")
-    direction = max(set(directions), key=directions.count) if directions else None
+    # CONTINUITY-2E.2 — was `max(set(directions), key=directions.count)`, whose
+    # tie-winner depended on PYTHONHASHSEED. A tie now earns no direction.
+    direction, direction_conflicted = resolve_direction_vote(directions)
 
     return {"score": score, "raw_score": raw, "classification": classification,
-            "direction": direction, "components": components,
-            "lookback": len(window)}
+            "direction": direction, "direction_conflicted": direction_conflicted,
+            "components": components, "lookback": len(window)}
 
 
 def format_manipulation(m: dict) -> str:

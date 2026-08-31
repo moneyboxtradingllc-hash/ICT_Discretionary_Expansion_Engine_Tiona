@@ -33,6 +33,9 @@ VALID_TOOLS = {
     "bearish_opening_order_block",
     "bullish_range_break_retest",
     "bearish_range_break_retest",
+    # PO3-REVERSAL-ORDER-BLOCK-1 (2026-08-20).
+    "bullish_po3_reversal_order_block",
+    "bearish_po3_reversal_order_block",
 }
 
 CANONICAL_TOOLS = sorted(VALID_TOOLS)
@@ -86,6 +89,7 @@ _ELIGIBLE: dict[str, dict[str, list]] = {
             "bullish_rejection_block",
             "bullish_mss_retest",
             "bullish_ote_after_reclaim",
+            "bullish_po3_reversal_order_block",
         ],
         "bearish": [
             "bearish_ifvg",
@@ -93,6 +97,7 @@ _ELIGIBLE: dict[str, dict[str, list]] = {
             "bearish_rejection_block",
             "bearish_mss_retest",
             "bearish_ote_after_reclaim",
+            "bearish_po3_reversal_order_block",
         ],
     },
     "trend_continuation": {
@@ -115,12 +120,14 @@ _ELIGIBLE: dict[str, dict[str, list]] = {
             "bullish_breaker",
             "bullish_rejection_block",
             "bullish_fvg",
+            "bullish_po3_reversal_order_block",
         ],
         "bearish": [
             "bearish_ifvg",
             "bearish_breaker",
             "bearish_rejection_block",
             "bearish_fvg",
+            "bearish_po3_reversal_order_block",
         ],
     },
     "failed_breakout_reversal": {

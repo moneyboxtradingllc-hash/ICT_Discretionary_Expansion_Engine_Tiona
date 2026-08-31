@@ -22,6 +22,46 @@ VALID_PHASES = {"accumulation", "manipulation", "distribution", "reversal",
 VALID_DIRECTIONS = {"bullish", "bearish", "conflicted", "neutral"}
 NEUTRAL_TOOL_FAMILIES = {"none", "wait", "two_sided_watch", "confirmation_required"}
 
+# The concrete tool families the prompt authorises. Kept here, beside the
+# validator, so container normalisation can only ever recognise an APPROVED
+# token -- an unknown string must stay unknown and fail closed.
+CONCRETE_TOOL_FAMILIES = {
+    "fvg", "ifvg", "order_block", "breaker", "rejection_block", "ote_retracement",
+    "mss_retest", "ote_after_reclaim", "opening_fvg", "opening_order_block",
+    "range_break_retest",
+    # PO3-REVERSAL-ORDER-BLOCK-1 (2026-08-20). DISTINCT from `order_block`, which
+    # keeps its continuation meaning untouched. This one exists only where a
+    # liquidity manipulation was reversed by expansion that violated the
+    # terminal opposing run -- the causal sequence IS the object.
+    "po3_reversal_order_block",
+}
+RECOGNIZED_TOOL_FAMILIES = CONCRETE_TOOL_FAMILIES | NEUTRAL_TOOL_FAMILIES
+
+
+def normalize_tool_family_container(value):
+    """A RECOGNISED bare-string tool family becomes a one-item list.
+
+    LUNA-DEGRADED-CLASSIFICATION (2026-08-06): the prompt's JSON template showed
+    a list while its prose demanded "a single tool family token", and on 3 of 38
+    live calls the model produced a bare string. `validate_brain_output` rejects
+    the whole object on a type mismatch, so two economically complete theses --
+    real direction, real structural invalidation, named draw -- were discarded
+    over one field's container.
+
+    This is a CONTAINER change only: "fvg" -> ["fvg"]. It never chooses,
+    substitutes or invents a family. An unrecognised string is returned
+    untouched so it still fails validation and the read stays degraded.
+
+    Returns (value, note_or_None).
+    """
+    if not isinstance(value, str):
+        return value, None
+    token = value.strip().lower()
+    if token not in RECOGNIZED_TOOL_FAMILIES:
+        return value, None          # unknown -> unchanged -> fails closed
+    return [token], {"field": "recommended_tool_family", "raw": value,
+                     "normalized": [token], "reason": "string_to_list_container"}
+
 # Requirement 1 — synonym → valid phase
 PHASE_NORMALIZATION = {
     "early_expansion": "continuation",
@@ -93,6 +133,13 @@ def normalize_output(parsed: dict, memory_matches: "list | None" = None) -> tupl
     notes = []
     out = dict(parsed or {})
     try:
+        # 0. container shape BEFORE any type-sensitive check. Deterministic and
+        # recognition-gated: it cannot introduce a family the model did not name.
+        fixed, note = normalize_tool_family_container(out.get("recommended_tool_family"))
+        if note is not None:
+            out["recommended_tool_family"] = fixed
+            notes.append(note)
+
         # 1. enum synonym normalization
         raw_phase = (out.get("narrative_phase") or "").lower().strip()
         if raw_phase and raw_phase not in VALID_PHASES:

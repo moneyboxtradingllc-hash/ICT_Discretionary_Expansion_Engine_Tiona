@@ -20,7 +20,8 @@ history, fresh memory) ship inside the run manifest.
 
 CLI:
   python -m replay_validation.replay_session --date 20260708
-      [--symbol QQQ] [--flags K=V ...] [--calibrate] [--out data/replay/runs]
+      [--symbol QQQ] [--flags K=V ...] [--calibrate] [--htf]
+      [--out data/replay/runs]
 """
 import json
 import os
@@ -28,7 +29,7 @@ import tempfile
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
-from replay_validation.candle_archive import load_session
+from replay_validation.candle_archive import load_session, list_archived
 from replay_validation.recorded_brain import RecordedBrain, brain_replay, _parse_ts
 from replay_validation.stage_trace import (
     build_stage_trace, trace_from_stored, first_divergence,
@@ -93,6 +94,39 @@ def _replay_env(flags: dict, sandbox: str):
                 os.environ[k] = v
 
 
+def _seed_htf_engine(date: str, symbol: str):
+    """HTF-REPLAY (2026-07-30) — reconstruct the multi-day memory the live
+    engine would have held at the open of `date`, from archived REAL candles
+    only. Invariants: sessions strictly BEFORE the replay date (no future
+    data); deterministic (archive content is the only input); the live HTF
+    store is neither read nor written (preload=False, persist=False).
+    Returns (engine, seed_dates)."""
+    from market_data.htf_memory_engine import HtfMemoryEngine, MAX_DAILY_RECORDS
+    engine = HtfMemoryEngine(symbol=symbol, persist=False, preload=False)
+    prior = [r["date"] for r in list_archived(symbol)
+             if r["date"] < date and r.get("bar_count", 0) > 0]
+    seed_dates = sorted(prior)[-MAX_DAILY_RECORDS:]
+    for d in seed_dates:            # chronological, real archived candles only
+        try:
+            engine.update(load_session(d, symbol))
+        except (FileNotFoundError, ValueError, OSError):
+            continue
+    return engine, seed_dates
+
+
+def _htf_scan_proof(ctx: dict) -> dict:
+    """Compact per-scan record of the exact HTF state used (invariant: every
+    replayed scan can prove what the Brain-side payload saw)."""
+    return {
+        "memory_age":           ctx.get("memory_age"),
+        "htf_bias":             ctx.get("htf_bias"),
+        "htf_confidence":       ctx.get("htf_confidence"),
+        "latest_completed_day": (ctx.get("daily_context") or {}).get("date"),
+        "nearest_draw":         (ctx.get("liquidity_context") or {}).get("nearest_draw"),
+        **({"note": ctx["note"]} if ctx.get("note") else {}),
+    }
+
+
 def _default_ticks(date: str, symbol: str, candles: list, brain: RecordedBrain) -> list:
     """Recorded Brain-call timestamps (exact live alignment) or a 60s grid."""
     if brain.records:
@@ -109,10 +143,18 @@ def _default_ticks(date: str, symbol: str, candles: list, brain: RecordedBrain) 
 def replay_session(date: str, symbol: str = "QQQ", flags: dict = None,
                    ticks: list = None, lookback: int = _LOOKBACK_DEFAULT,
                    sandbox: str = None, max_scans: int = None,
-                   brain: str = "recorded", post_stage_hook=None) -> dict:
+                   brain: str = "recorded", post_stage_hook=None,
+                   htf: bool = False) -> dict:
     """Replay one archived session through the current pipeline.
     brain: recorded (default, deterministic) | live (real LLM calls) |
     deterministic (mechanical fallback only).
+    htf (HTF-REPLAY, 2026-07-30): opt-in arm — default False keeps the
+    historical HTF-blind behavior byte-identical. When True, multi-day HTF
+    memory is reconstructed from archived prior sessions (real candles only,
+    strictly before `date`) and fed per-scan into build_snapshot exactly as
+    scan_loop does live (replay-parity doctrine). The live HTF store is never
+    read or written; every scan record carries an "htf" proof block; the arm
+    is labeled in the manifest. No prompt or authority changes ride this path.
     post_stage_hook (REPLAY-4 Counterfactual Decision Laboratory): optional
     callable(stage_name, snapshot) invoked at the named seams — "post_build",
     "post_council", "pre_decision", "post_gate" — allowing a counterfactual
@@ -151,6 +193,11 @@ def replay_session(date: str, symbol: str = "QQQ", flags: dict = None,
     own_sandbox = sandbox is None
     sandbox = sandbox or tempfile.mkdtemp(prefix=f"replay_{date}_")
 
+    # HTF-REPLAY — seed BEFORE the walk, from archive only; None when off.
+    htf_engine, htf_seed_dates = (None, [])
+    if htf:
+        htf_engine, htf_seed_dates = _seed_htf_engine(date, symbol)
+
     manifest = {
         "date": date, "symbol": symbol, "flags": dict(flags or {}),
         "forced_safety": dict(_SAFETY_ENV),
@@ -158,8 +205,12 @@ def replay_session(date: str, symbol: str = "QQQ", flags: dict = None,
         "counterfactual_hook": bool(post_stage_hook),
         "candles": len(parsed), "prev_session_loaded": prev_date,
         "lookback": lookback, "scans_planned": len(tick_list),
+        "htf_mode": bool(htf),
+        **({"htf_seed_dates": htf_seed_dates} if htf else {}),
         "caveats": ["news_off", "retrieval_off", "shadow_off",
                     "fresh_memory", "empty_adaptive_history", "no_execution"]
+                   + (["htf_memory_archive_seeded"] if htf
+                      else ["htf_memory_absent"])
                    + (["live_llm_nondeterministic"] if brain == "live" else []),
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -175,6 +226,9 @@ def replay_session(date: str, symbol: str = "QQQ", flags: dict = None,
         from ai_brain.thesis_lifecycle import ThesisLifecycleEngine
         from narrative_authority.protected_swings import ProtectedSwingTracker
         from structure.po3_alignment_manager import Po3StabilityManager
+        from structure.session_po3 import SessionPo3Authority
+        from market_data.session_context import (
+            DEEP_HISTORY_BARS as SESSION_CONTEXT_DEEP_BARS)
         from volatility.expansion_stability import ExpansionStabilityManager
         from setup_lifecycle.setup_tracker import SetupTracker
         from market_data.snapshot_builder import build_snapshot
@@ -193,6 +247,7 @@ def replay_session(date: str, symbol: str = "QQQ", flags: dict = None,
         thesis_engine = ThesisLifecycleEngine(symbol=symbol)
         swing_tracker = ProtectedSwingTracker()
         po3_stability = Po3StabilityManager()
+        session_po3 = SessionPo3Authority()
         expansion_stability = ExpansionStabilityManager()
         setup_tracker = SetupTracker()
         previous_snapshot, previous_qual_state, bars_in_state = None, None, 0
@@ -200,11 +255,22 @@ def replay_session(date: str, symbol: str = "QQQ", flags: dict = None,
         for tick in tick_list:
             if max_scans and len(scans) >= max_scans:   # cap EXECUTED scans,
                 break                                    # not head-of-tick-list
-            window = [c for ts, c in parsed if ts <= tick][-lookback:]
+            # SAME CUTOFF, GREATER DEPTH. The scan window keeps its
+            # lookback; cross-session context gets the deeper slice of the
+            # SAME already-cut-off series, so replay and live read the same
+            # tape by the same rule.
+            _visible = [c for ts, c in parsed if ts <= tick]
+            window = _visible[-lookback:]
+            deep_window = _visible[-SESSION_CONTEXT_DEEP_BARS:]
             if len(window) < 20:
                 continue
             try:
                 raw_data = build_timeframes(window)
+                # HTF-REPLAY — mirror scan_loop's order: fold this scan's real
+                # window (candles <= tick only; no future data can enter) into
+                # multi-day memory, then hand the context to build_snapshot.
+                # Off (default): kwarg not passed — legacy call byte-identical.
+                htf_ctx = htf_engine.update(window) if htf_engine else None
                 snapshot = build_snapshot(
                     raw_data,
                     memory=memory,
@@ -212,7 +278,9 @@ def replay_session(date: str, symbol: str = "QQQ", flags: dict = None,
                     symbol=symbol,
                     swing_tracker=swing_tracker,
                     po3_stability=po3_stability,
+                    session_po3=session_po3, deep_1m=deep_window,
                     expansion_stability=expansion_stability,
+                    **({"htf_context": htf_ctx} if htf_ctx is not None else {}),
                 )
 
                 def _hook(stage):
@@ -258,7 +326,9 @@ def replay_session(date: str, symbol: str = "QQQ", flags: dict = None,
                         break
                 scans.append({"timestamp": snapshot.get("timestamp"),
                               "trace": build_stage_trace(snapshot),
-                              "intent_zone": _ez or None})
+                              "intent_zone": _ez or None,
+                              **({"htf": _htf_scan_proof(htf_ctx)}
+                                 if htf_ctx is not None else {})})
             except Exception as exc:  # noqa: BLE001 — one bad scan must not kill the run
                 errors.append({"tick": tick.isoformat(), "error": repr(exc)})
 
@@ -271,7 +341,22 @@ def replay_session(date: str, symbol: str = "QQQ", flags: dict = None,
 
 def _summarize(scans: list, brain: "RecordedBrain | None", errors: list) -> dict:
     traces = [s["trace"] for s in scans]
+    # HTF-REPLAY — summary block only when the arm ran (scans carry proof)
+    htf_rows = [s["htf"] for s in scans if isinstance(s.get("htf"), dict)]
+    htf_summary = {}
+    if htf_rows:
+        bias_counts: dict = {}
+        for r in htf_rows:
+            b = r.get("htf_bias") or "unknown"
+            bias_counts[b] = bias_counts.get(b, 0) + 1
+        htf_summary = {"htf": {
+            "scans_with_htf":   len(htf_rows),
+            "memory_age_first": htf_rows[0].get("memory_age"),
+            "memory_age_last":  htf_rows[-1].get("memory_age"),
+            "bias_counts":      bias_counts,
+        }}
     return {
+        **htf_summary,
         "scans": len(scans),
         "errors": len(errors),
         "error_detail": errors[:5],
@@ -345,12 +430,16 @@ def _main() -> int:
                    choices=("recorded", "live", "deterministic"))
     p.add_argument("--max-scans", type=int)
     p.add_argument("--calibrate", action="store_true")
+    p.add_argument("--htf", action="store_true",
+                   help="HTF-REPLAY arm: seed multi-day memory from archived "
+                        "prior sessions (default: HTF-blind legacy behavior)")
     p.add_argument("--out", default=os.path.join("data", "replay", "runs"))
     args = p.parse_args()
 
     flags = dict(kv.split("=", 1) for kv in args.flags)
     result = replay_session(args.date, args.symbol, flags=flags,
-                            max_scans=args.max_scans, brain=args.brain)
+                            max_scans=args.max_scans, brain=args.brain,
+                            htf=args.htf)
     print(json.dumps(result["summary"], indent=2))
     if args.calibrate:
         cal = calibrate(result, args.date, args.symbol)

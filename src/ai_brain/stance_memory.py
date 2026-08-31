@@ -94,7 +94,55 @@ class StanceMemory:
                 "prior_5":            self.recent(5),
                 "thesis_anchor":      self._thesis_anchor,
                 "changed_since_last": changed,
+                # CONTINUITY-2B: prior stances may have been reasoned from a
+                # tape that was later repaired. Terra is told, not steered.
+                "history_revision":   self.superseded_summary(),
             }
         except Exception:  # noqa: BLE001
             return {"available": False, "last": None, "prior_5": [],
                     "thesis_anchor": None, "changed_since_last": None}
+
+    # ── history revision (CONTINUITY-2B, 2026-08-11) ─────────────────────────
+    #
+    # A stance is a BELIEF Terra formed about a market it was shown. When the
+    # canonical tape is retroactively repaired, every stance recorded before
+    # that repair was reasoned from a world that no longer exists -- and this
+    # buffer feeds straight back into the next prompt via `history_summary`.
+    # Mechanical state can be re-derived; a belief cannot, so it is RE-ANCHORED
+    # rather than replayed.
+    #
+    # The entries are NOT deleted. They are evidence of what Terra actually
+    # thought, and destroying them would be the same error as erasing a
+    # rejection. What is removed is their AUTHORITY: they are marked as formed
+    # before a revision, and the summary says so, so Terra is told rather than
+    # quietly steered by a superseded conviction.
+    def supersede(self, revision: int, note: str = "") -> dict:
+        """Mark every stance recorded so far as predating `revision`."""
+        try:
+            marked = 0
+            for entry in self._buf:
+                if entry.get("superseded_by_history_revision") is None:
+                    entry["superseded_by_history_revision"] = int(revision)
+                    marked += 1
+            if self._thesis_anchor is not None:
+                self._thesis_anchor["superseded_by_history_revision"] = int(revision)
+            self._history_revision = int(revision)
+            self._supersede_note = str(note or "")
+            self._save()
+            return {"marked": marked, "revision": int(revision)}
+        except Exception:  # noqa: BLE001 — memory may never cost a scan
+            return {"marked": 0, "revision": revision, "error": True}
+
+    def superseded_summary(self) -> dict:
+        """What the next prompt should be told about its own history."""
+        revision = getattr(self, "_history_revision", None)
+        stale = [e for e in self._buf
+                 if e.get("superseded_by_history_revision") is not None]
+        return {
+            "history_revision": revision,
+            "stances_formed_before_a_repair": len(stale),
+            "note": (getattr(self, "_supersede_note", "")
+                     or ("market history was repaired after these stances were "
+                         "formed; they described a tape that has since changed"
+                         if stale else "")),
+        }

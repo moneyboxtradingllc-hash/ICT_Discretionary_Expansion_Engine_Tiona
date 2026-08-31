@@ -22,7 +22,7 @@ from ai_retrieval.memory_schema import make_record, is_authoritative
 def _market(direction="bearish", phase="manipulation", regime="range_rotation",
             source="sweep_semantics", ts="t", draw=True, ph=702.5):
     return make_record(
-        timestamp=ts, symbol="QQQ", session="morning_continuation",
+        timestamp=ts, symbol="MNQ", session="morning_continuation",
         regime=regime, volatility_state="unstable",
         narrative_direction=direction, narrative_phase=phase,
         active_liquidity_draw={"side": "sell_side"} if draw else None,
@@ -109,7 +109,7 @@ class T3_PersistAcrossRestart(_StoreCase):
         self.assertTrue(all("embedding" in r for r in recs))
 
     def test_trade_memory_persists(self):
-        tr = make_record(timestamp="tr1", symbol="QQQ", record_type="trade",
+        tr = make_record(timestamp="tr1", symbol="MNQ", record_type="trade",
                          trade_taken=True, trade_direction="long", win_loss_be="loss",
                          r_multiple=-1.34, management_path="broker_stop_triggered",
                          direction_source="sweep_semantics")
@@ -136,23 +136,41 @@ class T4_NarrativeRetrievalNoEntryModel(_StoreCase):
 
 
 class T5_June1011Corpus(_StoreCase):
-    def test_backfill_loads(self):
-        res = backfill.backfill_dates(("20260610", "20260611"), "QQQ")
-        self.assertGreater(res["market_records"], 100)
-        self.assertGreaterEqual(res["trade_records"], 1)
-        self.assertEqual(vector_store.count(), res["total"])
+    """DECON-3 (2026-08-05) — REPLACED, not renamed.
 
-    def test_june11_long_trade_is_in_corpus_as_loss(self):
+    These tests asserted that the June 10/11 corpus loads into the retrieval
+    corpus and that its trades are retrievable. That corpus is QQQ/Alpaca-era
+    equity evidence, and under the TopstepX/MNQ doctrine it may no longer reach
+    an MNQ decision. Relabelling those records as MNQ was explicitly forbidden —
+    equity history is not futures history — so the capability is now asserted to
+    be BLOCKED rather than working.
+    """
+
+    def test_the_retired_qqq_corpus_cannot_enter_retrieval(self):
+        backfill.backfill_dates(("20260610", "20260611"), "QQQ")
+        r = retrieval.retrieve_analogs(_ctx(), k=5, authoritative_only=False,
+                                       min_similarity=0.0, persist_log=False)
+        self.assertEqual(r["analogs"], [])
+        self.assertEqual(r["returned"], 0)
+
+    def test_the_rejection_names_the_retired_instrument(self):
         backfill.backfill_dates(("20260611",), "QQQ")
-        recs = [r for r in vector_store.load_records()
-                if r["record_type"] == "trade" and r["outcome_context"]["r_multiple"]]
-        self.assertTrue(any(r["outcome_context"]["win_loss_be"] == "loss" for r in recs))
+        r = retrieval.retrieve_analogs(_ctx(), k=5, authoritative_only=False,
+                                       min_similarity=0.0, persist_log=False)
+        self.assertGreater(r["rejected_count"], 0)
+
+    def test_mnq_records_remain_retrievable_alongside_them(self):
+        """The guard must exclude QQQ without silencing MNQ."""
+        vector_store.add_record(_market(ts="mnq-1"))
+        r = retrieval.retrieve_analogs(_ctx(), k=5, authoritative_only=False,
+                                       min_similarity=0.0, persist_log=False)
+        self.assertGreaterEqual(r["returned"], 1)
 
 
 class T6_ObserveOnly(_StoreCase):
     def test_disabled_hook_returns_inert(self):
         os.environ.pop("AI_RETRIEVAL_ENABLED", None)
-        r = retrieval.retrieve_for_snapshot(_ctx(), "QQQ")
+        r = retrieval.retrieve_for_snapshot(_ctx(), "MNQ")
         self.assertFalse(r["enabled"])
         self.assertEqual(r["analogs"], [])
 

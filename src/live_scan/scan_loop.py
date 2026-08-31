@@ -31,6 +31,7 @@ from shared_context.council                import run_council
 from narrative_authority.narrative_engine  import build_narrative
 from narrative_authority.protected_swings  import ProtectedSwingTracker
 from structure.po3_alignment_manager        import Po3StabilityManager   # VECTOR-3
+from structure.session_po3                  import SessionPo3Authority
 from ai_brain.narrative_brain              import run_narrative_brain
 from adaptive_learning.outcome_assembler    import record_closed_trade_scar   # ADAPTIVE-1A.5
 from adaptive_learning.adaptive_live_authority import (   # ADAPTIVE-5 / ADAPTIVE-6
@@ -655,6 +656,7 @@ def run_scan_loop(symbol: str = None, data_provider: str = None):
     stance_memory            = StanceMemory()            # Phase AB-1 (brain self-memory)
     thesis_engine            = ThesisLifecycleEngine(symbol=symbol)   # Phase AB-7 (persistent thesis)
     po3_stability            = Po3StabilityManager()     # VECTOR-3 (PO3 alignment hysteresis)
+    session_po3              = SessionPo3Authority()     # canonical session PO3 phase
     from volatility.expansion_stability import ExpansionStabilityManager
     expansion_stability      = ExpansionStabilityManager()   # PERCEPTION-1 (expansion state hysteresis)
     prev_experience_summary  = None   # Phase 3A: carry forward for AI input next scan
@@ -799,6 +801,7 @@ def run_scan_loop(symbol: str = None, data_provider: str = None):
                     symbol=symbol,
                     swing_tracker=swing_tracker,   # PIPE-1: tracker advanced inside build_snapshot
                     po3_stability=po3_stability,   # VECTOR-3: persistent alignment hysteresis
+                    session_po3=session_po3,
                     expansion_stability=expansion_stability,  # PERCEPTION-1: expansion state hysteresis
                     capital_report=capital_report, # CAPITAL-1: equity awareness
                     htf_context=htf_context,       # HTF-MEM-1: multi-day context

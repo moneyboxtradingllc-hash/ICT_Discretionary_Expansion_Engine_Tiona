@@ -197,7 +197,11 @@ class TestOrders:
         assert sent["type"] == ORDER_TYPE["market"]
         assert sent["side"] == ORDER_SIDE["buy"]
         assert sent["size"] == 3
-        assert sent["stopLossBracket"] == {"ticks": 80, "type": ORDER_TYPE["stop"]}
+        # SMOKE-SIGN-REPAIR (2026-08-10): these once asserted UNSIGNED ticks.
+        # Topstep refused exactly that, verbatim: errorCode 2, "Invalid stop
+        # loss ticks (40). Ticks should be less than zero when longing." A long
+        # sends a negative stop and a positive target.
+        assert sent["stopLossBracket"] == {"ticks": -80, "type": ORDER_TYPE["stop"]}
         assert sent["takeProfitBracket"] == {"ticks": 140, "type": ORDER_TYPE["limit"]}
         assert out["order_id"] == 9056
 

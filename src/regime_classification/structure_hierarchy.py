@@ -32,7 +32,9 @@ RANGE_WINDOW = 60
 _BULL, _BEAR, _NEUTRAL = "bullish", "bearish", "neutral"
 
 
-def swing_sequence(candles: list, window: int = SEQ_WINDOW) -> dict:
+def swing_sequence(candles: list, window: int = SEQ_WINDOW, *,
+                   swing_evidence: dict = None,
+                   allow_uncadenced: bool = False) -> dict:
     """HH / HL / LH / LL counts from bounded recent swings.
 
     These were returned as hardcoded zeros by regime_features. They are the
@@ -45,7 +47,18 @@ def swing_sequence(candles: list, window: int = SEQ_WINDOW) -> dict:
     if not candles:
         return empty
     recent = candles[-window:]
-    highs, lows = find_swings(recent)
+    # STEP 4B.12 §4 UNIT 1 — canonical evidence projected onto THIS window.
+    # Measured: 19 occurrences withheld, 568 exposures, current swing set
+    # 12 -> 5. The projection preserves the existing horizon exactly; a
+    # full-history swing list would widen what this sequence can see.
+    from market_data.swing_evidence import project_swing_evidence
+    highs, lows = find_swings(
+        recent, evidence=project_swing_evidence(swing_evidence, recent),
+        # Explicit legacy opt-in for GEOMETRY-ONLY callers (timestamp-less
+        # fixtures that model a candle pattern, not a market history). Never set
+        # by production; pinned by the AST guard in
+        # tests/test_swing_evidence_authority.py.
+        allow_uncadenced=allow_uncadenced)
     if len(highs) < 2 and len(lows) < 2:
         return {**empty, "window": len(recent),
                 "swing_highs": len(highs), "swing_lows": len(lows),

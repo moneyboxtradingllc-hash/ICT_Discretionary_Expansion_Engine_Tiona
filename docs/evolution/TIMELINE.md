@@ -5,7 +5,7 @@ lab/ablation artifact; a claim without an artifact renders as PENDING._
 _`REJECTED` and `NO CHANGE` entries are displayed with the same
 prominence as wins — they are the credibility of this document._
 
-_Rendered 2026-07-13T19:18:43.611880+00:00 — 32 milestones on a 174-commit spine._
+_Rendered 2026-07-30T19:43:09.786953+00:00 — 38 milestones on a 200-commit spine._
 
 ## 2026-07-10
 
@@ -112,7 +112,7 @@ _Rendered 2026-07-13T19:18:43.611880+00:00 — 32 milestones on a 174-commit spi
 - **Evidence:** `docs/evolution/CREDIT_FREE_CLOSURE_20260713.md + data/replay/reports/credit_free_closure_20260713.json`
 - **Commit:** `b6c642c`
 
-<sub>spine: `c96ea2b` ENTRY-INVARIANT - Thesis invalidation entry eligibility · `18ff69b` MILESTONE - Entry invariant · `749d26c` HARDENING - Entry invariant fail-closed · `d33a9f4` MILESTONE - Entry invariant hardening · `b6c642c` CLOSURE - Brain authorship of fresh exposure</sub>
+<sub>spine: `c96ea2b` ENTRY-INVARIANT - Thesis invalidation entry eligibility · `18ff69b` MILESTONE - Entry invariant · `749d26c` HARDENING - Entry invariant fail-closed · `d33a9f4` MILESTONE - Entry invariant hardening · `b6c642c` CLOSURE - Brain authorship of fresh exposure · `f827729` MILESTONE - Authorship closure and freeze</sub>
 
 ## 2026-07-08
 
@@ -259,27 +259,48 @@ _Rendered 2026-07-13T19:18:43.611880+00:00 — 32 milestones on a 174-commit spi
 
 <sub>spine: `1fcba8c` ADAPT-LOOP-2 - Adaptive effect ledger and resolver · `12ceed0` ADAPT-LOOP-3 - Brain accuracy table and self-track-record feed · `9d409b5` ADAPT-LOOP-3B - Brain thesis quality grading · `d34dc21` ADAPT-LOOP-4 - Earn-back governance with replay gate · `85e204e` ADAPT-LOOP-5 - Retire recommendation engine · `48b1a79` REPLAY-4 - Counterfactual decision laboratory · `e295fc8` ADAPT-LOOP-6 - Organism health monitor and evolution timeline · `134a708` BRAIN-LIFECYCLE-ENFORCE - Persistent thesis promoted to enforce · `14a400b` MILESTONE - Brain lifecycle enforce · `734da90` BRAIN-INVALIDATION-REPAIR - Elicit invalidation level · `477f531` MILESTONE - Brain invalidation repair · `1aa2278` BRAIN-MODEL-TRIAL - Model arm support in live brain study · `e15dc90` MILESTONE - Adaptive unblocked lab result · `93b2ee3` AI-BRAIN-REQUIRED - Brain availability operating policy · `1e22d3e` MILESTONE - AI Brain required policy · `09bfc3f` HEALTH-ERA-LABEL - Calibration era quality from commit timestamps · `0b72e1c` MILESTONE - Calibration era labeling · `f605670` INTENT-SCORE-AUDIT - Execution-path quality gate demoted to witness · `df7289c` MILESTONE - Intent score demotion</sub>
 
-## 2026-07-20
+## 2026-07-30
 
-### [FOUNDATION — PARTIAL] NINJATRADER-MNQ-INTEGRATION-FOUNDATION
+### [VALIDATED] HTF-REPLAY
 
-- **Change:** New integration era `MNQ_NINJATRADER_FOUNDATION`. Narrow provider/adapter boundary (`src/integrations/ninjatrader/`) between the frozen organism and NinjaTrader Desktop / DEMO8458533 for Micro E-mini Nasdaq-100 (MNQ). Architecture decision `[NINJASCRIPT BRIDGE REQUIRED]`: a loopback-only NinjaScript AddOn (`MNQBridge.cs`) speaking a versioned IPC envelope to a pure-Python client. Ships: MNQ InstrumentSpec (one source of truth), DEMO8458533-only account allowlist (fail-closed, normalization can only narrow), NQ-denying contract resolver, futures risk translation (1-contract ceiling, no round-up), bar gatekeeper (dedup/ordering/expiry/staleness + health states), MNQ volume-era separation (honest INSUFFICIENT, never QQQ substitution), and a DISARMED execution adapter behind the existing broker interface. QQQ era preserved; statistics not blended.
-- **Measured:** NT8 installed but never launched (empty user-data dir); `NinjaTrader.Client.dll` present (.NET Fx 4.8), pythonnet absent → ATI DLL path rejected as insufficient (no bars/volume/historical) and dependency-heavy. Order submission proven DISARMED: `submit_order` denies before any wire call; account/instrument/quantity/uncertainty gates all fail-closed. 65 new tests pass; full suite green. NO AUTOMATED ORDER SUBMITTED.
-- **Evidence:** `data/integration/ninjatrader/{preflight,architecture_decision,mnq_contract_resolution,instrument_metadata,integration_health}.json` + `tests/test_ninjatrader_foundation.py`
-- **Verdict:** FOUNDATION PARTIAL — USER SETUP REQUIRED (launch NT8, connect data, compile bridge). Next authorized mission: MNQ-DEMO8458533-SMOKE-ORDER.
+- **Change:** Replay-parity repair: replay_session gains opt-in htf arm — multi-day HTF memory reconstructed from archived REAL prior sessions (strictly before the replay date) and fed per-scan into build_snapshot exactly as scan_loop does live; engine gains preload=False so the live store is neither read nor written; per-scan htf proof blocks + labeled manifest + summary; CLI --htf
+- **Measured:** replay never fed htf_context: every Brain study measured an HTF-blind Brain (live/replay context mismatch, HTF wiring audit 2026-07-30) → 0709 A/B: seeds 20 archived sessions, memory_age 19 (live store peaked at 5); recorded-mode trace parity 148/148 as invariants demand (HTF touches only the Brain payload; no mechanical reader) — HTF-PROMPT A/B now measurable; suite 2510 (7 new locks)
+- **Evidence:** `data/replay/reports/htf_replay_validation_20260730.json`
+- **Commit:** `78dc044`
 
-## 2026-07-21
+### [NO CHANGE] HTF-FLAGS-AUDIT
 
-### [FOUNDATION — BRIDGE COMPILE PENDING] NINJATRADER-MNQ ACCOUNT = DEMO8458533
+- **Change:** AUDIT ONLY, no code change: htf_conflict_flags semantics put on trial via HTF-REPLAY harvest (22 sessions, 13,043 scans, pre-registered Q1-Q5) before any reader is wired
+- **Measured:** flags computed and read by nothing; semantics never validated; risk of a miniature regime gate if naively wired → SPLIT VERDICT: disagreement flag DISCRIMINATES (narrative-signed 30m: agree +1.05 vs disagree -0.94, ~2pt separation, holds at session level 60pct vs 35pct positive; HTF side wins disagreements at every horizon) — first outcome evidence that multi-day context carries directional information; gap flag REJECTED as conflict signal (84pct of flag volume, latches 100pct of scans on 7 sessions, 1,330 scans suppressed by neutral-bias gating, redundant with gap_context). Recommendations queued: FLAG-SPLIT repair; reader = Brain via HTF-PROMPT, never a mechanical gate
+- **Evidence:** `data/replay/reports/htf_flag_audit_20260730.json`
+- **Commit:** `3b8c64a`
 
-- **Change:** Replaced the Sim101 placeholder with the real simulation account **DEMO8458533** as the sole allowlisted account across code, tests, launchers, artifacts, and docs (fail-closed preserved; normalization only narrows). Fixed a real preflight defect: NT8 user-data is OneDrive-redirected (`C:\Users\jesus\OneDrive\Documents\NinjaTrader 8`) — preflight now resolves it and detects the running NT process. Launcher now performs a live read-only bridge probe and reads Global Simulation Mode directly from `Config.xml`. Deployed `MNQBridge.cs` (account hard-pinned to DEMO8458533) into the NT AddOns folder.
-- **Measured:** NT8 installed + **running** (pid 10300); user-data **initialized**; `MNQBridge.cs` **compiles cleanly** against `NinjaTrader.Core.dll`+`NinjaTrader.Gui.dll` via csc (0 errors/0 warnings); Global Simulation Mode = **false** (Config.xml, persisted). Bridge **not yet compiled inside NT** (no `NinjaTrader.Custom.dll`, port 36901 not listening) → account/position/metadata/quote/bar reads fail closed. 65 foundation tests + full suite **1958 passed**. Order submission disabled; **NO ORDER SUBMITTED**.
-- **Evidence:** `data/integration/ninjatrader/{preflight,integration_health,live_verification_20260721}.json`
-- **Verdict:** FOUNDATION PARTIAL — single blocker is compiling the bridge inside NinjaTrader (NinjaScript Editor → F5). Next authorized mission renamed: **MNQ-DEMO8458533-SMOKE-ORDER**.
+### [VALIDATED] FLAG-SPLIT
 
-### [FOUNDATION VALIDATED — READ-ONLY MNQ READY] NINJATRADER-MNQ LIVE (DEMO8458533)
+- **Change:** htf_conflict_flags now carries ONLY directional HTF-vs-narrative disagreement (single-owner helper compute_htf_conflict_flags, witness doctrine in docstring); unfilled-gap condition removed from conflict flags — its information rides gap_context unconditionally, unchanged. Operator 12-point contract honored: no reader, no prompt/schema change, no authority/qualification/execution change. Audit doc gains paired within-session ADDENDUM (operator methodology review): agree beats disagree 13/20 sessions, +1.94pt mean paired diff CONCENTRATED in 20260612/20260625 (~+0.2pt without them) — headline downgraded to witness-grade
+- **Measured:** gap flag = 84pct of flag volume, latched 7 full sessions, 1,330 scans suppressed by neutral-bias gating, redundant with gap_context → expected flag volume on the 22-session harvest: 57pct of scans -> 22pct (disagreement-only); 8 new locks incl. operator regression (unfilled gap + neutral bias -> no flag, gap_context preserved) and no-authority-reader source lock; suite 2518
+- **Evidence:** `data/replay/reports/htf_flag_audit_20260730.json`
+- **Commit:** `9c6569c`
 
-- **Change:** Completed the live read-only path: NinjaScript `MNQBridge` compiled inside NT and listening on `127.0.0.1:36901`. Repaired a pre-existing CS0579 (duplicate `AssemblyInfo-moneyboxllc.cs` in the Custom tree — quarantined; NT canonical kept). Fixed a client framing bug (unsolicited HELLO_ACK greeting shifted responses; added greeting-consume + buffered line reader). Extended the bridge with read-only POSITION/ORDER/QUOTE/HISTORICAL_BARS handlers (bar times stamped tz-aware).
-- **Measured (live):** connection healthy; account **DEMO8458533** known, cash $50,000; **position flat** (qty 0); **working orders 0**; instrument **MNQ SEP26**, metadata **verified** (tick 0.25 / point $2.00 / tick $0.50, 0 mismatches); live quote (bid/ask/last/volume); **29 completed 1m bars** flowed MNQ→bridge→client→gatekeeping provider (health CONNECTED_HEALTHY, snapshot input ready). Global Simulation Mode = false (Config.xml). Full suite **1958 passed**. Order submission DISABLED; **NO ORDER SUBMITTED**.
-- **Evidence:** `data/integration/ninjatrader/{live_verification_20260721,integration_health,mnq_contract_resolution,instrument_metadata,bridge_compilation}.json`
-- **Verdict:** FOUNDATION VALIDATED — READ-ONLY MNQ READY. Next authorized mission: **MNQ-DEMO8458533-SMOKE-ORDER** (still requires explicit authorization; recommend enabling Global Simulation Mode first).
+### [VALIDATED] HTF-MNQ-ACCUM
+
+- **Change:** Deterministic MNQ lane passively folds every scan's real bars into data/htf_memory/MNQ.json via htf_accum (canonical MNQ key across contract months; roll-gap caveat recorded at data birth). WRITE-ONLY: author/facts/risk never reference HTF (source-locked); loop touches HTF only through the accumulator seam; htf_memory_age rides scan evidence as telemetry with no reader. accumulate() never raises — a memory defect cannot cost a scan
+- **Measured:** money venue had NO multi-day memory: no MNQ store file, zero prior-day facts in the lane (HTF wiring audit defect 4) → memory exists and deepens +1/session from the next lane run; consumption stays a separate future mission gated on depth/quality/semantics/replay/A-B (roadmap Track 2); suite 2523 (5 new locks)
+- **Evidence:** `tests/test_htf_mnq_accum.py`
+- **Commit:** `e2e2f3c`
+
+### [VALIDATED] MISSION-CONTROL
+
+- **Change:** src/mission_control: collector (7 guarded read-only panels: kill switch, money-venue lane + latest evidence funnel incl. htf_memory_age telemetry, venue health, QQQ organism funnel + last Brain state via existing stage-trace reader, HTF memory stores, substrate, evolution milestones) + self-contained HTML renderer (inline CSS, zero network/JS, hostile text escaped, ABSENT/STALE/LIVE chips, STOP-file banner) + CLI (--out/--json). Output data/ops/ (gitignored runtime artifact). Rendering only — no authority, campaign-safe
+- **Measured:** no live operator view: state readable only by spelunking scans.jsonl/evidence files; Olympus Phase 10 gap flagged in roadmap Track 5 → one page renders the whole operation: real render verified (money venue LIVE NT_DEMO_ACCOUNT 172-scan evidence file, organism STALE 20260709 as it should be, HTF stores QQQ 5d, substrate 19 journaled trades — real render caught a dict-shape bug fixtures missed); replay-scrubber stretch deferred; suite 2530 (7 new locks)
+- **Evidence:** `tests/test_mission_control.py`
+- **Commit:** `2159e09`
+
+### [VALIDATED] MNQ-SMOKE-ORDER
+
+- **Change:** MNQ-NT_DEMO_ACCOUNT-SMOKE-ORDER EXECUTED on the NinjaTrader demo (venue chosen by operator; scalper bot disconnected). Full ritual held: 12-point preflight GO (old token correctly refused reuse), operator's exact authorization phrase, fresh one-use token issued+burned atomically at submit, LONG 1 MNQ SEP26 MARKET
+- **Measured:** execution path never fired end-to-end on this venue: entry ack + fill + OCO bracket + protective exit all unproven live → entry ack 70ms, filled 28237, 2 OCO working; market dipped and the STOP side proved itself: SmokeStop filled 28232 (exactly 5.0pts, zero exit slippage), OCO cancelled target, RESOLVED FLAT in ~15s, zero working orders, token burned (-$10 sim). The protective side of the bracket is now live-proven. Campaign lane (ADAPTIVE-8) cleared to start next session 09:30-14:00 ET
+- **Evidence:** `data/integration/ninjatrader/smoke_send_result.json`
+- **Commit:** `7a25abb`
+
+<sub>spine: `883e8b6` ROADMAP - Context-Intelligence Era evolution roadmap · `d9f2d0f` HTF-AUDIT - Half-wired: payload yes, prompt no, replay never, MNQ absent · `58f6599` ROADMAP-v1.1 - Post-audit amendment: HTF verdict, selectivity caveat, replay-parity doctrine, operator track order · `78dc044` HTF-REPLAY - Archive-seeded multi-day memory as an opt-in replay arm · `eeb4bd2` MILESTONE - HTF-REPLAY replay-parity repair · `3b8c64a` HTF-FLAGS-AUDIT - Disagreement flag discriminates; gap flag latches and is rejected · `7286a52` MILESTONE - HTF conflict-flag semantics audit · `9c6569c` FLAG-SPLIT - Conflict flags carry only directional disagreement; gap state stays context · `0daa43b` MILESTONE - FLAG-SPLIT conflict-flag cleanup · `e2e2f3c` HTF-MNQ-ACCUM - The money venue starts accumulating multi-day memory, write-only · `008244f` MILESTONE - HTF-MNQ-ACCUM passive memory · `2159e09` MISSION-CONTROL - The throne room: one self-contained page over existing telemetry · `7f49d67` MILESTONE - Mission Control throne room · `7a25abb` ROADMAP-v1.2 - Status ledger and the full arc: ignition to Olympus · `e060e62` MILESTONE - MNQ smoke order executed and stop-side proven</sub>

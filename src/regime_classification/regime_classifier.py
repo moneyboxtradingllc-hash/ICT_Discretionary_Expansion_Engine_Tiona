@@ -27,20 +27,27 @@ _FAMILIES: dict[str, str] = {
 }
 
 
-def classify_regime(snapshot: dict, raw_data=None) -> dict:
+def classify_regime(snapshot: dict, raw_data=None, settled_data=None) -> dict:
     """
     Classify the current market regime from the assembled snapshot.
     Never raises. Returns safe 'unknown' result on any error.
     confidence_modifier is ALWAYS 0. authority_level is ALWAYS 'observe_only'.
+
+    CONTINUITY-2E: `raw_data` is the REALTIME series (forming higher-timeframe
+    bucket included) and feeds the reads that describe now. `settled_data` is
+    the same series with unfinished buckets removed, and feeds the structural
+    statistics that claim to be confirmed. When it is omitted the extractor
+    falls back to `raw_data` -- see extract_regime_features for why that
+    fallback is the 2D policy rather than a hole.
     """
     try:
-        return _classify(snapshot or {}, raw_data)
+        return _classify(snapshot or {}, raw_data, settled_data)
     except Exception as exc:
         return _safe_unknown([f"regime classification error: {exc}"])
 
 
-def _classify(snapshot: dict, raw_data=None) -> dict:
-    f = extract_regime_features(snapshot, raw_data)
+def _classify(snapshot: dict, raw_data=None, settled_data=None) -> dict:
+    f = extract_regime_features(snapshot, raw_data, settled_data)
 
     trend    = f["trend_score"]
     chop     = f["chop_score"]

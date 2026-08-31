@@ -7,7 +7,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from integrations.ninjatrader.deterministic.backtest import simulate_trade  # noqa: E402
+from integrations.topstepx.deterministic.backtest import simulate_trade  # noqa: E402
 
 LONG, SHORT = "long", "short"
 

@@ -61,10 +61,25 @@ def _live_snapshot(price=701.42, has_position=False):
         "liquidity": {"15m": {"sweep_detected": True, "sweep_direction": "above_high",
                               "reclaim_detected": True, "nearest_sell_side_liquidity": 699.60}},
         "playbook": {"selected_playbook": "liquidity_sweep_reversal", "direction": "bullish"},
+        # PHASE 2/3 (2026-08-12): the inventory the Brain sees is now the
+        # physically witnessed instance list, not `eligible_tools(playbook)`.
+        # AB-1 shipped two-sided VISIBILITY with generation deferred; generation
+        # has now landed, so the fixture carries real instances on both sides.
         "toolbox": {"preferred_tool": "bullish_ifvg",
                     "tool_candidates": [{"tool": "bullish_ifvg", "score": 80,
                                          "effective_status": "actionable",
-                                         "price_level": {"zone_low": 700.79}}]},
+                                         "price_level": {"zone_low": 700.79}}],
+                    "tool_instances": [
+                        {"tool_id": "bullish_ifvg@5m", "tool": "bullish_ifvg",
+                         "family": "ifvg", "direction": "bullish", "source_tf": "5m",
+                         "directional_witness": "below_low",
+                         "local_evidence_score": 55, "global_context_score": 25,
+                         "score": 80},
+                        {"tool_id": "bearish_ifvg@1m", "tool": "bearish_ifvg",
+                         "family": "ifvg", "direction": "bearish", "source_tf": "1m",
+                         "directional_witness": "above_high",
+                         "local_evidence_score": 40, "global_context_score": 20,
+                         "score": 60}]},
         "narrative_authority": {},
         "protected_swings": {"protected_high": {"level": 702.50, "basis": "buy_side_raid_rejected"},
                              "protected_low": None},
@@ -115,8 +130,15 @@ class T4_TwoSidedInventory(unittest.TestCase):
         inv = bi["playbook_toolbox"]
         self.assertTrue(any("bearish" in t["tool"] for t in inv["bearish"]))
         self.assertTrue(any("bullish" in t["tool"] for t in inv["bullish"]))
-        # bullish side is live-scored, bearish side is inventory-only (visibility)
-        self.assertTrue(any(t["live_scored"] for t in inv["bullish"]))
+        # PHASE 2/3: BOTH sides are now live-scored. AB-1 could only promise
+        # visibility on the opposite side; two-sided generation has since landed,
+        # so an unwitnessed side is empty rather than unscored.
+        self.assertTrue(all(t["live_scored"] for t in inv["bullish"]))
+        self.assertTrue(all(t["live_scored"] for t in inv["bearish"]))
+        # every instance names the timeframe that witnessed its side
+        for t in inv["bullish"] + inv["bearish"]:
+            self.assertTrue(t["source_tf"])
+            self.assertTrue(t["directional_witness"])
 
 
 class T5_PositionAwareness(unittest.TestCase):

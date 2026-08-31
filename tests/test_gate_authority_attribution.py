@@ -18,7 +18,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from integrations.ninjatrader.deterministic.facts_provider import (
+from integrations.topstepx.deterministic.facts_provider import (
     build_facts_from_snapshot,
 )
 
@@ -99,6 +99,6 @@ class TestAttributionDoesNotChangeTheVerdict:
             assert _facts(**{a: False})["final_gate_authorizes"] is False
 
     def test_the_diagnostic_keys_are_not_mechanical_facts(self):
-        from integrations.ninjatrader.deterministic.author import _REQUIRED_FACT_KEYS
+        from integrations.topstepx.deterministic.author import _REQUIRED_FACT_KEYS
         assert "_gate_permissions" not in _REQUIRED_FACT_KEYS
         assert "_gate_blockers" not in _REQUIRED_FACT_KEYS

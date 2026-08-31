@@ -12,6 +12,15 @@ import json
 import os
 import sys
 import unittest
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _enforce_regime(monkeypatch):
+    """This suite asserts the ENFORCE path. PROD-20260807 made observe_only the
+    explicit production default, so enforcement must now be requested."""
+    monkeypatch.setenv("REGIME_AUTHORITY_MODE", "enforce")
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))

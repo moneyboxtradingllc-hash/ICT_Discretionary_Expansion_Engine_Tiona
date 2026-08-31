@@ -105,16 +105,22 @@ class TestBrokerAdapters(unittest.TestCase):
     def test_factory_maps_brokers(self):
         self.assertEqual(get_adapter(broker="paper").name, "paper")
         self.assertEqual(get_adapter(broker="tradestation").name, "tradestation")
-        self.assertEqual(get_adapter(broker="unknown").name, "paper")  # safe default
+        # DECON-3: an unknown broker used to resolve to the paper (Alpaca)
+        # adapter. Substituting a retired venue for an unrecognised one is not
+        # a safe default.
+        from broker.factory import BrokerSelectionError
+        with self.assertRaises(BrokerSelectionError):
+            get_adapter(broker="unknown")
 
     def test_available(self):
-        # ninjatrader registered by NINJATRADER-MNQ-INTEGRATION-FOUNDATION
-        # (DEMO8458533 MNQ, DISARMED); topstepx registered for operators on
+        # LUNA-TOPSTEPX-ONLY: the ninjatrader adapter was removed with the
+        # venue, so the registry no longer offers a name that cannot resolve.
+        # topstepx is registered for operators on
         # Topstep's own platform, which has no NinjaTrader bridge. Registration
         # arms nothing: topstepx refuses a non-simulated account unless the
         # operator explicitly sets TOPSTEPX_ALLOW_LIVE. Default remains paper.
         self.assertEqual(set(available_brokers()),
-                         {"paper", "tradestation", "ninjatrader", "topstepx"})
+                         {"paper", "tradestation", "topstepx"})
 
     def test_stub_adapters_not_connected_and_refuse(self):
         for b in ("tradestation",):

@@ -93,7 +93,7 @@ echo "ORDERS ARMED: ${TOPSTEPX_ARM_ORDERS}"
 echo "OPENAI CALLS: DISABLED"
 echo "======================================================================"
 
-stop="data/integration/ninjatrader/deterministic/STOP"
+stop="data/integration/topstepx/deterministic/STOP"
 if [ -f "$stop" ]; then rm -f "$stop"; fi
 
-"$PYTHON" -m integrations.ninjatrader.deterministic.loop
+"$PYTHON" -m integrations.topstepx.deterministic.loop

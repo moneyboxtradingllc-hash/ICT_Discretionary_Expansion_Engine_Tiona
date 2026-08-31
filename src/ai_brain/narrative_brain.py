@@ -18,6 +18,9 @@ later AB phases, gated separately). Rollback: AI_BRAIN_ENABLED=false. Never
 raises — any failure yields a degraded, schema-valid witness output.
 """
 import json
+import time
+
+from ai_brain import ai_call_ledger as LEDGER
 import os
 
 import logging
@@ -25,7 +28,8 @@ import logging
 from ai_brain.brain_input import build_brain_input
 from ai_brain.brain_prompt import (
     BRAIN_SYSTEM_PROMPT, REPAIR_PROMPT_TEMPLATE, NEWS_CONTEXT_ADDENDUM,
-    VOLUME_WITNESS_ADDENDUM,
+    VOLUME_WITNESS_ADDENDUM, CANDLE_TEMPORAL_ADDENDUM, EXECUTION_PRICE_ADDENDUM,
+    REJECTION_ENTRY_MODE_ADDENDUM, DEALING_RANGE_ADDENDUM,
     ADAPTIVE_LEARNING_ADDENDUM, ADAPTIVE_FRICTION_ADDENDUM, MARKET_COMMANDER_ADDENDUM,
 )
 
@@ -52,6 +56,32 @@ from ai_brain.brain_persistence import persist_brain_call
 from narrative_authority.narrative_engine import build_narrative
 
 _log = logging.getLogger(__name__)
+
+# ── call context ─────────────────────────────────────────────────────────────
+# Session id and scan number belong on every accounting row, but threading them
+# through `_call_llm`'s signature would break every existing test double
+# (`lambda bi, repair=None`) and, worse, would make the accounting change the
+# call contract. They ride here instead: set once per scan, read at call time.
+_CALL_CONTEXT = {"session_id": "", "scan": None, "attempt": 1}
+
+
+def set_call_context(*, session_id: str = "", scan: object = None,
+                     attempt: int = 1) -> None:
+    _CALL_CONTEXT.update({"session_id": session_id or "", "scan": scan,
+                          "attempt": int(attempt)})
+
+
+def _purpose_for(repair) -> str:
+    """Which of the four call sites this is. Derived from the repair payload so
+    the callable signature stays exactly what every test double expects."""
+    if not repair:
+        return LEDGER.PURPOSE_PRIMARY
+    return (repair or {}).get("purpose") or LEDGER.PURPOSE_JSON_REPAIR
+
+
+def _call_context() -> tuple:
+    return (_CALL_CONTEXT.get("session_id", ""), _CALL_CONTEXT.get("scan"),
+            _CALL_CONTEXT.get("attempt", 1))
 _CONSUMED_FIELDS_AB1 = []   # AB-1 wires no consumers; populated as phases land
 
 
@@ -61,6 +91,57 @@ def enabled() -> bool:
 
 def _llm_enabled() -> bool:
     return os.getenv("AI_BRAIN_LLM", "false").lower().strip() == "true"
+
+
+JSON_MODE_TRUTHY = ("on", "true", "1", "yes")
+
+
+def _armed_session() -> bool:
+    """True when an ARMED production launcher owns this process.
+
+    Set by the launcher, never by a test or a diagnostic, so model resolution
+    fails closed only where a real order could follow.
+    """
+    return os.getenv("PRODUCTION_ARMED_SESSION", "").strip().lower() in ("1", "true", "on", "yes")
+
+
+def json_mode_enabled() -> bool:
+    """Whether the API is asked to ENFORCE JSON (response_format).
+
+    THE single source of truth. The armed-startup guard calls this same
+    predicate rather than reading the variable itself, because the two must not
+    be able to disagree: the original check accepted only the literal "on", so
+    `BRAIN_JSON_MODE=true` would have read as enabled to an operator and to a
+    naive guard while leaving the model on prose instruction alone.
+
+    On 2026-08-06 the flag was unset entirely and 2 of 38 live Luna calls came
+    back malformed -- an unclosed array, and English number words as bare
+    tokens. Neither is possible when the API enforces the grammar.
+    """
+    return os.getenv("BRAIN_JSON_MODE", "off").lower().strip() in JSON_MODE_TRUTHY
+
+
+SOVEREIGN_SOURCE = "llm"
+
+
+def degraded_reason(source: str, output: dict, fallback: str = None) -> "str | None":
+    """The explicit reason a call is not sovereign, or None when it is.
+
+    Every non-sovereign source must carry a stated reason. A degraded call with
+    no reason makes a legitimate market stand-down look identical to a Brain
+    failure -- on 2026-08-06 three schema-valid reads were degraded by
+    `recommended_tool_family wrong type: str` and that reason was only
+    discoverable by digging into output["warnings"].
+    """
+    if source == SOVEREIGN_SOURCE and not fallback:
+        return None
+    if fallback:
+        return str(fallback)
+    for w in (output or {}).get("warnings") or []:
+        if str(w).startswith("schema fallback:"):
+            return str(w).replace("schema fallback:", "schema_invalid:").strip()
+        return str(w)
+    return f"non_sovereign_source:{source}"
 
 
 def _keep_shallow_enabled() -> bool:
@@ -119,6 +200,41 @@ def _split_analogs(analogs: list, direction: str) -> tuple:
         else:
             support.append(a)   # non-directional analog = neutral context
     return support, conflict
+
+
+#: Snapshot blocks carrying ACCOUNT truth rather than MARKET truth. Market
+#: truth is what both authors reason over; account truth meets the organism only
+#: at the risk gate, and has no business in a replay archive.
+_ACCOUNT_BLOCKS = ("position_monitor", "risk", "broker_stop", "broker_trace",
+                   "paper_execution", "trade_reconciliation", "performance_dashboard",
+                   "account", "capital", "adaptive_size")
+
+
+def _archivable_snapshot(snapshot: dict) -> dict:
+    """The raw snapshot minus account state, FULLY DETACHED from the live one.
+
+    A shallow copy shared every nested dict and list with the live snapshot, so
+    the archive's correctness depended on nothing mutating between building the
+    record and serialising it -- a guarantee held by statement ordering rather
+    than by the data. Evidence that replay depends on may not rest on where a
+    line happens to sit.
+
+    Detaching is done through the JSON round trip the telemetry format uses
+    anyway, so anything that could not be archived faithfully is coerced here
+    rather than at write time. Never raises: archiving a scan may never be the
+    reason a scan fails.
+    """
+    try:
+        if not isinstance(snapshot, dict):
+            return {}
+        trimmed = {k: v for k, v in snapshot.items() if k not in _ACCOUNT_BLOCKS}
+        return json.loads(json.dumps(trimmed, default=str))
+    except Exception:  # noqa: BLE001
+        try:
+            return copy.deepcopy({k: v for k, v in snapshot.items()
+                                  if k not in _ACCOUNT_BLOCKS})
+        except Exception:  # noqa: BLE001
+            return {}
 
 
 def _deterministic(snapshot: dict, brain_input: dict, analogs: list) -> dict:
@@ -208,6 +324,69 @@ def _deterministic(snapshot: dict, brain_input: dict, analogs: list) -> dict:
 
 # ── LLM path ──────────────────────────────────────────────────────────────────
 
+def _carries_dealing_range(brain_input: dict) -> bool:
+    """Does the payload actually carry a measured dealing range?
+
+    DEALING-RANGE-PAYLOAD-1. Guarded like every other addendum: a clause
+    describing an auction the payload cannot show teaches the model to imagine
+    one. `high` is the discriminator because an empty block is published as {}.
+    Never raises.
+    """
+    try:
+        dr = ((brain_input or {}).get("market") or {}).get("dealing_range") or {}
+        return isinstance(dr, dict) and dr.get("high") is not None
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _carries_anchored_rejection_block(brain_input: dict) -> bool:
+    """Does the catalog actually carry an anchored rejection block?
+
+    REJECTION-ENTRY-MODE-SEPARATION-1. Guarded like every other addendum: the
+    clause explains how to read a specific object, and describing an object the
+    payload does not contain teaches the model to imagine one. Never raises.
+    """
+    try:
+        return any(isinstance(t, dict)
+                   and t.get("level_type") == "protected_level_rejection_block"
+                   for t in ((brain_input or {}).get("authorized_tool_catalog") or []))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _carries_execution_price(brain_input: dict) -> bool:
+    """Does this payload actually carry the execution-price block?
+
+    EXEC-PRICE-FRESHNESS-2. Guarded rather than assumed, exactly as
+    `_candles_carry_temporal_status` is: an archive predating
+    EXEC-PRICE-FRESHNESS-1 has no such block, and a clause explaining a field the
+    model cannot see teaches it to hallucinate one. The clause is attached when
+    the block EXISTS -- including when it exists and reports itself unavailable
+    or stale, because that state is precisely what the Brain must learn to
+    describe rather than repair. Never raises.
+    """
+    try:
+        block = ((brain_input or {}).get("market") or {}).get("execution_price")
+        return isinstance(block, dict) and bool(block.get("schema"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _candles_carry_temporal_status(brain_input: dict) -> bool:
+    """Does this payload actually state settled/forming/unknown per timeframe?
+
+    Guarded rather than assumed: a trimmed archive replayed through this path
+    carries no `timeframes`, so the clause explaining the field would describe
+    something the model cannot see. Never raises.
+    """
+    try:
+        by_tf = ((brain_input or {}).get("market") or {}).get("candles") or {}
+        return any(isinstance(b, dict) and b.get("last_candle_temporal_status")
+                   for b in by_tf.values())
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _call_llm(brain_input: dict, repair: "dict | None" = None) -> dict:
     """
     Real LLM Brain call. Returns a full call record (never raises):
@@ -216,10 +395,31 @@ def _call_llm(brain_input: dict, repair: "dict | None" = None) -> dict:
     parsed is None + fallback_reason set on any failure (no silent success).
     `repair` (optional): {"previous": dict, "errors": [...]} adds a repair turn.
     """
+    purpose = _purpose_for(repair)
+    session_id, scan, attempt = _call_context()
     user_content = json.dumps(brain_input, default=str)
     # NEWS-1 — append the news-awareness clause ONLY when news_context is present
     # (NEWS_LAYER_ENABLED). Base prompt is unchanged otherwise (regression-safe).
     system_prompt = BRAIN_SYSTEM_PROMPT
+    # CONTINUITY-2G — how to read `temporal_status`, appended ONLY when the
+    # payload actually carries it. A prompt that describes metadata the payload
+    # does not have teaches the model to hallucinate the field; an older archive
+    # replayed through this path is therefore left with the base prompt.
+    if _candles_carry_temporal_status(brain_input):
+        system_prompt = system_prompt + CANDLE_TEMPORAL_ADDENDUM
+    # EXEC-PRICE-FRESHNESS-2 — which of the two price fields means "now".
+    # Without this the Brain reads `current_price` (a SETTLED close) as the live
+    # location, which is the 2026-08-20 11:02:10 defect exactly.
+    if _carries_execution_price(brain_input):
+        system_prompt = system_prompt + EXECUTION_PRICE_ADDENDUM
+    # REJECTION-ENTRY-MODE-SEPARATION-1 — an established block is already the
+    # rejection; a second one is confirmation, not a prerequisite.
+    if _carries_anchored_rejection_block(brain_input):
+        system_prompt = system_prompt + REJECTION_ENTRY_MODE_ADDENDUM
+    # DEALING-RANGE-PAYLOAD-1 — where price sits in the auction. Location
+    # context; premium is not a short signal and discount is not a long one.
+    if _carries_dealing_range(brain_input):
+        system_prompt = system_prompt + DEALING_RANGE_ADDENDUM
     if isinstance(brain_input.get("news_context"), dict):
         system_prompt = system_prompt + NEWS_CONTEXT_ADDENDUM
     # VOLUME-WITNESS — participation clause ONLY when the payload carries the
@@ -251,7 +451,10 @@ def _call_llm(brain_input: dict, repair: "dict | None" = None) -> dict:
         out["fallback_reason"] = "no_api_key"
         return out
     try:
-        model = os.getenv("AI_BRAIN_MODEL", os.getenv("AI_MODEL", "gpt-4o-mini"))
+        # Single authority. The old chain fell through AI_MODEL to gpt-4o-mini,
+        # so a missing AI_BRAIN_MODEL ran production on a weaker model silently.
+        from ai_brain.production_model import resolve_model
+        model = resolve_model(armed=_armed_session())
         out["model"] = model
         timeout = float(os.getenv("AI_BRAIN_TIMEOUT_SECONDS", "25"))
         client = _openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"),
@@ -263,23 +466,70 @@ def _call_llm(brain_input: dict, repair: "dict | None" = None) -> dict:
                 errors="\n".join(str(e) for e in repair.get("errors", [])),
                 previous=json.dumps(repair.get("previous", {}), default=str))})
         create_kwargs = {"model": model, "messages": messages, "timeout": timeout}
+        # ── PROMPT CACHING (2026-08-11) ──────────────────────────────────────
+        # Measured on 116 live calls: the system prompt is 13,250 chars and
+        # BYTE-IDENTICAL across every scan (~3,988 tokens, 37.6% of the
+        # prompt); the user payload diverges at character 23. The message
+        # order is already [system(static), user(dynamic)], which is exactly
+        # the shape caching wants, so NOTHING about what Terra reads changes
+        # here -- only a stable key is attached so the identical prefix can be
+        # recognised across scans.
+        #
+        # `prompt_cache_key` deliberately excludes session/scan/timestamp: any
+        # of those would give every request a unique key and guarantee a miss.
+        # It DOES include the model and a doctrine version, because a changed
+        # prefix must not silently reuse an old one.
+        cache_key = LEDGER.cache_key(role=LEDGER.PRIMARY, model=model)
+        create_kwargs["prompt_cache_key"] = cache_key
+        client_request_id = LEDGER.new_client_request_id(
+            session_id=session_id, scan=scan, role=LEDGER.PRIMARY,
+            purpose=purpose, attempt=attempt)
+        # Sent so a request that TIMES OUT still has an identity we own; the
+        # server's x-request-id only exists if a response came back.
+        create_kwargs["extra_headers"] = {
+            LEDGER.CLIENT_REQUEST_HEADER: client_request_id}
+        out["client_request_id"] = client_request_id
+        out["prompt_cache_key"] = cache_key
         # BRAIN-RELIABILITY-2 (2026-07-09) — structured JSON output eliminates
         # the JSONDecodeError fallback class (malformed JSON destroying healthy
         # reads). The prompt already demands JSON-only output; this makes the
         # API enforce it. Default off = legacy request shape.
-        if os.getenv("BRAIN_JSON_MODE", "off").lower().strip() == "on":
+        if json_mode_enabled():
             create_kwargs["response_format"] = {"type": "json_object"}
-        resp = client.chat.completions.create(**create_kwargs)
+        _started = time.time()
+        # `with_raw_response` exposes the HTTP headers, which is the only place
+        # OpenAI's `x-request-id` lives. Falls back to the plain call when the
+        # SDK (or a test double) does not offer it -- instrumentation may never
+        # be the reason a scan loses its brain.
+        _raw = None
+        try:
+            _raw = client.chat.completions.with_raw_response.create(**create_kwargs)
+            resp = _raw.parse()
+        except AttributeError:
+            resp = client.chat.completions.create(**create_kwargs)
+        _latency = time.time() - _started
         content = resp.choices[0].message.content or ""
         out["raw_response"] = content
+        out["request_id"] = LEDGER.server_request_id(_raw, resp)
+        out["response_id"] = getattr(resp, "id", "") or ""
+        out["latency_seconds"] = _latency
         try:
             u = getattr(resp, "usage", None)
             if u is not None:
-                out["usage"] = {"prompt_tokens": getattr(u, "prompt_tokens", None),
-                                "completion_tokens": getattr(u, "completion_tokens", None),
-                                "total_tokens": getattr(u, "total_tokens", None)}
+                # Full class breakdown: cached vs uncached input and cache
+                # writes are billed differently, and one flat `prompt_tokens`
+                # cannot be costed honestly.
+                out["usage"] = dict(LEDGER.usage_breakdown(u))
         except Exception:  # noqa: BLE001
             pass
+        LEDGER.record(
+            session_id=session_id, scan=scan, role=LEDGER.PRIMARY,
+            purpose=purpose, attempt=attempt, model_requested=model,
+            model_returned=getattr(resp, "model", "") or "",
+            client_request_id=client_request_id, request_id=out["request_id"],
+            response_id=out["response_id"], usage=getattr(resp, "usage", None),
+            ok=True, latency_seconds=_latency, prompt_cache_key=cache_key,
+            cache_mode="implicit")
         start, end = content.find("{"), content.rfind("}")
         if start < 0 or end < 0:
             out["fallback_reason"] = "no_json_in_response"
@@ -307,18 +557,59 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
         history = stance_memory.history_summary() if stance_memory else {"available": False}
         brain_input = build_brain_input(snapshot, history)
 
-        # AB-4 — retrieve historical analogs and reason WITH them. Prefer the
-        # analogs already computed in the scan (snapshot["ai_retrieval"]); else
-        # retrieve now. Observe-only; never authoritative for execution.
+        # BUILD-CANONICAL-EXTERNAL-BRAIN-EXECUTION-BRIDGE (2026-08-07).
+        # PROD-20260807 proved the deterministic layer already knew every level
+        # Terra wanted -- 29452.50 was enumerated on all 23 propose-entry scans
+        # -- but the catalog was built AFTER the model call and never shown to
+        # it. Terra named levels in prose and a resolver tried to guess which
+        # object was meant; it failed on 17 of 23. Publishing the catalog HERE,
+        # before the call, lets Terra select an id and removes prose from the
+        # execution join entirely.
+        try:
+            from broker.luna_candidate_producer import (
+                authorized_invalidation_catalog, authorized_objective_catalog)
+            reference = ((brain_input.get("market") or {}).get("current_price"))
+            brain_input["authorized_objectives"] = authorized_objective_catalog(
+                snapshot, brain_input, reference)
+            brain_input["authorized_invalidations"] =                 authorized_invalidation_catalog(brain_input)
+        except Exception:  # noqa: BLE001 -- a catalog failure must not kill the read
+            brain_input["authorized_objectives"] = []
+            brain_input["authorized_invalidations"] = []
+
+        # COGNITION-ESCALATION-ROUTER-1 (2026-08-24) -- SHADOW ONLY.
+        #
+        # Placed HERE and nowhere earlier because this is the last point that is
+        # still PRE-PROVIDER while both catalogs exist: `authorized_tool_catalog`
+        # carries where price stands, `authorized_objectives` carries what stands
+        # in front of each target, and `active_path_state` carries who owns the
+        # leg. Routing before this point would have to guess at evidence the
+        # organism has not built yet.
+        #
+        # It reads NOTHING a model produced and writes NOTHING the model can see:
+        # the verdict goes to a separate sink, never to `brain_input`. The call
+        # cannot raise and its return value is discarded, so removing this block
+        # entirely would leave the scan byte-identical.
+        try:
+            from cognition.escalation_router import observe as _shadow_route
+            _shadow_route(snapshot=snapshot, brain_input=brain_input,
+                          symbol=symbol)
+        except Exception:  # noqa: BLE001 -- shadow telemetry may never cost a scan
+            pass
+
+        # AB-4 — reason WITH the analogs the SCAN retrieved. Observe-only;
+        # never authoritative for execution.
+        #
+        # ONE SCAN -> ONE RETRIEVAL RESULT. This used to re-query whenever the
+        # scan's result carried no analogs, and that second call passed
+        # `min_similarity=0.0` -- bypassing the bound MIN_SIMILARITY (0.60) and,
+        # because `retrieve_analogs` has no enablement gate of its own, also
+        # bypassing AI_RETRIEVAL_ENABLED. Terra could therefore be shown analogs
+        # the contract had already rejected, from a corpus the operator believed
+        # was switched off, and the telemetry describing "the" retrieval would
+        # have described a different query than the one the Brain consumed.
         analogs = []
         try:
             retr = snapshot.get("ai_retrieval") or {}
-            if not retr.get("analogs"):
-                from ai_retrieval.retrieval import retrieve_analogs
-                # k-NN semantics: nearest authoritative analogs; similarity score
-                # is carried for downstream judgment (observe-only).
-                retr = retrieve_analogs(snapshot, k=5, authoritative_only=True,
-                                        min_similarity=0.0, persist_log=False)
             analogs = retr.get("analogs", []) or []
             brain_input["memory_retrieval"] = {"count": len(analogs), "analogs": analogs}
         except Exception:  # noqa: BLE001
@@ -449,7 +740,8 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
                 need, repair_errors = needs_repair(parsed)
                 if need:
                     repaired = True
-                    rep = _call_llm(brain_input, repair={"previous": parsed,
+                    rep = _call_llm(brain_input, repair={"purpose": LEDGER.PURPOSE_JSON_REPAIR,
+                                                        "previous": parsed,
                                                          "errors": repair_errors})
                     if rep["ok"]:
                         llm_call["repair_usage"] = rep.get("usage")
@@ -500,6 +792,7 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
                     if fam_gap and _family_repair_enabled():
                         family_repair_attempted = True
                         frep = _call_llm(brain_input, repair={
+                            "purpose": LEDGER.PURPOSE_FAMILY_REPAIR,
                             "previous": parsed, "errors": family_errors})
                         if frep["ok"]:
                             cand, cand_notes = normalize_output(frep["parsed"], analogs)
@@ -546,6 +839,7 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
                     if inv_gap and _invalidation_repair_enabled():
                         invalidation_repair_attempted = True
                         irep = _call_llm(brain_input, repair={
+                            "purpose": LEDGER.PURPOSE_INVALIDATION_REPAIR,
                             "previous": parsed, "errors": invalidation_errors})
                         if irep["ok"]:
                             cand, cand_notes = normalize_output(irep["parsed"], analogs)
@@ -633,6 +927,19 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             "shallow_reasoning_kept": shallow_kept,
             "input_degraded": brain_input.get("degraded", []),
             "input_payload": brain_input,
+            # RAW-SNAPSHOT-ARCHIVE (2026-08-07) — OBSERVATIONAL ONLY.
+            #
+            # `input_payload` is what the external Brain saw. The DETERMINISTIC
+            # author reads the raw snapshot instead, and that was never
+            # preserved -- so no archived session can replay both authors over
+            # the same moment. PROD-20260807 has canonical objects but no raw
+            # snapshot; the QQQ-era snapshots have the raw snapshot but predate
+            # canonical objects. Neither half alone can answer whether the two
+            # brains agree.
+            #
+            # Nothing reads this back. It changes no input, no authority, no
+            # timing beyond one dict copy, and no decision.
+            "raw_snapshot": _archivable_snapshot(snapshot),
             "adaptive_telemetry": adaptive_telemetry,   # ADAPTIVE-1C (observe_only)
             "ai_market_commander": ai_market_commander, # MARKET COMMANDER B2 (observe_only)
             "parsed_output": output,
@@ -650,6 +957,13 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             "llm_model": (llm_call or {}).get("model"),
             "llm_usage": (llm_call or {}).get("usage"),
             "fallback_reason": fallback_reason,
+            # LUNA-DEGRADED-TELEMETRY (2026-08-06): the reason a call was
+            # degraded lived only inside output["warnings"], where a caller
+            # reading the block's top level saw source=degraded with
+            # fallback_reason=None and nothing else — a Brain-quality failure
+            # indistinguishable from a quiet market. Surfaced here so no
+            # degraded call is ever reasonless.
+            "degraded_reason": degraded_reason(source, output, fallback_reason),
             "normalization_notes": norm_notes,
             "repair_attempted": repaired,
             # BRAIN-FAMILY-REPAIR (2026-07-09) — soft family-repair telemetry

@@ -21,7 +21,10 @@ from deployment.instance_config import InstanceConfig
 _ACTIVE: "Optional[InstanceContext]" = None
 
 # Global memory lives OUTSIDE any instance (broad market lessons only, Phase 4).
-GLOBAL_MEMORY_DIR = os.path.join("data", "global_memory")
+# Env-redirectable so the test suite can be isolated from live runtime state.
+# The full suite previously wrote real "lessons" into data/global_memory/
+# because this was a hardcoded constant with no seam.
+GLOBAL_MEMORY_DIR = os.getenv("GLOBAL_MEMORY_DIR") or os.path.join("data", "global_memory")
 
 
 class InstanceContext:

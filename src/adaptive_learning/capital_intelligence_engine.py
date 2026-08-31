@@ -98,11 +98,19 @@ def _num(v, default=None):
     return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else default
 
 
+#: RISK-DOCTRINE-MIGRATION (operator, 2026-08-20): $500 -> $725.
+#: Two trades a day at the $350 per-trade ceiling is $700; the extra $25 is
+#: headroom for commissions, fees and rounding, so the hard daily stop is not
+#: set exactly at the theoretical planned-risk sum.
+DEFAULT_DAILY_LOSS_LIMIT_USD = 725.0
+
+
 def _daily_limit() -> float:
     try:
-        return float(os.getenv("DAILY_LOSS_LIMIT_DOLLARS", "500"))
+        return float(os.getenv("DAILY_LOSS_LIMIT_DOLLARS",
+                               str(DEFAULT_DAILY_LOSS_LIMIT_USD)))
     except (TypeError, ValueError):
-        return 500.0
+        return DEFAULT_DAILY_LOSS_LIMIT_USD
 
 
 # ── persistence (scan loop is the only writer) ────────────────────────────────
@@ -114,13 +122,62 @@ def _history_path(base_dir: "str | None" = None, create: bool = False) -> str:
     return os.path.join(d, HISTORY_FILE)
 
 
-def _load_history(base_dir=None) -> dict:
+# DECONTAMINATE (2026-08-06): capital history carried NO account binding at all.
+# Anchors 20260706..20260805 all read 99990.53 -- an Alpaca paper balance reaching
+# this file through the equity leak repaired in 9af35f1. The Topstep Combine is a
+# $50k account, so drawdown pressure and Brain aggression were being computed
+# against a peak belonging to a different venue and a different account.
+CAPITAL_SCHEMA_VERSION = 2
+_IDENTITY_FIELDS = ("venue", "account_fingerprint", "account_mode", "currency",
+                    "schema_version")
+
+
+def capital_identity(*, venue: str = "", account_fingerprint: str = "",
+                     account_mode: str = "", currency: str = "USD") -> dict:
+    """The identity a capital record must carry to be trusted."""
+    return {"venue": (venue or "").upper(), "account_fingerprint": account_fingerprint or "",
+            "account_mode": (account_mode or "").upper(), "currency": (currency or "USD").upper(),
+            "schema_version": CAPITAL_SCHEMA_VERSION}
+
+
+def identity_matches(hist: dict, identity: dict) -> tuple:
+    """(ok, reason). Absent identity is REJECTED, never assumed compatible."""
+    if not identity or not identity.get("account_fingerprint"):
+        return False, "no_session_identity"
+    stored = {k: (hist or {}).get(k) for k in _IDENTITY_FIELDS}
+    if not any(stored.values()):
+        return False, "history_has_no_identity"
+    for field in ("venue", "account_fingerprint", "account_mode", "currency"):
+        if stored.get(field) != identity.get(field):
+            return False, f"identity_mismatch:{field}"
+    if int(stored.get("schema_version") or 0) != CAPITAL_SCHEMA_VERSION:
+        return False, "schema_version_mismatch"
+    return True, "same_account"
+
+
+def _load_history(base_dir=None, identity: dict = None) -> dict:
+    """Load history, but only history proven to belong to THIS account.
+
+    A foreign or identity-less record is returned as a quarantined shell: its
+    equity never becomes a peak, and the contamination is reported rather than
+    silently dropped.
+    """
     try:
         with open(_history_path(base_dir), encoding="utf-8") as fh:
             data = json.load(fh)
-        return data if isinstance(data, dict) else {}
+        data = data if isinstance(data, dict) else {}
     except (FileNotFoundError, ValueError, OSError):
-        return {}
+        data = {}
+    if identity is None:
+        return data                      # legacy/diagnostic read, unchanged
+    ok, reason = identity_matches(data, identity)
+    if ok:
+        return data
+    return {"_quarantined_history": {k: data.get(k) for k in
+                                     ("peak_equity", "last_equity", "updated_at")},
+            "_quarantine_reason": reason,
+            "_quarantined_anchor_count": len(data.get("daily_anchors") or {}),
+            **identity}
 
 
 def _save_history(hist: dict, base_dir=None) -> None:
@@ -202,7 +259,7 @@ def compute_risk_efficiency(daily: "dict | None" = None) -> "float | None":
 
 def build_capital_metrics(symbol: str, account: "dict | None",
                           today: "str | None" = None,
-                          base_dir=None) -> dict:
+                          base_dir=None, identity: dict = None) -> dict:
     """Gather the full capital metric set (read-only)."""
     day = today or datetime.now(timezone.utc).strftime("%Y%m%d")
     day = day.replace("-", "")[:8]
@@ -223,16 +280,29 @@ def build_capital_metrics(symbol: str, account: "dict | None",
                      if week_floor < d.replace("-", "")[:8] <= day
                      for t in trades)
 
-    hist = _load_history(base_dir)
+    hist = _load_history(base_dir, identity=identity)
     equity = _num((account or {}).get("equity"))
-    peak = _num(hist.get("peak_equity"))
+    # A quarantined history contributes NO peak. The peak then initializes from
+    # this account's own verified equity, which is the only same-account
+    # evidence that exists.
+    peak = None if hist.get("_quarantine_reason") else _num(hist.get("peak_equity"))
+    peak_source = "same_account_history"
+    if peak is None:
+        peak_source = ("initialized_from_verified_balance"
+                       if equity is not None else "unavailable")
     if equity is not None:
         peak = max(peak or equity, equity)
 
     limit = _daily_limit()
+    quarantine = hist.get("_quarantine_reason")
     return {
         "equity": equity,
         "peak_equity": peak,
+        "peak_equity_source": peak_source,
+        "capital_identity": identity,
+        "foreign_history_quarantined": quarantine,
+        "quarantined_peak": (hist.get("_quarantined_history") or {}).get("peak_equity")
+                            if quarantine else None,
         "drawdown_pct": (round((peak - equity) / peak, 6)
                          if equity is not None and peak else None),
         "daily_pnl": round(daily_pnl, 2),
@@ -282,7 +352,7 @@ def evaluate_capital_state(metrics: dict) -> dict:
     dd = _num(m.get("drawdown_pct"))
     daily = _num(m.get("daily_pnl"), 0.0)
     weekly = _num(m.get("weekly_pnl"), 0.0)
-    limit = _num(m.get("daily_loss_limit"), _daily_limit()) or 500.0
+    limit = _num(m.get("daily_loss_limit"), _daily_limit()) or DEFAULT_DAILY_LOSS_LIMIT_USD
     n = int(m.get("closed_trades") or 0)
     exp = _num(m.get("expectancy"))
     pf = _num(m.get("profit_factor"))
@@ -361,21 +431,34 @@ def evaluate_capital_state(metrics: dict) -> dict:
 
 def track_capital(symbol: str, account: "dict | None" = None,
                   today: "str | None" = None, base_dir=None,
-                  persist: bool = True) -> dict:
+                  persist: bool = True, identity: dict = None) -> dict:
     """One live-scan capital cycle: fetch equity (unless provided), gather
     metrics, evaluate state, persist peak-equity history. Never raises."""
     try:
         if account is None:
-            try:
-                from paper_execution.paper_broker import get_account
-                account = get_account()
-            except Exception:  # noqa: BLE001
-                account = {}
-        metrics = build_capital_metrics(symbol, account, today, base_dir)
+            # DECON-3 (2026-08-05): this fell back to `paper_broker.get_account()`,
+            # which reads the ALPACA paper account. On a TopstepX MNQ session that
+            # computed drawdown pressure and aggression tier from an unrelated
+            # equities balance and fed it into the snapshot the Brain reads.
+            # The caller now supplies the real account, or capital contributes
+            # nothing — an unknown balance is reported, never substituted.
+            account = {}
+        metrics = build_capital_metrics(symbol, account, today, base_dir,
+                                        identity=identity)
         report = evaluate_capital_state(metrics)
 
         if persist and metrics.get("equity") is not None:
-            hist = _load_history(base_dir)
+            hist = _load_history(base_dir, identity=identity)
+            if hist.get("_quarantine_reason"):
+                # Start a clean same-account history. The rejected record is
+                # preserved beside it as evidence, never merged, never relabelled.
+                hist = {**(identity or {}),
+                        "rejected_foreign_history": hist.get("_quarantined_history"),
+                        "rejected_reason": hist.get("_quarantine_reason"),
+                        "rejected_anchor_count": hist.get("_quarantined_anchor_count"),
+                        "initialized_from": "verified_same_account_balance"}
+            elif identity:
+                hist.update(identity)
             hist["peak_equity"] = metrics["peak_equity"]
             hist["last_equity"] = metrics["equity"]
             hist["updated_at"] = datetime.now(timezone.utc).isoformat()

@@ -49,7 +49,41 @@ _REQUIRED = {
     "recommended_playbook_family": str,
     "recommended_tool_family":   list,
     "direction_provenance":      dict,
+    # CANONICAL EXECUTION OBJECT SELECTION (2026-08-07).
+    # PROD-20260807 proved prose cannot be the execution join key: the Brain
+    # named levels the deterministic layer already enumerated, and
+    # `classify_draw` failed to bind 17 of 23 proposals. Executable identity now
+    # comes from an id chosen out of the published catalog, never from text.
+    "objective_id":              (str, type(None)),
+    "invalidation_id":           (str, type(None)),
 }
+
+# TOOL-OCCURRENCE-SELECTION-1 (2026-08-21) — DELIBERATELY NOT IN `_REQUIRED`.
+#
+# `recommended_tool_occurrence_id` lets Luna name WHICH plain-FVG occurrence she
+# is trading. Measured on 40 archived scans once plain FVGs gained identity: a
+# bearish `fvg` token resolved to 16-26 simultaneously eligible occurrences in
+# 40 of 40 scans. She could SEE every occurrence_id and had no field in which to
+# return one, so mechanics -- correctly refusing to choose among discretionary
+# objects -- answered TOOL_OCCURRENCE_AMBIGUOUS instead of taking the trade she
+# meant. LUNA SELECTS, MECHANICS VERIFIES: a join key, never a ranking.
+#
+# It is NOT declared above because `_REQUIRED` is a PRESENCE contract -- every
+# key in it must appear in every response, which is why `objective_id` and
+# `invalidation_id` live there and must be emitted even as null. This field is
+# CONDITIONALLY meaningful: required only for `fvg` with several eligible
+# occurrences, and lawfully absent for a unique occurrence, a non-FVG family, a
+# stand_down or a wait. Declaring it required made 49 suites fail with
+# `missing field:` -- every stand_down, replay and archived read.
+#
+# The contract is therefore the PROMPT plus the producer's
+# `parsed.get("recommended_tool_occurrence_id")`, where absence resolves to
+# None and the family-level path is preserved unchanged.
+#
+# And NO optional-field registry is declared here. A tuple naming this field
+# would be consumed by nothing, enforce nothing, and read to a later maintainer
+# as though it participated in validation -- a symbol that describes a contract
+# it does not hold. The absence of a declaration IS the accurate statement.
 
 
 def empty_brain_output() -> dict:
@@ -89,6 +123,9 @@ def empty_brain_output() -> dict:
         "direction_provenance":      {"source": "fallback_none",
                                       "structure_derived": False,
                                       "retrieval_used": False},
+        # Absent unless an entry is actually proposed.
+        "objective_id":              None,
+        "invalidation_id":           None,
     }
 
 

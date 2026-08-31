@@ -26,7 +26,18 @@ import os
 
 def regime_authority_mode() -> str:
     """Return 'enforce' (default) or 'observe_only'."""
-    mode = os.getenv("REGIME_AUTHORITY_MODE", "enforce").lower().strip()
+    # PROD-20260807 AUDIT: this variable was ABSENT from the production
+    # environment and defaulted to "enforce", while the TopstepX production path
+    # imports no regime veto at all. Latent ambiguity -- doctrine said context
+    # only, configuration said enforce, and only an accident of imports made
+    # them agree. The production default is now explicit.
+    #
+    # A BLANK value is "unset", not "enforce". `REGIME_AUTHORITY_MODE=` left
+    # empty in .env previously fell through to enforcement and silently re-armed
+    # a veto the doctrine says does not exist. Only an explicit word decides.
+    mode = (os.getenv("REGIME_AUTHORITY_MODE") or "").lower().strip()
+    if not mode:
+        mode = "observe_only"
     return "observe_only" if mode == "observe_only" else "enforce"
 
 

@@ -41,8 +41,23 @@ def _live_bars(n=10):
     return out
 
 
-BARS = _live_bars()
+#: NOT bound at import. `_STALE_BAR_MINUTES` is 15.0 and this module is imported
+#: at COLLECTION, so a module-level snapshot ages for the whole run: the full
+#: suite takes ~17 minutes and the three tests that need a fresh window were
+#: reading bars that had gone stale while other files ran. The lane was right to
+#: refuse them -- the fixture was the thing that aged. Regenerating per call
+#: keeps "a fixture standing in for a live feed has to age like one" true for the
+#: duration of a single test rather than the duration of the suite.
+#:
+#: Prices are a pure function of the index, so every assertion against
+#: `_live_bars()[-1]["c"]` or `len(_live_bars())` is unaffected by when it runs.
+def BARS_now():
+    return _live_bars()
 
+
+
+from integrations.topstepx.deterministic import (                # noqa: E402
+    topstepx_mutation_authority as MA)
 
 class Venue:
     def __init__(self, *, positions=None, orders=None):
@@ -60,10 +75,15 @@ class Venue:
         if path == "/api/Contract/search":
             return {"success": True, "contracts": [dict(MNQ)]}
         if path == "/api/History/retrieveBars":
-            return {"success": True, "bars": BARS}
+            return {"success": True, "bars": BARS_now()}
         if path == "/api/Position/searchOpen":
             return {"success": True, "positions": self.positions}
         if path == "/api/Order/searchOpen":
+            return {"success": True, "orders": self.orders}
+        if path == "/api/Order/v2/query":
+            # THE COMPLETE DISCOVERY SURFACE. A transport that scripts only
+            # `searchOpen` models a venue that hides Suspended bracket children,
+            # which is precisely the state this lane must be able to see.
             return {"success": True, "orders": self.orders}
         if path == "/api/Order/place":
             return {"success": True, "orderId": 5150}
@@ -89,7 +109,7 @@ def env(monkeypatch):
 
 
 def _client(venue):
-    from integrations.ninjatrader.deterministic.topstepx_lane_client import (
+    from integrations.topstepx.deterministic.topstepx_lane_client import (
         TopstepXLaneClient)
     adapter = TopstepXBrokerAdapter(
         client=TopstepXClient("tiona", "k", transport=venue))
@@ -109,7 +129,7 @@ class TestNoNinjaTraderAnywhere:
         import ast
         import inspect
 
-        from integrations.ninjatrader.deterministic import topstepx_lane_client
+        from integrations.topstepx.deterministic import topstepx_lane_client
         tree = ast.parse(inspect.getsource(topstepx_lane_client))
         imported = []
         for node in ast.walk(tree):
@@ -124,22 +144,22 @@ class TestNoNinjaTraderAnywhere:
         monkeypatch.setenv("DETERMINISTIC_VENUE", "topstepx")
         import importlib
 
-        from integrations.ninjatrader.deterministic import loop
+        from integrations.topstepx.deterministic import loop
         importlib.reload(loop)
         assert loop.VENUE == "topstepx"
         assert type(loop._venue_client()).__name__ == "TopstepXLaneClient"
-        monkeypatch.setenv("DETERMINISTIC_VENUE", "ninjatrader")
+        monkeypatch.setenv("DETERMINISTIC_VENUE", "topstepx")
         importlib.reload(loop)
 
     def test_an_unknown_venue_is_refused_not_defaulted(self, env, monkeypatch):
         monkeypatch.setenv("DETERMINISTIC_VENUE", "tradovate")
         import importlib
 
-        from integrations.ninjatrader.deterministic import loop
+        from integrations.topstepx.deterministic import loop
         importlib.reload(loop)
         with pytest.raises(RuntimeError, match="not a venue"):
             loop._venue_client()
-        monkeypatch.setenv("DETERMINISTIC_VENUE", "ninjatrader")
+        monkeypatch.setenv("DETERMINISTIC_VENUE", "topstepx")
         importlib.reload(loop)
 
 
@@ -190,45 +210,68 @@ class TestTheShapeTheLaneReads:
     def test_quote_is_the_last_closed_bar_and_says_so(self, env):
         q = _client(Venue()).quote("MNQ")
         assert q["known"] is True
-        assert q["last"] == BARS[-1]["c"]
+        assert q["last"] == BARS_now()[-1]["c"]
         assert q["derived_from"] == "last_closed_bar"
 
 
-class TestOrdersAreDisarmedByDefault:
-    def test_nothing_can_be_sent_without_an_explicit_arm(self, env):
-        venue = Venue()
-        c = _client(venue)
-        ack = c.deterministic_order({"direction": "long", "quantity": 3,
-                                     "structural_stop_price": 120.0,
-                                     "target_points": 35.0})
-        assert ack["accepted"] is False
-        assert "disarmed" in ack["reason"]
-        assert not venue.called("/api/Order/place")
+class TestThisLaneHoldsNoMutationAuthority:
+    """THIS CLASS CHANGED MEANING, DELIBERATELY.
 
-    def test_an_armed_order_converts_the_stop_price_to_a_distance(self, env, monkeypatch):
-        monkeypatch.setenv("TOPSTEPX_ARM_ORDERS", "true")
-        venue = Venue()
-        c = _client(venue)
-        ref = BARS[-1]["c"]                       # 139.5
-        ack = c.deterministic_order({"direction": "long", "quantity": 3,
-                                     "structural_stop_price": ref - 20.0,
-                                     "target_points": 35.0})
-        assert ack["accepted"] is True and ack["order_id"] == 5150
-        sent = venue.sent("/api/Order/place")
-        assert sent["size"] == 3
-        assert sent["stopLossBracket"]["ticks"] == 80      # 20 pts / 0.25
-        assert sent["takeProfitBracket"]["ticks"] == 140   # 35 pts / 0.25
+    It was `TestOrdersAreDisarmedByDefault`, and it certified that this lane
+    could place a bracket once `TOPSTEPX_ARM_ORDERS=true`. That was a real
+    authority over a real TopstepX account -- and it sat beside a `flatten()`
+    the same flag never gated at all, which is how a bare `close_position` with
+    no discovery, no ownership and no cancellation survived five certified
+    safety commits and 7,888 passing tests.
 
-    def test_a_stop_equal_to_the_reference_is_refused(self, env, monkeypatch):
-        monkeypatch.setenv("TOPSTEPX_ARM_ORDERS", "true")
+    `TOPSTEPX-PARALLEL-MUTATION-SURFACE-1` removed the authority rather than
+    growing Luna's certified architecture to absorb a second execution path.
+    The safety boundary is the brokerage ACCOUNT, not the entrypoint we happen
+    to call production: if code can authenticate to that account and mutate it,
+    it belongs in the safety analysis whether or not anyone launches it.
+
+    So the arming flag no longer decides anything here. If this lane is ever
+    restored for execution it needs its own execution-authority project and its
+    own safety certification, and these tests will be rewritten by that project
+    rather than quietly satisfied by an environment variable.
+    """
+
+    def test_an_order_is_denied_and_never_reaches_the_venue(self, env):
         venue = Venue()
         ack = _client(venue).deterministic_order({
-            "direction": "long", "quantity": 1,
-            "structural_stop_price": BARS[-1]["c"], "target_points": 35.0})
+            "direction": "long", "quantity": 3,
+            "structural_stop_price": 120.0, "target_points": 35.0})
         assert ack["accepted"] is False
+        assert ack["authority"] == MA.DENIED
         assert not venue.called("/api/Order/place")
 
-    def test_environment_proof_reports_the_arm_state(self, env, monkeypatch):
+    def test_arming_the_flag_does_not_restore_the_authority(self, env, monkeypatch):
+        """The environment variable is a convention. Authority is structural."""
+        monkeypatch.setenv("TOPSTEPX_ARM_ORDERS", "true")
+        venue = Venue()
+        ref = BARS_now()[-1]["c"]
+        ack = _client(venue).deterministic_order({
+            "direction": "long", "quantity": 3,
+            "structural_stop_price": ref - 20.0, "target_points": 35.0})
+        assert ack["accepted"] is False
+        assert ack["authority"] == MA.DENIED
+        assert not venue.called("/api/Order/place")
+
+    def test_flatten_is_denied_and_never_reaches_close_contract(self, env,
+                                                                monkeypatch):
+        """THE SIXTH DEFECT. `flatten` was never behind the arming flag, so this
+        lane could not place an order without arming but could close a live
+        position without it."""
+        monkeypatch.setenv("TOPSTEPX_ARM_ORDERS", "true")
+        venue = Venue()
+        out = _client(venue).flatten("MNQ")
+        assert out["flattened"] is False
+        assert out["authority"] == MA.DENIED
+        assert not venue.called("/api/Position/closeContract")
+
+    def test_environment_proof_still_reports_the_arm_state(self, env, monkeypatch):
+        """The flag is still REPORTED -- an operator reading a proof wants to
+        know what the environment says -- it simply grants nothing."""
         assert _client(Venue()).environment_proof()["arm_orders"] is False
         monkeypatch.setenv("TOPSTEPX_ARM_ORDERS", "true")
         assert _client(Venue()).environment_proof()["arm_orders"] is True
@@ -241,7 +284,7 @@ class TestOrdersAreDisarmedByDefault:
 
 class TestDisconnectedIsSafe:
     def test_every_read_reports_unknown_before_connect(self, env):
-        from integrations.ninjatrader.deterministic.topstepx_lane_client import (
+        from integrations.topstepx.deterministic.topstepx_lane_client import (
             TopstepXLaneClient)
         c = TopstepXLaneClient(TopstepXBrokerAdapter(
             client=TopstepXClient("tiona", "k", transport=Venue())))
@@ -252,7 +295,7 @@ class TestDisconnectedIsSafe:
 
     def test_orders_are_refused_before_connect(self, env, monkeypatch):
         monkeypatch.setenv("TOPSTEPX_ARM_ORDERS", "true")
-        from integrations.ninjatrader.deterministic.topstepx_lane_client import (
+        from integrations.topstepx.deterministic.topstepx_lane_client import (
             TopstepXLaneClient)
         venue = Venue()
         c = TopstepXLaneClient(TopstepXBrokerAdapter(
@@ -289,20 +332,20 @@ class TestTheBarWindowIsUnambiguous:
 
     def test_a_stale_window_is_refused_rather_than_traded(self, env, monkeypatch):
         """Stale bars are indistinguishable from a quiet market downstream."""
-        import integrations.ninjatrader.deterministic.topstepx_lane_client as mod
+        import integrations.topstepx.deterministic.topstepx_lane_client as mod
         monkeypatch.setattr(mod.TopstepXLaneClient, "_bar_age_minutes",
                             staticmethod(lambda _s: 240.0))
         assert _client(Venue()).historical_1m("MNQ", 100) == []
 
     def test_fresh_bars_pass(self, env, monkeypatch):
-        import integrations.ninjatrader.deterministic.topstepx_lane_client as mod
+        import integrations.topstepx.deterministic.topstepx_lane_client as mod
         monkeypatch.setattr(mod.TopstepXLaneClient, "_bar_age_minutes",
                             staticmethod(lambda _s: 1.0))
-        assert len(_client(Venue()).historical_1m("MNQ", 100)) == len(BARS)
+        assert len(_client(Venue()).historical_1m("MNQ", 100)) == len(BARS_now())
 
     def test_an_unreadable_timestamp_does_not_halt_trading(self, env):
         """Unparseable must read as a parsing problem, not as staleness."""
-        from integrations.ninjatrader.deterministic.topstepx_lane_client import (
+        from integrations.topstepx.deterministic.topstepx_lane_client import (
             TopstepXLaneClient)
         assert TopstepXLaneClient._bar_age_minutes("not-a-date") is None
         assert TopstepXLaneClient._bar_age_minutes(None) is None
@@ -329,7 +372,7 @@ class TestTheVenueOwnsTheIdentity:
         # and quietly undo a module-level patch.
         import dotenv
         monkeypatch.setattr(dotenv, "load_dotenv", lambda *a, **k: False)
-        import integrations.ninjatrader.deterministic as d
+        import integrations.topstepx.deterministic as d
         for k in ("NT_ACCOUNT", "NT_INSTRUMENT", "TOPSTEPX_ACCOUNT_NAME",
                   "TOPSTEPX_CONTRACT"):
             monkeypatch.delenv(k, raising=False)
@@ -341,9 +384,9 @@ class TestTheVenueOwnsTheIdentity:
 
     def test_topstepx_needs_no_ninjatrader_config_at_all(self, monkeypatch):
         d = self._reload(monkeypatch, "topstepx",
-                         TOPSTEPX_ACCOUNT_NAME="PRAC-V2-562817-71602583",
+                         TOPSTEPX_ACCOUNT_NAME="PRAC-V2-FIXTURE-00000000",
                          TOPSTEPX_CONTRACT="MNQ")
-        assert d.ACCOUNT == "PRAC-V2-562817-71602583"
+        assert d.ACCOUNT == "PRAC-V2-FIXTURE-00000000"
         assert d.INSTRUMENT == "MNQ"
 
     def test_account_known_is_true_on_the_topstepx_path(self, env, monkeypatch):
@@ -365,15 +408,15 @@ class TestTheVenueOwnsTheIdentity:
             self._reload(monkeypatch, "topstepx")
         msg = str(exc.value)
         assert "TOPSTEPX_ACCOUNT_NAME" in msg
-        assert "Do NOT set NT_ACCOUNT" in msg      # kills the placeholder idea
 
-    def test_ninjatrader_still_demands_its_own_config(self, monkeypatch):
+    def test_any_other_venue_is_refused_outright(self, monkeypatch):
+        """LUNA-TOPSTEPX-ONLY. NinjaTrader used to be a second routable
+        venue with its own config. It was removed, so selecting it is now
+        a hard refusal rather than a differently-configured lane -- a
+        deleted venue must not fall through to a half-present path.
+        """
         with pytest.raises(RuntimeError) as exc:
             self._reload(monkeypatch, "ninjatrader")
-        assert "NT_ACCOUNT" in str(exc.value)
-
-    def test_ninjatrader_identity_is_unchanged(self, monkeypatch):
-        d = self._reload(monkeypatch, "ninjatrader",
-                         NT_ACCOUNT="DEMO8458533", NT_INSTRUMENT="MNQ SEP26")
-        assert d.ACCOUNT == "DEMO8458533"
-        assert d.INSTRUMENT == "MNQ SEP26"
+        msg = str(exc.value)
+        assert "only supported" in msg
+        assert "topstepx" in msg

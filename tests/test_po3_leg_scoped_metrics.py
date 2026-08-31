@@ -25,6 +25,7 @@ from volatility.expansion_detector import (
     detect_expansion, _leg_slice, _leg_start_index, _directional_efficiency,
 )
 from structure import po3_config as cfg
+from structure.structure_engine import analyze_structure
 
 
 @pytest.fixture(autouse=True)
@@ -115,21 +116,136 @@ class TestWindowIsAlwaysBounded:
         assert len(_leg_slice(candles, None)) == len(candles)
 
 
+def _stamped(i, o, h, l, c):
+    out = _candle(o, h, l, c)
+    out["timestamp"] = f"2026-08-12T15:{i:02d}:00+00:00"
+    out["volume"] = 10
+    return out
+
+
+def _v_tape(prices, base=28000.0):
+    """Real geometry: the swing detector decides what a pivot is, not the test."""
+    return [_stamped(i, base + p, base + p + 1, base + p - 1, base + p + 0.5)
+            for i, p in enumerate(prices)]
+
+
+def _old_price_search(candles, struct):
+    """The REPLACED algorithm. Kept so these regressions can be shown to fail
+    against the implementation they replaced — a fixture that cannot fail
+    against the defect is not evidence."""
+    if not isinstance(struct, dict) or not candles:
+        return None
+    found = []
+    for key, extreme in (("last_swing_high", "high"), ("last_swing_low", "low")):
+        lvl = struct.get(key)
+        if not isinstance(lvl, (int, float)):
+            continue
+        for i in range(len(candles) - 1, -1, -1):
+            if abs(float(candles[i][extreme]) - float(lvl)) <= 1e-6:
+                found.append(i)
+                break
+    return max(found) if found else None
+
+
 class TestPivotAnchoring:
-    def test_leg_starts_at_the_most_recent_pivot(self):
-        candles = _noise(40) + _clean_leg(20)
+    """STEP 4B.12 §4 UNIT 4 — rebuilt around REAL occurrences.
+
+    These fixtures used to hand `_leg_start_index` a struct containing only a
+    PRICE, taken from a candle chosen by position and then called a pivot:
+
         pivot_price = candles[-15]["low"]
-        idx = _leg_start_index(candles, {"last_swing_low": pivot_price})
-        assert idx == len(candles) - 15
+        _leg_start_index(candles, {"last_swing_low": pivot_price})
+
+    Nothing in that tape was ever a detected swing. The old implementation could
+    not tell an authoritative occurrence from any candle at the same price, which
+    is precisely why the fixture passed -- it asserted the defect's contract while
+    claiming to assert pivot anchoring.
+
+    The tapes below contain real geometry, the authoritative structure engine
+    decides which occurrence is the swing, and a later candle revisits that exact
+    price so identity has something to be stolen by.
+    """
+
+    #: A V-shaped low that IS certified, then a revisit of the same price in the
+    #: unconfirmed tail -- the live shape: on 1m the high 29843.00 was made at
+    #: 15:43 and touched again at 15:51, and the old search took the touch.
+    DECOY_TAPE = [50, 44, 38, 32, 26, 20, 26, 32, 38, 44, 50, 44, 38, 32, 26, 20]
+
+    def test_leg_starts_at_the_most_recent_pivot(self):
+        """Named for the proposition it must prove: the MOST RECENT occurrence.
+
+        An earlier draft asserted only `origin != decoy` and `origin in (hi, lo)`.
+        An implementation returning the OLDER of two genuine pivots would have
+        satisfied that, so the assertion did not carry the test's name.
+        """
+        candles = _v_tape(self.DECOY_TAPE)
+        struct = analyze_structure(candles, allow_uncadenced=True)
+
+        hi = struct["last_swing_high_pivot_index"]
+        lo = struct["last_swing_low_pivot_index"]
+        assert lo == 5 and candles[lo]["low"] == struct["last_swing_low"]
+
+        decoy = [i for i, c in enumerate(candles)
+                 if abs(c["low"] - struct["last_swing_low"]) <= 1e-6 and i != lo]
+        assert decoy == [15], "the fixture must contain a same-price decoy"
+
+        expected = max(i for i in (hi, lo) if isinstance(i, int))
+        origin = _leg_start_index(candles, struct)
+        assert origin == expected, "the leg must begin at the MOST RECENT pivot"
+        assert origin != 15, "a later revisit may not become the leg origin"
+
+        # and the defect is real: the replaced algorithm chose the decoy
+        assert _old_price_search(candles, struct) == 15
 
     def test_most_recent_of_the_two_pivots_wins(self):
-        candles = _noise(40) + _clean_leg(20)
-        struct = {"last_swing_high": candles[-18]["high"], "last_swing_low": candles[-6]["low"]}
-        assert _leg_start_index(candles, struct) == len(candles) - 6
+        """The doctrine is unchanged: the later of the two EXACT occurrences."""
+        candles = _v_tape(self.DECOY_TAPE)
+        struct = analyze_structure(candles, allow_uncadenced=True)
+        hi = struct["last_swing_high_pivot_index"]
+        lo = struct["last_swing_low_pivot_index"]
+        assert isinstance(hi, int) and isinstance(lo, int) and hi != lo
 
-    def test_no_pivot_match_returns_none(self):
-        assert _leg_start_index(_noise(50), {"last_swing_high": 99999.0}) is None
-        assert _leg_start_index(_noise(50), None) is None
+        # price and index describe the SAME object on both sides
+        assert candles[hi]["high"] == struct["last_swing_high"]
+        assert candles[lo]["low"] == struct["last_swing_low"]
+
+        assert _leg_start_index(candles, struct) == max(hi, lo)
+        # not the same-price revisit that the old search preferred
+        assert _leg_start_index(candles, struct) != _old_price_search(candles, struct)
+
+    def test_missing_pivot_identity_does_not_fall_back_to_price(self):
+        """RENAMED from `test_no_pivot_match_returns_none`.
+
+        That test asserted "no candle extreme matches the price, so None". The
+        engine no longer matches prices at all, so it passed for a reason its
+        name no longer described -- misleading green coverage. The proposition
+        worth freezing is the opposite and much stronger: a matching price is
+        PRESENT and is still refused, because identity is absent.
+        """
+        candles = _v_tape(self.DECOY_TAPE)
+        struct = analyze_structure(candles, allow_uncadenced=True)
+        price_only = {"last_swing_high": struct["last_swing_high"],
+                      "last_swing_low": struct["last_swing_low"]}
+
+        # the price is right there in the series and the old search finds it
+        assert _old_price_search(candles, price_only) == 15
+        # ...and identity being absent means the answer is unknown, not guessed
+        assert _leg_start_index(candles, price_only) is None
+        assert _leg_start_index(candles, None) is None
+
+    def test_the_producer_never_pairs_a_price_with_another_occurrences_index(self):
+        """Price from occurrence A + index from occurrence B would rebuild the
+        defect with extra steps."""
+        candles = _v_tape(self.DECOY_TAPE)
+        struct = analyze_structure(candles, allow_uncadenced=True)
+        for level_key, index_key, extreme in (
+                ("last_swing_high", "last_swing_high_pivot_index", "high"),
+                ("last_swing_low", "last_swing_low_pivot_index", "low")):
+            lvl, idx = struct[level_key], struct[index_key]
+            if lvl is None:
+                assert idx is None
+                continue
+            assert candles[idx][extreme] == lvl
 
 
 class TestScoringConsequences:

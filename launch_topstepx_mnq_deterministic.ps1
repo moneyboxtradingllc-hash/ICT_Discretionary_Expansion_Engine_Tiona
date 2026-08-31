@@ -58,7 +58,7 @@ Write-Host "ORDERS ARMED: $($env:TOPSTEPX_ARM_ORDERS)"
 Write-Host "OPENAI CALLS: DISABLED"
 Write-Host "======================================================================"
 
-$stop = "data/integration/ninjatrader/deterministic/STOP"
+$stop = "data/integration/topstepx/deterministic/STOP"
 if (Test-Path $stop) { Remove-Item $stop -Force }
 
-python -m integrations.ninjatrader.deterministic.loop
+python -m integrations.topstepx.deterministic.loop

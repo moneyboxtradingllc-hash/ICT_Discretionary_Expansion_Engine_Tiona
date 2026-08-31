@@ -119,6 +119,21 @@ def evaluate_gate(snapshot: dict) -> dict:
 
     pref_c = _preferred_candidate(snapshot)
 
+    # LUNA-SESSION-PO3-AUTHORITY-1 — THE SESSION PHASE GATE.
+    #
+    # The canonical session PO3 phase decides whether a NEW entry may exist at
+    # all, upstream of every playbook. It is read here (rather than folded into
+    # one of the existing checks) so a phase block is legible as itself: an
+    # accumulation stand-down is not a risk block, not a regime block and not a
+    # weak thesis.
+    #
+    # ABSENCE IS PERMISSIVE. A snapshot with no session_po3 block predates this
+    # unit; the authority blocks on a PROVEN unresolved phase, never on the
+    # absence of its own evidence.
+    _sp3 = snapshot.get("session_po3") or {}
+    session_phase = _sp3.get("phase")
+    session_phase_permits = bool(_sp3.get("new_entry_allowed", True))
+
     # ── Authorization checks ──────────────────────────────────────────────────
     # Phase 5F.4: legacy 'trade_authorized_false' normalizes to 'ready_for_execution'
     decision       = normalize_decision(da.get("decision"))
@@ -330,10 +345,16 @@ def evaluate_gate(snapshot: dict) -> dict:
         and thesis_eligible
         # BRAIN-AUTHORSHIP — no fresh exposure without sovereign authorship
         and authorship_ok
+        # SESSION-PO3 — accumulation / unresolved excursion authorizes no new entry
+        and session_phase_permits
     )
 
     # ── Blocking factors ──────────────────────────────────────────────────────
     blocking: list[str] = []
+    if not session_phase_permits:
+        blocking.append(
+            f"session PO3 phase {session_phase}: "
+            f"{_sp3.get('block_reason') or 'new entry not authorized'}")
     if not execution_enabled:
         blocking.append("execution globally disabled")
     if decision != "ready_for_execution":
@@ -432,6 +453,9 @@ def evaluate_gate(snapshot: dict) -> dict:
         "would_authorize_if_enabled": would_authorize,
         "authorization_checks":       auth_checks,
         "blocking_factors":           blocking[:8],
+        # SESSION-PO3 authority, reported whether or not it blocked.
+        "session_phase":              session_phase,
+        "session_phase_permits_entry": session_phase_permits,
         "warnings":                   warnings[:3],
         # Phase 5F.3 — trigger confirmation enforcement
         "trigger_requirement_met":    trig_req_met,

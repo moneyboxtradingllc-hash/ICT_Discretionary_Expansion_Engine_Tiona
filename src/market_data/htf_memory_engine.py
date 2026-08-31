@@ -96,10 +96,14 @@ class HtfMemoryEngine:
     """Stateful daily-memory accumulator. The live scan loop owns one instance
     and calls update(candles_1m) once per scan."""
 
-    def __init__(self, symbol: str, persist: bool = True):
+    def __init__(self, symbol: str, persist: bool = True, preload: bool = True):
         self.symbol = str(symbol or "UNKNOWN").upper()
         self.persist = persist
-        self._state = _load(self.symbol)
+        # HTF-REPLAY (2026-07-30): preload=False starts from EMPTY memory.
+        # Replay reconstructs state from archived real candles only, so the
+        # live store is neither read (preload=False) nor written
+        # (persist=False) — isolation is structural, not disciplinary.
+        self._state = _load(self.symbol) if preload else {}
         self._state.setdefault("days", {})
 
     # ── ingestion ─────────────────────────────────────────────────────────────

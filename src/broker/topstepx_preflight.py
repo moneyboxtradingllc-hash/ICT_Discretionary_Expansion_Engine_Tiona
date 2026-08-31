@@ -24,6 +24,8 @@ from broker.topstepx_adapter import (                        # noqa: E402
     TopstepXBrokerAdapter, TopstepXConfigError, load_topstepx_config,
 )
 from broker.topstepx_client import TopstepXAuthError, TopstepXError  # noqa: E402
+from broker.topstepx_redaction import MASK, redacted_account_label   # noqa: E402
+from broker import topstepx_account_role as account_role             # noqa: E402
 
 _OK, _NO, _WARN = "  ok  ", " FAIL ", " WARN "
 
@@ -43,8 +45,13 @@ def main(argv=None) -> int:
         _line(_NO, "configuration")
         print(f"\n{exc}\n")
         return 1
-    _line(_OK, "configuration", f"user={cfg['username']} account={cfg['account_name']!r} "
-                                f"contract={cfg['contract']!r}")
+    # TOPSTEPX-INTEGRATION (2026-08-04): this line printed the TopstepX username
+    # and the full account name. The username is half of the loginKey payload —
+    # a credential, not a label — and terminal output ends up in scrollback,
+    # screenshots and pasted bug reports. Both are now redacted at the source.
+    _line(_OK, "configuration",
+          f"user={MASK} account={redacted_account_label(cfg['account_name'])} "
+          f"contract={cfg['contract']!r}")
 
     adapter = TopstepXBrokerAdapter()
     try:
@@ -66,10 +73,11 @@ def main(argv=None) -> int:
 
     _line(_OK, "authentication", "session established")
     _line(_OK, "account resolved",
-          f"{account.name} (id={account.id})  balance=${account.balance:,.2f}")
-    _line(_OK if account.simulated else _WARN, "account type",
-          "SIMULATED (practice)" if account.simulated
-          else "*** NOT SIMULATED - REAL MONEY ***")
+          f"{redacted_account_label(account.name)}  balance=${account.balance:,.2f}")
+    # TOPSTEPX-COMBINE-ROLE: `simulated` describes the routing environment, not
+    # what the account is for. A Trading Combine is simulated too.
+    for line in account_role.report_lines(account.simulated):
+        _line(_OK if account.simulated else _WARN, "account", line)
 
     state = adapter.get_account()
     _line(_OK, "contract resolved",

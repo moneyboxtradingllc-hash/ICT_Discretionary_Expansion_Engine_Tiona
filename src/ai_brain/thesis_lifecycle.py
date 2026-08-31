@@ -329,12 +329,19 @@ class ThesisLifecycleEngine:
     def __init__(self, persist: bool = True, symbol: str = None):
         self._active = None
         self._persist = persist
-        self._symbol = symbol or os.getenv("SCAN_SYMBOL", "QQQ")
+        # DECON-3: defaulted to "QQQ". Theses are persisted per symbol, so an
+        # unnamed MNQ engine would match and resurrect a stored QQQ thesis.
+        from doctrine.instrument_identity import PRODUCTION_INSTRUMENT
+        self._symbol = symbol or os.getenv("SCAN_SYMBOL") or PRODUCTION_INSTRUMENT
+        # Foreign/identity-less persisted state found at load, if any.
+        # Always defined so callers and telemetry never branch on hasattr.
+        self.quarantined = None
         if persist:
             self._load()
 
     # ── persistence ───────────────────────────────────────────────────────────
     def _load(self) -> None:
+        self.quarantined = None
         try:
             path = _active_path()
             if not os.path.exists(path):
@@ -343,8 +350,34 @@ class ThesisLifecycleEngine:
             active = data.get("active")
             if not active:
                 return
-            # Restart safety: only resurrect a same-symbol, non-terminal, in-age thesis.
-            if active.get("symbol") and active.get("symbol") != self._symbol:
+            # Restart safety: only resurrect a same-instrument, non-terminal,
+            # in-age thesis.
+            #
+            # DECONTAMINATE (2026-08-06): this checked only active["symbol"],
+            # but the record stores the instrument at the FILE level. The stale
+            # 2026-06-15 QQQ thesis therefore had active.get("symbol") is None,
+            # the guard never fired, and only the idle-expiry check incidentally
+            # kept it out of an MNQ session. Identity is now checked where it is
+            # actually written, and a foreign thesis is QUARANTINED -- reported,
+            # never relabelled, never fed to the Brain.
+            stored = (active.get("symbol") or data.get("symbol") or "").strip()
+            if stored and stored != self._symbol:
+                self.quarantined = {"reason": "foreign_instrument",
+                                    "stored_instrument": stored,
+                                    "session_instrument": self._symbol,
+                                    "thesis_id": active.get("thesis_id"),
+                                    "created_at": active.get("created_at"),
+                                    "path": path}
+                self._active = None
+                return
+            if not stored:
+                self.quarantined = {"reason": "missing_instrument_identity",
+                                    "stored_instrument": None,
+                                    "session_instrument": self._symbol,
+                                    "thesis_id": active.get("thesis_id"),
+                                    "created_at": active.get("created_at"),
+                                    "path": path}
+                self._active = None
                 return
             if active.get("status") in (STATUS_INVALIDATED, STATUS_EXPIRED, STATUS_COMPLETED):
                 return
@@ -384,6 +417,37 @@ class ThesisLifecycleEngine:
                 json.dump(payload, fh, default=str)
         except Exception:  # noqa: BLE001
             pass
+
+    # ── history revision (CONTINUITY-2B, 2026-08-11) ─────────────────────────
+    def invalidate_on_history_revision(self, revision: int, ts: str = "") -> dict:
+        """Kill an active thesis that was formed from a superseded tape.
+
+        `thesis_state` reaches `trade_qualification_engine`, so a thesis built
+        while twenty minutes of history were missing keeps gating candidates
+        after the tape is repaired. It cannot be re-derived the way a swing can
+        -- it was a reading of evidence, and that evidence has changed -- so it
+        is INVALIDATED rather than replayed.
+
+        Uses the existing lifecycle vocabulary rather than a new one: `_load`
+        already discards a persisted thesis in INVALIDATED, so this survives a
+        restart without any additional mechanism. Never raises.
+        """
+        try:
+            if not self._active:
+                return {"invalidated": False, "reason": "no active thesis"}
+            thesis = self._active
+            thesis["status"] = STATUS_INVALIDATED
+            thesis["invalidation_reason"] = (
+                f"market history revised to r{revision}; this thesis was formed "
+                "from a tape that has since been repaired")
+            thesis["invalidated_at_history_revision"] = int(revision)
+            self._journal("invalidated_by_history_revision", thesis, ts or "")
+            self._active = None
+            self._save()
+            return {"invalidated": True, "revision": int(revision),
+                    "thesis_id": thesis.get("thesis_id") or thesis.get("id")}
+        except Exception:  # noqa: BLE001 — may never cost a scan
+            return {"invalidated": False, "error": True}
 
     def _journal(self, action: str, thesis: dict, ts: str) -> None:
         if not self._persist:

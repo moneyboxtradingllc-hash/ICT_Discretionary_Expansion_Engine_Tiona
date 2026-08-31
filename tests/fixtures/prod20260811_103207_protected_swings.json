@@ -1,0 +1,87 @@
+{
+  "_provenance": {
+    "captured": "PROD-20260811 scan at 10:32:07 ET (14:32:07Z), MNQ",
+    "why": "The scan whose 47-point bearish candidate was refused by the 40-point ceiling while a 27.75-point 1m protected high existed in this same registry and was never delivered to Terra.",
+    "contents": "protected_swings block verbatim from raw_snapshot, plus the 1m close used as price. No account, credential, mission or authorization data."
+  },
+  "price": 29746.0,
+  "protected_swings": {
+    "protected_high": {
+      "level": 29793.0,
+      "timeframe": "5m",
+      "role": "active_leg",
+      "registered_at": "2026-08-11T14:30:00+00:00",
+      "swing_id": "5m:swing_high:29793",
+      "basis": "buy_side_raid_rejected"
+    },
+    "protected_low": {
+      "level": 29636.0,
+      "timeframe": "3m",
+      "role": "transition",
+      "registered_at": "2026-08-11T14:27:00+00:00",
+      "swing_id": "3m:swing_low:29636",
+      "basis": "sell_side_raid_rejected"
+    },
+    "by_timeframe": {
+      "highs": {
+        "5m": {
+          "level": 29793.0,
+          "timeframe": "5m",
+          "role": "active_leg",
+          "registered_at": "2026-08-11T14:30:00+00:00",
+          "swing_id": "5m:swing_high:29793",
+          "basis": "buy_side_raid_rejected"
+        },
+        "3m": {
+          "level": 29793.0,
+          "timeframe": "3m",
+          "role": "transition",
+          "registered_at": "2026-08-11T14:30:00+00:00",
+          "swing_id": "3m:swing_high:29793",
+          "basis": "buy_side_raid_rejected"
+        },
+        "1m": {
+          "level": 29773.75,
+          "timeframe": "1m",
+          "role": "execution",
+          "registered_at": "2026-08-11T14:30:00+00:00",
+          "swing_id": "1m:swing_high:29773.8",
+          "basis": "buy_side_raid_rejected"
+        }
+      },
+      "lows": {
+        "15m": {
+          "level": 29752.5,
+          "timeframe": "15m",
+          "role": "context",
+          "registered_at": "2026-08-11T14:29:00+00:00",
+          "swing_id": "15m:swing_low:29752.5",
+          "basis": "sell_side_raid_rejected"
+        },
+        "3m": {
+          "level": 29636.0,
+          "timeframe": "3m",
+          "role": "transition",
+          "registered_at": "2026-08-11T14:27:00+00:00",
+          "swing_id": "3m:swing_low:29636",
+          "basis": "sell_side_raid_rejected"
+        },
+        "1m": {
+          "level": 29736.75,
+          "timeframe": "1m",
+          "role": "execution",
+          "registered_at": "2026-08-11T14:26:00+00:00",
+          "swing_id": "1m:swing_low:29736.8",
+          "basis": "sell_side_raid_rejected"
+        }
+      }
+    },
+    "roles": {
+      "15m": "context",
+      "5m": "active_leg",
+      "3m": "transition",
+      "1m": "execution"
+    },
+    "warnings": []
+  }
+}

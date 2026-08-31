@@ -29,23 +29,51 @@ def _range_acceleration(candles: list) -> float:
 
 
 def _leg_start_index(candles: list, struct: dict) -> int | None:
-    """Index at which the current auction leg began — the most recent structural
-    pivot. Returns None when structure offers no pivot that maps to these candles.
+    """Index at which the current auction leg began — the EXACT occurrence of the
+    most recent structural pivot. None when structure offers no such occurrence.
 
-    The swing prices come from find_swings() on this same series, so they should
-    equal a candle extreme exactly; the epsilon is float-safety, not tolerance.
+    STEP 4B.12 §4 UNIT 4 — PRICE VALIDATES GEOMETRY, IT DOES NOT OWN IDENTITY.
+
+    This used to take the swing PRICE and scan backwards for a candle whose
+    extreme equalled it. Its docstring argued the price "should equal a candle
+    extreme exactly" -- true, and beside the point. It equals every candle that
+    ever TOUCHED the level, and the reversed scan took the most recent one, so a
+    revisit could steal the leg origin from the swing that made it.
+
+    Measured over 1000 lookups: 48 wrong occurrences, all 48 because a later
+    candle revisited a level; 30 changed a leg metric. Decoy side HIGH 36 /
+    LOW 12, and two distinct forms:
+
+        a revisit outranking its OWN pivot                   40
+        a revisit outranking the OTHER side's NEWER pivot     8
+
+    The second form is the one that shows why price could never have been a safe
+    identity mechanism. The search matched each side independently and returned
+    `max(...)`, so it asked "which of these two prices was TOUCHED most
+    recently" when the question is "which of these two authoritative
+    OCCURRENCES happened most recently". On 1m at 15:55 a high revisit at 15:51
+    outranked a swing low made at 15:45, and the leg began at a candle that was
+    not a pivot on either side.
+
+    The producer now publishes the pivot index of the exact occurrence each
+    level came from, in THIS list's index space, so identity is carried rather
+    than reconstructed. The "later of the two sides" doctrine is unchanged; only
+    the identity mechanism is.
     """
     if not isinstance(struct, dict) or not candles:
         return None
     found = []
-    for key, extreme in (("last_swing_high", "high"), ("last_swing_low", "low")):
-        lvl = struct.get(key)
-        if not isinstance(lvl, (int, float)):
+    for key in ("last_swing_high_pivot_index", "last_swing_low_pivot_index"):
+        idx = struct.get(key)
+        # NO PRICE FALLBACK. An absent, malformed or out-of-range index means
+        # the occurrence cannot be identified in this series, and unknown must
+        # stay unknown -- `_leg_slice` already owns the bounded fallback window.
+        # Searching by price here is exactly the second identity authority this
+        # unit exists to delete.
+        if isinstance(idx, bool) or not isinstance(idx, int):
             continue
-        for i in range(len(candles) - 1, -1, -1):
-            if abs(float(candles[i][extreme]) - float(lvl)) <= 1e-6:
-                found.append(i)
-                break
+        if 0 <= idx < len(candles):
+            found.append(idx)
     return max(found) if found else None
 
 
@@ -66,8 +94,37 @@ def _leg_slice(candles: list, struct: dict) -> list:
     return candles[-leg_len:] if leg_len < n else candles
 
 
-def _follow_through(candles: list) -> int:
-    """Count consecutive candles at the tail moving in the same direction."""
+def _follow_through(candles: list, tf: str = None) -> int:
+    """Consecutive candles at the tail moving in the same direction.
+
+    STEP 4B.12 §4 UNIT 5 — CONSECUTIVE MEANS CONSECUTIVE MARKET BARS.
+
+    This counted adjacent ARRAY elements. When a venue-open bucket has no
+    observation, `build_timeframes` emits no bucket at all, so its neighbours
+    become array-adjacent and this walked straight through the hole. Measured
+    over 1000 evaluations: 29 of 426 multi-bar runs spanned a missing expected
+    bucket, from three unique holes (15m 18:00, 3m 18:09, 5m 18:10). On 3m at
+    18:14 it reported a FOUR-bar bearish run where market time supports ONE.
+
+    Credit is unchanged -- `min(run * 5, 15)`, same baseline, same state gates.
+    Only the evidentiary input is corrected: the run must be market-contiguous.
+
+    `tf` is optional so existing callers and fixtures keep working; without it
+    the continuity authority infers the step from the observations themselves.
+    """
+    from market_data.evidence_continuity import authoritative_trailing_run
+    verdict = authoritative_trailing_run(candles, tf, lambda c: c.get("direction"))
+    return verdict["authoritative_run"]
+
+
+def _observed_follow_through(candles: list) -> int:
+    """The raw array run, preserved as an OBSERVATION.
+
+    MODEL B: seeing six same-direction neighbours is a true statement about the
+    array. It is simply not proof that six consecutive market bars occurred, so
+    it may not buy deterministic credit. The observation is kept rather than
+    overwritten -- `market_events` already publishes exactly this distinction.
+    """
     if len(candles) < 2:
         return 0
     last_dir = candles[-1]["direction"]
@@ -223,7 +280,11 @@ def detect_expansion(candles: list, atr_result: dict, tf: str = None,
     dir_eff = _directional_efficiency(leg)
     body_dom = _body_dominance(leg)
     range_accel = _range_acceleration(leg)
-    follow_count = _follow_through(candles)
+    # UNIT 5: the tf is the horizon the continuity authority needs to know
+    # which buckets the venue was scheduled to print. Telemetry keeps the raw
+    # observation beside the authorised credit so the distinction stays visible.
+    follow_count = _follow_through(candles, tf)
+    observed_follow = _observed_follow_through(candles)
     displacement = _displacement_detected(candles, disp_threshold)
     exhaustion = _exhaustion_risk(candles)
 
@@ -257,4 +318,19 @@ def detect_expansion(candles: list, atr_result: dict, tf: str = None,
         # Telemetry: which slice the conviction ratios actually described.
         "leg_candles": len(leg),
         "leg_scoped": len(leg) < len(candles),
+        # UNIT 5 — OBSERVATION vs AUTHORITY, both kept, both named explicitly.
+        #
+        # NOT `follow_through_run`. `snapshot_builder` nests the displacement
+        # block one level down as `expansion[tf]["displacement"]`, and that
+        # block has published `follow_through_run` = the OBSERVED array run
+        # since long before this unit -- `market_events` consumes it under that
+        # meaning. Publishing a sibling of the same name carrying the opposite
+        # proposition would be the §4 hazard in mirror form: not changing an
+        # existing fact's meaning, but minting a new fact that contradicts an
+        # established name one level away. Neither key existed here before, so
+        # nothing is renamed and no consumer is disturbed -- both are simply
+        # spelled out. When they differ, an expected bucket had no observation
+        # and deterministic credit was withheld; that scar is readable here.
+        "follow_through_authorised_run": follow_count,
+        "follow_through_observed_run": observed_follow,
     }

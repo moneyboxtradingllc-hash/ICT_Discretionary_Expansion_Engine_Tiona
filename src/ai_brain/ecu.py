@@ -19,6 +19,8 @@ thesis is non-directional and the mechanical witness path resumes (logged).
 """
 import os
 
+from doctrine.instrument_identity import PRODUCTION_INSTRUMENT
+
 _STANCE = None   # module-level chronological stance memory for the ECU pre-pass
 
 
@@ -56,7 +58,12 @@ def produce_thesis(snapshot: dict) -> dict:
         from ai_brain.narrative_brain import run_narrative_brain, enabled as brain_enabled
         if not brain_enabled():
             return _empty("brain_disabled")
-        res = run_narrative_brain(snapshot, snapshot.get("symbol", "QQQ"), _stance())
+        # DECON-3: this defaulted to "QQQ". `build_snapshot` does not stamp
+        # snapshot["symbol"], so under ECU the canonical Brain call — the thesis
+        # production actually consumes — told Luna it was reading QQQ during an
+        # MNQ session, and keyed the symbol-partitioned stance/persistence there.
+        symbol = snapshot.get("symbol") or os.getenv("SCAN_SYMBOL") or PRODUCTION_INSTRUMENT
+        res = run_narrative_brain(snapshot, symbol, _stance())
         o = res.get("output") or {}
         direction = (o.get("narrative_direction") or "neutral").lower()
         opportunity = direction in ("bullish", "bearish")

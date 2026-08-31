@@ -33,6 +33,25 @@ def _onehot(value, vocab):
 def _key_fields(rec_or_ctx: dict) -> dict:
     """Pull the narrative/delivery/liquidity/protected key fields from either a
     memory record or a live snapshot-shaped dict."""
+    # BUILD-SAFE-DESCRIPTIVE-SESSION-MEMORY: a descriptive segment record stores
+    # these FLAT, not nested. Without this branch it falls through to the live-
+    # snapshot reader, finds none of its keys, and embeds as a near-zero vector
+    # -- which scores below every similarity floor, so the record is stored and
+    # then never retrievable. Silent, and invisible except as "0 analogs".
+    if rec_or_ctx.get("memory_type") == "descriptive_observation":
+        return {
+            "regime": rec_or_ctx.get("market_regime"),
+            "vol": rec_or_ctx.get("volatility_state"),
+            "session": rec_or_ctx.get("session_phase"),
+            "ndir": rec_or_ctx.get("dominant_direction"),
+            "nphase": rec_or_ctx.get("narrative_phase"),
+            "ddir": rec_or_ctx.get("delivery_direction"),
+            "draw": (rec_or_ctx.get("active_draw")
+                     if rec_or_ctx.get("active_draw") != "none_identified" else None),
+            "ph": rec_or_ctx.get("protected_high"),
+            "pl": rec_or_ctx.get("protected_low"),
+            "nconf": None, "dconf": None, "exhaustion": None,
+        }
     if "narrative_context" in rec_or_ctx:   # memory record
         mc = rec_or_ctx.get("market_context", {}) or {}
         nc = rec_or_ctx.get("narrative_context", {}) or {}

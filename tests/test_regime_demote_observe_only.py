@@ -136,11 +136,11 @@ class TestEnforcePreservesLegacy(unittest.TestCase):
             self.assertEqual(g["regime_authority"]["mechanical_regime_role"], "enforce")
             self.assertEqual(g["regime_authority"]["regime_effect_on_execution"], "enforced")
 
-    def test_default_env_is_enforce(self):
+    def test_default_env_is_observe_only(self):
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("REGIME_AUTHORITY_MODE", None)
-            self.assertEqual(regime_authority_mode(), "enforce")
-            self.assertTrue(regime_enforces())
+            self.assertEqual(regime_authority_mode(), "observe_only")
+            self.assertFalse(regime_enforces())
 
 
 class TestSafeguardsUntouched(unittest.TestCase):

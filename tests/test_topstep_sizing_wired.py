@@ -21,7 +21,7 @@ def sizing(monkeypatch, tmp_path):
     """Fresh module state per test; the guard reads env at call time."""
     monkeypatch.setenv("TOPSTEP_STATE_PATH", str(tmp_path / "state.json"))
     monkeypatch.delenv("TOPSTEP_ACCOUNT_SIZE", raising=False)
-    from integrations.ninjatrader.deterministic import risk
+    from integrations.topstepx.deterministic import risk
     return risk
 
 

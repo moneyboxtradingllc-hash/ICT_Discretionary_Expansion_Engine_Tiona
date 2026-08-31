@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 def _closed_trade(**over) -> dict:
     base = {
-        "instrument": "QQQ",
+        "instrument": "MNQ",
         "entry_timestamp": "2026-06-15T15:30:00+00:00",
         "status": "closed",
         "session": "afternoon",
@@ -163,9 +163,9 @@ class TestLiveMemoryWriter(_StoreIsolated):
     def test_deterministic_memory_id_formula(self):
         from adaptive_learning.live_memory_writer import compute_memory_id
         import hashlib
-        mid = compute_memory_id("QQQ", "2026-06-15T15:30:00+00:00", "closed_trade")
+        mid = compute_memory_id("MNQ", "2026-06-15T15:30:00+00:00", "closed_trade")
         expect = hashlib.sha256(
-            "QQQ*2026-06-15T15:30:00+00:00*closed_trade".encode("utf-8")).hexdigest()
+            "MNQ*2026-06-15T15:30:00+00:00*closed_trade".encode("utf-8")).hexdigest()
         self.assertEqual(mid, expect)
 
 

@@ -139,7 +139,7 @@ def _leg_end_index(candles, anchor_idx, struct, side):
     return pick(span, key=lambda i: candles[i][key])
 
 
-def _leg_displacement(candles, anchor_idx, struct, side, atr):
+def _leg_displacement(candles, anchor_idx, struct, side, atr, source_tf=None):
     """Score the repricing leg with the detector's own semantics, evaluated at
     the leg's COMPLETION rather than at the current bar.
 
@@ -156,13 +156,19 @@ def _leg_displacement(candles, anchor_idx, struct, side, atr):
         total = sum(_rng(c) for c in leg)
         if total > 0:
             eff = min(1.0, abs(leg[-1]["close"] - leg[0]["open"]) / total)
+    # STEP 4B.8: cadence is PROVENANCE, threaded from the caller that selected
+    # the series -- never inferred from timestamp spacing, which missing buckets
+    # and scheduled breaks both make lie. Absent cadence means the canonical
+    # imbalance proposition is refused, not scored on unvouched geometry.
+    from toolbox.price_levels import TF_MINUTES
     return detect_displacement(candles[:leg_end + 1], struct, atr,
-                               {"directional_efficiency": eff})
+                               {"directional_efficiency": eff},
+                               tf_minutes=TF_MINUTES.get(source_tf))
 
 
 def extract_order_block(candles: list, atr: float, struct: dict = None,
                         authority: dict = None, manipulation: dict = None,
-                        displacement: dict = None) -> dict:
+                        displacement: dict = None, source_tf: str = None) -> dict:
     """Locate the institutional footprint preceding repricing.
 
     Returns the region, its geometry, and the evidence — or a refusal naming the
@@ -193,7 +199,8 @@ def extract_order_block(candles: list, atr: float, struct: dict = None,
     # exactly when it mattered. The repricing leg is the window immediately after
     # the anchor, and that is what must be scored.
     if displacement is None and len(candles) > anchor_idx + 1:
-        displacement = _leg_displacement(candles, anchor_idx, struct, side, atr)
+        displacement = _leg_displacement(candles, anchor_idx, struct, side, atr,
+                                         source_tf)
 
     local_atr = _local_atr(candles, anchor_idx, fallback=atr)
     run = _compressed_run(candles, anchor_idx, local_atr)

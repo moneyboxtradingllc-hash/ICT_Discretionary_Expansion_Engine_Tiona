@@ -2,7 +2,7 @@
 VOLUME-WITNESS (2026-07-10) — participation sense organ. WITNESS ONLY.
 
 The mechanical review found volume flows through the whole data plane
-(alpaca_provider IEX feed → timeframe_builder sum-aggregation →
+(TopstepX GatewayTrade → timeframe_builder sum-aggregation →
 candle_normalizer) and is then read by NOTHING. This organ turns the dead
 field into deterministic, normalized, provenance-aware participation evidence
 for the sovereign Brain.
@@ -19,10 +19,11 @@ Determinism: pure over the candles + event blocks it is handed, plus one
 optional LOCAL baseline table (replay-built, see
 replay_validation/volume_baseline.py). No wall-clock, no LLM, no network.
 
-Venue doctrine: the Alpaca provider uses DataFeed.IEX — venue-limited volume,
-NOT the consolidated tape. Relative metrics stay self-consistent (IEX vs its
-own IEX baseline); absolute volume is labeled venue_limited_iex and must never
-be read as total-market participation.
+Venue doctrine (DECON-3, 2026-08-05): volume now comes from the TopstepX
+GatewayTrade stream for the active MNQ contract — CME exchange volume for that
+contract, not an equity venue slice. The retired Alpaca path used DataFeed.IEX,
+whose volume was venue-limited and understated the tape; baselines built under
+it are NOT comparable to MNQ and are quarantined, not reused.
 
 Bar-completeness doctrine: the provider's REST bars endpoint emits completed
 bars only (the forming minute is not returned), so the last bar is treated as
@@ -68,16 +69,33 @@ def volume_witness_enabled() -> bool:
 _baseline_cache: dict = {}
 
 
+from doctrine.instrument_identity import assert_production_instrument, normalize
+
+FEED_SOURCE = "topstepx"
+VENUE_SCOPE = "cme_mnq_contract"
+
+
 def baseline_table_path(symbol: str) -> str:
     root = os.getenv("PERFORMANCE_TABLES_DIR", os.path.join("data", "performance"))
-    return os.path.join(root, symbol or "QQQ", "volume_minute_baseline.json")
+    # DECON-3: defaulted to "QQQ" — an unnamed MNQ session loaded the QQQ
+    # volume baseline and compared futures volume against equity percentiles.
+    return os.path.join(root, assert_production_instrument(
+        symbol, where="volume baseline"), "volume_minute_baseline.json")
 
 
 def load_minute_baseline(symbol: str) -> "dict | None":
     """Replay-built per-minute-of-day volume distribution (ET HH:MM →
     sorted values). Local file only; cached; absent table → None (the
-    percentile then reports unavailable — never fabricated)."""
-    key = symbol or "QQQ"
+    percentile then reports unavailable — never fabricated).
+
+    DECON-3: an unnamed session gets NO baseline rather than the QQQ one. Absent
+    identity is exclusion, so the percentile reports unavailable; a retired or
+    foreign instrument still refuses outright, because loading it would compare
+    MNQ volume against equity percentiles.
+    """
+    if not normalize(symbol):
+        return None
+    key = assert_production_instrument(symbol, where="volume baseline")
     if key in _baseline_cache:
         return _baseline_cache[key]
     table = None
@@ -203,11 +221,12 @@ def _data_quality(one_m: list, core_1m: dict, baseline_table) -> dict:
     last_ts = (one_m[-1].get("timestamp") if one_m else None)
     return {
         "status": status,
-        "feed_source": "alpaca",
-        "venue_scope": "venue_limited_iex",
-        "venue_note": ("IEX venue volume only — NOT the consolidated tape. "
-                       "Relative metrics compare IEX to its own IEX baseline; "
-                       "absolute volume understates total-market activity."),
+        "feed_source": FEED_SOURCE,
+        "venue_scope": VENUE_SCOPE,
+        "venue_note": ("TopstepX GatewayTrade volume for the active MNQ "
+                       "contract (CME). Compared only against an MNQ baseline "
+                       "built from the same stream; equity-era baselines are "
+                       "quarantined and never substituted."),
         "bar_timestamp": last_ts,
         "bar_complete": True,
         "bar_complete_basis": ("provider REST bars endpoint emits completed "
@@ -334,7 +353,7 @@ def build_volume_witness(all_normalized: dict, liquidity: dict = None,
                  for tf in _TFS}
         one_m = (all_normalized or {}).get("1m") or []
         core_1m = by_tf.get("1m") or {}
-        baseline_table = load_minute_baseline(symbol or "QQQ")
+        baseline_table = load_minute_baseline(symbol)
 
         current_bar = {}
         if core_1m.get("state") not in (None, "insufficient_data"):

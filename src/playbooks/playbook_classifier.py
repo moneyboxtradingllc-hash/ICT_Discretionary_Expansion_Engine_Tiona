@@ -36,6 +36,41 @@ _SWEEP_NARRATIVES = {
     "bearish_continuation_after_manipulation",
 }
 
+# ── SESSION-PO3 phase coupling (LUNA-SESSION-PO3-AUTHORITY-1) ────────────────
+# Two effects, both narrow:
+#   1. `accumulation_building` bonuses may no longer be paid while the canonical
+#      session phase is an unresolved accumulation family. The hard block lives
+#      upstream, so these could no longer produce a trade -- but a scoring rule
+#      that REWARDS a breakout playbook for balance is exactly backwards, and
+#      leaving it would keep contradicting the doctrine in the ranking.
+#      They are gated, not deleted: after the phase resolves they still mean
+#      what they always meant.
+#   2. After MANIPULATION_CONFIRMED the reversal families are PREFERRED. A
+#      preference is a ranking, never a permission: mechanical sufficiency,
+#      geometry and risk still decide, and no trade is manufactured (S7).
+_UNRESOLVED_ACCUMULATION = frozenset({
+    "ACCUMULATION_FORMING", "ACCUMULATION_ESTABLISHED", "REACCUMULATION",
+    "EXCURSION_UNRESOLVED",
+})
+#: Points a phase-preferred family earns. Deliberately small: it reorders
+#: near-ties, it does not overwhelm the evidence a playbook actually scored on.
+PHASE_PREFERENCE_POINTS = 15
+
+
+def _session_phase(snap: dict) -> str:
+    return str(((snap or {}).get("session_po3") or {}).get("phase") or "")
+
+
+def _accumulation_bonus_allowed(snap: dict) -> bool:
+    """False while the canonical session phase is unresolved accumulation."""
+    return _session_phase(snap) not in _UNRESOLVED_ACCUMULATION
+
+
+def _phase_preference(snap: dict, playbook: str) -> int:
+    prefs = ((snap or {}).get("session_po3") or {}).get("preferred_playbook_families")
+    return PHASE_PREFERENCE_POINTS if playbook in (prefs or []) else 0
+
+
 _NO_PLAYBOOK_RESULT = {
     "selected_playbook":   "no_playbook",
     "playbook_confidence": 0,
@@ -122,7 +157,8 @@ def _score_manipulation_to_distribution(snap: dict) -> int:
 
     po3_align = po3.get("alignment", "")
     if po3_align == "manipulation_to_distribution":                   s += 35
-    elif po3_align == "accumulation_building":                        s += 15
+    elif po3_align == "accumulation_building" and _accumulation_bonus_allowed(snap):
+        s += 15
 
     if any(liq.get(tf, {}).get("sweep_detected") for tf in _TFS):   s += 20
 
@@ -209,7 +245,10 @@ def _score_range_expansion(snap: dict) -> int:
     if align in ("neutral", "mixed", "partial"):                       s += 10
     elif align in ("full", "strong"):                                   s -= 15  # trending, not ranging
 
-    if po3.get("alignment") in ("accumulation_building", "manipulation_to_distribution"):
+    if po3.get("alignment") == "manipulation_to_distribution":
+        s += 10
+    elif (po3.get("alignment") == "accumulation_building"
+          and _accumulation_bonus_allowed(snap)):
         s += 10
 
     if ai.get("market_narrative") in ("conflicted", "exhaustion_risk"): s -= 15
@@ -439,6 +478,16 @@ def classify_playbook(snapshot: dict) -> dict:
         "range_expansion":              _score_range_expansion,
     }
     scores = {name: fn(snapshot) for name, fn in scorers.items()}
+
+    # SESSION-PO3 reversal priority. After MANIPULATION_CONFIRMED the reversal
+    # families rank first into distribution. Ranking only -- the phase never
+    # creates a playbook that scored nothing, and an empty opportunity set still
+    # produces no trade.
+    _prefs = ((snapshot or {}).get("session_po3") or {}).get(
+        "preferred_playbook_families") or []
+    if _prefs:
+        scores = {name: min(100, sc + _phase_preference(snapshot, name)) if sc else sc
+                  for name, sc in scores.items()}
 
     # ── Phase AB-5B — ECU: the Brain ORIGINATES the playbook ─────────────────
     # When the Brain asserts an opportunity and names a valid playbook family,

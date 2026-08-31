@@ -17,8 +17,46 @@ def _structure_line(tf: str, structure: dict) -> str:
     return f"{tf} structure: {state}, bias {bias}{flag_str}."
 
 
+#: STEP 4B.12 §5 — THIS WAS A POSITIVE-OUTPUT LIST, NOT AN OBSERVATION LEDGER.
+#:
+#: A timeframe whose sweep was genuinely absent and a timeframe whose sweep
+#: could not be evaluated at all produced the SAME output here: nothing. The
+#: Brain then read that silence as settled negative evidence, which is the
+#: §3H defect at a second site.
+#:
+#: The positive lines are unchanged. What is added is an explicit statement of
+#: non-evaluation, so that absence of a sweep line means "looked, found none"
+#: and nothing else.
+_RAID_FAMILY = ("sweep_detected", "reclaim_detected")
+
+#: §10 — the prose must name the ACTUAL missing prerequisite. Describing a
+#: calendar-authority failure as a "close unavailable" would tell the reader that
+#: better price data could repair it; nothing is wrong with the candles there.
+_CAPABILITY_PROSE = {
+    "INSUFFICIENT_OBSERVATIONS":
+        "too few observations to evaluate",
+    "PREVIOUS_SLOT_CLOSE_UNPROVEN":
+        "the previous market slot was observed but its close is unproven",
+    "PREVIOUS_SLOT_NOT_OBSERVED":
+        "the previous expected market slot was not observed",
+    "EXPECTED_SLOT_AUTHORITY_UNAVAILABLE":
+        "venue cadence is unknown or unavailable, so the previous expected "
+        "market slot cannot be identified at all",
+    "NO_CADENCE_SUPPLIED":
+        "the caller supplied no cadence, so market adjacency is unestablished",
+    "PREVIOUS_SLOT_CLOSE_UNAVAILABLE":
+        "the previous market slot's close is unavailable",
+    "PREDICATE_UNREACHABLE_DOCTRINE_UNRESOLVED":
+        "the detector cannot evaluate this proposition at all",
+}
+
+
 def _liquidity_lines(liquidity: dict) -> list:
+    from structure.liquidity_engine import (
+        CAPABILITY_EVALUATED, CAPABILITY_UNAVAILABLE_SENSOR)
+
     lines = []
+    unevaluable, sensor_dead = {}, []
     for tf in ["15m", "5m", "3m", "1m"]:
         liq = liquidity.get(tf, {})
         if liq.get("sweep_detected"):
@@ -27,6 +65,41 @@ def _liquidity_lines(liquidity: dict) -> list:
             lines.append(f"Liquidity sweep {direction} on {tf} — {reclaim}.")
         if liq.get("failed_breakout"):
             lines.append(f"Failed breakout on {tf}.")
+
+        caps = liq.get("proposition_capability")
+        if not caps:
+            # Archived payloads predate the capability contract. Manufacturing
+            # an "unknown" for them would rewrite what the bot actually knew at
+            # the time, so they keep their original silence -- the same
+            # reasoning as `_bucket_is_settled` trusting unlabelled history.
+            continue
+        reasons = liq.get("capability_reason") or {}
+        for name in _RAID_FAMILY:
+            if caps.get(name, CAPABILITY_EVALUATED) != CAPABILITY_EVALUATED:
+                unevaluable.setdefault(reasons.get(name, "unspecified"), set()).add(tf)
+        if caps.get("failed_breakout") == CAPABILITY_UNAVAILABLE_SENSOR:
+            sensor_dead.append(tf)
+
+    order = {"15m": 0, "5m": 1, "3m": 2, "1m": 3}
+    for reason, tfs in unevaluable.items():
+        why = _CAPABILITY_PROSE.get(reason, reason)
+        listed = ", ".join(sorted(tfs, key=lambda t: order.get(t, 9)))
+        lines.append(f"Sweep/reclaim NOT EVALUATED on {listed} — {why}. "
+                     "Treat as unknown, not as absence of a sweep.")
+    if sensor_dead:
+        listed = ", ".join(sorted(sensor_dead, key=lambda t: order.get(t, 9)))
+        # SENSOR-SCOPED, and it must stay that way. The first version of this
+        # line read "no failed-breakout evidence exists in either direction",
+        # which was FALSE on the very snapshot it was measured against: the
+        # liquidity sensor is dead, but `manipulation_detector._failed_breakout`
+        # -- a different producer, same English name, different reference
+        # universe -- reported a positive on 3m and 1m of that same scan.
+        #
+        # A capability claim belongs to a SENSOR, never to a market concept.
+        lines.append(f"Failed-breakout: the liquidity_engine sensor is "
+                     f"UNAVAILABLE on {listed} (predicate unreachable, doctrine "
+                     "unresolved). This states nothing about failed breakouts "
+                     "seen by any other sensor.")
     return lines
 
 

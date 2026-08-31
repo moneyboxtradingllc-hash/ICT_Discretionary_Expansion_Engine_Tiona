@@ -55,7 +55,7 @@ def _named(d, name):
 
 class TestDriftIsNotDisplacement:
     def test_a_drift_does_not_confirm(self):
-        d = detect_displacement(_drift(), {}, atr=20.0, expansion={})
+        d = detect_displacement(_drift(), {}, atr=20.0, expansion={}, tf_minutes=1)
         assert d["classification"] != "displacement_confirmed"
         assert _named(d, "displacement_magnitude")["present"] is False
 
@@ -66,20 +66,20 @@ class TestDriftIsNotDisplacement:
         assert d["score"] >= CONFIRMED_AT
 
     def test_the_two_are_separated_by_a_wide_margin(self):
-        drift = detect_displacement(_drift(), {}, atr=20.0, expansion={})
-        drive = detect_displacement(_drive(), {}, atr=20.0, expansion={})
+        drift = detect_displacement(_drift(), {}, atr=20.0, expansion={}, tf_minutes=1)
+        drive = detect_displacement(_drive(), {}, atr=20.0, expansion={}, tf_minutes=1)
         assert drive["score"] > drift["score"] + 30
 
 
 class TestMagnitudeIsReportedNotJustFlagged:
     def test_magnitude_is_expressed_in_atr(self):
-        d = detect_displacement(_drive(step=-40.0), {}, atr=20.0, expansion={})
+        d = detect_displacement(_drive(step=-40.0), {}, atr=20.0, expansion={}, tf_minutes=1)
         assert d["magnitude_atr"] >= MAGNITUDE_ATR_MULT
         assert "x atr" in _named(d, "displacement_magnitude")["detail"]
 
     def test_a_1_4x_body_does_not_clear_the_bar(self):
         """The exact shape seen after the 2026-07-24 block."""
-        d = detect_displacement(_drive(step=-28.0), {}, atr=20.0, expansion={})
+        d = detect_displacement(_drive(step=-28.0), {}, atr=20.0, expansion={}, tf_minutes=1)
         assert d["magnitude_atr"] < MAGNITUDE_ATR_MULT
         assert _named(d, "displacement_magnitude")["present"] is False
 
@@ -91,28 +91,28 @@ class TestMagnitudeIsReportedNotJustFlagged:
 
 class TestImbalanceEvidence:
     def test_gaps_left_behind_are_counted(self):
-        d = detect_displacement(_drive(), {}, atr=20.0, expansion={})
+        d = detect_displacement(_drive(), {}, atr=20.0, expansion={}, tf_minutes=1)
         assert d["imbalance_count"] > 0
         assert _named(d, "imbalance_created")["present"] is True
 
     def test_a_drift_leaves_no_imbalance(self):
-        d = detect_displacement(_drift(), {}, atr=20.0, expansion={})
+        d = detect_displacement(_drift(), {}, atr=20.0, expansion={}, tf_minutes=1)
         assert d["imbalance_count"] == 0
 
     def test_the_reused_rule_matches_price_levels(self):
         """find_fvgs must stay the single source of the 3-candle rule."""
         bars = _drive()
-        gaps = find_fvgs(bars, "bearish")
+        gaps = find_fvgs(bars, "bearish", 1)
         assert gaps, "fixture must actually contain gaps"
-        assert _find_fvg(bars, "bearish") == (gaps[0]["low"], gaps[0]["high"])
+        assert _find_fvg(bars, "bearish", 1) == (gaps[0]["low"], gaps[0]["high"])
 
     def test_no_gaps_gives_no_legacy_zone(self):
-        assert _find_fvg(_drift(), "bearish") is None
+        assert _find_fvg(_drift(), "bearish", 1) is None
 
 
 class TestTelemetry:
     def test_every_component_is_reported_with_a_reason(self):
-        d = detect_displacement(_drift(), {}, atr=20.0, expansion={})
+        d = detect_displacement(_drift(), {}, atr=20.0, expansion={}, tf_minutes=1)
         names = {c["name"] for c in d["components"]}
         assert names == {"displacement_magnitude", "imbalance_created",
                          "structure_break", "directional_efficiency",
@@ -121,7 +121,7 @@ class TestTelemetry:
             assert c["detail"]
 
     def test_absent_components_keep_their_weight(self):
-        d = detect_displacement(_drift(), {}, atr=20.0, expansion={})
+        d = detect_displacement(_drift(), {}, atr=20.0, expansion={}, tf_minutes=1)
         assert _named(d, "imbalance_created")["points"] == 0
         assert _named(d, "imbalance_created")["weight"] == W_IMBALANCE
 
@@ -153,7 +153,7 @@ class TestAuthorityCoherenceIsReportedNotEnforced:
         assert d["authority_coherence"]["coherent"] is True
 
     def test_no_authority_means_no_coherence_block(self):
-        d = detect_displacement(_drive(), {}, atr=20.0, expansion={})
+        d = detect_displacement(_drive(), {}, atr=20.0, expansion={}, tf_minutes=1)
         assert "authority_coherence" not in d
 
 

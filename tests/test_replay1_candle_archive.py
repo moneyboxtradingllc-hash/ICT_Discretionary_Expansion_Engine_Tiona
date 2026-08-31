@@ -4,7 +4,7 @@ REPLAY-1 — candle archive regression locks (2026-07-09).
 The archive is the ONLY durable copy of the 1m tape (live fetch is a rolling
 window). Locks:
   * range fetch: base interface raises DataFeedError (providers without range
-    support keep working); Alpaca override exists and is read-only
+    support keep working); the Alpaca override is archived and non-importable
   * archive round-trip: fetch → filter to ET date → atomic write → load
   * integrity: existing archive never silently clobbered (skip unless more bars
     or force); corrupt archive rewritten; no_data day reported, nothing written
@@ -14,6 +14,7 @@ window). Locks:
   * safety: replay_validation imports no broker/order machinery
 """
 import json
+import importlib
 import os
 import sys
 import tempfile
@@ -75,19 +76,18 @@ class TestRangeFetchInterface(unittest.TestCase):
         with self.assertRaises(DataFeedError):
             _Minimal().fetch_1m_candles_range("QQQ", None, None)
 
-    def test_alpaca_override_exists_and_is_read_only(self):
-        src = os.path.join(os.path.dirname(__file__), "..", "src",
-                           "data_feed", "alpaca_provider.py")
-        with open(src, encoding="utf-8") as fh:
-            txt = fh.read()
-        self.assertIn("def fetch_1m_candles_range", txt)
-        # read-only doctrine intact: no trading-client import, no order calls
-        self.assertNotIn("import TradingClient", txt)
-        self.assertNotIn("alpaca.trading", txt)
-        self.assertNotIn("submit_order", txt)
+    def test_the_alpaca_provider_is_not_importable(self):
+        """LUNA-TOPSTEPX-ONLY: Alpaca was REMOVED, not archived.
 
+        This test previously asserted the retired module sat under
+        `archive/legacy_alpaca_qqq/` and could not be imported. The
+        archive copy is gone too, so the surviving theorem is the one
+        that actually matters: nothing can import an Alpaca provider.
+        """
+        import importlib
+        with self.assertRaises(ModuleNotFoundError):
+            importlib.import_module("data_feed.alpaca_provider")
 
-class TestArchiveRoundTrip(_Base):
     def test_archive_filters_to_et_date_and_loads(self):
         prov = _FakeProvider()
         res = archive_session("20260708", "QQQ", provider=prov)

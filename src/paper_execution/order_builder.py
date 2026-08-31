@@ -175,6 +175,17 @@ def build_order(snapshot: dict, symbol: str) -> dict:
     # Use price_level from the preferred candidate (has invalidation_level)
     pref_c = _preferred_candidate(snapshot)
     pl     = pref_c.get("price_level", {})
+    # CONTINUITY-2F — this function derives the STOP from
+    # `price_level.invalidation_level`. A zone whose geometry depends on a
+    # forming higher-timeframe bucket may not supply it: measured on the Aug-11
+    # tape the same tool's invalidation moved up to 20.5 points against a
+    # 40-point ceiling purely because an unfinished bar was in the window.
+    # REFUSED, never substituted -- no older gap, no nearer level, no other
+    # timeframe. The setup is declined, not re-priced.
+    if pl.get("execution_eligible") is False:
+        return {"valid": False,
+                "reject_reason": pl.get("execution_ineligible_reason")
+                or "TOOL_NOT_SETTLED: zone geometry depends on a forming bucket"}
     ez     = ti.get("entry_zone") or {}
 
     order_type      = entry_order_type()

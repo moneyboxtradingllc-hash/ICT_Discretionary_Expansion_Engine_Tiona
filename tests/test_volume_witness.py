@@ -172,8 +172,11 @@ class TestProvenance(unittest.TestCase):
     def test_venue_scope_and_completeness_exposed(self):
         w = build_volume_witness({"1m": _bars([100] * 25)})
         dq = w["data_quality"]
-        self.assertEqual(dq["venue_scope"], "venue_limited_iex")
-        self.assertIn("NOT the consolidated tape", dq["venue_note"])
+        # DECON-3: the IEX venue-limited scope belonged to the retired Alpaca
+        # feed. Volume now comes from the TopstepX MNQ contract stream.
+        self.assertEqual(dq["venue_scope"], "cme_mnq_contract")
+        self.assertEqual(dq["feed_source"], "topstepx")
+        self.assertIn("MNQ", dq["venue_note"])
         self.assertTrue(dq["bar_complete"])
         self.assertIn("completed bars only", dq["bar_complete_basis"])
         self.assertEqual(w["calculation_version"], "volume_witness_v1")

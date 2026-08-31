@@ -15,7 +15,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from integrations.ninjatrader.deterministic.funnel import funnel_console, funnel_trace
+from integrations.topstepx.deterministic.funnel import funnel_console, funnel_trace
 
 
 def _snapshot(**over):

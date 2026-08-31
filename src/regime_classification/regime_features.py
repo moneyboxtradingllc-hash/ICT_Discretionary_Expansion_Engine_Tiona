@@ -13,19 +13,47 @@ _EXPANDING_STATES   = ("early_expansion", "healthy_expansion", "mature_expansion
 _CONTRACTING_STATES = ("compression",)
 
 
-def extract_regime_features(snapshot: dict, raw_data=None) -> dict:
+def extract_regime_features(snapshot: dict, raw_data=None, settled_data=None,
+                            *, allow_uncadenced: bool = False) -> dict:
     """
     Extract regime feature signals from a fully assembled snapshot.
     Returns the 12 public fields plus internal flags used by regime_classifier.
     Never raises.
+
+    CONTINUITY-2E: two series, deliberately. `raw_data` is realtime (forming
+    higher-timeframe bucket included); `settled_data` has unfinished buckets
+    removed. Reads that describe NOW take raw; statistics that claim CONFIRMED
+    structure take settled.
     """
     try:
-        return _extract(snapshot, raw_data)
+        return _extract(snapshot, raw_data, settled_data,
+                        allow_uncadenced=allow_uncadenced)
     except Exception:
         return _zero_features()
 
 
-def _extract(snapshot: dict, raw_data=None) -> dict:
+def _settled_series(settled_data, raw_data, tf: str) -> list:
+    """The settled series for `tf`, or the realtime one when no settled view was
+    supplied.
+
+    The fallback is the CONTINUITY-2D policy, not a hole: candles arriving here
+    are already normalised, and normalisation whitelists the `complete`/`members`
+    flags away, so this layer cannot re-derive settledness on its own. A caller
+    that supplies no settled view has told us nothing about completeness, and 2D
+    ruled that unlabelled history is treated as settled because inventing
+    incompleteness would silently delete real structure.
+
+    In production `snapshot_builder` always supplies it; that is pinned by test
+    rather than assumed here.
+    """
+    series = (settled_data or {}).get(tf)
+    if series is None:
+        return (raw_data or {}).get(tf) or []
+    return series
+
+
+def _extract(snapshot: dict, raw_data=None, settled_data=None, *,
+             allow_uncadenced: bool = False) -> dict:
     structure  = snapshot.get("structure",  {}) or {}
     volatility = snapshot.get("volatility", {}) or {}
     expansion  = snapshot.get("expansion",  {}) or {}
@@ -93,7 +121,35 @@ def _extract(snapshot: dict, raw_data=None) -> dict:
                               narrative=snapshot.get("narrative_authority"),
                               po3=po3, liquidity=liquidity)
     relationship = classify_relationship(authority, bias_5)
-    seq = swing_sequence((raw_data or {}).get("15m") or ctx_candles)
+    # CONTINUITY-2E (2026-08-11). swing_sequence calls find_swings, which
+    # confirms a pivot against neighbours on BOTH sides -- so a forming 15m
+    # bucket was supplying right-side confirmation for structure published as
+    # confirmed. That is the exact defect 2D fixed in analyze_structure,
+    # reproduced one layer over: measured on the live tape, a 15m swing high of
+    # 29,805.0 rested on a 6-of-15 bucket and vanished when it closed higher.
+    #
+    # Settled evidence only. The realtime reads below (last price, range
+    # metrics, range state) keep the forming bar on purpose -- they describe now.
+    # STEP 4B.12 §4 UNIT 1 — the sequence is computed from PIVOTS, so it needs
+    # the same canonical neighbourhood authority as every other swing consumer.
+    # Evidence is built for whichever timeframe actually supplied the series;
+    # `swing_sequence` then projects it onto its own bounded window rather than
+    # being handed swings from a wider history.
+    seq_candles, _seq_tf = _settled_series(settled_data, raw_data, "15m"), "15m"
+    if not seq_candles:
+        seq_candles, _seq_tf = _settled_series(settled_data, raw_data, "5m"), "5m"
+    _seq_ev = None
+    if seq_candles:
+        from market_data.swing_evidence import build_swing_evidence
+        _seq_ev = build_swing_evidence(seq_candles,
+                                       (raw_data or {}).get(_seq_tf),
+                                       {"15m": 15, "5m": 5}[_seq_tf])
+    # The `ctx_candles` fallback carries no known timeframe, so no evidence can
+    # be resolved for it and its pivots are withheld. Failing closed is the
+    # doctrine: unavailable evidence may not license legacy array adjacency.
+    seq = swing_sequence(seq_candles or ctx_candles,
+                         swing_evidence=_seq_ev,
+                         allow_uncadenced=allow_uncadenced)
     rng = range_metrics(ctx_candles)
     rng_state = range_state(ctx_candles)
     deal_range = dealing_range(structure, last_price)

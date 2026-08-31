@@ -22,8 +22,8 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from integrations.ninjatrader.deterministic import risk as R
-from integrations.ninjatrader.deterministic import (
+from integrations.topstepx.deterministic import risk as R
+from integrations.topstepx.deterministic import (
     MAX_RISK_DOLLARS, HARD_MAX_RISK_PCT, RISK_PCT_OF_EQUITY, MAX_CONTRACTS,
     POINT_VALUE,
 )
@@ -143,11 +143,11 @@ class TestExistingCallersAreUnchanged:
         assert R.contracts_for_stop(12.0) == int(MAX_RISK_DOLLARS // (12.0 * POINT_VALUE))
 
     def test_an_absolute_backstop_still_binds(self):
-        from integrations.ninjatrader.deterministic import MAX_CONTRACTS_HARD
+        from integrations.topstepx.deterministic import MAX_CONTRACTS_HARD
         assert R.contracts_for_stop(0.25, 10_000_000) == MAX_CONTRACTS_HARD
 
     def test_the_ceiling_is_what_the_account_can_margin(self):
-        from integrations.ninjatrader.deterministic import (
+        from integrations.topstepx.deterministic import (
             MARGIN_PER_CONTRACT, MARGIN_USAGE_PCT)
         for eq in (25_000, 50_000, 100_000):
             expected = int((eq * MARGIN_USAGE_PCT / 100.0) // MARGIN_PER_CONTRACT)
