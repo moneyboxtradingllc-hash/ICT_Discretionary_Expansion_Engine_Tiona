@@ -135,21 +135,47 @@ def _extract(snapshot: dict, raw_data=None, settled_data=None, *,
     # Evidence is built for whichever timeframe actually supplied the series;
     # `swing_sequence` then projects it onto its own bounded window rather than
     # being handed swings from a wider history.
-    seq_candles, _seq_tf = _settled_series(settled_data, raw_data, "15m"), "15m"
-    if not seq_candles:
-        seq_candles, _seq_tf = _settled_series(settled_data, raw_data, "5m"), "5m"
-    _seq_ev = None
-    if seq_candles:
+    # LUNA-SWING-SEQUENCE-TRUTH-1 (2026-09-01). SUFFICIENCY, NOT PRESENCE.
+    #
+    # This used to take 15m whenever a 15m series EXISTED and fall through to 5m
+    # only when it was entirely absent. Measured live: 19 settled 15m bars were
+    # present, `find_swings` returned ZERO pivots from them ("only 0 swing highs
+    # / 0 swing lows in window"), the guard never fired because the series was
+    # not empty, and the sequence reported `unknown` while 59 settled 5m bars and
+    # 99 settled 3m bars sat unconsulted.
+    #
+    # "Candles exist" was never the question. The question is whether the
+    # candidate timeframe produced enough confirmed pivots to state a
+    # relationship, and that is the EXISTING sufficiency law inside
+    # `swing_sequence` -- read here rather than re-implemented.
+    seq, _seq_tf, _seq_attempts = None, None, []
+    for _tf, _minutes in (("15m", 15), ("5m", 5), ("3m", 3)):
+        _cands = _settled_series(settled_data, raw_data, _tf)
+        if not _cands:
+            _seq_attempts.append("%s: no settled series" % _tf)
+            continue
         from market_data.swing_evidence import build_swing_evidence
-        _seq_ev = build_swing_evidence(seq_candles,
-                                       (raw_data or {}).get(_seq_tf),
-                                       {"15m": 15, "5m": 5}[_seq_tf])
-    # The `ctx_candles` fallback carries no known timeframe, so no evidence can
-    # be resolved for it and its pivots are withheld. Failing closed is the
-    # doctrine: unavailable evidence may not license legacy array adjacency.
-    seq = swing_sequence(seq_candles or ctx_candles,
-                         swing_evidence=_seq_ev,
-                         allow_uncadenced=allow_uncadenced)
+        _ev = build_swing_evidence(_cands, (raw_data or {}).get(_tf), _minutes)
+        _try = swing_sequence(_cands, swing_evidence=_ev,
+                              allow_uncadenced=allow_uncadenced)
+        _seq_attempts.append("%s: %d highs / %d lows" % (
+            _tf, _try.get("swing_highs", 0), _try.get("swing_lows", 0)))
+        if _try.get("sequence") != "unknown":
+            seq, _seq_tf = _try, _tf
+            break
+        if seq is None:
+            seq, _seq_tf = _try, _tf      # keep the first attempt's detail
+    if seq is None:
+        # The `ctx_candles` fallback carries no known timeframe, so no evidence
+        # can be resolved for it and its pivots are withheld. Failing closed is
+        # the doctrine: unavailable evidence may not license legacy array
+        # adjacency.
+        seq = swing_sequence(ctx_candles, swing_evidence=None,
+                             allow_uncadenced=allow_uncadenced)
+        _seq_tf = None
+    seq = dict(seq)
+    seq["source_timeframe"] = _seq_tf
+    seq["fallback_trace"] = _seq_attempts
     rng = range_metrics(ctx_candles)
     rng_state = range_state(ctx_candles)
     deal_range = dealing_range(structure, last_price)
@@ -239,6 +265,8 @@ def _extract(snapshot: dict, raw_data=None, settled_data=None, *,
         "higher_lows":             seq["higher_lows"],
         "lower_lows":              seq["lower_lows"],
         "swing_sequence":          seq["sequence"],
+        "swing_source_timeframe":  seq.get("source_timeframe"),
+        "swing_fallback_trace":    seq.get("fallback_trace") or [],
         "close_position_in_range": float(rng["close_position_in_range"]),
         # Hierarchy telemetry — authority and the phase inside it.
         "htf_authority":           authority,

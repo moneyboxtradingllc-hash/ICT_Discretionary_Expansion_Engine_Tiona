@@ -579,7 +579,123 @@ def _protected(snapshot: dict, price) -> dict:
         # through; the summary fields above are untouched for their consumers.
         "by_timeframe": ps.get("by_timeframe") or {},
         "roles": ps.get("roles") or {},
+        # LUNA-SWING-SEQUENCE-TRUTH-1 (2026-09-01). ORDINAL STRUCTURE, BESIDE
+        # THE CAUSAL RECORDS RATHER THAN INSTEAD OF THEM.
+        #
+        # Every record above says WHY a level exists (`buy_side_raid_rejected`).
+        # None of them said where it sits relative to the swing it succeeded, so
+        # four consecutive higher highs reached the Brain as four unrelated
+        # rejections. The lineage carries both facts; `basis` is untouched.
+        #
+        # This states what structure DID. It grants nothing: a bullish sequence
+        # is not permission, and PO3, delivery, liquidity and location all still
+        # have to agree before anything is executable.
+        "ordinal_sequence": _swing_sequence_block(snapshot),
+        # LUNA-LIQUIDITY-SCOPE-TRUTH-1. A REFERENCE, NOT A COPY.
+        #
+        # A protected swing is often caused by a liquidity sweep, and it would
+        # have been easy to stamp `detector_scope` onto the swing record. That
+        # creates two mutable homes for one fact, and two homes eventually
+        # disagree. The audited record therefore stays exactly as it was -- its
+        # six audited fields are unchanged -- and the causal relationship is
+        # published beside it. The OCCURRENCE remains the single authority for
+        # side, scope, rejection and event-time provenance.
+        #
+        # (The field list is deliberately not enumerated here: a neighbouring
+        # unit pins `_protected` against naming it, and that guard is right --
+        # this hop passes provenance through and must never recompute it.)
+        "caused_by": _swing_causation(snapshot),
     }
+
+
+def _swing_causation(snapshot: dict) -> dict:
+    """Which protected swing was born of which liquidity occurrence.
+
+    EXACT JOIN ONLY, on the same law the component join uses: a swing is linked
+    when its timeframe and formation instant match a proven sweep on that
+    timeframe. Anything ambiguous is left unlinked -- an absent reference is
+    honest, a wrong one silently rewrites causation.
+    """
+    out = {}
+    try:
+        ps = (snapshot or {}).get("protected_swings") or {}
+        by_tf = ps.get("by_timeframe") or {}
+        sweeps = {}
+        for tf, block in (((snapshot or {}).get("liquidity") or {})).items():
+            if isinstance(block, dict) and block.get("sweep_fact"):
+                sweeps.setdefault(tf, []).append(block["sweep_fact"])
+        from market_data.sweep_occurrence import liquidity_sweep_occurrence
+        contract = (snapshot or {}).get("contract_id") or ""
+        for side in ("highs", "lows"):
+            for tf, rec in (by_tf.get(side) or {}).items():
+                if not isinstance(rec, dict):
+                    continue
+                hits = [f for f in sweeps.get(tf, [])
+                        if f.get("event_time") == rec.get("registered_at")]
+                if len(hits) != 1:
+                    continue
+                occ = liquidity_sweep_occurrence(hits[0], source_tf=tf,
+                                                 contract=contract)
+                if occ:
+                    # LINK ONLY. Copying `detector_scope`/`po3_scope` here would
+                    # create a SECOND Brain-visible home for one fact, and two
+                    # homes drift. The occurrence remains the sole owner of
+                    # side, scope, rejection and event-time provenance; this
+                    # says only WHICH occurrence caused this swing.
+                    out["%s.%s" % (side, tf)] = {
+                        "swing_id": rec.get("swing_id"),
+                        "occurrence_id": occ.get("occurrence_id"),
+                        "linkage": "PROVEN",
+                    }
+        return out
+    except Exception:  # noqa: BLE001 -- causation is enrichment, never a blocker
+        return out
+
+
+def _swing_sequence_block(snapshot: dict) -> dict:
+    """Canonical ordinal sequence, plus the windowed pivot witness beside it.
+
+    TWO MECHANISMS, ONE AUTHORITY. The confirmed registry is canonical because
+    those are the swings the organism already trusts for invalidation. The
+    candle-pivot feature is a windowed witness for regime work. Where they
+    disagree the disagreement is PUBLISHED -- the Brain is told both and told
+    which is authoritative -- because silently preferring either one would throw
+    away real uncertainty.
+    """
+    try:
+        from narrative_authority.swing_structure import (canonical_sequence,
+                                                         witness_agreement)
+        ps = snapshot.get("protected_swings", {}) or {}
+        mr = snapshot.get("market_regime", {}) or {}
+        canon = canonical_sequence(ps.get("lineage") or {})
+        # A CURATED VIEW, NOT THE INTERNAL OBJECT. `canonical_sequence` returns
+        # working fields the Brain has no use for -- a schema tag, the selected
+        # slot's timeframe, and `high_direction`/`low_direction`, which restate
+        # what the ordinal lists already say. Publishing the whole dict put 22
+        # paths in front of Luna and would have required contracting every one
+        # of them; each field below is here because she reasons with it.
+        agree = witness_agreement(canon, mr.get("swing_sequence"))
+        return {
+            "sequence": canon["sequence"],
+            "authority": canon["authority"],
+            "detail": canon["detail"],
+            "confirmed_highs": canon["confirmed_highs"],
+            "confirmed_lows": canon["confirmed_lows"],
+            "highs": canon["highs"],
+            "lows": canon["lows"],
+            "high_ordinals": canon["high_ordinals"],
+            "low_ordinals": canon["low_ordinals"],
+            "windowed_witness": {
+                "sequence": mr.get("swing_sequence"),
+                "source_timeframe": mr.get("swing_source_timeframe"),
+                "detail": mr.get("swing_detail"),
+                "fallback_trace": mr.get("swing_fallback_trace") or [],
+            },
+            "witness_agreement": {"agreement": agree["agreement"]},
+        }
+    except Exception as exc:  # noqa: BLE001 -- never break the payload
+        return {"schema": "swing_structure.v1", "sequence": "UNKNOWN",
+                "detail": "swing structure unavailable: %s" % (exc,)}
 
 
 def _session_context_block(snapshot: dict) -> dict:
@@ -619,11 +735,175 @@ def _session_po3_block(snapshot: dict) -> dict:
                       if exc else None),
         "manipulation": {"classification": manip.get("classification"),
                          "direction": manip.get("direction"),
-                         "conflicted": manip.get("conflicted")},
+                         "conflicted": manip.get("conflicted"),
+                         # THE VERDICT KEEPS ITS SHAPE; the reasoning is added
+                         # beside it. A confirmed manipulation with a null
+                         # direction is a legitimate answer -- it just has to be
+                         # explicable, and now it is.
+                         "votes": _manipulation_votes(manip, _sweep_facts(snapshot))},
         "distribution_direction": b.get("distribution_direction"),
         "preferred_playbook_families": b.get("preferred_playbook_families") or [],
         "transition_reason": b.get("reason"),
     }
+
+
+
+def _liquidity_events_block(snapshot: dict) -> dict:
+    """Proven sweep events, with the scope each was judged against AT THE TIME.
+
+    LUNA-LIQUIDITY-SCOPE-TRUTH-1 (2026-09-01). The organism already knew an
+    external sweep from an internal raid and weighted them 30 vs 20 -- and
+    published neither. The Brain received `manipulation.classification` and a
+    direction that could be null, so Luna reasoned about "both sides raided"
+    with no way to know which liquidity was outer and which was inner.
+
+    SCOPE ENRICHES A PROVEN EVENT; IT NEVER MANUFACTURES ONE. Only sweeps that
+    production evidence law actually established appear here. A timeframe with
+    no lawful sweep contributes nothing -- not an `unknown` placeholder, which
+    is reserved for a proven event whose scope authority was unavailable.
+
+    NOTHING HERE IS DIRECTIONAL. `external` + `sell_side` + `reclaimed` are
+    three facts. What they mean is Luna's to decide.
+    """
+    # NO `note` FIELD. It restated the unit's own law -- "scope is stamped when
+    # the event occurs" -- which is contract semantics, not a fact about any
+    # event. `scope_reason` stays because it carries per-event causal
+    # information a structured field cannot: WHY a proven occurrence has
+    # UNKNOWN scope.
+    out = {"available": False, "events": []}
+    try:
+        liq = (snapshot or {}).get("liquidity") or {}
+        events = []
+        for tf, block in sorted(liq.items()):
+            if not isinstance(block, dict):
+                continue
+            f = block.get("sweep_fact")
+            if not f:
+                continue                     # no proven sweep -> no scope fact
+            det_ref = f.get("detector_scope_reference") or {}
+            po3_ref = f.get("po3_scope_reference") or {}
+            events.append({
+                "timeframe": tf,
+                "event_time": f.get("event_time"),
+                "liquidity_side_taken": f.get("liquidity_side_taken"),
+                "swept_level": f.get("swept_level"),
+                "reclaimed": bool(f.get("reclaimed")),
+                "detector_scope": f.get("detector_scope"),
+                "detector_scope_relative_to": det_ref.get("type"),
+
+                "detector_outer_high": det_ref.get("outer_high"),
+                "detector_outer_low": det_ref.get("outer_low"),
+                "po3_scope": f.get("po3_scope"),
+                "po3_scope_relative_to": po3_ref.get("type"),
+                # KEPT: a semantic continuity identifier. It lets Luna tell
+                # "the same causal accumulation range, later extended" from "a
+                # different range". The two SNAPSHOT ids are deliberately NOT
+                # here -- they are exact-version audit identifiers she can only
+                # compare for equality, and every fact they certify is already
+                # published above. They remain on the immutable occurrence for
+                # forensic verification and restart reconstruction.
+                "po3_range_id": po3_ref.get("range_id"),
+
+                "po3_range_high": po3_ref.get("high"),
+                "po3_range_low": po3_ref.get("low"),
+                "scope_reason": f.get("scope_reason"),
+            })
+        out["events"] = events
+        out["available"] = bool(events)
+        return out
+    except Exception as exc:  # noqa: BLE001 -- never break the payload
+        out["scope_error"] = "liquidity events unavailable: %s" % (exc,)
+        return out
+
+
+def _join_occurrence(component: dict, sweeps: list) -> tuple:
+    """EXACT causal join, or nothing.
+
+    Two sweeps can take the same level on the same side later in one session, so
+    `level + side` is not an identity -- matching on it could attach a current
+    component to an unrelated historical event, which is worse than an absent
+    id. The join therefore requires the component's OWN captured event instant
+    to agree with the occurrence's, alongside side and level.
+
+    Ambiguity is refused: 0 candidates or more than 1 both yield UNPROVEN. There
+    is no nearest-time, nearest-price or first-match fallback.
+    """
+    at = component.get("source_event_time")
+    side = component.get("liquidity_side_taken")
+    level = component.get("level")
+    tf = component.get("timeframe")
+    if not at or not side or level is None:
+        return None, "UNPROVEN: component carries no event identity"
+    # THE STRONGEST IDENTITY COMMON TO BOTH SIDES. Member-level provenance
+    # (`source_member_times`) exists on 3m/5m/15m settled bars but NOT on 1m,
+    # which publishes no member list -- so it is not common to both and cannot
+    # join them. Timeframe is: the detector runs per timeframe and the
+    # occurrence records `source_tf`. Including it separates a 1m sweep from a
+    # 3m sweep that share an instant, side and level.
+    hits = [f for f in sweeps
+            if f.get("event_time") == at
+            and f.get("liquidity_side_taken") == side
+            and f.get("swept_level") == level
+            and (tf is None or f.get("timeframe") == tf)]
+    if len(hits) == 1:
+        return hits[0].get("occurrence_id"), "PROVEN"
+    if not hits:
+        return None, "UNPROVEN: no occurrence matches this event identity"
+    return None, "UNPROVEN: %d occurrences share this event identity" % len(hits)
+
+
+def _manipulation_votes(manip: dict, sweeps=None) -> list:
+    """WHICH components voted, and how -- so a conflict is attributable.
+
+    `direction_conflicted: True` told the Brain that something disagreed without
+    ever saying what. The vote now travels on the component, and a component
+    that describes a sweep carries the level and side it fired on, so two
+    components describing ONE event are recognisable as two readings of the same
+    sweep rather than two separate liquidity events.
+    """
+    out = []
+    for c in (manip or {}).get("components") or []:
+        if not isinstance(c, dict) or not c.get("present"):
+            continue
+        occ_id, linkage = _join_occurrence(c, sweeps or [])
+        out.append({"component": c.get("name"),
+                    "points": c.get("points"),
+                    "direction_vote": c.get("direction_vote"),
+                    "level": c.get("level"),
+                    "liquidity_side_taken": c.get("liquidity_side_taken"),
+                    "source_event_time": c.get("source_event_time"),
+                    "timeframe": c.get("timeframe"),
+                    "occurrence_id": occ_id,
+                    "occurrence_linkage": linkage})
+    return out
+
+
+def _sweep_facts(snapshot: dict) -> list:
+    """Every proven sweep in this snapshot, with its occurrence identity.
+
+    The identity is minted by the SAME authority the durable ledger uses, so a
+    component and a persisted occurrence cannot end up pointing at different ids
+    for one event.
+    """
+    out = []
+    try:
+        from market_data.sweep_occurrence import liquidity_sweep_occurrence
+        for tf, block in sorted(((snapshot or {}).get("liquidity") or {}).items()):
+            if not isinstance(block, dict):
+                continue
+            f = block.get("sweep_fact")
+            if not f:
+                continue
+            occ = liquidity_sweep_occurrence(
+                f, source_tf=tf, contract=(snapshot or {}).get("contract_id") or "")
+            out.append({"event_time": f.get("event_time"),
+                        "liquidity_side_taken": f.get("liquidity_side_taken"),
+                        "swept_level": f.get("swept_level"),
+                        "timeframe": tf,
+                        "occurrence_id": (occ or {}).get("occurrence_id")})
+    except Exception:  # noqa: BLE001 -- linkage is enrichment, never a blocker
+        return out
+    return out
 
 
 def build_brain_input(snapshot: dict, stance_history: dict) -> dict:
@@ -836,6 +1116,9 @@ def build_brain_input(snapshot: dict, stance_history: dict) -> dict:
                 **({"sensors": _liq_sensors} if _liq_sensors else {}),
             },
             "protected_swings": _protected(snapshot, price),
+            # LUNA-LIQUIDITY-SCOPE-TRUTH-1: proven sweep events with the
+            # scope each was judged against at the time it happened.
+            "liquidity_events": _liquidity_events_block(snapshot),
             # ACTIVE-PATH-STATE-1 (2026-08-24) — WHICH SIDE OWNS THE TAPE.
             #
             # Everything else in this payload is instantaneous: a boolean that

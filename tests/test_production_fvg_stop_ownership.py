@@ -284,9 +284,29 @@ class TestToolVerificationIsNotStopAuthority:
         assert a.objective.price == b.objective.price
 
     def test_nothing_downstream_reads_the_occurrence_as_authority(self):
-        """6 — the field is written and never consulted for a decision."""
-        import subprocess
-        readers = subprocess.run(
-            ["git", "grep", "-l", "selected_tool_occurrence_id", "--", "src/"],
-            capture_output=True, text=True).stdout.split()
-        assert readers == ["src/broker/luna_candidate_producer.py"], readers
+        """6 — the field is written and never consulted for a decision.
+
+        THIS IS A CLAIM ABOUT SOURCE CONTENTS, so it is answered by reading the
+        source. It used `git grep`, which made a statement about the code
+        depend on the presence of a git repository: from a source distribution
+        the search returned nothing and the theorem read as violated when the
+        code was in fact correct. Walking `src/` answers the same question and
+        works from a clone, an archive or a vendored copy alike.
+        """
+        import os as _os
+        repo = _os.path.dirname(_os.path.dirname(
+            _os.path.abspath(__file__)))
+        root = _os.path.join(repo, "src")
+        found = []
+        for base, _dirs, files in _os.walk(root):
+            if "__pycache__" in base:
+                continue
+            for fn in files:
+                if not fn.endswith(".py"):
+                    continue
+                p = _os.path.join(base, fn)
+                with open(p, encoding="utf-8", errors="replace") as fh:
+                    if "selected_tool_occurrence_id" in fh.read():
+                        found.append(
+                            _os.path.relpath(p, repo).replace(_os.sep, "/"))
+        assert sorted(found) == ["src/broker/luna_candidate_producer.py"], found

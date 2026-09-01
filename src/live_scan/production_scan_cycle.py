@@ -80,6 +80,12 @@ class ProductionScanCycle:
         self.thesis_engine = ThesisLifecycleEngine(symbol=symbol)
         self.po3_stability = Po3StabilityManager()
         self.session_po3 = SessionPo3Authority()
+        # LUNA-LIQUIDITY-SCOPE-TRUTH-1: last scan's ESTABLISHED session
+        # range, so a sweep is judged against a boundary that PREDATES
+        # it. Judging an event against a range the event itself helped
+        # extend would let it create its own yardstick.
+        self._prior_po3_range = None
+        self._prior_po3_session_date = None
         self.expansion_stability = ExpansionStabilityManager()
 
         self.previous_snapshot = None
@@ -169,6 +175,15 @@ class ProductionScanCycle:
         "previous_snapshot",     # a candle-derived snapshot
         "previous_qual_state",   # derived from that snapshot
         "bars_in_state",         # a counter over derived states
+        # LUNA-LIQUIDITY-SCOPE-TRUTH-1. The PRIOR established session range and
+        # its date. Both are derived from `session_po3`, which is itself
+        # candle-derived, so a revised tape invalidates them. Discarding is the
+        # fail-closed answer: after a revision the organism can no longer vouch
+        # that this range predated any event, and `po3_scope` correctly reads
+        # UNKNOWN until an established range forms again. Keeping them would let
+        # a range from a tape that no longer exists classify a live event.
+        "_prior_po3_range",
+        "_prior_po3_session_date",
         # LIQUIDITY-SWEEP-EPISODE-IDENTITY-1. What the PREVIOUS scan observed
         # and wrote. A canonical-history rebuild must not carry a prior scan's
         # result forward as though it belonged to the rebuilt state. The durable
@@ -290,6 +305,8 @@ class ProductionScanCycle:
             self.swing_tracker = ProtectedSwingTracker()
             self.po3_stability = Po3StabilityManager()
             self.session_po3 = SessionPo3Authority()
+            self._prior_po3_range = None
+            self._prior_po3_session_date = None
             self.expansion_stability = ExpansionStabilityManager()
             self._flip_registry = None
             self.previous_snapshot = None
@@ -474,6 +491,16 @@ class ProductionScanCycle:
         snapshot["state_transition"] = analyze_transition(
             snapshot, self.previous_snapshot, self.bars_in_state)
         self.previous_snapshot = snapshot
+        # REMEMBERED FOR THE NEXT SCAN, NOT USED FOR THIS ONE. Only an
+        # ESTABLISHED range is carried: a forming range has not earned the
+        # authority to say what is outside it, and `po3_reference` refuses it
+        # anyway -- carrying it here would only make that refusal harder to see.
+        _sp3 = (snapshot.get("session_po3") or {}) if isinstance(snapshot, dict) else {}
+        _rng = _sp3.get("range") or {}
+        self._prior_po3_range = dict(_rng) if _rng.get("established") else None
+        self._prior_po3_session_date = (
+            str(_sp3.get("session_date") or "") or
+            (str(snapshot.get("timestamp") or "")[:10] if isinstance(snapshot, dict) else None))
         self.previous_qual_state = cur_qual
 
         snapshot["setup_lifecycle"] = self.setup_tracker.update(snapshot, self.symbol)
@@ -895,6 +922,15 @@ class ProductionScanCycle:
             # bridged array-neighbour close, and importing it here would carry
             # that cadence-unsafe path across the line.
             from market_data.sweep_occurrence import liquidity_sweep_occurrence
+            from market_data.liquidity_scope import stamp as _scope_stamp
+
+            def _po3_stamp(f, prior_range, session_date):
+                """Session scope only -- the detector scope is already frozen."""
+                out = _scope_stamp(f, highs=None, lows=None,
+                                   po3_range=prior_range,
+                                   session_date=session_date)
+                return {"po3_scope": out["po3_scope"],
+                        "po3_scope_reference": out["po3_scope_reference"]}
             written = []
             for tf, block in sorted((snapshot.get("liquidity") or {}).items()):
                 if not isinstance(block, dict):
@@ -902,6 +938,14 @@ class ProductionScanCycle:
                 fact = block.get("sweep_fact")
                 if not fact:
                     continue
+                # THE RANGE THAT EXISTED BEFORE THE EVENT, not the one this
+                # scan just derived. Judging a sweep against a range the sweep
+                # itself helped extend would let the event create its own
+                # yardstick; `_prior_po3_range` is last scan's established
+                # range, so the boundary predates the event it judges.
+                fact = dict(fact)
+                fact.update(_po3_stamp(fact, self._prior_po3_range,
+                                       self._prior_po3_session_date))
                 occurrence = liquidity_sweep_occurrence(
                     fact, source_tf=tf, contract=self.contract_id)
                 if occurrence is None:

@@ -77,6 +77,22 @@ class ProtectedSwingTracker:
         # points, against a 40-point execution ceiling.
         self.protected_highs = {}    # tf -> {"level","timeframe","registered_at",...}
         self.protected_lows = {}
+        # LUNA-SWING-SEQUENCE-TRUTH-1 (2026-09-01). ORDERED LINEAGE PER SLOT.
+        #
+        # The slots above hold only what is protected NOW. That is the right
+        # answer to "where is my invalidation" and the wrong answer to "what has
+        # structure been doing", and the organism only ever published the first.
+        # Measured live on 2026-09-01: the registry moved highs
+        # 29157.75 -> 29163.25 -> 29173 -> 29179 and lows
+        # 29040 -> 29085 -> 29116 -> 29135.75 -- seven consecutive rising
+        # confirmed swings -- while the Brain was told `swing_sequence: unknown`
+        # and read each one in isolation as a rejected raid.
+        #
+        # ONE ENTRY PER LIFE, not per scan. A re-affirmation is the same life
+        # and must not appear twice, or a well-defended level would fabricate a
+        # run of "equal" swings it never made.
+        self.high_lineage = {}       # tf -> [record, ...] oldest first
+        self.low_lineage = {}
 
     # ── backward-compatible summary ──────────────────────────────────────────
     # Consumers across brain_input, outcome assembly and memory read these two
@@ -158,6 +174,30 @@ class ProtectedSwingTracker:
                 record["registered_at"] = born
         return record
 
+    @staticmethod
+    def _ordinal(side: str, level: float, prior: "float | None") -> tuple:
+        """Where a confirmed swing sits relative to the one it succeeded.
+
+        DELIBERATELY NOT A FIELD ON THE RECORD. The protected-swing record
+        answers "what is this level and why is it protected" -- an intrinsic,
+        audited, six-field contract about ONE life. An ordinal answers "how did
+        this life relate to the previous one", which is RELATIONAL and belongs
+        to the succession, not to either endpoint.
+
+        Putting it on the record broke that: it made a re-affirmation look like
+        a mutation of a level that had not changed, which is precisely what
+        `test_reaffirmation_changes_nothing_at_all` exists to catch. The
+        invariant restored here is REAFFIRMATION CHANGES NOTHING; SUCCESSION
+        CREATES LINEAGE.
+        """
+        if prior is None:
+            return None, None
+        if level > prior:
+            return ("higher_high" if side == "high" else "higher_low"), prior
+        if level < prior:
+            return ("lower_high" if side == "high" else "lower_low"), prior
+        return ("equal_high" if side == "high" else "equal_low"), prior
+
     def update(self, snapshot: dict) -> dict:
         """
         Register new protected levels from this scan's sweep evidence and
@@ -186,15 +226,17 @@ class ProtectedSwingTracker:
             st    = structure.get(tf, {}) or {}
             sweep = liq.get("sweep_direction", "")
             if sweep == "above_high" and st.get("last_swing_high") is not None:
-                self.protected_highs[tf] = self._register(
-                    self.protected_highs.get(tf), tf=tf, side="high",
-                    level=float(st["last_swing_high"]), ts=ts,
-                    basis="buy_side_raid_rejected")
+                self.protected_highs[tf] = self._note_lineage(
+                    "high", tf, self._register(
+                        self.protected_highs.get(tf), tf=tf, side="high",
+                        level=float(st["last_swing_high"]), ts=ts,
+                        basis="buy_side_raid_rejected"))
             elif sweep == "below_low" and st.get("last_swing_low") is not None:
-                self.protected_lows[tf] = self._register(
-                    self.protected_lows.get(tf), tf=tf, side="low",
-                    level=float(st["last_swing_low"]), ts=ts,
-                    basis="sell_side_raid_rejected")
+                self.protected_lows[tf] = self._note_lineage(
+                    "low", tf, self._register(
+                        self.protected_lows.get(tf), tf=tf, side="low",
+                        level=float(st["last_swing_low"]), ts=ts,
+                        basis="sell_side_raid_rejected"))
 
         # ── Violation: a close beyond the level clears THAT timeframe only ───
         if price is not None:
@@ -207,6 +249,56 @@ class ProtectedSwingTracker:
                     self.protected_lows.pop(tf, None)
 
         return self.state()
+
+    #: Bounded so a long session cannot grow the record without limit. Ample
+    #: for sequence work, which reads the most recent lives.
+    LINEAGE_CAP = 32
+
+    def _note_lineage(self, side: str, tf: str, record: dict) -> dict:
+        """Append one CONFIRMED LIFE and stamp its ordinal relationship.
+
+        Never raises: structural bookkeeping must not be able to break
+        registration, which is execution-bearing.
+        """
+        try:
+            book = self.high_lineage if side == "high" else self.low_lineage
+            hist = book.setdefault(tf, [])
+            if hist and hist[-1].get("swing_id") == record.get("swing_id") \
+                    and hist[-1].get("current_registered_at") == record.get("registered_at"):
+                # Same life re-affirmed; the lineage already holds it.
+                return record
+            prev = hist[-1] if hist else None
+            prior = prev["level"] if prev else None
+            ordinal, _vs = self._ordinal(side, record["level"], prior)
+            # THE SUCCESSION IS THE FACT. Both endpoints are named so the
+            # relationship can be audited without re-deriving it from a
+            # neighbouring entry, and so a rebuild reads the same answer.
+            hist.append({
+                "side": side,
+                "timeframe": record["timeframe"],
+                "previous_price": prior,
+                "current_price": record["level"],
+                "previous_registered_at": prev["current_registered_at"] if prev else None,
+                "current_registered_at": record["registered_at"],
+                "ordinal": ordinal,
+                "swing_id": record["swing_id"],
+                "basis": record["basis"],
+                # `level` is retained under its historical name because
+                # `swing_structure` reads lineage levels; it is the same value
+                # as `current_price`, not a second authority.
+                "level": record["level"],
+            })
+            del hist[:-self.LINEAGE_CAP]
+        except Exception:  # noqa: BLE001 -- never break registration
+            pass
+        return record
+
+    def lineage(self) -> dict:
+        """The ordered confirmed swings this session, oldest first, per timeframe."""
+        return {"highs": {tf: [dict(r) for r in h]
+                          for tf, h in self.high_lineage.items() if h},
+                "lows": {tf: [dict(r) for r in h]
+                         for tf, h in self.low_lineage.items() if h}}
 
     def state(self, warnings: "list | None" = None) -> dict:
         """Summary AND per-timeframe truth, side by side.
@@ -224,5 +316,9 @@ class ProtectedSwingTracker:
                 "lows":  {tf: dict(r) for tf, r in self.protected_lows.items() if r},
             },
             "roles": dict(TIMEFRAME_ROLES),
+            # Ordinal structure travels BESIDE the causal records, never
+            # instead of them: every entry keeps its `basis` and gains an
+            # `ordinal`.
+            "lineage": self.lineage(),
             "warnings":       warnings or [],
         }

@@ -107,10 +107,24 @@ def _classify(snapshot: dict, raw_data=None, settled_data=None) -> dict:
         label = "chop"
         evidence.append(f"chop={chop} >= 55 and > trend={trend}")
 
-    # ── Priority 9: range_rotation (catchall for low trend) ──────────────────
-    elif trend < 50:
+    # ── Priority 9: range_rotation — POSITIVE EVIDENCE ONLY ──────────────────
+    # LUNA-SWING-SEQUENCE-TRUTH-1 (2026-09-01). This was a catchall: any
+    # trend score under 50 became `range_rotation`, so ABSENCE OF TREND PROOF
+    # was converted into PROOF OF RANGE. Measured live the same feature object
+    # simultaneously reported `range_state: "expanding"` ("recent 139.75 vs
+    # prior 90.75 = 1.54x") while this branch labelled the market a range on the
+    # strength of `trend=20 < 50`.
+    #
+    # A range is a claim about mechanics -- price contained and rotating -- and
+    # it now has to be earned. Where neither trend nor range is positively
+    # established the honest answer is `unknown`, which the ontology already
+    # carries and which downstream reads as "no regime authority" rather than
+    # as a quiet assertion of containment.
+    elif trend < 50 and f.get("range_state") not in ("expanding",):
         label = "range_rotation"
-        evidence.append(f"trend={trend} < 50 — catchall")
+        evidence.append(
+            f"trend={trend} < 50 and range_state={f.get('range_state')!r} "
+            f"is not expanding")
 
     # ── Priority 10: unknown (default) ───────────────────────────────────────
     else:

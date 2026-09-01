@@ -134,11 +134,41 @@ class TestOneSettledSeriesOwnsTheContract:
             in self.source(), "V1: the regime layer can no longer tell the two apart"
 
     def test_swing_sequence_reads_the_settled_series(self):
+        """V1: the windowed swing witness may never be built from forming candles.
+
+        THE THEOREM, NOT THE CALL SPELLING. This asserted the literal source
+        text `swing_sequence(seq_candles`, which pinned one call form rather
+        than a property. LUNA-SWING-SEQUENCE-TRUTH-1 replaced the single-series
+        call with a 15m -> 5m -> 3m pivot-sufficiency loop, and the assertion
+        broke while the settled-evidence property it exists to protect was
+        never violated.
+
+        Checked structurally here, and BEHAVIOURALLY in
+        tests/test_swing_sequence_truth.py::
+        TestSettledEvidenceOwnsTheWindowedWitness, which proves a settled series
+        is preferred over a forming one for the same timeframe and that exactly
+        one timeframe becomes the witness.
+        """
+        import ast as _ast
+
         from regime_classification import regime_features as RF
-        src = inspect.getsource(RF._extract)
-        assert "swing_sequence(seq_candles" in src
-        assert "_settled_series(settled_data, raw_data, \"15m\")" in src, \
-            "V1: swing_sequence is back on the realtime series"
+        tree = _ast.parse(inspect.getsource(RF._extract))
+        fn = next(n for n in _ast.walk(tree) if isinstance(n, _ast.FunctionDef))
+        called = {getattr(c.func, "id", "") for c in _ast.walk(fn)
+                  if isinstance(c, _ast.Call)}
+        assert "swing_sequence" in called, \
+            "the windowed swing witness is no longer computed here"
+        assert "_settled_series" in called, \
+            "V1: swing candidates no longer come through the settled authority"
+        # `raw_data` is the REALTIME view. It is legitimately passed to the
+        # evidence builder as a source-member lookup, but a candidate SERIES
+        # must never be indexed straight out of it -- that is the regression
+        # this guard exists for.
+        raw_subscripts = [n for n in _ast.walk(fn)
+                          if isinstance(n, _ast.Subscript)
+                          and getattr(n.value, "id", "") == "raw_data"]
+        assert not raw_subscripts, \
+            "V1: a swing candidate was taken directly from the realtime series"
 
     def test_volatility_stays_realtime_and_expansion_is_now_settled(self):
         """UPDATED BY CONTINUITY-2E.1 (2026-08-11).

@@ -525,7 +525,21 @@ class TestCandleAuthorityUntouched:
         assert alone.diagnostics == beside.diagnostics
 
     def test_V17_the_candle_provider_source_is_unmodified_by_this_unit(self):
+        """GIT_REPOSITORY_REQUIRED.
+
+        This asks a question about a DIFF AGAINST HEAD -- did this unit modify
+        these two files -- which cannot be answered from files alone, only from
+        repository history. A clone answers it; a source distribution carries no
+        history to diff against, and git then falls back to `--no-index` and
+        errors on the pathspec. Skipping there names the missing authority; it
+        does not weaken the theorem, which still runs wherever a repository
+        exists.
+        """
         import subprocess
+        if subprocess.run(["git", "rev-parse", "--git-dir"], cwd=ROOT,
+                          capture_output=True).returncode != 0:
+            pytest.skip("GIT_REPOSITORY_REQUIRED: no repository to diff against "
+                        "-- this theorem certifies history, not file contents")
         out = subprocess.run(
             ["git", "diff", "--name-only", "HEAD", "--",
              "src/data_feed/topstepx_provider.py",

@@ -166,6 +166,57 @@ _CONTRACT_SOURCES = (
     ("validator", "ai_brain/brain_validation.py"),
     ("input", "ai_brain/brain_input.py"),
     ("protected_swings", "narrative_authority/protected_swings.py"),
+    # LUNA-SWING-SEQUENCE-TRUTH-1 (2026-09-01) — THE STRUCTURAL/REGIME TRUTH
+    # PRODUCERS. `protected_swings` and `input` were already bound, which binds
+    # the registry and the publication hop -- but not the three modules that
+    # decide WHAT STRUCTURE AND REGIME MEAN before publication. Someone could
+    # have changed the canonical sequence law, the timeframe sufficiency law or
+    # the range-evidence law in isolation, and a minted authorization would have
+    # kept verifying against an organism that had quietly been given a different
+    # picture of the market.
+    #
+    # regime_features / regime_classifier are bound as an EXISTING hole, not a
+    # new one: `market_regime` has always travelled in the Brain payload, so
+    # these two have been able to change Brain-visible truth unbound since long
+    # before this unit. The unit made that materially worse by routing the
+    # windowed swing witness through them, and that is what surfaced it.
+    ("swing_structure", "narrative_authority/swing_structure.py"),
+    # LUNA-LIQUIDITY-SCOPE-TRUTH-1 (2026-09-01) — THE LIQUIDITY-EVENT TRUTH
+    # PRODUCERS. Each was machine-tested against the question the closure
+    # actually asks: can an isolated semantic edit here change a CERTIFIED
+    # Brain-visible fact? Every one answered yes.
+    #
+    #   liquidity_scope       decides internal vs external, and against which
+    #                         named authority
+    #   sweep_occurrence      mints the event identity the scope is frozen onto
+    #   liquidity_engine      proves the sweep and stamps scope at event time
+    #   manipulation_detector owns the component votes and their levels
+    #   direction_vote        resolves direction / direction_conflicted
+    #   session_po3           owns the accumulation range po3_scope is judged by
+    #   po3_config            MANIP_CONTEXT/MANIP_LOOKBACK define which pivots
+    #                         exist -- measured: narrowing the context flips the
+    #                         same event from external to internal, so a
+    #                         CONSTANTS file silently owns scope
+    #   snapshot_builder      threads `timeframe=tf` into the component --
+    #                         measured: deleting that kwarg turns a PROVEN
+    #                         occurrence link into UNPROVEN
+    #   production_scan_cycle stamps po3_scope from the PRIOR established range
+    #
+    # The cost is accepted for the same reason it was accepted for the
+    # production entrypoint: churn in a bound file invalidates live
+    # authorizations, and that is cheaper than an unbound file quietly changing
+    # what Luna believes about what happened.
+    ("liquidity_scope", "market_data/liquidity_scope.py"),
+    ("sweep_occurrence", "market_data/sweep_occurrence.py"),
+    ("liquidity_engine", "structure/liquidity_engine.py"),
+    ("manipulation_detector", "structure/manipulation_detector.py"),
+    ("direction_vote", "structure/direction_vote.py"),
+    ("session_po3", "structure/session_po3.py"),
+    ("po3_config", "structure/po3_config.py"),
+    ("snapshot_builder", "market_data/snapshot_builder.py"),
+    ("production_scan_cycle", "live_scan/production_scan_cycle.py"),
+    ("regime_features", "regime_classification/regime_features.py"),
+    ("regime_classifier", "regime_classification/regime_classifier.py"),
     ("mtf_market_state", "market_state/mtf_market_state.py"),
     ("structure_flip", "structure/structure_flip.py"),
     # how its answer becomes a trade

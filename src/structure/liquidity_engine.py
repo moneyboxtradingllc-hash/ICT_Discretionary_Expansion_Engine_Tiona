@@ -380,6 +380,22 @@ def analyze_liquidity(candles: list, prior: dict = None, *,
             "source_bars": [c.get("timestamp") or c.get("time")
                             for c in candles[-2:]],
         }
+        # LUNA-LIQUIDITY-SCOPE-TRUTH-1 (2026-09-01). SCOPE IS STAMPED HERE,
+        # ONCE, because this is the only moment the pivot set that judged the
+        # event is still the pivot set that existed. `manipulation_detector`
+        # re-derived internal/external every scan from a rolling
+        # `candles[-40:]`, so a later higher swing rewrote what an earlier
+        # sweep WAS -- proven: pivots [100,110] gave EXTERNAL, and
+        # [100,110,120] gave INTERNAL for the identical candle.
+        #
+        # NO PO3 DEPENDENCY HERE, DELIBERATELY. `session_po3` already consumes
+        # this engine; reaching the other way would close a cycle. The session
+        # scope is stamped by the scan cycle, which owns both facts.
+        from market_data.liquidity_scope import stamp as _scope_stamp
+        sweep_fact.update(_scope_stamp(
+            sweep_fact, highs=highs, lows=lows, po3_range=None,
+            context_start=(candles[0].get("timestamp") if candles else None),
+            context_end=when))
 
     # Buy-side liquidity: resting stops above price (at swing highs above current close)
     above = [h for h in highs if h > last_close]

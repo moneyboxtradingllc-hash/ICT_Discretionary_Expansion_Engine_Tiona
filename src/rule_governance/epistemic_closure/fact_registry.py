@@ -35,13 +35,1260 @@ T_EC = "tests/test_epistemic_closure_certification.py"
 T_SC = "tests/test_objective_scale_preservation.py"
 T_SP = "tests/test_session_po3_authority.py"
 T_CS = "tests/test_cross_session_context.py"
+T_SS = "tests/test_swing_sequence_truth.py"
+T_LS = "tests/test_liquidity_scope_truth.py"
 
 
 # ══ PROTECTED SWINGS ════════════════════════════════════════════════════════
 # CERTIFIED as of PROTECTED-SWING-CAUSAL-TIME-1. Before that unit the semantic
 # contract below was FALSE: the producer re-stamped `registered_at` on every
 # reaffirmation while every consumer read it as a birth time.
+_LIQUIDITY_SCOPE = [
+    {
+        "fact_id": "liquidity_event.available",
+        "producer_owner": "ai_brain.brain_input",
+        "representation": "liquidity_events.available",
+        "semantic_claim":
+            "Whether ANY production-authoritative sweep exists on this scan.  "
+            "False means ABSENT -- no lawful occurrence at all -- which is a  "
+            "DIFFERENT claim from a proven event whose scope is UNKNOWN. The  "
+            "four states never collapse: internal/external classify, UNKNOWN  "
+            "means the scope authority was unavailable, ABSENT means there  "
+            "was no event to scope. ",
+        "authority_class": CERTIFIED,
+        "decision_influence": (BRAIN_NARRATIVE,),
+        "persistence": RAM_ONLY,
+        "lifecycle": {
+            "formation": "minted with the occurrence, from a sweep production "
+                         "evidence law actually proved",
+            "mutation": "NONE",
+            "invalidation": "n/a -- a historical event does not un-happen",
+        },
+        "temporal": {"formation_time": "the sweep event instant",
+                     "observation_time": "the scan that minted it"},
+        "restart": "reconstructed from the durable occurrence",
+        "late_start": "absent when the event was not witnessed; never inferred",
+        "limitations": ("Says nothing about liquidity that was taken but not proven  "
+            "under production evidence law ",),
+        "certification_tests": (
+            f"{T_LS}::TestScopeRequiresAProvenOccurrence",
+        ),
+        "semantic_predicates": ("liquidity.scope_requires_a_proven_occurrence", ),
+        "scenarios": (REAFFIRMED_LIFE, SESSION_BOUNDARY),
+        "consumers": [{"name": "ai_brain.brain_prompt",
+                       "believes": "what liquidity event actually occurred",
+                       "influence": BRAIN_NARRATIVE}],
+    },
+    {
+        "fact_id": "liquidity_event.event_time",
+        "producer_owner": "market_data.sweep_occurrence",
+        "representation": "liquidity_events.events[].event_time",
+        "semantic_claim":
+            "The instant the sweep occurred, as reported by the settled candle  "
+            "that pierced the level and closed back through it. Part of the  "
+            "occurrence identity, and the field that makes the component join  "
+            "exact rather than inferred. ",
+        "authority_class": CERTIFIED,
+        "decision_influence": (BRAIN_NARRATIVE,),
+        "persistence": RAM_ONLY,
+        "lifecycle": {
+            "formation": "minted with the occurrence, from a sweep production "
+                         "evidence law actually proved",
+            "mutation": "NONE",
+            "invalidation": "n/a -- a historical event does not un-happen",
+        },
+        "temporal": {"formation_time": "the sweep event instant",
+                     "observation_time": "the scan that minted it"},
+        "restart": "reconstructed from the durable occurrence",
+        "late_start": "absent when the event was not witnessed; never inferred",
+        "limitations": ("An event instant, not a decision instant ",),
+        "certification_tests": (
+            f"{T_LS}::TestEventTimeImmutability",
+        ),
+        "semantic_predicates": ("liquidity.scope_is_event_time_immutable", ),
+        "scenarios": (REAFFIRMED_LIFE, SESSION_BOUNDARY),
+        "consumers": [{"name": "ai_brain.brain_prompt",
+                       "believes": "what liquidity event actually occurred",
+                       "influence": BRAIN_NARRATIVE}],
+    },
+    {
+        "fact_id": "liquidity_event.side",
+        "producer_owner": "market_data.sweep_occurrence",
+        "representation": "liquidity_events.events[].liquidity_side_taken",
+        "semantic_claim":
+            "WHICH liquidity was taken: buy_side or sell_side. SIDE IS NOT  "
+            "SCOPE AND NEITHER IS DIRECTION. A sell-side sweep is a sell-side  "
+            "sweep; it is not bullish, and pairing it with `external` does not  "
+            "make it a trade. ",
+        "authority_class": CERTIFIED,
+        "decision_influence": (BRAIN_NARRATIVE,),
+        "persistence": RAM_ONLY,
+        "lifecycle": {
+            "formation": "minted with the occurrence, from a sweep production "
+                         "evidence law actually proved",
+            "mutation": "NONE",
+            "invalidation": "n/a -- a historical event does not un-happen",
+        },
+        "temporal": {"formation_time": "the sweep event instant",
+                     "observation_time": "the scan that minted it"},
+        "restart": "reconstructed from the durable occurrence",
+        "late_start": "absent when the event was not witnessed; never inferred",
+        "limitations": ("Names the pool taken, nothing about what follows ",),
+        "certification_tests": (
+            f"{T_LS}::TestScopeIsNotDirection",
+        ),
+        "semantic_predicates": ("liquidity.scope_is_not_direction", ),
+        "scenarios": (REAFFIRMED_LIFE, SESSION_BOUNDARY),
+        "consumers": [{"name": "ai_brain.brain_prompt",
+                       "believes": "what liquidity event actually occurred",
+                       "influence": BRAIN_NARRATIVE}],
+    },
+    {
+        "fact_id": "liquidity_event.swept_level",
+        "producer_owner": "market_data.sweep_occurrence",
+        "representation": "liquidity_events.events[].swept_level",
+        "semantic_claim":
+            "The price of the level that was pierced and reclaimed. Published  "
+            "so a scope claim can be checked against the boundaries that  "
+            "judged it, rather than taken on trust. ",
+        "authority_class": CERTIFIED,
+        "decision_influence": (BRAIN_NARRATIVE,),
+        "persistence": RAM_ONLY,
+        "lifecycle": {
+            "formation": "minted with the occurrence, from a sweep production "
+                         "evidence law actually proved",
+            "mutation": "NONE",
+            "invalidation": "n/a -- a historical event does not un-happen",
+        },
+        "temporal": {"formation_time": "the sweep event instant",
+                     "observation_time": "the scan that minted it"},
+        "restart": "reconstructed from the durable occurrence",
+        "late_start": "absent when the event was not witnessed; never inferred",
+        "limitations": ("A historical level. Not a live objective and not a stop ",),
+        "certification_tests": (
+            f"{T_LS}::TestEventTimeImmutability",
+        ),
+        "semantic_predicates": ("liquidity.scope_is_event_time_immutable", ),
+        "scenarios": (REAFFIRMED_LIFE, SESSION_BOUNDARY),
+        "consumers": [{"name": "ai_brain.brain_prompt",
+                       "believes": "what liquidity event actually occurred",
+                       "influence": BRAIN_NARRATIVE}],
+    },
+    {
+        "fact_id": "liquidity_event.reclaimed",
+        "producer_owner": "market_data.sweep_occurrence",
+        "representation": "liquidity_events.events[].reclaimed",
+        "semantic_claim":
+            "Whether the SAME settled candle closed back through the level it  "
+            "pierced. REJECTION IS NOT DIRECTION: it says the level held, not  "
+            "which way price goes next. ",
+        "authority_class": CERTIFIED,
+        "decision_influence": (BRAIN_NARRATIVE,),
+        "persistence": RAM_ONLY,
+        "lifecycle": {
+            "formation": "minted with the occurrence, from a sweep production "
+                         "evidence law actually proved",
+            "mutation": "NONE",
+            "invalidation": "n/a -- a historical event does not un-happen",
+        },
+        "temporal": {"formation_time": "the sweep event instant",
+                     "observation_time": "the scan that minted it"},
+        "restart": "reconstructed from the durable occurrence",
+        "late_start": "absent when the event was not witnessed; never inferred",
+        "limitations": ("One-bar reclaim only; a multi-bar reclaim would need its  "
+            "own detector and is not this fact ",),
+        "certification_tests": (
+            f"{T_LS}::TestScopeIsNotDirection",
+        ),
+        "semantic_predicates": ("liquidity.scope_is_not_direction", ),
+        "scenarios": (REAFFIRMED_LIFE, SESSION_BOUNDARY),
+        "consumers": [{"name": "ai_brain.brain_prompt",
+                       "believes": "what liquidity event actually occurred",
+                       "influence": BRAIN_NARRATIVE}],
+    },
+    {
+        "fact_id": "liquidity_event.timeframe",
+        "producer_owner": "market_data.sweep_occurrence",
+        "representation": "liquidity_events.events[].timeframe",
+        "semantic_claim":
+            "The timeframe whose settled series proved this sweep. Part of the  "
+            "occurrence identity: the detector runs PER TIMEFRAME, so a 1m and  "
+            "a 3m sweep sharing an instant, side and level are different  "
+            "events -- and without this field the causal join would refuse  "
+            "both as ambiguous. ",
+        "authority_class": CERTIFIED,
+        "decision_influence": (BRAIN_NARRATIVE,),
+        "persistence": RAM_ONLY,
+        "lifecycle": {
+            "formation": "minted with the occurrence, from a sweep production "
+                         "evidence law actually proved",
+            "mutation": "NONE",
+            "invalidation": "n/a -- a historical event does not un-happen",
+        },
+        "temporal": {"formation_time": "the sweep event instant",
+                     "observation_time": "the scan that minted it"},
+        "restart": "reconstructed from the durable occurrence",
+        "late_start": "absent when the event was not witnessed; never inferred",
+        "limitations": ("Names the proving series, not a hierarchy of importance ",),
+        "certification_tests": (
+            f"{T_LS}::TestDetectorScope",
+        ),
+        "semantic_predicates": ("liquidity.scope_names_its_authority", ),
+        "scenarios": (REAFFIRMED_LIFE, SESSION_BOUNDARY),
+        "consumers": [{"name": "ai_brain.brain_prompt",
+                       "believes": "what liquidity event actually occurred",
+                       "influence": BRAIN_NARRATIVE}],
+    },
+    {
+        "fact_id": "liquidity_link.occurrence_id",
+        "producer_owner": "ai_brain.brain_input",
+        "representation": "protected_swings.caused_by",
+        "semantic_claim":
+            "WHICH liquidity occurrence caused a protected swing, as a  "
+            "REFERENCE AND NOT A COPY. The occurrence remains the single owner  "
+            "of side, scope, rejection and event-time provenance, so the swing  "
+            "record cannot drift out of agreement with the event that created  "
+            "it. Linkage certainty is PROVEN/UNPROVEN, which is about IDENTITY  "
+            "and is not the internal/external/unknown scope vocabulary. An  "
+            "unprovable link is OMITTED rather than published as a doubtful  "
+            "one. The certified join is event_time + side + swept_level +  "
+            "timeframe -- the strongest identity common to both the component  "
+            "and the occurrence. Member-level provenance is NOT common to both  "
+            "representations (1m publishes no member list) and is therefore  "
+            "not part of the join; if stronger common provenance is introduced  "
+            "later, this contract must be reconsidered. ",
+        "authority_class": CERTIFIED,
+        "decision_influence": (BRAIN_NARRATIVE,),
+        "persistence": RAM_ONLY,
+        "lifecycle": {
+            "formation": "minted with the occurrence, from a sweep production "
+                         "evidence law actually proved",
+            "mutation": "NONE",
+            "invalidation": "n/a -- a historical event does not un-happen",
+        },
+        "temporal": {"formation_time": "the sweep event instant",
+                     "observation_time": "the scan that minted it"},
+        "restart": "reconstructed from the durable occurrence",
+        "late_start": "absent when the event was not witnessed; never inferred",
+        "limitations": ("Present only when EXACTLY ONE occurrence satisfies the  "
+            "complete exact key; zero or several both yield no link ",),
+        "certification_tests": (
+            f"{T_LS}::TestScopeRequiresAProvenOccurrence",
+        ),
+        "semantic_predicates": ("liquidity.scope_requires_a_proven_occurrence", ),
+        "scenarios": (REAFFIRMED_LIFE, SESSION_BOUNDARY),
+        "consumers": [{"name": "ai_brain.brain_prompt",
+                       "believes": "what liquidity event actually occurred",
+                       "influence": BRAIN_NARRATIVE}],
+    },
+    {
+        "fact_id": "liquidity_scope.detector_scope",
+        "producer_owner": "market_data.liquidity_scope",
+        "representation": "liquidity_events.events[].detector_scope",
+        "semantic_claim":
+            "Where the swept level sat relative to the MANIPULATION PIVOT CONTEXT "
+            "at the instant of the sweep: `internal`, `external`, or `unknown`. "
+            "A buy-side sweep is judged against the outermost swing HIGH and a "
+            "sell-side sweep against the outermost LOW. "
+            "FOUR STATES THAT ARE NOT INTERCHANGEABLE: internal and external "
+            "are classifications; `unknown` means a PROVEN occurrence whose "
+            "scope authority was unavailable; and ABSENCE of the whole event "
+            "means no production-authoritative sweep existed at all. "
+            "IT IS NOT A DIRECTION. external + sell_side + reclaimed are three "
+            "facts, not a signal.",
+        "authority_class": CERTIFIED,
+        "decision_influence": (BRAIN_NARRATIVE,),
+        "persistence": RAM_ONLY,
+        "lifecycle": {
+            "formation": "stamped once, when the sweep occurrence is minted",
+            "mutation": "NONE. Later scans mint NEW occurrences; they never "
+                        "restate an existing one",
+            "invalidation": "n/a -- a historical event does not stop having "
+                            "happened",
+        },
+        "temporal": {"formation_time": "the sweep event instant",
+                     "observation_time": "the scan that minted the occurrence"},
+        "restart": "reconstructed from the durable occurrence, which carries "
+                   "its own event-time reference; never recomputed against a "
+                   "later context",
+        "late_start": "a process that did not witness the event has no "
+                      "occurrence for it, and therefore no scope -- absent, "
+                      "never guessed",
+        "limitations": (
+            "Says nothing about magnitude, intent or what follows. A rolling pivot "
+            "context has no identity across scans, so this claim is meaningful "
+            "only together with its event-time reference.",
+        ),
+        "certification_tests": (
+            f"{T_LS}::TestDetectorScope",
+            f"{T_LS}::TestEventTimeImmutability",
+        ),
+        "semantic_predicates": ("liquidity.scope_is_event_time_immutable", "liquidity.scope_is_not_direction", ),
+        "scenarios": (REAFFIRMED_LIFE, SESSION_BOUNDARY),
+        "consumers": [
+            {"name": "ai_brain.brain_prompt",
+             "believes": "what liquidity was taken, and relative to which named "
+                         "authority, at the moment it happened",
+             "influence": BRAIN_NARRATIVE},
+        ],
+    },
+    {
+        "fact_id": "liquidity_scope.detector_reference",
+        "producer_owner": "market_data.liquidity_scope",
+        "representation": "liquidity_events.events[].detector_scope_relative_to",
+        "semantic_claim":
+            "WHICH AUTHORITY the detector scope was judged against, as a constant: "
+            "`MANIPULATION_PIVOT_CONTEXT`. Published because \"external\" is "
+            "meaningless without \"external to what\", and this unit exists "
+            "because the organism published the word and withheld the "
+            "reference. The boundaries themselves travel as "
+            "detector_outer_high / detector_outer_low.",
+        "authority_class": CERTIFIED,
+        "decision_influence": (BRAIN_NARRATIVE,),
+        "persistence": RAM_ONLY,
+        "lifecycle": {
+            "formation": "stamped once, when the sweep occurrence is minted",
+            "mutation": "NONE. Later scans mint NEW occurrences; they never "
+                        "restate an existing one",
+            "invalidation": "n/a -- a historical event does not stop having "
+                            "happened",
+        },
+        "temporal": {"formation_time": "the sweep event instant",
+                     "observation_time": "the scan that minted the occurrence"},
+        "restart": "reconstructed from the durable occurrence, which carries "
+                   "its own event-time reference; never recomputed against a "
+                   "later context",
+        "late_start": "a process that did not witness the event has no "
+                      "occurrence for it, and therefore no scope -- absent, "
+                      "never guessed",
+        "limitations": (
+            "Names the authority, not its quality. A pivot context is a rolling "
+            "window, not a structural range.",
+        ),
+        "certification_tests": (
+            f"{T_LS}::TestEventTimeImmutability",
+        ),
+        "semantic_predicates": ("liquidity.scope_names_its_authority", ),
+        "scenarios": (REAFFIRMED_LIFE, SESSION_BOUNDARY),
+        "consumers": [
+            {"name": "ai_brain.brain_prompt",
+             "believes": "what liquidity was taken, and relative to which named "
+                         "authority, at the moment it happened",
+             "influence": BRAIN_NARRATIVE},
+        ],
+    },
+    {
+        "fact_id": "liquidity_scope.detector_boundaries",
+        "producer_owner": "market_data.liquidity_scope",
+        "representation": "liquidity_events.events[].detector_outer_high",
+        "semantic_claim":
+            "The outermost swing HIGH of the pivot context as it stood at the "
+            "event, published with detector_outer_low so the scope claim is "
+            "falsifiable rather than asserted. Null when no pivot high was "
+            "available, in which case a buy-side scope reads `unknown`.",
+        "authority_class": CERTIFIED,
+        "decision_influence": (BRAIN_NARRATIVE,),
+        "persistence": RAM_ONLY,
+        "lifecycle": {
+            "formation": "stamped once, when the sweep occurrence is minted",
+            "mutation": "NONE. Later scans mint NEW occurrences; they never "
+                        "restate an existing one",
+            "invalidation": "n/a -- a historical event does not stop having "
+                            "happened",
+        },
+        "temporal": {"formation_time": "the sweep event instant",
+                     "observation_time": "the scan that minted the occurrence"},
+        "restart": "reconstructed from the durable occurrence, which carries "
+                   "its own event-time reference; never recomputed against a "
+                   "later context",
+        "late_start": "a process that did not witness the event has no "
+                      "occurrence for it, and therefore no scope -- absent, "
+                      "never guessed",
+        "limitations": (
+            "A boundary at event time only. It does not describe the market now.",
+        ),
+        "certification_tests": (
+            f"{T_LS}::TestEventTimeImmutability",
+        ),
+        "semantic_predicates": ("liquidity.scope_is_event_time_immutable", ),
+        "scenarios": (REAFFIRMED_LIFE, SESSION_BOUNDARY),
+        "consumers": [
+            {"name": "ai_brain.brain_prompt",
+             "believes": "what liquidity was taken, and relative to which named "
+                         "authority, at the moment it happened",
+             "influence": BRAIN_NARRATIVE},
+        ],
+    },
+    {
+        "fact_id": "liquidity_scope.detector_boundary_low",
+        "producer_owner": "market_data.liquidity_scope",
+        "representation": "liquidity_events.events[].detector_outer_low",
+        "semantic_claim":
+            "The low-side counterpart of detector_outer_high.",
+        "authority_class": CERTIFIED,
+        "decision_influence": (BRAIN_NARRATIVE,),
+        "persistence": RAM_ONLY,
+        "lifecycle": {
+            "formation": "stamped once, when the sweep occurrence is minted",
+            "mutation": "NONE. Later scans mint NEW occurrences; they never "
+                        "restate an existing one",
+            "invalidation": "n/a -- a historical event does not stop having "
+                            "happened",
+        },
+        "temporal": {"formation_time": "the sweep event instant",
+                     "observation_time": "the scan that minted the occurrence"},
+        "restart": "reconstructed from the durable occurrence, which carries "
+                   "its own event-time reference; never recomputed against a "
+                   "later context",
+        "late_start": "a process that did not witness the event has no "
+                      "occurrence for it, and therefore no scope -- absent, "
+                      "never guessed",
+        "limitations": (
+            "A boundary at event time only.",
+        ),
+        "certification_tests": (
+            f"{T_LS}::TestEventTimeImmutability",
+        ),
+        "semantic_predicates": ("liquidity.scope_is_event_time_immutable", ),
+        "scenarios": (REAFFIRMED_LIFE, SESSION_BOUNDARY),
+        "consumers": [
+            {"name": "ai_brain.brain_prompt",
+             "believes": "what liquidity was taken, and relative to which named "
+                         "authority, at the moment it happened",
+             "influence": BRAIN_NARRATIVE},
+        ],
+    },
+    {
+        "fact_id": "liquidity_scope.po3_scope",
+        "producer_owner": "market_data.liquidity_scope",
+        "representation": "liquidity_events.events[].po3_scope",
+        "semantic_claim":
+            "Where the swept level sat relative to the SESSION PO3 ACCUMULATION "
+            "RANGE that was ESTABLISHED BEFORE the event: `internal`, "
+            "`external`, or `unknown`. "
+            "`unknown` is the honest answer when no established range existed "
+            "yet, and a range that forms LATER never relabels an earlier "
+            "event. Measured 2026-09-01: the 09:39 sweep is `unknown` because "
+            "the accumulation range was born at 13:45Z, six minutes after. "
+            "IT MAY DISAGREE WITH detector_scope, legitimately: a level can "
+            "sit inside a wide pivot context and outside a tighter "
+            "established range. Both are published; neither overrides.",
+        "authority_class": CERTIFIED,
+        "decision_influence": (BRAIN_NARRATIVE,),
+        "persistence": RAM_ONLY,
+        "lifecycle": {
+            "formation": "stamped once, when the sweep occurrence is minted",
+            "mutation": "NONE. Later scans mint NEW occurrences; they never "
+                        "restate an existing one",
+            "invalidation": "n/a -- a historical event does not stop having "
+                            "happened",
+        },
+        "temporal": {"formation_time": "the sweep event instant",
+                     "observation_time": "the scan that minted the occurrence"},
+        "restart": "reconstructed from the durable occurrence, which carries "
+                   "its own event-time reference; never recomputed against a "
+                   "later context",
+        "late_start": "a process that did not witness the event has no "
+                      "occurrence for it, and therefore no scope -- absent, "
+                      "never guessed",
+        "limitations": (
+            "Requires an ESTABLISHED range. A forming range has not earned the "
+            "authority to say what is outside it, so it yields `unknown` "
+            "rather than a provisional classification.",
+        ),
+        "certification_tests": (
+            f"{T_LS}::TestPo3Scope",
+            f"{T_LS}::TestTodayIsRepresentationOnly",
+        ),
+        "semantic_predicates": ("liquidity.po3_scope_needs_a_prior_range", "liquidity.scope_is_not_direction", ),
+        "scenarios": (REAFFIRMED_LIFE, SESSION_BOUNDARY),
+        "consumers": [
+            {"name": "ai_brain.brain_prompt",
+             "believes": "what liquidity was taken, and relative to which named "
+                         "authority, at the moment it happened",
+             "influence": BRAIN_NARRATIVE},
+        ],
+    },
+    {
+        "fact_id": "liquidity_scope.po3_reference",
+        "producer_owner": "market_data.liquidity_scope",
+        "representation": "liquidity_events.events[].po3_scope_relative_to",
+        "semantic_claim":
+            "WHICH AUTHORITY the session scope was judged against, as a constant: "
+            "`SESSION_PO3_ACCUMULATION_RANGE`. Null when no established range "
+            "existed.",
+        "authority_class": CERTIFIED,
+        "decision_influence": (BRAIN_NARRATIVE,),
+        "persistence": RAM_ONLY,
+        "lifecycle": {
+            "formation": "stamped once, when the sweep occurrence is minted",
+            "mutation": "NONE. Later scans mint NEW occurrences; they never "
+                        "restate an existing one",
+            "invalidation": "n/a -- a historical event does not stop having "
+                            "happened",
+        },
+        "temporal": {"formation_time": "the sweep event instant",
+                     "observation_time": "the scan that minted the occurrence"},
+        "restart": "reconstructed from the durable occurrence, which carries "
+                   "its own event-time reference; never recomputed against a "
+                   "later context",
+        "late_start": "a process that did not witness the event has no "
+                      "occurrence for it, and therefore no scope -- absent, "
+                      "never guessed",
+        "limitations": (
+            "Names the authority, not its quality.",
+        ),
+        "certification_tests": (
+            f"{T_LS}::TestPo3Scope",
+        ),
+        "semantic_predicates": ("liquidity.scope_names_its_authority", ),
+        "scenarios": (REAFFIRMED_LIFE, SESSION_BOUNDARY),
+        "consumers": [
+            {"name": "ai_brain.brain_prompt",
+             "believes": "what liquidity was taken, and relative to which named "
+                         "authority, at the moment it happened",
+             "influence": BRAIN_NARRATIVE},
+        ],
+    },
+    {
+        "fact_id": "liquidity_scope.po3_range_id",
+        "producer_owner": "market_data.liquidity_scope",
+        "representation": "liquidity_events.events[].po3_range_id",
+        "semantic_claim":
+            "Stable identity of the CAUSAL accumulation range, unchanged across "
+            "legitimate boundary extensions. Derived from session and birth, "
+            "which do not move when the range extends. Lets the Brain tell "
+            "\"the same range, later extended\" from \"a different range\". "
+            "The exact-version snapshot identifiers are deliberately NOT "
+            "published: they are opaque audit ids, and every fact they "
+            "certify already travels as structured boundaries above. They "
+            "remain on the immutable occurrence for forensic verification.",
+        "authority_class": CERTIFIED,
+        "decision_influence": (BRAIN_NARRATIVE,),
+        "persistence": RAM_ONLY,
+        "lifecycle": {
+            "formation": "stamped once, when the sweep occurrence is minted",
+            "mutation": "NONE. Later scans mint NEW occurrences; they never "
+                        "restate an existing one",
+            "invalidation": "n/a -- a historical event does not stop having "
+                            "happened",
+        },
+        "temporal": {"formation_time": "the sweep event instant",
+                     "observation_time": "the scan that minted the occurrence"},
+        "restart": "reconstructed from the durable occurrence, which carries "
+                   "its own event-time reference; never recomputed against a "
+                   "later context",
+        "late_start": "a process that did not witness the event has no "
+                      "occurrence for it, and therefore no scope -- absent, "
+                      "never guessed",
+        "limitations": (
+            "Comparable for identity only; it carries no boundaries of its own.",
+        ),
+        "certification_tests": (
+            f"{T_LS}::TestRangeIdentityVersusSnapshot",
+        ),
+        "semantic_predicates": ("liquidity.range_id_survives_extension", ),
+        "scenarios": (REAFFIRMED_LIFE, SESSION_BOUNDARY),
+        "consumers": [
+            {"name": "ai_brain.brain_prompt",
+             "believes": "what liquidity was taken, and relative to which named "
+                         "authority, at the moment it happened",
+             "influence": BRAIN_NARRATIVE},
+        ],
+    },
+    {
+        "fact_id": "liquidity_scope.po3_boundaries",
+        "producer_owner": "market_data.liquidity_scope",
+        "representation": "liquidity_events.events[].po3_range_high",
+        "semantic_claim":
+            "The accumulation-range HIGH as it stood at the event, published with "
+            "po3_range_low so the session scope claim is falsifiable.",
+        "authority_class": CERTIFIED,
+        "decision_influence": (BRAIN_NARRATIVE,),
+        "persistence": RAM_ONLY,
+        "lifecycle": {
+            "formation": "stamped once, when the sweep occurrence is minted",
+            "mutation": "NONE. Later scans mint NEW occurrences; they never "
+                        "restate an existing one",
+            "invalidation": "n/a -- a historical event does not stop having "
+                            "happened",
+        },
+        "temporal": {"formation_time": "the sweep event instant",
+                     "observation_time": "the scan that minted the occurrence"},
+        "restart": "reconstructed from the durable occurrence, which carries "
+                   "its own event-time reference; never recomputed against a "
+                   "later context",
+        "late_start": "a process that did not witness the event has no "
+                      "occurrence for it, and therefore no scope -- absent, "
+                      "never guessed",
+        "limitations": (
+            "Event-time boundaries. The range may have extended since.",
+        ),
+        "certification_tests": (
+            f"{T_LS}::TestRangeIdentityVersusSnapshot",
+        ),
+        "semantic_predicates": ("liquidity.range_id_survives_extension", ),
+        "scenarios": (REAFFIRMED_LIFE, SESSION_BOUNDARY),
+        "consumers": [
+            {"name": "ai_brain.brain_prompt",
+             "believes": "what liquidity was taken, and relative to which named "
+                         "authority, at the moment it happened",
+             "influence": BRAIN_NARRATIVE},
+        ],
+    },
+    {
+        "fact_id": "liquidity_scope.po3_boundary_low",
+        "producer_owner": "market_data.liquidity_scope",
+        "representation": "liquidity_events.events[].po3_range_low",
+        "semantic_claim":
+            "The low-side counterpart of po3_range_high.",
+        "authority_class": CERTIFIED,
+        "decision_influence": (BRAIN_NARRATIVE,),
+        "persistence": RAM_ONLY,
+        "lifecycle": {
+            "formation": "stamped once, when the sweep occurrence is minted",
+            "mutation": "NONE. Later scans mint NEW occurrences; they never "
+                        "restate an existing one",
+            "invalidation": "n/a -- a historical event does not stop having "
+                            "happened",
+        },
+        "temporal": {"formation_time": "the sweep event instant",
+                     "observation_time": "the scan that minted the occurrence"},
+        "restart": "reconstructed from the durable occurrence, which carries "
+                   "its own event-time reference; never recomputed against a "
+                   "later context",
+        "late_start": "a process that did not witness the event has no "
+                      "occurrence for it, and therefore no scope -- absent, "
+                      "never guessed",
+        "limitations": (
+            "Event-time boundaries.",
+        ),
+        "certification_tests": (
+            f"{T_LS}::TestRangeIdentityVersusSnapshot",
+        ),
+        "semantic_predicates": ("liquidity.range_id_survives_extension", ),
+        "scenarios": (REAFFIRMED_LIFE, SESSION_BOUNDARY),
+        "consumers": [
+            {"name": "ai_brain.brain_prompt",
+             "believes": "what liquidity was taken, and relative to which named "
+                         "authority, at the moment it happened",
+             "influence": BRAIN_NARRATIVE},
+        ],
+    },
+    {
+        "fact_id": "liquidity_scope.scope_reason",
+        "producer_owner": "market_data.liquidity_scope",
+        "representation": "liquidity_events.events[].scope_reason",
+        "semantic_claim":
+            "WHY a proven occurrence has an unresolved scope, e.g. \"no "
+            "established session accumulation range at event time; po3 scope "
+            "is unavailable, not internal\". Explanatory, and deliberately "
+            "distinct from the structured states: it exists so `unknown` says "
+            "what was missing instead of being opaque.",
+        "authority_class": ADVISORY,
+        "decision_influence": (BRAIN_NARRATIVE,),
+        "persistence": RAM_ONLY,
+        "lifecycle": {
+            "formation": "stamped once, when the sweep occurrence is minted",
+            "mutation": "NONE. Later scans mint NEW occurrences; they never "
+                        "restate an existing one",
+            "invalidation": "n/a -- a historical event does not stop having "
+                            "happened",
+        },
+        "temporal": {"formation_time": "the sweep event instant",
+                     "observation_time": "the scan that minted the occurrence"},
+        "restart": "reconstructed from the durable occurrence, which carries "
+                   "its own event-time reference; never recomputed against a "
+                   "later context",
+        "late_start": "a process that did not witness the event has no "
+                      "occurrence for it, and therefore no scope -- absent, "
+                      "never guessed",
+        "limitations": (
+            "Prose. It explains a structured state and must never be parsed as one.",
+        ),
+        "certification_tests": (
+            f"{T_LS}::TestPo3Scope",
+        ),
+        "semantic_predicates": ("liquidity.prose_asserts_nothing", ),
+        "scenarios": (REAFFIRMED_LIFE, SESSION_BOUNDARY),
+        "consumers": [
+            {"name": "ai_brain.brain_prompt",
+             "believes": "what liquidity was taken, and relative to which named "
+                         "authority, at the moment it happened",
+             "influence": BRAIN_NARRATIVE},
+        ],
+    },
+]
+
 _PROTECTED_SWINGS = [
+    # ── ORDINAL SUCCESSION ──────────────────────────────────────────────────
+    # LUNA-SWING-SEQUENCE-TRUTH-1 (2026-09-01). Contracted because the facts
+    # below are NEW Brain-visible paths, and an uncontracted payload path fails
+    # this gate closed -- correctly. Measured live 2026-09-01: the registry
+    # walked highs 29157.75 -> 29163.25 -> 29173 -> 29179 and lows
+    # 29040 -> 29085 -> 29116 -> 29135.75 while the Brain was told
+    # `swing_sequence: unknown` and read each swing as an isolated rejection.
+    {
+        "fact_id": "protected_swing.lineage_step",
+        "producer_owner": "narrative_authority.protected_swings.ProtectedSwingTracker",
+        "representation": "protected_swings.lineage.{side}s.{tf}[i] (tracker state; NOT published to the Brain -- the curated ordinal_sequence carries what it needs)",
+        "semantic_claim":
+            "One SUCCESSION between two consecutive confirmed protected-swing "
+            "lives on one timeframe and side: the price and formation time of "
+            "the life that ended, the price and formation time of the life that "
+            "replaced it, and the ordinal relationship between them "
+            "(higher_high / lower_high / equal_high, or the low equivalents). "
+            "It is a fact about a RELATIONSHIP, not about either endpoint, "
+            "which is why it does not live on the swing record. The list is "
+            "CHRONOLOGICAL, oldest first, and bounded to the most recent 32 "
+            "lives per slot. `ordinal` is null for the first life on a slot, "
+            "because a first swing succeeds nothing.",
+        "authority_class": CERTIFIED,
+        "decision_influence": (BRAIN_NARRATIVE,),
+        "persistence": RAM_ONLY,
+        "lifecycle": {
+            "formation": "appended when a genuinely DIFFERENT level takes an "
+                         "occupied slot (succession), or on the first "
+                         "registration into an empty slot",
+            "mutation": "NONE. Re-affirmation of a live level appends nothing "
+                        "and alters nothing -- reaffirmation changes nothing, "
+                        "succession creates lineage",
+            "invalidation": "entries age out only via the 32-life bound; a "
+                            "violation ends a LIFE, not its succession record",
+        },
+        "temporal": {"formation_time": "current_registered_at",
+                     "observation_time": "the scan timestamp, carried on the "
+                                         "occurrence, never here"},
+        "restart": "RAM-only. A fresh process rebuilds lineage as new "
+                   "successions are confirmed; it does not back-fill history it "
+                   "did not witness, and reports INSUFFICIENT until two "
+                   "confirmed lives exist on a side",
+        "late_start": "a late process has a SHORTER lineage, never a wrong one; "
+                      "the canonical sequence degrades to INSUFFICIENT rather "
+                      "than inventing a relationship",
+        "consumers": [
+            {"name": "narrative_authority.swing_structure",
+             "believes": "the ordered confirmed swings from which the canonical "
+                         "ordinal sequence is derived",
+             "influence": BRAIN_NARRATIVE},
+            {"name": "ai_brain.brain_input",
+             "believes": "what confirmed structure actually did, published "
+                         "beside the causal `basis` rather than instead of it",
+             "influence": BRAIN_NARRATIVE},
+        ],
+        "limitations": (
+            "Says nothing about WHY structure advanced, only that it did. A succession is not displacement, not delivery and not permission.",
+        ),
+        "certification_tests": (
+            f"{T_SS}::TestBothDimensionsSurvive",
+        ),
+        "semantic_predicates": ("swing.ordinals_are_derived",),
+        "scenarios": (REAFFIRMED_LIFE, SESSION_BOUNDARY),
+    },
+    {
+        "fact_id": "protected_swing.ordered_confirmed_levels",
+        "producer_owner": "narrative_authority.swing_structure.canonical_sequence",
+        "representation": "protected_swings.ordinal_sequence.highs",
+        "semantic_claim":
+            "The confirmed swing-high prices the sequence was derived from, "
+            "CHRONOLOGICAL, oldest first, read from one timeframe's lineage. "
+            "Published with `lows` so the Brain can see the actual ladder "
+            "rather than only its summary verdict. Prices, not levels to trade.",
+        "authority_class": CERTIFIED,
+        "decision_influence": (BRAIN_NARRATIVE,),
+        "persistence": RAM_ONLY,
+        "lifecycle": {"formation": "read from the lineage each scan",
+                      "mutation": "extends on succession; bounded at 32",
+                      "invalidation": "empty when no lineage exists"},
+        "temporal": {"formation_time": "derived", "observation_time": "the scan"},
+        "restart": "RAM-only; a fresh process sees only witnessed successions",
+        "late_start": "a shorter ladder, never a wrong one",
+        "consumers": [{"name": "ai_brain.brain_prompt",
+                       "believes": "the ordered confirmed highs behind the "
+                                   "sequence", "influence": BRAIN_NARRATIVE}],
+        "limitations": (
+            "Historical confirmed prices, not live levels and not objectives.",
+        ),
+        "certification_tests": (
+            f"{T_SS}::TestBrainPublication",
+        ),
+        "semantic_predicates": ("swing.ordinals_are_derived",),
+        "scenarios": (REAFFIRMED_LIFE, SESSION_BOUNDARY),
+    },
+    {
+        "fact_id": "protected_swing.ordered_confirmed_lows",
+        "producer_owner": "narrative_authority.swing_structure.canonical_sequence",
+        "representation": "protected_swings.ordinal_sequence.lows",
+        "semantic_claim":
+            "The low-side counterpart of `highs`: confirmed swing-low prices, "
+            "chronological, oldest first.",
+        "authority_class": CERTIFIED,
+        "decision_influence": (BRAIN_NARRATIVE,),
+        "persistence": RAM_ONLY,
+        "lifecycle": {"formation": "read from the lineage each scan",
+                      "mutation": "extends on succession; bounded at 32",
+                      "invalidation": "empty when no lineage exists"},
+        "temporal": {"formation_time": "derived", "observation_time": "the scan"},
+        "restart": "RAM-only; a fresh process sees only witnessed successions",
+        "late_start": "a shorter ladder, never a wrong one",
+        "consumers": [{"name": "ai_brain.brain_prompt",
+                       "believes": "the ordered confirmed lows behind the "
+                                   "sequence", "influence": BRAIN_NARRATIVE}],
+        "limitations": (
+            "Historical confirmed prices, not live levels and not objectives.",
+        ),
+        "certification_tests": (
+            f"{T_SS}::TestBrainPublication",
+        ),
+        "semantic_predicates": ("swing.ordinals_are_derived",),
+        "scenarios": (REAFFIRMED_LIFE, SESSION_BOUNDARY),
+    },
+    {
+        "fact_id": "protected_swing.high_ordinals",
+        "producer_owner": "narrative_authority.swing_structure.canonical_sequence",
+        "representation": "protected_swings.ordinal_sequence.high_ordinals",
+        "semantic_claim":
+            "The ordinal relationship BETWEEN each consecutive pair of confirmed "
+            "highs: `higher_high`, `lower_high` or `equal_high`. There is one "
+            "fewer entry than there are highs, because a relationship needs two "
+            "endpoints. Derived from the prices each scan rather than trusted "
+            "from a stored field, so any assembly route yields the same answer.",
+        "authority_class": CERTIFIED,
+        "decision_influence": (BRAIN_NARRATIVE,),
+        "persistence": RAM_ONLY,
+        "lifecycle": {"formation": "derived from the ordered highs",
+                      "mutation": "extends with the ladder",
+                      "invalidation": "empty when fewer than two highs exist"},
+        "temporal": {"formation_time": "derived", "observation_time": "the scan"},
+        "restart": "deterministic for a given ladder",
+        "late_start": "fewer relationships, never invented ones",
+        "consumers": [{"name": "ai_brain.brain_prompt",
+                       "believes": "how each confirmed high related to the one "
+                                   "before it", "influence": BRAIN_NARRATIVE}],
+        "limitations": (
+            "Relationships only; carries no timing, no magnitude and no strength.",
+        ),
+        "certification_tests": (
+            f"{T_SS}::TestCanonicalSequence",
+        ),
+        "semantic_predicates": ("swing.ordinals_are_derived",),
+        "scenarios": (REAFFIRMED_LIFE, SESSION_BOUNDARY),
+    },
+    {
+        "fact_id": "protected_swing.low_ordinals",
+        "producer_owner": "narrative_authority.swing_structure.canonical_sequence",
+        "representation": "protected_swings.ordinal_sequence.low_ordinals",
+        "semantic_claim":
+            "The low-side counterpart of `high_ordinals`: `higher_low`, "
+            "`lower_low` or `equal_low` between consecutive confirmed lows.",
+        "authority_class": CERTIFIED,
+        "decision_influence": (BRAIN_NARRATIVE,),
+        "persistence": RAM_ONLY,
+        "lifecycle": {"formation": "derived from the ordered lows",
+                      "mutation": "extends with the ladder",
+                      "invalidation": "empty when fewer than two lows exist"},
+        "temporal": {"formation_time": "derived", "observation_time": "the scan"},
+        "restart": "deterministic for a given ladder",
+        "late_start": "fewer relationships, never invented ones",
+        "consumers": [{"name": "ai_brain.brain_prompt",
+                       "believes": "how each confirmed low related to the one "
+                                   "before it", "influence": BRAIN_NARRATIVE}],
+        "limitations": (
+            "Relationships only; carries no timing, no magnitude and no strength.",
+        ),
+        "certification_tests": (
+            f"{T_SS}::TestCanonicalSequence",
+        ),
+        "semantic_predicates": ("swing.ordinals_are_derived",),
+        "scenarios": (REAFFIRMED_LIFE, SESSION_BOUNDARY),
+    },
+    {
+        "fact_id": "protected_swing.witness_sequence",
+        "producer_owner": "regime_classification.regime_features",
+        "representation": "protected_swings.ordinal_sequence.windowed_witness.sequence",
+        "semantic_claim":
+            "The windowed pivot witness's own verdict, in ITS vocabulary: "
+            "`higher_highs_higher_lows`, `lower_highs_lower_lows`, "
+            "`mixed_bullish_lean`, `mixed_bearish_lean`, `balanced` or "
+            "`unknown`. Deliberately NOT translated into the canonical "
+            "vocabulary, so the Brain cannot mistake a windowed opinion for the "
+            "confirmed registry's answer.",
+        "authority_class": ADVISORY,
+        "decision_influence": (BRAIN_NARRATIVE,),
+        "persistence": RAM_ONLY,
+        "lifecycle": {"formation": "computed from settled candle pivots",
+                      "mutation": "recomputed each scan",
+                      "invalidation": "`unknown` when no timeframe was sufficient"},
+        "temporal": {"formation_time": "derived", "observation_time": "the scan"},
+        "restart": "deterministic for a given settled series",
+        "late_start": "may be `unknown` with few settled bars",
+        "consumers": [{"name": "ai_brain.brain_prompt",
+                       "believes": "a subordinate second opinion on structure",
+                       "influence": BRAIN_NARRATIVE}],
+        "limitations": (
+            "Windowed opinion in its own vocabulary; never authoritative.",
+        ),
+        "certification_tests": (
+            f"{T_SS}::TestSettledEvidenceOwnsTheWindowedWitness",
+        ),
+        "semantic_predicates": ("swing.witness_is_settled_and_single",),
+        "scenarios": (REAFFIRMED_LIFE, SESSION_BOUNDARY),
+    },
+    {
+        "fact_id": "protected_swing.witness_timeframe",
+        "producer_owner": "regime_classification.regime_features",
+        "representation": "protected_swings.ordinal_sequence.windowed_witness.source_timeframe",
+        "semantic_claim":
+            "WHICH single settled timeframe produced the windowed witness "
+            "(`15m`, `5m`, `3m`, or null when none was sufficient). Selection "
+            "is by mechanical pivot sufficiency only -- never by desired "
+            "direction -- and exactly one timeframe is chosen, so the witness "
+            "is never a mixed-timeframe pivot set.",
+        "authority_class": ADVISORY,
+        "decision_influence": (BRAIN_NARRATIVE,),
+        "persistence": RAM_ONLY,
+        "lifecycle": {"formation": "the first candidate with sufficient pivots",
+                      "mutation": "may change scan to scan as evidence changes",
+                      "invalidation": "null when no candidate was sufficient"},
+        "temporal": {"formation_time": "derived", "observation_time": "the scan"},
+        "restart": "deterministic for a given settled series",
+        "late_start": "may fall to a faster timeframe with less history",
+        "consumers": [{"name": "ai_brain.brain_prompt",
+                       "believes": "which window the second opinion came from",
+                       "influence": BRAIN_NARRATIVE}],
+        "limitations": (
+            "Names the window, not its reliability.",
+        ),
+        "certification_tests": (
+            f"{T_SS}::TestSettledEvidenceOwnsTheWindowedWitness",
+        ),
+        "semantic_predicates": ("swing.witness_is_settled_and_single",),
+        "scenarios": (REAFFIRMED_LIFE, SESSION_BOUNDARY),
+    },
+    {
+        "fact_id": "protected_swing.witness_detail",
+        "producer_owner": "regime_classification.regime_features",
+        "representation": "protected_swings.ordinal_sequence.windowed_witness.detail",
+        "semantic_claim":
+            "Human-readable explanation of the windowed witness, e.g. "
+            "'HH=3 LH=1 HL=2 LL=0 over 60 candles' or "
+            "'only 0 swing highs / 0 swing lows in window'. Explanatory only.",
+        "authority_class": ADVISORY,
+        "decision_influence": (BRAIN_NARRATIVE,),
+        "persistence": RAM_ONLY,
+        "lifecycle": {"formation": "composed with the witness",
+                      "mutation": "tracks the witness",
+                      "invalidation": "n/a"},
+        "temporal": {"formation_time": "derived", "observation_time": "the scan"},
+        "restart": "deterministic for a given settled series",
+        "late_start": "unaffected",
+        "consumers": [{"name": "ai_brain.brain_prompt",
+                       "believes": "why the windowed witness says what it says",
+                       "influence": BRAIN_NARRATIVE}],
+        "limitations": (
+            "Prose. Explanatory only.",
+        ),
+        "certification_tests": (
+            f"{T_SS}::TestSettledEvidenceOwnsTheWindowedWitness",
+        ),
+        "semantic_predicates": ("swing.prose_asserts_nothing",),
+        "scenarios": (REAFFIRMED_LIFE, SESSION_BOUNDARY),
+    },
+    {
+        "fact_id": "protected_swing.witness_fallback_trace",
+        "producer_owner": "regime_classification.regime_features",
+        "representation": "protected_swings.ordinal_sequence.windowed_witness.fallback_trace",
+        "semantic_claim":
+            "Every timeframe CONSIDERED for the windowed witness with its pivot "
+            "counts, in the order tried, e.g. "
+            "['15m: 0 highs / 0 lows', '5m: 4 highs / 3 lows']. Published so "
+            "the selection is auditable and so a witness that found nothing "
+            "says WHERE it looked -- the defect this unit repaired was a "
+            "selection that silently never looked past 15m.",
+        "authority_class": ADVISORY,
+        "decision_influence": (BRAIN_NARRATIVE,),
+        "persistence": RAM_ONLY,
+        "lifecycle": {"formation": "appended per candidate considered",
+                      "mutation": "rebuilt each scan",
+                      "invalidation": "empty when no candidate series existed"},
+        "temporal": {"formation_time": "derived", "observation_time": "the scan"},
+        "restart": "deterministic for a given settled series",
+        "late_start": "unaffected",
+        "consumers": [{"name": "ai_brain.brain_prompt",
+                       "believes": "which windows were examined before the "
+                                   "witness was chosen",
+                       "influence": BRAIN_NARRATIVE}],
+        "limitations": (
+            "Records what was examined, not why a timeframe lacked pivots.",
+        ),
+        "certification_tests": (
+            f"{T_SS}::TestSettledEvidenceOwnsTheWindowedWitness",
+        ),
+        "semantic_predicates": ("swing.witness_is_settled_and_single",),
+        "scenarios": (REAFFIRMED_LIFE, SESSION_BOUNDARY),
+    },
+    {
+        "fact_id": "protected_swing.sequence_provenance",
+        "producer_owner": "narrative_authority.swing_structure.canonical_sequence",
+        "representation": "protected_swings.ordinal_sequence.authority",
+        "semantic_claim":
+            "WHICH MECHANISM AUTHORED the ordinal sequence, as a constant "
+            "string: `confirmed_swing_registry`. Published so the Brain can "
+            "tell canonical structure from the windowed pivot witness beside "
+            "it, rather than inferring authority from position in the payload.",
+        "authority_class": CERTIFIED,
+        "decision_influence": (BRAIN_NARRATIVE,),
+        "persistence": RAM_ONLY,
+        "lifecycle": {"formation": "constant for this producer",
+                      "mutation": "NONE",
+                      "invalidation": "n/a"},
+        "temporal": {"formation_time": "derived", "observation_time": "the scan"},
+        "restart": "constant across processes",
+        "late_start": "unaffected",
+        "consumers": [{"name": "ai_brain.brain_prompt",
+                       "believes": "which mechanism is authoritative for "
+                                   "ordinal structure",
+                       "influence": BRAIN_NARRATIVE}],
+        "limitations": (
+            "Names the author, not the quality of what was authored.",
+        ),
+        "certification_tests": (
+            f"{T_SS}::TestBrainPublication",
+        ),
+        "semantic_predicates": ("swing.registry_outranks_witness",),
+        "scenarios": (REAFFIRMED_LIFE, SESSION_BOUNDARY),
+    },
+    {
+        "fact_id": "protected_swing.confirmed_swing_counts",
+        "producer_owner": "narrative_authority.swing_structure.canonical_sequence",
+        "representation": "protected_swings.ordinal_sequence.confirmed_highs",
+        "semantic_claim":
+            "HOW MUCH CONFIRMED EVIDENCE the sequence rests on: the number of "
+            "confirmed swing lives read from the selected slot. Published "
+            "beside `confirmed_lows` so the Brain can weigh a sequence drawn "
+            "from two swings differently from one drawn from eight, and so "
+            "INSUFFICIENT is legible rather than opaque. A count, never a "
+            "strength score and never permission.",
+        "authority_class": CERTIFIED,
+        "decision_influence": (BRAIN_NARRATIVE,),
+        "persistence": RAM_ONLY,
+        "lifecycle": {"formation": "counted from the lineage each scan",
+                      "mutation": "grows as successions confirm; bounded at 32",
+                      "invalidation": "0 when no lineage exists"},
+        "temporal": {"formation_time": "derived", "observation_time": "the scan"},
+        "restart": "RAM-only; a fresh process counts only what it witnessed",
+        "late_start": "a late process reports a smaller count, never a wrong one",
+        "consumers": [{"name": "ai_brain.brain_prompt",
+                       "believes": "how many confirmed swings support the "
+                                   "sequence",
+                       "influence": BRAIN_NARRATIVE}],
+        "limitations": (
+            "A count is not conviction. Eight confirmed swings do not make a sequence tradable.",
+        ),
+        "certification_tests": (
+            f"{T_SS}::TestBrainPublication",
+        ),
+        "semantic_predicates": ("swing.insufficient_is_not_unknown",),
+        "scenarios": (REAFFIRMED_LIFE, SESSION_BOUNDARY),
+    },
+    {
+        "fact_id": "protected_swing.confirmed_low_count",
+        "producer_owner": "narrative_authority.swing_structure.canonical_sequence",
+        "representation": "protected_swings.ordinal_sequence.confirmed_lows",
+        "semantic_claim":
+            "The low-side counterpart of `confirmed_highs`: the number of "
+            "confirmed low lives the sequence rests on. Contracted separately "
+            "because the two sides can legitimately differ, and a sequence is "
+            "INSUFFICIENT when EITHER side is short.",
+        "authority_class": CERTIFIED,
+        "decision_influence": (BRAIN_NARRATIVE,),
+        "persistence": RAM_ONLY,
+        "lifecycle": {"formation": "counted from the lineage each scan",
+                      "mutation": "grows as successions confirm; bounded at 32",
+                      "invalidation": "0 when no lineage exists"},
+        "temporal": {"formation_time": "derived", "observation_time": "the scan"},
+        "restart": "RAM-only; a fresh process counts only what it witnessed",
+        "late_start": "a late process reports a smaller count, never a wrong one",
+        "consumers": [{"name": "ai_brain.brain_prompt",
+                       "believes": "how many confirmed lows support the sequence",
+                       "influence": BRAIN_NARRATIVE}],
+        "limitations": (
+            "A count is not conviction; see confirmed_highs.",
+        ),
+        "certification_tests": (
+            f"{T_SS}::TestBrainPublication",
+        ),
+        "semantic_predicates": ("swing.insufficient_is_not_unknown",),
+        "scenarios": (REAFFIRMED_LIFE, SESSION_BOUNDARY),
+    },
+    {
+        "fact_id": "protected_swing.sequence_detail",
+        "producer_owner": "narrative_authority.swing_structure.canonical_sequence",
+        "representation": "protected_swings.ordinal_sequence.detail",
+        "semantic_claim":
+            "A HUMAN-READABLE EXPLANATION of how the sequence was reached, e.g. "
+            "'highs rising (1m), lows rising (1m) over 4/4 confirmed swings', or "
+            "the reason it is INSUFFICIENT or UNKNOWN. Explanatory only: it "
+            "restates facts published structurally elsewhere and introduces no "
+            "claim of its own. It exists so an unresolved sequence says WHY.",
+        "authority_class": ADVISORY,
+        "decision_influence": (BRAIN_NARRATIVE,),
+        "persistence": RAM_ONLY,
+        "lifecycle": {"formation": "composed each scan from the same inputs",
+                      "mutation": "tracks the sequence it describes",
+                      "invalidation": "n/a"},
+        "temporal": {"formation_time": "derived", "observation_time": "the scan"},
+        "restart": "deterministic for a given lineage",
+        "late_start": "unaffected",
+        "consumers": [{"name": "ai_brain.brain_prompt",
+                       "believes": "why the sequence is what it is",
+                       "influence": BRAIN_NARRATIVE}],
+        "limitations": (
+            "Prose. It restates structured facts and must never be parsed as one.",
+        ),
+        "certification_tests": (
+            f"{T_SS}::TestCanonicalSequence",
+        ),
+        "semantic_predicates": ("swing.prose_asserts_nothing",),
+        "scenarios": (REAFFIRMED_LIFE, SESSION_BOUNDARY),
+    },
+    {
+        "fact_id": "protected_swing.ordinal_sequence",
+        "producer_owner": "narrative_authority.swing_structure.canonical_sequence",
+        "representation": "protected_swings.ordinal_sequence.sequence",
+        "semantic_claim":
+            "The canonical ordinal state of confirmed structure, derived ONLY "
+            "from the confirmed protected-swing registry: BULLISH_SEQUENCE "
+            "(highs rising and lows rising), BEARISH_SEQUENCE (both falling), "
+            "MIXED (any conflicting arrangement, including higher highs with "
+            "lower lows -- reported, never resolved into a lean), INSUFFICIENT "
+            "(the registry is readable but holds fewer than two confirmed "
+            "swings on a side), or UNKNOWN (no registry was supplied, or it "
+            "could not be read). INSUFFICIENT and UNKNOWN are DIFFERENT CLAIMS "
+            "and may not collapse: the first means the mechanism is early, the "
+            "second means it is unavailable. "
+            "IT IS STRUCTURE, NOT PERMISSION. A bullish sequence is not a buy "
+            "and authorizes nothing; PO3 phase, delivery, liquidity and "
+            "location remain independently authoritative.",
+        "authority_class": CERTIFIED,
+        "decision_influence": (BRAIN_NARRATIVE,),
+        "persistence": RAM_ONLY,
+        "lifecycle": {
+            "formation": "recomputed every scan from the current lineage",
+            "mutation": "changes only when the lineage it reads changes",
+            "invalidation": "an unreadable lineage yields UNKNOWN; it never "
+                            "falls back to a previous answer",
+        },
+        "temporal": {"formation_time": "derived, no independent birth time",
+                     "observation_time": "the scan that computed it"},
+        "restart": "deterministic for a given lineage: the same confirmed "
+                   "levels yield the same sequence in any process",
+        "late_start": "reports INSUFFICIENT until enough confirmed lives exist",
+        "consumers": [
+            {"name": "ai_brain.brain_prompt",
+             "believes": "what confirmed highs and lows have done relative to "
+                         "one another, as evidence to weigh -- not an instruction",
+             "influence": BRAIN_NARRATIVE},
+        ],
+        "limitations": (
+            "A sequence is not a direction to trade. It says what confirmed structure did, not what price will do next, and it is silent on location, PO3 phase and whether any entry is lawful.",
+        ),
+        "certification_tests": (
+            f"{T_SS}::TestCanonicalSequence",
+            f"{T_SS}::TestTodayIsRepresentationOnly",
+        ),
+        "semantic_predicates": ("swing.bullish_means_both_sides_rose",
+                                "swing.bearish_means_both_sides_fell",
+                                "swing.conflict_is_mixed",
+                                "swing.insufficient_is_not_unknown",
+                                "swing.structure_is_not_permission",),
+        "scenarios": (REAFFIRMED_LIFE, SESSION_BOUNDARY),
+    },
+    {
+        "fact_id": "protected_swing.windowed_witness",
+        "producer_owner": "regime_classification.regime_features",
+        "representation": "protected_swings.ordinal_sequence.windowed_witness",
+        "semantic_claim":
+            "A SECOND, NON-AUTHORITATIVE view of swing structure, computed from "
+            "candle pivots on ONE settled timeframe selected by mechanical "
+            "pivot sufficiency (15m, else 5m, else 3m). `source_timeframe` "
+            "names the timeframe chosen and `fallback_trace` records every "
+            "candidate considered with its pivot counts, so the selection is "
+            "auditable. It is a REGIME WITNESS: where it disagrees with the "
+            "confirmed registry the registry wins, and the disagreement is "
+            "published rather than silently resolved.",
+        "authority_class": ADVISORY,
+        "decision_influence": (BRAIN_NARRATIVE,),
+        "persistence": RAM_ONLY,
+        "lifecycle": {
+            "formation": "recomputed every scan from settled candles",
+            "mutation": "changes with the settled series",
+            "invalidation": "`unknown` when no candidate timeframe produced "
+                            "sufficient pivots",
+        },
+        "temporal": {"formation_time": "derived, no independent birth time",
+                     "observation_time": "the scan that computed it"},
+        "restart": "deterministic for a given settled series",
+        "late_start": "fewer settled bars may yield `unknown`; it never "
+                      "substitutes the realtime series to avoid that",
+        "consumers": [
+            {"name": "ai_brain.brain_prompt",
+             "believes": "a windowed second opinion, explicitly subordinate to "
+                         "the confirmed registry",
+             "influence": BRAIN_NARRATIVE},
+        ],
+        "limitations": (
+            "Subordinate to the confirmed registry and drawn from ONE timeframe; it can be `unknown` while the registry has a clear answer.",
+        ),
+        "certification_tests": (
+            f"{T_SS}::TestSettledEvidenceOwnsTheWindowedWitness",
+        ),
+        "semantic_predicates": ("swing.witness_is_settled_and_single",),
+        "scenarios": (REAFFIRMED_LIFE, SESSION_BOUNDARY),
+    },
+    {
+        "fact_id": "protected_swing.witness_agreement",
+        "producer_owner": "narrative_authority.swing_structure.witness_agreement",
+        "representation": "protected_swings.ordinal_sequence.witness_agreement.agreement",
+        "semantic_claim":
+            "Whether the windowed pivot witness agrees with the canonical "
+            "confirmed-registry sequence: `agree`, `disagree`, or "
+            "`not_comparable` (either side is UNKNOWN/INSUFFICIENT, or the "
+            "windowed value has no canonical counterpart). "
+            "IT IS NOT A DIRECTION AND NOT A STATE OF THE MARKET. It is named "
+            "`agreement` rather than `state` deliberately: `bias`/`state` keys "
+            "inside the structural blocks are the legacy structure engine's "
+            "directional verdicts, and carrying them killed 43 scans on "
+            "2026-08-11.",
+        "authority_class": CERTIFIED,
+        "decision_influence": (BRAIN_NARRATIVE,),
+        "persistence": RAM_ONLY,
+        "lifecycle": {
+            "formation": "recomputed every scan from the two sequences",
+            "mutation": "changes with either input",
+            "invalidation": "`not_comparable` whenever a comparison would be "
+                            "meaningless; it never guesses agreement",
+        },
+        "temporal": {"formation_time": "derived, no independent birth time",
+                     "observation_time": "the scan that computed it"},
+        "restart": "deterministic for a given pair of sequences",
+        "late_start": "`not_comparable` until both sides are available",
+        "consumers": [
+            {"name": "ai_brain.brain_prompt",
+             "believes": "whether two independent mechanisms see the same "
+                         "structure; disagreement is uncertainty to weigh",
+             "influence": BRAIN_NARRATIVE},
+        ],
+        "limitations": (
+            "Agreement is not correctness -- two mechanisms can agree and both be early. Disagreement is uncertainty, not a signal.",
+        ),
+        "certification_tests": (
+            f"{T_SS}::TestWitnessIsNotAuthority",
+        ),
+        "semantic_predicates": ("swing.registry_outranks_witness",
+                                "swing.agreement_needs_both_sides",),
+        "scenarios": (REAFFIRMED_LIFE, SESSION_BOUNDARY),
+    },
     {
         "fact_id": "protected_swing.registered_at",
         "producer_owner": "narrative_authority.protected_swings.ProtectedSwingTracker",
@@ -1064,7 +2311,7 @@ _SESSION_CONTEXT = [
 #: THE REGISTRY. Order is presentation only; `fact_id` is identity.
 CONTRACTS = tuple(_PROTECTED_SWINGS + _OCCURRENCES + _ACTIVE_PATH +
                   _LIQUIDITY + _DEALING_RANGE + _RECOVERY +
-                  _SESSION_PO3 + _SESSION_CONTEXT)
+                  _SESSION_PO3 + _SESSION_CONTEXT + _LIQUIDITY_SCOPE)
 
 
 def by_id() -> dict:

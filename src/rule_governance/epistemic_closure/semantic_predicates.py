@@ -719,9 +719,359 @@ def session_context_cannot_reach_the_session_phase():
                   "identical output with and without the context block")
 
 
+
+# ── ORDINAL SWING STRUCTURE ─────────────────────────────────────────────────
+# LUNA-SWING-SEQUENCE-TRUTH-1 (2026-09-01).
+#
+# THESE CERTIFY STRUCTURAL MEANING, NOT TRADING IMPLICATION. `BULLISH_SEQUENCE`
+# is proven to mean "confirmed highs rose AND confirmed lows rose" and nothing
+# else. It is deliberately NOT bound to bias, entry permission, Active Path
+# ownership, PO3 phase, a target or an expected outcome -- if a predicate here
+# ever proves one of those, the fact has stopped being structure and become a
+# recommendation.
+
+def _sequence_of(highs, lows):
+    from narrative_authority.swing_structure import canonical_sequence
+    return canonical_sequence({"highs": {"1m": [{"level": h} for h in highs]},
+                               "lows": {"1m": [{"level": lo} for lo in lows]}})
+
+
+def bullish_sequence_means_both_sides_rose():
+    """BULLISH_SEQUENCE iff every confirmed high rose AND every low rose."""
+    from narrative_authority.swing_structure import BULLISH
+    r = _sequence_of([100, 110, 120], [90, 95, 99])
+    if r["sequence"] != BULLISH:
+        return False, f"rising/rising produced {r['sequence']!r}"
+    if r["high_ordinals"] != ["higher_high"] * 2 or \
+            r["low_ordinals"] != ["higher_low"] * 2:
+        return False, f"ordinals disagree: {r['high_ordinals']} / {r['low_ordinals']}"
+    # A single non-rising high on either side must remove the claim.
+    for bad_h, bad_l in (([100, 110, 105], [90, 95, 99]),
+                         ([100, 110, 120], [90, 95, 92])):
+        if _sequence_of(bad_h, bad_l)["sequence"] == BULLISH:
+            return False, "a falling swing did not remove BULLISH_SEQUENCE"
+    return True, ("BULLISH_SEQUENCE requires rising confirmed highs AND rising "
+                  "confirmed lows; one contrary swing removes it")
+
+
+def bearish_sequence_means_both_sides_fell():
+    from narrative_authority.swing_structure import BEARISH
+    r = _sequence_of([120, 110, 100], [99, 95, 90])
+    if r["sequence"] != BEARISH:
+        return False, f"falling/falling produced {r['sequence']!r}"
+    for bad_h, bad_l in (([120, 110, 115], [99, 95, 90]),
+                         ([120, 110, 100], [99, 95, 97])):
+        if _sequence_of(bad_h, bad_l)["sequence"] == BEARISH:
+            return False, "a contrary swing did not remove BEARISH_SEQUENCE"
+    return True, ("BEARISH_SEQUENCE requires falling confirmed highs AND "
+                  "falling confirmed lows")
+
+
+def conflicting_structure_is_mixed_not_a_lean():
+    """A widening or narrowing auction is reported, never resolved into a lean."""
+    from narrative_authority.swing_structure import MIXED
+    cases = {"higher highs, lower lows": ([100, 120], [90, 80]),
+             "lower highs, higher lows": ([120, 110], [90, 95]),
+             "flat both sides": ([100, 100], [90, 90])}
+    for name, (h, lo) in cases.items():
+        got = _sequence_of(h, lo)["sequence"]
+        if got != MIXED:
+            return False, f"{name} produced {got!r}, not MIXED"
+    return True, "conflicting ordinal evidence yields MIXED, never a lean"
+
+
+def insufficient_and_unknown_do_not_collapse():
+    """Two different claims: 'too early' vs 'unavailable'."""
+    from narrative_authority.swing_structure import (INSUFFICIENT, UNKNOWN,
+                                                     canonical_sequence)
+    early = canonical_sequence({"highs": {}, "lows": {}})
+    if early["sequence"] != INSUFFICIENT:
+        return False, f"an empty but readable registry gave {early['sequence']!r}"
+    one = _sequence_of([100], [90])
+    if one["sequence"] != INSUFFICIENT:
+        return False, "one swing a side was not INSUFFICIENT"
+    for absent in (None, {}, "corrupt", 7):
+        if canonical_sequence(absent)["sequence"] != UNKNOWN:
+            return False, f"absent registry {absent!r} was not UNKNOWN"
+    return True, ("INSUFFICIENT means readable-but-early; UNKNOWN means "
+                  "unavailable; neither is ever reported as the other")
+
+
+def the_sequence_carries_no_trading_implication():
+    """THE LAW THAT KEEPS THIS STRUCTURAL. The published fact must not contain
+    any directional or permissive vocabulary."""
+    r = _sequence_of([100, 110, 120], [90, 95, 99])
+    blob = repr(r).lower()
+    banned = ("buy", "sell", "long", "short", "entry", "target", "bias",
+              "permission", "authorize", "take_trade")
+    hit = [w for w in banned if w in blob]
+    if hit:
+        return False, f"structural fact leaked trading vocabulary: {hit}"
+    return True, ("the canonical sequence states ordering only; it names no "
+                  "direction to trade, no entry and no permission")
+
+
+def the_registry_outranks_the_windowed_witness():
+    """The witness may disagree; it may never override."""
+    from narrative_authority.swing_structure import BULLISH, witness_agreement
+    canon = _sequence_of([100, 110], [90, 95])
+    w = witness_agreement(canon, "lower_highs_lower_lows")
+    if w["agreement"] != "disagree":
+        return False, f"a contradicting witness reported {w['agreement']!r}"
+    if w["canonical"] != BULLISH:
+        return False, "the canonical answer changed when the witness disagreed"
+    agree = witness_agreement(canon, "higher_highs_higher_lows")
+    if agree["agreement"] != "agree":
+        return False, "a concurring witness was not reported as agreement"
+    return True, ("the confirmed registry keeps its answer under disagreement; "
+                  "the windowed witness is published, never promoted")
+
+
+def agreement_is_not_claimed_across_unavailable_truth():
+    from narrative_authority.swing_structure import (INSUFFICIENT, UNKNOWN,
+                                                     witness_agreement)
+    canon = _sequence_of([100, 110], [90, 95])
+    if witness_agreement(canon, "unknown")["agreement"] != "not_comparable":
+        return False, "an unknown witness was compared anyway"
+    for state in (UNKNOWN, INSUFFICIENT):
+        got = witness_agreement({"sequence": state}, "higher_highs_higher_lows")
+        if got["agreement"] != "not_comparable":
+            return False, f"canonical {state} was compared anyway"
+    return True, ("comparison requires both sides to be established; otherwise "
+                  "not_comparable, never a guessed agreement")
+
+
+def ordinals_are_derived_not_trusted():
+    """The same confirmed prices yield the same relationships by any route, so a
+    stored ordinal can never disagree with the levels it describes."""
+    a = _sequence_of([100, 110, 120], [90, 95, 99])
+    b = _sequence_of([100, 110, 120], [90, 95, 99])
+    if a["high_ordinals"] != b["high_ordinals"] or a["sequence"] != b["sequence"]:
+        return False, "the same ladder produced two different answers"
+    if len(a["high_ordinals"]) != len(a["highs"]) - 1:
+        return False, "ordinal count does not match the relationships available"
+    return True, ("ordinals are recomputed from the ordered prices; a rebuild "
+                  "yields an identical sequence")
+
+
+def the_windowed_witness_reads_one_settled_timeframe():
+    """Selection is by pivot sufficiency over settled candles, and yields ONE
+    timeframe -- never a mixed-timeframe pivot set."""
+    import ast as _ast
+    import inspect as _inspect
+
+    from regime_classification import regime_features as RF
+    tree = _ast.parse(_inspect.getsource(RF._extract))
+    fn = next(n for n in _ast.walk(tree) if isinstance(n, _ast.FunctionDef))
+    called = {getattr(c.func, "id", "") for c in _ast.walk(fn)
+              if isinstance(c, _ast.Call)}
+    if "_settled_series" not in called:
+        return False, "swing candidates no longer come from the settled authority"
+    raw_sub = [n for n in _ast.walk(fn) if isinstance(n, _ast.Subscript)
+               and getattr(n.value, "id", "") == "raw_data"]
+    if raw_sub:
+        return False, "a candidate series was taken from the realtime view"
+    return True, ("every windowed candidate is drawn through the settled-series "
+                  "authority; exactly one timeframe becomes the witness")
+
+
+
+def explanatory_prose_introduces_no_new_claim():
+    """`detail` fields explain; they must never assert.
+
+    Prose reaches the Brain as language, which is exactly how a recommendation
+    could smuggle itself past a structured contract -- so the explanation is
+    held to the same law as the fact it describes: it may restate ordering and
+    counts, and it may say why something is unresolved, but it may not name a
+    direction to trade, an entry, a target or a permission.
+    """
+    from narrative_authority.swing_structure import canonical_sequence
+    banned = ("buy", "sell", "long", "short", "entry", "target", "bias",
+              "permission", "authorize", "should", "expect")
+    samples = [
+        canonical_sequence({"highs": {"1m": [{"level": 100}, {"level": 110}]},
+                            "lows": {"1m": [{"level": 90}, {"level": 95}]}}),
+        canonical_sequence({"highs": {"1m": [{"level": 100}]},
+                            "lows": {"1m": [{"level": 90}]}}),
+        canonical_sequence(None),
+        canonical_sequence({"highs": {}, "lows": {}}),
+    ]
+    for r in samples:
+        text = str(r.get("detail", "")).lower()
+        hit = [w for w in banned if w in text]
+        if hit:
+            return False, f"detail prose asserted {hit} in {text!r}"
+        if not text:
+            return False, f"a {r['sequence']} result gave no explanation"
+    return True, ("every detail string explains the sequence without naming a "
+                  "direction, an entry, a target or a permission")
+
+
+
+# ── LIQUIDITY SCOPE ─────────────────────────────────────────────────────────
+# LUNA-LIQUIDITY-SCOPE-TRUTH-1 (2026-09-01).
+#
+# These certify that scope means WHAT WAS TAKEN, RELATIVE TO WHICH NAMED
+# AUTHORITY, AT THE TIME. None of them binds scope to a trade: `external` +
+# `sell_side` + `reclaimed` is three facts, and if a predicate here ever proved
+# a direction, the fact would have stopped being an observation.
+
+def _scope_sweep(side="sell_side", level=100.0):
+    return {"event_time": "2026-09-01T13:40:00+00:00",
+            "liquidity_side_taken": side, "swept_level": level,
+            "reclaimed": True}
+
+
+def scope_is_event_time_immutable():
+    """THE DEFECT, AS A RUNNING CHECK.
+
+    The classifier answered from whatever pivot context happened to be current,
+    so a later higher swing rewrote what an earlier event WAS. A stamp taken at
+    the event must survive a context that has since moved.
+    """
+    from market_data.liquidity_scope import EXTERNAL, INTERNAL, stamp
+    f = _scope_sweep(level=100.0)
+    at_event = stamp(f, highs=[130], lows=[100.0, 110.0])
+    if at_event["detector_scope"] != EXTERNAL:
+        return False, "the event-time stamp was not EXTERNAL"
+    later = stamp(f, highs=[130], lows=[90.0, 100.0])
+    if later["detector_scope"] != INTERNAL:
+        return False, "a moved context did not reclassify a NEW stamp"
+    if at_event["detector_scope"] != EXTERNAL:
+        return False, "the frozen stamp was rewritten by later context"
+    return True, ("scope stamped at the event survives a context that moved; a "
+                  "later scan mints a new fact rather than restating an old one")
+
+
+def scope_is_not_direction():
+    """Scope, side and rejection are observations. None of them is a trade."""
+    from market_data.liquidity_scope import stamp
+    r = stamp(_scope_sweep(), highs=[130], lows=[100.0])
+    blob = repr(r).lower()
+    banned = ("bullish", "bearish", "buy", "long", "short", "entry", "target",
+              "bias", "permission", "authorize")
+    hit = [w for w in banned if w in blob]
+    if hit:
+        return False, "a scope fact carried directional vocabulary: %s" % hit
+    return True, ("scope publishes side, classification and reference only -- no "
+                  "direction, entry, target or permission")
+
+
+def scope_names_its_authority():
+    """`external` without `external to what` is not a fact."""
+    from market_data.liquidity_scope import (MANIPULATION_PIVOT_CONTEXT,
+                                             SESSION_PO3_ACCUMULATION_RANGE,
+                                             stamp)
+    r = stamp(_scope_sweep(), highs=[130], lows=[100.0],
+              po3_range={"high": 140, "low": 95, "birth": "b",
+                         "last_extension": "e", "established": True},
+              session_date="20260901")
+    det = (r.get("detector_scope_reference") or {}).get("type")
+    po3 = (r.get("po3_scope_reference") or {}).get("type")
+    if det != MANIPULATION_PIVOT_CONTEXT:
+        return False, "the detector scope named no authority (%r)" % det
+    if po3 != SESSION_PO3_ACCUMULATION_RANGE:
+        return False, "the session scope named no authority (%r)" % po3
+    if det == po3:
+        return False, "the two authorities collapsed into one"
+    return True, ("both scopes name a distinct authority, so they can "
+                  "legitimately disagree without either being wrong")
+
+
+def po3_scope_needs_a_prior_range():
+    """A range that forms later is not evidence about an earlier event."""
+    from market_data.liquidity_scope import EXTERNAL, UNKNOWN, stamp
+    f = _scope_sweep(level=90.0)
+    none_yet = stamp(f, highs=[130], lows=[90.0], po3_range=None,
+                     session_date="20260901")
+    if none_yet["po3_scope"] != UNKNOWN:
+        return False, "no established range did not yield UNKNOWN"
+    if none_yet["po3_scope_reference"] is not None:
+        return False, "a reference was published without a range"
+    forming = stamp(f, highs=[130], lows=[90.0],
+                    po3_range={"high": 140, "low": 95, "birth": "b",
+                               "last_extension": "e", "established": False},
+                    session_date="20260901")
+    if forming["po3_scope"] != UNKNOWN:
+        return False, "a FORMING range was allowed to classify an event"
+    later = stamp(f, highs=[130], lows=[90.0],
+                  po3_range={"high": 140, "low": 95, "birth": "b",
+                             "last_extension": "e", "established": True},
+                  session_date="20260901")
+    if later["po3_scope"] != EXTERNAL:
+        return False, "an established range failed to classify"
+    if none_yet["po3_scope"] != UNKNOWN:
+        return False, "the earlier UNKNOWN was relabelled by a later range"
+    return True, ("session scope requires an ESTABLISHED range that predates "
+                  "the event; a forming or later range yields UNKNOWN and never "
+                  "relabels history")
+
+
+def range_id_survives_extension():
+    """The same accumulation range that extends is still the same range."""
+    from market_data.liquidity_scope import po3_reference
+    base = {"high": 29179.0, "low": 29074.5, "birth": "2026-09-01T13:45:00+00:00",
+            "last_extension": "2026-09-01T14:22:00+00:00", "established": True}
+    v4 = po3_reference(base, session_date="20260901")
+    v5 = po3_reference(dict(base, high=29210.0,
+                            last_extension="2026-09-01T14:40:00+00:00"),
+                       session_date="20260901")
+    if v4["range_id"] != v5["range_id"]:
+        return False, "an extension created a new range identity"
+    if v4["reference_snapshot_id"] == v5["reference_snapshot_id"]:
+        return False, "two different boundary states share one snapshot id"
+    other = po3_reference(dict(base, birth="2026-09-01T15:10:00+00:00"),
+                          session_date="20260901")
+    if other["range_id"] == v4["range_id"]:
+        return False, "a genuinely different range reused an identity"
+    return True, ("range_id is stable across legitimate extension while the "
+                  "snapshot id versions, so an event stays bound to the exact "
+                  "boundaries it was judged against")
+
+
+def scope_requires_a_proven_occurrence():
+    """Scope enriches a proven event; it never manufactures one."""
+    from datetime import datetime, timedelta, timezone
+
+    from structure.liquidity_engine import analyze_liquidity
+    t0 = datetime(2026, 9, 1, 13, 0, tzinfo=timezone.utc)
+    bars = []
+    for i in range(80):
+        off = (i % 5) * 6.0 - (i % 3) * 4.0
+        bars.append({"timestamp": (t0 + timedelta(minutes=i)).isoformat(),
+                     "open": 29100 + off, "high": 29105 + off,
+                     "low": 29095 + off, "close": 29101 + off})
+    bars.append({"timestamp": (t0 + timedelta(minutes=80)).isoformat(),
+                 "open": 29090, "high": 29095, "low": 29050, "close": 29092})
+    prod = analyze_liquidity(bars, None)                 # production defaults
+    if prod.get("sweep_fact") is not None:
+        return False, "bare OHLC without member provenance minted a sweep"
+    if "detector_scope" in repr(prod):
+        return False, "a scope fact appeared without a proven occurrence"
+    return True, ("no lawful sweep means no scope fact at all -- ABSENT, which "
+                  "is not the same claim as UNKNOWN")
+
+
 #: id -> callable. Contracts reference these by id; the verifier runs them.
 PREDICATES = {
     "protected_swing.formation_immutable": formation_time_is_immutable_within_a_life,
+    "swing.bullish_means_both_sides_rose": bullish_sequence_means_both_sides_rose,
+    "swing.bearish_means_both_sides_fell": bearish_sequence_means_both_sides_fell,
+    "swing.conflict_is_mixed": conflicting_structure_is_mixed_not_a_lean,
+    "swing.insufficient_is_not_unknown": insufficient_and_unknown_do_not_collapse,
+    "swing.structure_is_not_permission": the_sequence_carries_no_trading_implication,
+    "swing.registry_outranks_witness": the_registry_outranks_the_windowed_witness,
+    "swing.agreement_needs_both_sides": agreement_is_not_claimed_across_unavailable_truth,
+    "swing.ordinals_are_derived": ordinals_are_derived_not_trusted,
+    "swing.witness_is_settled_and_single": the_windowed_witness_reads_one_settled_timeframe,
+    "swing.prose_asserts_nothing": explanatory_prose_introduces_no_new_claim,
+    "liquidity.scope_is_event_time_immutable": scope_is_event_time_immutable,
+    "liquidity.scope_is_not_direction": scope_is_not_direction,
+    "liquidity.scope_names_its_authority": scope_names_its_authority,
+    "liquidity.po3_scope_needs_a_prior_range": po3_scope_needs_a_prior_range,
+    "liquidity.range_id_survives_extension": range_id_survives_extension,
+    "liquidity.scope_requires_a_proven_occurrence": scope_requires_a_proven_occurrence,
+    "liquidity.prose_asserts_nothing": explanatory_prose_introduces_no_new_claim,
     "protected_swing.id_not_unique_across_lives": swing_id_is_not_unique_across_lives,
     "causal.one_edge_one_event": one_settled_edge_is_one_category_a_event,
     "causal.category_b_refused": category_b_mints_no_identity,

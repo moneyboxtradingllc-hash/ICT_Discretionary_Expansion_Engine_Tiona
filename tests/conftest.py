@@ -243,14 +243,36 @@ def _operator_evidence_present() -> bool:
         out = subprocess.run(["git", "ls-files", "--", "data/"], cwd=repo,
                              capture_output=True, text=True, timeout=30)
     except (OSError, subprocess.SubprocessError):
-        # No git available: fall back to disk, accepting that a runtime-created
-        # data/ may read as evidence. Failing OPEN here only means tests run and
-        # report honestly; it never grants any production permission.
-        return os.path.isdir(os.path.join(repo, "data"))
+        return _evidence_on_disk(repo)
     # A DEAD SPAWN IS NOT AN ANSWER. Only a successful git call may decide this.
     if out.returncode != 0:
-        return os.path.isdir(os.path.join(repo, "data"))
+        return _evidence_on_disk(repo)
     return bool((out.stdout or "").strip())
+
+
+def _evidence_on_disk(repo: str) -> bool:
+    """Is a REAL archived corpus present, with no git to ask?
+
+    THE DIRECTORY IS NOT THE EVIDENCE, AND THIS IS WHERE THAT BIT. The earlier
+    fallback returned `os.path.isdir(data)` and called failing open acceptable
+    because "tests run and report honestly". They do not. Measured on the
+    distributed archive, which ships ZERO data/ entries and no .git: the suite
+    itself creates data/ as a runtime root, the directory then exists, the guard
+    goes inert, and 43 tests run against evidence that was never distributed --
+    reporting failures that describe nothing about the code.
+
+    A recorded session writes a SHA256SUMS manifest. The suite never does. So
+    ask for the manifest, which cannot be conjured by a test run.
+    """
+    root = os.path.join(repo, "data", "replay_sessions")
+    try:
+        for session in os.scandir(root):
+            if session.is_dir() and os.path.isfile(
+                    os.path.join(session.path, "SHA256SUMS.txt")):
+                return True
+    except OSError:
+        return False
+    return False
 
 
 _OPERATOR_STATE_PRESENT = _operator_evidence_present()

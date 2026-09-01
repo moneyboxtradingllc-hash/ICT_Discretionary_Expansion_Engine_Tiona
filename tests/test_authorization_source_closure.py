@@ -47,6 +47,48 @@ MUST_BE_BOUND = {
     "structure/structure_flip.py": "the second invalidation family",
     "broker/luna_candidate_producer.py": "the invalidation/objective/TOOL catalogs",
     "broker/topstepx_combine_risk.py": "the risk doctrine and bracket geometry",
+    # LUNA-SWING-SEQUENCE-TRUTH-1 (2026-09-01). The structural/regime truth
+    # producers. `protected_swings` and `input` were already bound, which binds
+    # the registry and the publication hop but NOT the modules that decide what
+    # structure and regime MEAN before publication.
+    # LUNA-LIQUIDITY-SCOPE-TRUTH-1 (2026-09-01). Liquidity-event truth: what
+    # was taken, relative to which named authority, at the moment it happened.
+    "market_data/liquidity_scope.py":
+        "whether a swept level was internal or external, and to WHICH "
+        "authority -- the classification Luna reasons over",
+    "market_data/sweep_occurrence.py":
+        "the immutable event identity that scope is frozen onto",
+    "structure/liquidity_engine.py":
+        "proves the sweep under production evidence law and stamps scope at "
+        "event time",
+    "structure/manipulation_detector.py":
+        "the component votes, their levels and sides -- what makes a "
+        "direction conflict attributable",
+    "structure/direction_vote.py":
+        "resolves manipulation direction and direction_conflicted",
+    "structure/session_po3.py":
+        "owns the accumulation range that po3_scope is judged against",
+    "structure/po3_config.py":
+        "MANIP_CONTEXT/MANIP_LOOKBACK decide which pivots exist; narrowing "
+        "the context flips the same event from external to internal, so this "
+        "constants file silently owns scope",
+    "market_data/snapshot_builder.py":
+        "threads the timeframe that makes a component-to-occurrence link "
+        "provable; without it the join refuses a link that was knowable",
+    "live_scan/production_scan_cycle.py":
+        "stamps po3_scope from the PRIOR established range, so an event is "
+        "judged against a boundary that predates it",
+    "narrative_authority/swing_structure.py":
+        "the canonical ordinal sequence Luna reasons over -- whether confirmed "
+        "highs and lows rose, fell or conflict, and the INSUFFICIENT/UNKNOWN "
+        "distinction between an early registry and an unreadable one",
+    "regime_classification/regime_features.py":
+        "which settled timeframe becomes the windowed swing witness, by pivot "
+        "sufficiency; a silent selection defect here withheld structure from "
+        "the Brain for an entire session",
+    "regime_classification/regime_classifier.py":
+        "whether a market may be called a range; absence of trend evidence was "
+        "being converted into positive proof of range",
     "broker/daily_loss_budget.py":
         "whether a NEW ENTRY is permitted at all, the remaining session "
         "loss room, the dynamic ceiling on planned risk, and the "

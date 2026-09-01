@@ -43,6 +43,49 @@ CONTRACTED = {
     "protected_swings.by_timeframe": "protected_swing.registered_at",
     "protected_swings.protected_high": "protected_swing.level",
     "protected_swings.protected_low": "protected_swing.level",
+    # LUNA-SWING-SEQUENCE-TRUTH-1 -- ordinal structure from the confirmed
+    # registry, and the windowed pivot witness published beside it. Registered
+    # one path per claim rather than as a single prefix, for the same reason
+    # session_po3 is: the canonical sequence, the confirmed ladder it rests on,
+    # the subordinate witness and the agreement between them are separate
+    # assertions and each answers for itself.
+    "protected_swings.ordinal_sequence.sequence": "protected_swing.ordinal_sequence",
+    "protected_swings.ordinal_sequence.authority": "protected_swing.sequence_provenance",
+    "protected_swings.ordinal_sequence.detail": "protected_swing.sequence_detail",
+    "protected_swings.ordinal_sequence.confirmed_highs": "protected_swing.confirmed_swing_counts",
+    "protected_swings.ordinal_sequence.confirmed_lows": "protected_swing.confirmed_low_count",
+    "protected_swings.ordinal_sequence.highs": "protected_swing.ordered_confirmed_levels",
+    "protected_swings.ordinal_sequence.lows": "protected_swing.ordered_confirmed_lows",
+    "protected_swings.ordinal_sequence.high_ordinals": "protected_swing.high_ordinals",
+    "protected_swings.ordinal_sequence.low_ordinals": "protected_swing.low_ordinals",
+    "protected_swings.ordinal_sequence.windowed_witness.sequence": "protected_swing.witness_sequence",
+    "protected_swings.ordinal_sequence.windowed_witness.source_timeframe": "protected_swing.witness_timeframe",
+    "protected_swings.ordinal_sequence.windowed_witness.detail": "protected_swing.witness_detail",
+    "protected_swings.ordinal_sequence.windowed_witness.fallback_trace": "protected_swing.witness_fallback_trace",
+    "protected_swings.ordinal_sequence.witness_agreement.agreement": "protected_swing.witness_agreement",
+    # LUNA-LIQUIDITY-SCOPE-TRUTH-1 -- proven sweep events with the scope each
+    # was judged against AT THE TIME, plus the causal links that point back to
+    # them. One path per claim: the two scopes answer to DIFFERENT authorities
+    # and can legitimately disagree, so a single prefix would hide which
+    # authority a disagreement belongs to.
+    "liquidity_events.events[].detector_scope": "liquidity_scope.detector_scope",
+    "liquidity_events.events[].detector_scope_relative_to": "liquidity_scope.detector_reference",
+    "liquidity_events.events[].detector_outer_high": "liquidity_scope.detector_boundaries",
+    "liquidity_events.events[].detector_outer_low": "liquidity_scope.detector_boundary_low",
+    "liquidity_events.events[].po3_scope": "liquidity_scope.po3_scope",
+    "liquidity_events.events[].po3_scope_relative_to": "liquidity_scope.po3_reference",
+    "liquidity_events.events[].po3_range_id": "liquidity_scope.po3_range_id",
+    "liquidity_events.events[].po3_range_high": "liquidity_scope.po3_boundaries",
+    "liquidity_events.events[].po3_range_low": "liquidity_scope.po3_boundary_low",
+    "liquidity_events.events[].scope_reason": "liquidity_scope.scope_reason",
+    "liquidity_events.available": "liquidity_event.available",
+    "liquidity_events.events": "liquidity_event.available",
+    "liquidity_events.events[].event_time": "liquidity_event.event_time",
+    "liquidity_events.events[].liquidity_side_taken": "liquidity_event.side",
+    "liquidity_events.events[].swept_level": "liquidity_event.swept_level",
+    "liquidity_events.events[].reclaimed": "liquidity_event.reclaimed",
+    "liquidity_events.events[].timeframe": "liquidity_event.timeframe",
+    "protected_swings.caused_by": "liquidity_link.occurrence_id",
     # LUNA-SESSION-PO3-AUTHORITY-1 -- the canonical session phase and the entry
     # ruling that belongs to it. Registered specifically rather than as one
     # prefix so the RANGE, the EXCURSION and the detector's verdict each answer

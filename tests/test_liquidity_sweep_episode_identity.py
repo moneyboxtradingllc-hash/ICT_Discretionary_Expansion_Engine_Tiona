@@ -422,14 +422,31 @@ class TestTheProductionWriter:
         assert "occurrence_id" not in blob
         assert "LIQUIDITY_SWEEP" not in blob
 
-    def test_the_brain_payload_never_sees_the_new_fields(self):
-        """`_RAID_PROPOSITIONS` is a whitelist, so `sweep_fact` cannot leak."""
+    def test_the_raw_sweep_container_never_reaches_the_brain(self):
+        """`_RAID_PROPOSITIONS` is a whitelist, so `sweep_fact` cannot leak.
+
+        SUPERSEDED IN PART by LUNA-LIQUIDITY-SCOPE-TRUTH-1 (2026-09-01), and the
+        distinction is the point. This also asserted that `swept_level` and
+        `occurrence_id` could never reach the Brain -- written when a sweep was
+        purely a ledger memory with no decision-bearing meaning.
+
+        That is no longer the law. Luna was standing down on a tape where the
+        mechanics knew an external sweep from an internal raid, weighted them 30
+        vs 20, and told her only `manipulation_confirmed` with a null direction.
+        She now receives curated event facts -- side, swept level, scope, and
+        the reference each scope was judged against -- because withholding them
+        was the defect.
+
+        WHAT STILL HOLDS, AND IS TESTED HERE: the raw `sweep_fact` container is
+        an internal producer structure and must never be handed over wholesale.
+        Publication stays curated and contracted. The ledger-isolation theorem
+        is unchanged and lives in
+        `test_recording_is_not_written_into_the_snapshot`.
+        """
         from ai_brain.brain_input import build_brain_input
         blob = json.dumps(build_brain_input(snapshot_with_sweep(),
                                             {"available": False}), default=str)
         assert "sweep_fact" not in blob
-        assert "swept_level" not in blob
-        assert "occurrence_id" not in blob
 
     def test_a_broken_ledger_never_kills_the_scan(self, tmp_path):
         cyc = scan_cycle(tmp_path)

@@ -35,6 +35,13 @@ POSSIBLE_AT  = 25
 _MIN_CANDLES = 6
 
 
+def _instant(c):
+    """The candle instant a component fired on -- captured HERE, where the
+    candle is still known, so the occurrence join is deterministic rather than
+    reverse-engineered later from level and side."""
+    return c.get("timestamp") or c.get("time") or c.get("t")
+
+
 def _rng(c):
     r = c.get("range")
     return r if r is not None else (c["high"] - c["low"])
@@ -55,15 +62,17 @@ def _lower_wick(c):
 def _external_sweep(window, highs, lows):
     """A swing extreme pierced and rejected — the outermost resting liquidity."""
     if not window:
-        return False, "no window", None
+        return False, "no window", None, None, None
     ext_high = max(highs) if highs else None
     ext_low = min(lows) if lows else None
     for c in reversed(window):
         if ext_high is not None and c["high"] > ext_high and c["close"] < ext_high:
-            return True, f"pierced external high {ext_high} closed {c['close']}", "above_high"
+            return (True, f"pierced external high {ext_high} closed {c['close']}",
+                    "above_high", ext_high, _instant(c))
         if ext_low is not None and c["low"] < ext_low and c["close"] > ext_low:
-            return True, f"pierced external low {ext_low} closed {c['close']}", "below_low"
-    return False, "no external extreme pierced and rejected", None
+            return (True, f"pierced external low {ext_low} closed {c['close']}",
+                    "below_low", ext_low, _instant(c))
+    return False, "no external extreme pierced and rejected", None, None, None
 
 
 def _internal_raid(window, highs, lows):
@@ -71,7 +80,7 @@ def _internal_raid(window, highs, lows):
     outer extreme. Distinct from an external sweep and frequently the only
     liquidity event present on continuation setups."""
     if not window:
-        return False, "no window", None
+        return False, "no window", None, None, None
     ext_high = max(highs) if highs else None
     ext_low = min(lows) if lows else None
     internal_highs = [h for h in highs if ext_high is None or h < ext_high]
@@ -79,11 +88,13 @@ def _internal_raid(window, highs, lows):
     for c in reversed(window):
         for h in internal_highs:
             if c["high"] > h and c["close"] < h:
-                return True, f"raided internal high {h} closed {c['close']}", "above_high"
+                return (True, f"raided internal high {h} closed {c['close']}",
+                        "above_high", h, _instant(c))
         for l in internal_lows:
             if c["low"] < l and c["close"] > l:
-                return True, f"raided internal low {l} closed {c['close']}", "below_low"
-    return False, "no internal level raided", None
+                return (True, f"raided internal low {l} closed {c['close']}",
+                        "below_low", l, _instant(c))
+    return False, "no internal level raided", None, None, None
 
 
 def _failure_swing(highs, lows):
@@ -172,7 +183,8 @@ def _rapid_reversal(window, atr):
 # ── Confluence ────────────────────────────────────────────────────────────────
 
 def detect_manipulation(candles: list, atr: float = None, *,
-                        swing_evidence: dict = None) -> dict:
+                        swing_evidence: dict = None,
+                        timeframe: str = None) -> dict:
     """Score manipulation by confluence over a lookback window.
 
     Returns score (0-100, capped), a classification band, and a per-component
@@ -182,10 +194,32 @@ def detect_manipulation(candles: list, atr: float = None, *,
     """
     components, directions = [], []
 
-    def add(name, present, points, detail, direction=None):
+    def add(name, present, points, detail, direction=None, level=None,
+            side=None, source_event_time=None):
+        """LUNA-LIQUIDITY-SCOPE-TRUTH-1: a component now records ITS OWN VOTE.
+
+        `directions` was a bare list, so `direction_conflicted=True` told the
+        Brain that something disagreed without ever saying WHAT -- the conflict
+        was unattributable. The vote and the level that earned it now travel on
+        the component, which is also what lets publication link a component back
+        to the sweep occurrence it describes instead of presenting one event
+        twice as two.
+        """
         components.append({"name": name, "present": bool(present),
                            "points": points if present else 0,
-                           "weight": points, "detail": detail})
+                           "weight": points, "detail": detail,
+                           "direction_vote": direction if present else None,
+                           "level": level if present else None,
+                           "liquidity_side_taken": side if present else None,
+                           "source_event_time": source_event_time if present else None,
+                           # LUNA-LIQUIDITY-SCOPE-TRUTH-1: the detector runs
+                           # PER TIMEFRAME, so the timeframe is part of an
+                           # event's identity. Without it a 1m and a 3m sweep at
+                           # the same instant, side and level are
+                           # indistinguishable -- and the occurrence join would
+                           # correctly refuse both as ambiguous, losing a link
+                           # that was actually provable.
+                           "timeframe": timeframe if present else None})
         if present and direction:
             directions.append(direction)
 
@@ -212,13 +246,19 @@ def detect_manipulation(candles: list, atr: float = None, *,
     highs, lows = find_swings(
         _ctx, evidence=project_swing_evidence(swing_evidence, _ctx))
 
-    present, detail, d = _external_sweep(window, highs, lows)
+    present, detail, d, lvl, at = _external_sweep(window, highs, lows)
     add("external_sweep", present, W_EXTERNAL_SWEEP, detail,
-        "bearish" if d == "above_high" else "bullish" if d else None)
+        "bearish" if d == "above_high" else "bullish" if d else None,
+        level=lvl,
+        side=("buy_side" if d == "above_high" else "sell_side" if d else None),
+        source_event_time=at)
 
-    present, detail, d = _internal_raid(window, highs, lows)
+    present, detail, d, lvl, at = _internal_raid(window, highs, lows)
     add("internal_raid", present, W_INTERNAL_RAID, detail,
-        "bearish" if d == "above_high" else "bullish" if d else None)
+        "bearish" if d == "above_high" else "bullish" if d else None,
+        level=lvl,
+        side=("buy_side" if d == "above_high" else "sell_side" if d else None),
+        source_event_time=at)
 
     present, detail, d = _failure_swing(highs, lows)
     add("failure_swing", present, W_FAILURE_SWING, detail, d)

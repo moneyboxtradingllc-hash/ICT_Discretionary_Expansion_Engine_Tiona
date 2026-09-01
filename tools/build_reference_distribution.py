@@ -53,11 +53,17 @@ DENY_DOC_PATTERNS = ("PROD-2026", "SESSION_REPORT", "MEMORY_AUDIT",
 
 #: Substrings that mark operator identity/state. Their PRESENCE in an exported
 #: file is a build failure, not a warning.
-FORBIDDEN_CONTENT = (
-    "moneyboxtradingllc", "TOPSTEPX_API_KEY=", "TOPSTEPX_USERNAME=",
-    "Bearer ", "eyJhbGciOi",              # JWT header
-    "NT_DEMO_ACCOUNT",
-)
+#: OPERATOR IDENTITY IS SUPPLIED, NOT BUILT IN. This tuple used to name one
+#: operator's handle and email literally, so the sanitizer shipped the very
+#: identity it existed to strip -- and every downstream copy inherited it.
+#: `OPERATOR_IDENTIFIERS` (comma-separated) adds this operator's own strings at
+#: build time; the generic credential shapes below always apply.
+FORBIDDEN_CONTENT = tuple(
+    [x.strip() for x in (os.environ.get("OPERATOR_IDENTIFIERS") or "").split(",")
+     if x.strip()]
+    + ["TOPSTEPX_API_KEY=", "TOPSTEPX_USERNAME=",
+       "Bearer ", "eyJhbGciOi",            # JWT header
+       "NT_DEMO_ACCOUNT"])
 
 #: Operator-state values that may legitimately appear in a docstring as
 #: engineering history, but must never appear as a live assertion.
@@ -90,11 +96,13 @@ def doc_is_private(rel: str) -> bool:
 #: everywhere -- source, tests and docs alike -- keeps the control intact and
 #: self-consistent while naming nobody: the receiving operator must put her own
 #: account in before the lane will address anything.
-REDACTIONS = {
-    "NT_DEMO_ACCOUNT": "NT_DEMO_ACCOUNT_PLACEHOLDER",
-    "moneyboxtradingllc@gmail.com": "operator@example.invalid",
-    "moneyboxtradingllc": "operator",
-}
+#: Same law: the map is seeded from the environment so no operator's identity is
+#: hardcoded here. Format: "find=>replace,find=>replace".
+REDACTIONS = dict(
+    [("NT_DEMO_ACCOUNT", "NT_DEMO_ACCOUNT_PLACEHOLDER")]
+    + [tuple(part.split("=>", 1)) for part in
+       (os.environ.get("OPERATOR_REDACTIONS") or "").split(",")
+       if "=>" in part])
 
 REDACTABLE_SUFFIXES = (".py", ".md", ".txt", ".json", ".jsonl", ".html",
                        ".yml", ".yaml", ".ini", ".cfg", ".template", ".cs")

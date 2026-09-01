@@ -566,7 +566,7 @@ def build_snapshot(
                 settled, settled_atr_result.get("atr"),
                 # Full-series evidence; the detector projects it onto its own
                 # MANIP_CONTEXT horizon rather than being handed wider swings.
-                swing_evidence=_swing_ev.get(tf))
+                swing_evidence=_swing_ev.get(tf), timeframe=tf)
         # DISPLACEMENT-CONFLUENCE: displacement_detected is a bare bool and
         # cannot separate a nudge from a drive that tears gaps in the tape.
         #

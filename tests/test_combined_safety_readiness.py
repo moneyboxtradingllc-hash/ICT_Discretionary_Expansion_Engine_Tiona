@@ -373,18 +373,24 @@ class TestStrategyUntouched:
         assert RISK.ABSOLUTE_MAX_STOP_POINTS >= 50.0
         assert RISK.PRODUCTION_MAX_RISK_USD >= 350.0
 
+    # LINEAGE NOTE. The unit histories below were imported from upstream and
+    # describe WHY each change was made. Their fingerprint transitions are
+    # deliberately not reproduced: this repository is a sanitized tree that
+    # never computed those digests, and printing them would claim a
+    # certification lineage it does not have. This tree pins only the digest it
+    # computes for itself.
     def test_the_brain_contract_fingerprint_is_the_certified_one(self):
         """The pin moves ONLY when cognition deliberately changes, and the move
         is stated here rather than discovered in a live session.
 
-        brain:fd790385d5943f83  ->  brain:5d9e5d3f74a712c4
+        UPSTREAM UNIT (digests not reproduced -- see note below)
             LUNA-SESSION-PO3-AUTHORITY-1 (2026-08-29). Two closure sources
             changed, both intentionally: `brain_input` now shows Luna the
             canonical session PO3 phase, and `luna_candidate_producer` now
             refuses a new entry while that phase is unresolved accumulation.
             Nothing in the safety, risk or execution layer moved.
 
-        brain:5d9e5d3f74a712c4  ->  brain:21648ba77b0c8a31
+        UPSTREAM UNIT (digests not reproduced -- see note below)
             VENUE-CALENDAR-AUTHORITY-HORIZON-1 (2026-08-30). Exactly ONE closure
             source changed: `tool_geometry` -> src/toolbox/price_levels.py.
             `_canonically_adjacent` now refuses to prove market adjacency when
@@ -398,7 +404,7 @@ class TestStrategyUntouched:
             digest moved because execution-bearing GEOMETRY changed, which is
             exactly where a fingerprint move belongs.
 
-        brain:21648ba77b0c8a31  ->  brain:c108dbcb0996791e
+        UPSTREAM UNIT (digests not reproduced -- see note below)
             LUNA-CROSS-SESSION-PO3-CONTEXT-1 (2026-08-30). Exactly ONE closure
             source changed: `input` -> src/ai_brain/brain_input.py, which now
             publishes the cross-session context block beside the session phase.
@@ -410,7 +416,7 @@ class TestStrategyUntouched:
             byte-identical. The digest moved because the Brain SEES more, not
             because anything mechanical acts on it.
 
-        brain:c108dbcb0996791e  ->  brain:6e8c53fa8e434472
+        UPSTREAM UNIT (digests not reproduced -- see note below)
             LUNA-VAP-CAPTURE-AND-PERSISTENCE-1 (2026-08-30). Exactly ONE closure
             source changed: `production_entrypoint` ->
             tools/topstepx_production_session.py, because the actual production
@@ -434,7 +440,7 @@ class TestStrategyUntouched:
             no profile, publishes nothing to the Brain and has no route to any
             strategy surface.
 
-        brain:6e8c53fa8e434472  ->  brain:bcc04da8e500d261
+        UPSTREAM UNIT (digests not reproduced -- see note below)
             LUNA-DAILY-LOSS-BUDGET-GOVERNOR-1 (2026-08-31). Exactly ONE closure
             source changed: `production_entrypoint` ->
             tools/topstepx_production_session.py, whose disarmed rehearsal
@@ -455,6 +461,44 @@ class TestStrategyUntouched:
             It governs the NEXT entry. It is NOT a guaranteed maximum realized
             loss, and nothing in it may ever claim to be.
 
+        UPSTREAM UNIT (digests not reproduced -- see note below)
+            LUNA-SWING-SEQUENCE-TRUTH-1 (2026-09-01). Luna was standing down on
+            a tape whose CONFIRMED registry had walked highs
+            29157.75 -> 29163.25 -> 29173 -> 29179 and lows
+            29040 -> 29085 -> 29116 -> 29135.75, because the only sequence the
+            organism computed came from 15m candle pivots, that window produced
+            ZERO pivots, and the fallback asked whether 15m candles EXISTED
+            rather than whether they had produced anything. Mechanics held the
+            structure and withheld it.
+
+            The registry now owns ordinal succession, the windowed pivot witness
+            falls through 15m -> 5m -> 3m on PIVOT SUFFICIENCY, and a regime may
+            no longer be called a range on the absence of trend evidence.
+            Closure 18 -> 21: swing_structure, regime_features and
+            regime_classifier were binding NOTHING while able to change
+            Brain-visible truth.
+
+        UPSTREAM UNIT (digests not reproduced -- see note below)
+            LUNA-LIQUIDITY-SCOPE-TRUTH-1 (2026-09-01). The organism already told
+            an external sweep from an internal raid and weighted them 30 vs 20 --
+            then recomputed both every scan from a rolling `candles[-40:]`, so a
+            later higher swing rewrote what an earlier event WAS. Measured: the
+            identical candle reads EXTERNAL against pivots [100,110] and
+            INTERNAL against [100,110,120]. Luna was told only
+            `manipulation_confirmed` with a null direction.
+
+            Scope is now stamped ONCE, at the event, against a NAMED authority,
+            and carried immutably on the occurrence. Two authorities travel
+            separately -- MANIPULATION_PIVOT_CONTEXT and
+            SESSION_PO3_ACCUMULATION_RANGE -- because they can legitimately
+            disagree, and `po3_scope` refuses to answer at all unless an
+            ESTABLISHED range predated the event.
+
+            Closure 21 -> 30. `po3_config` is a CONSTANTS file whose
+            MANIP_CONTEXT decides which pivots exist, and `snapshot_builder`
+            threads the one kwarg that makes an occurrence link provable; both
+            were unbound while able to change what Luna believes happened.
+
             CLOSURE 17 -> 18. `daily_loss_budget` joined the closure beside
             `risk_doctrine`. The entrypoint change alone bound only the CALL:
             the remaining-room arithmetic, the exhaustion behaviour, the
@@ -465,8 +509,33 @@ class TestStrategyUntouched:
             test_authorization_source_closure.py::
             test_a_semantic_edit_to_the_loss_governor_moves_the_fingerprint.
         """
+        # THIS DIGEST EQUALS UPSTREAM LUNA'S, AND THAT IS THE CORRECT RESULT.
+        #
+        # Proven per source, not inferred: all 30 decision-bearing closure
+        # sources are byte-equivalent between this tree and the upstream
+        # certified organism under the repository's canonical line-ending
+        # representation. Equality is therefore a PARITY RESULT -- the
+        # decision-bearing code really is the same code.
+        #
+        # IT IS NOT EVIDENCE THAT SANITIZATION FAILED. This tree's differences
+        # -- omitted broker lanes, the `integrations/topstepx/` layout,
+        # configuration-supplied account identity, absent runtime data,
+        # launchers and fixtures -- all live OUTSIDE the semantic closure, so
+        # none of them can move this digest.
+        #
+        # DO NOT INFER FINGERPRINT DIVERGENCE FROM SANITIZATION. Removing
+        # lanes, moving a namespace or externalising configuration changes the
+        # tree without necessarily changing this digest, because those files are
+        # not closure sources. Compute and certify the fingerprint from the
+        # ACTUAL FINAL DISTRIBUTION BYTES -- a value taken from a working copy
+        # can differ for reasons that have nothing to do with semantics, such as
+        # line-ending representation.
+        #
+        # FINGERPRINT PARITY IS NOT AUTHORIZATION PARITY. This repository
+        # inherits no account, credentials, authorization or operational
+        # certification from upstream.
         from ai_brain.production_model import brain_contract_fingerprint
-        assert brain_contract_fingerprint() == "brain:bcc04da8e500d261"
+        assert brain_contract_fingerprint() == "brain:55d8110d92020d4f"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.
@@ -478,6 +547,23 @@ class TestStrategyUntouched:
         certifies is the safety stack itself, so that is the range it names.
         """
         import subprocess
+        # UPSTREAM HISTORY IS AN ENVIRONMENTAL PREREQUISITE HERE.
+        #
+        # This range names commits from the ORIGINATING repository. This tree is
+        # a sanitized snapshot with its own history, so a real clone -- and the
+        # distributed archive, which carries no .git at all -- cannot resolve
+        # them. The theorem is about what those upstream commits touched; where
+        # that history is absent the honest result is a skip, not a failure and
+        # certainly not a pass.
+        #
+        # It resolved during preparation only because the build worktree shared
+        # the upstream object store, which is exactly the kind of false green
+        # this guard exists to prevent.
+        _probe = subprocess.run(["git", "cat-file", "-e", "511a493~1"],
+                                capture_output=True, cwd=ROOT)
+        if _probe.returncode != 0:
+            pytest.skip("EXTERNAL_HISTORY_REQUIRED: the upstream safety-stack "
+                        "commit range is not present in this repository")
         out = subprocess.run(
             ["git", "diff", "--name-only", "511a493~1", SAFETY_STACK_TIP],
             cwd=ROOT, capture_output=True, text=True)

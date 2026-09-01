@@ -81,4 +81,13 @@ def liquidity_sweep_occurrence(sweep_fact: dict, *, source_tf: str,
         "reclaimed_at": sweep_fact.get("reclaimed_at"),
         "reclaim_basis": sweep_fact.get("reclaim_basis"),
         "source_bars": list(sweep_fact.get("source_bars") or ()),
+        # LUNA-LIQUIDITY-SCOPE-TRUTH-1. Frozen at mint, with the reference each
+        # claim was judged against. A later scan may mint a DIFFERENT occurrence
+        # with a different scope; it may never restate this one.
+        "scope_schema": sweep_fact.get("scope_schema"),
+        "detector_scope": sweep_fact.get("detector_scope") or "unknown",
+        "detector_scope_reference": sweep_fact.get("detector_scope_reference"),
+        "po3_scope": sweep_fact.get("po3_scope") or "unknown",
+        "po3_scope_reference": sweep_fact.get("po3_scope_reference"),
+        "scope_reason": sweep_fact.get("scope_reason"),
     }
