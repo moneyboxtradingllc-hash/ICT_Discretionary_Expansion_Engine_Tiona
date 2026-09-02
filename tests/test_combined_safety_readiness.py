@@ -508,6 +508,20 @@ class TestStrategyUntouched:
             it -- proven executably, not asserted, by
             test_authorization_source_closure.py::
             test_a_semantic_edit_to_the_loss_governor_moves_the_fingerprint.
+
+            brain:55d8110d92020d4f  ->  brain:07bf24372b59c85d
+            LUNA-DAILY-GOVERNOR-TRADE-ATTRIBUTION-1 (2026-09-02). The governor
+            decoded venue trade rows in the NORMALISED dialect only
+            (`order_id`, `created`), but `TopstepXLiveSession.recent_trades()`
+            returns RAW venue JSON (`orderId`, `creationTimestamp`) and is
+            required to keep doing so -- `topstepx_execution_runner` matches
+            fills on `t["orderId"]` with no fallback. Against every live row
+            both keys resolved to None/"", so a lineage-OWNED entry fill could
+            not match the owned set and PROD-20260902's first fill forced
+            CONTAMINATED; the same silence disabled the prior-session cutoff.
+            This is precisely the contamination-handling edit the paragraph
+            above says must invalidate a minted authorization, so the
+            fingerprint moving here is the binding working, not a regression.
         """
         # THIS DIGEST EQUALS UPSTREAM LUNA'S, AND THAT IS THE CORRECT RESULT.
         #
@@ -535,7 +549,7 @@ class TestStrategyUntouched:
         # inherits no account, credentials, authorization or operational
         # certification from upstream.
         from ai_brain.production_model import brain_contract_fingerprint
-        assert brain_contract_fingerprint() == "brain:55d8110d92020d4f"
+        assert brain_contract_fingerprint() == "brain:07bf24372b59c85d"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.

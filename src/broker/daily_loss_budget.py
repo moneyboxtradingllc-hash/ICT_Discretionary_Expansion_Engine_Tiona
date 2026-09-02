@@ -76,6 +76,39 @@ def _num(v):
     return f if f == f and f not in (float("inf"), float("-inf")) else None
 
 
+def _tfield(trade, *names):
+    """First present value among `names` on a venue TRADE row.
+
+    WHY BOTH DIALECTS ARE READ HERE, AND WHY THAT IS NOT A COMPETING SCHEMA.
+    `TopstepXClient.trade_history()` normalises to snake_case (`order_id`,
+    `created`, `pnl`); `TopstepXLiveSession.recent_trades()` deliberately does
+    NOT -- it posts `/api/Trade/search` directly and returns RAW venue JSON.
+    That rawness is load-bearing elsewhere: `topstepx_execution_runner` matches
+    fills on `t["orderId"]` with no fallback, so normalising the session method
+    would break fill detection on the execution path.
+
+    This module is therefore one of the modules that legitimately sees both
+    dialects, exactly like `topstepx_order_discovery._field` and
+    `topstepx_mission_reconciler._contract_of`, and it decodes them the same
+    documented way. Reading both is a DECODING concern. It is not a licence to
+    invent a value that is absent, and it never widens ownership: a row whose
+    identity is missing in BOTH dialects still returns None and stays unowned.
+
+    PROD-20260902: this module read `order_id`/`created` only. Against the live
+    session's raw rows both resolved to None/"" for EVERY trade, so a correctly
+    tagged, lineage-owned entry fill could not match the owned set, and the
+    first fill of the session forced CONTAMINATED. The same silence disabled the
+    prior-session cutoff, because `created` was never truthy.
+    """
+    if not isinstance(trade, dict):
+        return None
+    for name in names:
+        got = trade.get(name)
+        if got is not None:
+            return got
+    return None
+
+
 def session_start_utc(*, session_date: str, window_start: str, tz_name: str):
     """The exact UTC instant this session's decision window opened.
 
@@ -217,13 +250,14 @@ def compute(*, budget_usd, orders, trades, missions, contract_id,
     for t in trades:
         if (t or {}).get("voided"):
             continue
-        created = str((t or {}).get("created") or "")
+        created = str(_tfield(t, "created", "creationTimestamp") or "")
         if created and created < session_start:
             continue                      # a prior session may not leak forward
-        if str((t or {}).get("order_id")) in own["owned"]:
+        order_id = _tfield(t, "order_id", "orderId")
+        if order_id is not None and str(order_id) in own["owned"]:
             mine.append(t)
         else:
-            foreign.append({"order_id": (t or {}).get("order_id"),
+            foreign.append({"order_id": order_id,
                             "created": created,
                             "size": (t or {}).get("size")})
 

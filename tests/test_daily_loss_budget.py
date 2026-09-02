@@ -676,3 +676,111 @@ class TestPersistenceBoundary:
             SA.SessionAuthorization.load(path).verify(
                 account_fingerprint=self.ACCT, contract_id=CID,
                 session_date=self.DATE)
+
+
+# ── the raw venue dialect ─────────────────────────────────────────────────────
+
+def raw_trade(oid, pnl=None, fees=0.36, commissions=0.25, *, size=1,
+              created=LATER, voided=False, contract=CID):
+    """A trade EXACTLY as `TopstepXLiveSession.recent_trades()` returns it.
+
+    That method posts `/api/Trade/search` directly and returns RAW venue JSON --
+    `orderId`, `creationTimestamp`, `profitAndLoss` -- while `trade()` above
+    builds the snake_case rows `TopstepXClient.trade_history()` produces. Every
+    pre-existing test in this file used the normalised helper, which is exactly
+    why PROD-20260902 was invisible to 678 lines of green tests: the fixture
+    never reproduced the wire contract the live session actually delivers.
+    """
+    return {"orderId": oid, "profitAndLoss": pnl, "fees": fees,
+            "commissions": commissions, "size": size, "contractId": contract,
+            "creationTimestamp": created, "voided": voided}
+
+
+class TestRawVenueDialectAttribution:
+    """PROD-20260902. The live session's raw rows must attribute identically."""
+
+    def test_owned_raw_trade_is_attributed_not_contaminating(self):
+        """The defect: `.get("order_id")` was None for EVERY live venue row, so a
+        correctly lineage-owned entry fill could not match the owned set and the
+        session's FIRST fill forced CONTAMINATED."""
+        m = Mission(order_id=1001)
+        r = run(trades=[raw_trade(1001, pnl=-2.5)], orders=[order(1001)], missions=[m])
+        assert r["state"] == "OK", r
+        assert r["entry_permitted"] is True
+        assert r["attributed_trades"] == 1
+        assert r.get("unattributed_count") in (None, 0)
+
+    def test_raw_and_normalised_rows_agree(self):
+        """Two dialects of the same fact must produce the same verdict."""
+        m = Mission(order_id=1001)
+        a = run(trades=[trade(1001, pnl=-40.0)], orders=[order(1001)], missions=[m])
+        b = run(trades=[raw_trade(1001, pnl=-40.0)], orders=[order(1001)], missions=[m])
+        assert a["state"] == b["state"] == "OK"
+        assert a["loss_used"] == b["loss_used"]
+        assert a["accounting"]["budget_session_pnl"] == b["accounting"]["budget_session_pnl"]
+
+    def test_raw_creation_timestamp_excludes_prior_session(self):
+        """`created` was always "" against raw rows, so the prior-session cutoff
+        could never fire. A trade from before the window must not leak forward."""
+        m = Mission(order_id=1001)
+        r = run(trades=[raw_trade(1001, pnl=-500.0, created=BEFORE)],
+                orders=[order(1001)], missions=[m])
+        assert r["state"] == "OK", r
+        assert r["attributed_trades"] == 0
+        assert r["loss_used"] == 0.0
+
+    def test_raw_unowned_trade_still_contaminates(self):
+        """Decoding both dialects may never WIDEN ownership."""
+        m = Mission(order_id=1001)
+        r = run(trades=[raw_trade(9999, pnl=-10.0)], orders=[order(1001)], missions=[m])
+        assert r["state"] == "CONTAMINATED"
+        assert r["reason"] == DLB.UNOWNED_TRADE
+        assert r["unattributed_count"] == 1
+        assert r["unattributed"][0]["order_id"] == 9999
+
+    def test_missing_identity_in_both_dialects_fails_closed(self):
+        """No id in either dialect is UNOWNED, never a silent pass."""
+        m = Mission(order_id=1001)
+        row = raw_trade(1001, pnl=-10.0)
+        row.pop("orderId")
+        r = run(trades=[row], orders=[order(1001)], missions=[m])
+        assert r["state"] == "CONTAMINATED"
+        assert r["unattributed"][0]["order_id"] is None
+
+    def test_raw_economics_are_not_double_subtracted(self):
+        """profitAndLoss - fees - commissions, once."""
+        m = Mission(order_id=1001)
+        r = run(trades=[raw_trade(1001, pnl=-2.5, fees=3.60, commissions=2.50, size=5)],
+                orders=[order(1001)], missions=[m])
+        acct = r["accounting"]
+        assert acct["gross_session_pnl"] == -2.5
+        assert acct["actual_exchange_fees"] == 3.60
+        assert acct["commission_cost"] == 2.50
+        assert acct["budget_session_pnl"] == -8.60
+        assert r["loss_used"] == 8.60
+
+    def test_raw_voided_trade_is_skipped(self):
+        m = Mission(order_id=1001)
+        r = run(trades=[raw_trade(1001, pnl=-999.0, voided=True)],
+                orders=[order(1001)], missions=[m])
+        assert r["state"] == "OK"
+        assert r["attributed_trades"] == 0
+
+    def test_todays_real_session_shape(self):
+        """PROD-20260902 reproduced: an owned entry fill and an UNOWNED
+        emergency-flatten fill. The entry must attribute; the flatten is not in
+        any certified lineage and must still contaminate. This test pins the
+        boundary of the schema repair -- it does not claim the flatten is ours."""
+        m = Mission(order_id=3479178244, exit_order_id=3479178244,
+                    protective_order_ids=[3479178245, 3479178246],
+                    token_id="prod-d2aabb2a151a")
+        orders = [order(3479178244, tag="EXPBOT-prod-d2aabb2a151a"),
+                  order(3479178245, parent=3479178244),
+                  order(3479178246, parent=3479178244),
+                  order(3479178907)]
+        trades = [raw_trade(3479178244, pnl=None, fees=1.80, commissions=1.25, size=5),
+                  raw_trade(3479178907, pnl=-2.5, fees=1.80, commissions=1.25, size=5)]
+        r = run(trades=trades, orders=orders, missions=[m])
+        assert r["state"] == "CONTAMINATED"
+        assert r["unattributed_count"] == 1
+        assert r["unattributed"][0]["order_id"] == 3479178907
