@@ -172,6 +172,14 @@ def classify_exit(trades: list, mission) -> tuple:
     Price is not evidence of ownership; neither is recency, side or quantity.
     """
     protective = {str(o) for o in (mission.protective_order_ids or []) if o is not None}
+    # THE PARENT IS NEVER ITS OWN EXIT. Belt and braces beside
+    # `protective_child_ids`: a mission PERSISTED before that filter existed
+    # restores a contaminated list from disk, and this function is the one that
+    # turns the list into an exit identity. Excluding the entry here means an
+    # already-written record cannot resurrect the defect on the next restart.
+    entry = getattr(mission, "order_id", None)
+    if entry is not None:
+        protective.discard(str(entry))
     if not protective:
         return EXIT_UNATTRIBUTED, None, None
     stop_ids = {str(o) for o in (getattr(mission, "stop_order_ids", None) or [])}
@@ -208,6 +216,33 @@ def _merge(known, seen) -> list:
 
 def _ids(orders: list) -> list:
     return [o.get("id") for o in orders or [] if o.get("id") is not None]
+
+
+def protective_child_ids(orders: list, *, entry_order_id) -> list:
+    """The mission's protective CHILDREN -- never the entry parent.
+
+    LUNA-PROTECTIVE-CHILD-LINEAGE-1 (2026-09-02). `lineage_orders` answers
+    "which orders are OURS", and the entry qualifies on its own `custom_tag`.
+    Feeding that set straight into `protective_order_ids` made the parent a
+    member of its own protective children, and `classify_exit` -- which trusts
+    that set as exit authority -- then bound the ENTRY as the mission's exit:
+
+        exit_order_id  3479178244   the entry order
+        exit_price     29097.75     the ENTRY fill price
+        exit_type      closed
+
+    while the real closing order was a venue-minted flatten the mission never
+    learned about. A mission lineage set and a protective-children set are
+    different claims: the first says "we own this", the second says "this can
+    close the position". Only the second may answer which leg ended a trade.
+
+    Filtering by IDENTITY, not by order type: a protective child is defined by
+    not being the parent, so an unrecognised child type is still carried
+    (that is what kept a Suspended bracket leg in the lineage), while the
+    parent is excluded no matter how it presents itself.
+    """
+    return [oid for oid in _ids(orders)
+            if entry_order_id is None or not _same(oid, entry_order_id)]
 
 
 def split_protective(orders: list) -> tuple:
@@ -351,11 +386,13 @@ class MissionReconciler:
                  filled_quantity=size,
                  fill_price=(entry_fills[-1].get("price") if entry_fills
                              else pos.get("avg_price", pos.get("averagePrice"))),
-                 protective_order_ids=_ids(every),
+                 protective_order_ids=protective_child_ids(
+                     every, entry_order_id=mission.order_id),
                  evidence=f"venue position size {size}")
         elif size and every:
             mission.observe_protection(
-                protective_order_ids=_ids(every),
+                protective_order_ids=protective_child_ids(
+                    every, entry_order_id=mission.order_id),
                 evidence="venue working orders")
 
         # ── rung: it closed ──────────────────────────────────────────────────
@@ -389,7 +426,8 @@ class MissionReconciler:
                         step(mission.observe_position_open, MS.POSITION_OPEN,
                              filled_quantity=abs(_int(entry_fills[-1].get("size")) or 1),
                              fill_price=entry_fills[-1].get("price"),
-                             protective_order_ids=_ids(every),
+                             protective_order_ids=protective_child_ids(
+                                 every, entry_order_id=mission.order_id),
                              evidence="venue trade history (fill seen only after close)")
                 if MS.lifecycle_rank(mission.state) >= MS.lifecycle_rank(MS.POSITION_OPEN):
                     kind, price, oid = classify_exit(trades, mission)

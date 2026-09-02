@@ -326,3 +326,105 @@ class TestRestartAndIdempotence:
         # It had no adopted protection, so the closing execution cannot be
         # bound to it — truthfully unattributed rather than borrowed.
         assert m.exit_price is None
+
+
+# ══ H · PROTECTIVE CHILDREN ARE NOT THE LINEAGE SET ═════════════════════════
+class TestProtectiveChildLineage:
+    """LUNA-PROTECTIVE-CHILD-LINEAGE-1 (2026-09-02).
+
+    PROD-20260902 T1: `lineage_orders` answers "which orders are OURS", and the
+    ENTRY qualifies on its own `custom_tag`. That whole set was written into
+    `protective_order_ids`, so `classify_exit` -- which trusts it as EXIT
+    authority -- matched the entry's own trade and recorded:
+
+        exit_order_id  3479178244  (the entry)
+        exit_price     29097.75    (the ENTRY fill price)
+        exit_type      closed
+
+    The real closing order was a venue-minted flatten the mission never saw.
+    A lineage set says "we own this"; a protective-children set says "this can
+    close the position". Only the second may answer which leg ended a trade.
+    """
+
+    E, S, T = 3479178244, 3479178245, 3479178246
+
+    def _mission(self, protective):
+        class M:
+            pass
+        m = M()
+        m.order_id = self.E
+        m.protective_order_ids = list(protective)
+        m.stop_order_ids, m.target_order_ids = [], []
+        return m
+
+    def test_the_entry_is_not_a_protective_child(self):
+        kept = RC.protective_child_ids(
+            [{"id": self.E}, {"id": self.S}, {"id": self.T}], entry_order_id=self.E)
+        assert self.E not in kept
+
+    def test_real_children_survive_the_filter(self):
+        kept = RC.protective_child_ids(
+            [{"id": self.E}, {"id": self.S}, {"id": self.T}], entry_order_id=self.E)
+        assert kept == [self.S, self.T]
+
+    def test_an_unrecognised_child_type_is_still_carried(self):
+        """The filter is by IDENTITY, not by order type -- that is what keeps a
+        Suspended or unfamiliar bracket leg inside the lineage."""
+        kept = RC.protective_child_ids(
+            [{"id": self.E}, {"id": 999}], entry_order_id=self.E)
+        assert kept == [999]
+
+    def test_classify_exit_cannot_bind_the_entry_as_its_own_exit(self):
+        """Today's exact shape, including the venue flatten the mission never
+        learned. The honest answer is UNATTRIBUTED, not a borrowed number."""
+        m = self._mission([self.T, self.S, self.E])      # AS PERSISTED
+        kind, price, oid = RC.classify_exit(
+            [trade(self.E, 29097.75), trade(3479178907, 29098.00)], m)
+        assert oid != self.E
+        assert (kind, price, oid) == (RC.EXIT_UNATTRIBUTED, None, None)
+
+    def test_no_proven_exit_invents_no_identity(self):
+        m = self._mission([self.E])
+        assert RC.classify_exit([trade(self.E, 29097.75)], m) == (
+            RC.EXIT_UNATTRIBUTED, None, None)
+
+    def test_a_persisted_contaminated_record_cannot_resurrect_the_defect(self):
+        """A mission written BEFORE the filter existed restores a contaminated
+        list from disk; classify_exit must still refuse the parent."""
+        m = self._mission([self.E, self.S])
+        kind, price, oid = RC.classify_exit([trade(self.E, 29097.75)], m)
+        assert (kind, price, oid) == (RC.EXIT_UNATTRIBUTED, None, None)
+
+    def test_a_real_stop_fill_is_still_classified(self):
+        m = self._mission([self.S, self.T])
+        m.stop_order_ids = [self.S]
+        kind, price, oid = RC.classify_exit(
+            [trade(self.E, 29097.75), trade(self.S, 29130.00)], m)
+        assert (kind, oid) == (RC.EXIT_STOP, self.S) and price == 29130.00
+
+    def test_a_real_target_fill_is_still_classified(self):
+        m = self._mission([self.S, self.T])
+        m.target_order_ids = [self.T]
+        kind, price, oid = RC.classify_exit(
+            [trade(self.E, 29097.75), trade(self.T, 28940.75)], m)
+        assert (kind, oid) == (RC.EXIT_TARGET, self.T) and price == 28940.75
+
+    def test_one_mission_cannot_borrow_another_missions_entry(self):
+        """The 2026-08-25 T1/T2 defect must stay fixed under the new filter."""
+        m = self._mission([self.S])
+        assert RC.classify_exit([trade(T1_ENTRY, T1_FILL)], m) == (
+            RC.EXIT_UNATTRIBUTED, None, None)
+
+    def test_reconciliation_end_to_end_never_stores_the_entry(self, tmp_path):
+        """The REAL reconciler against the real object graph: an entry carrying
+        our own tag must not end up inside its own protective children."""
+        tagged_entry = {"id": T2_ENTRY, "contract_id": CID,
+                        "custom_tag": "EXPBOT-tok-PRAC-20260825-T2"}
+        v = Venue(positions=[real_position()],
+                  orders=[tagged_entry] + t2_children(),
+                  trades=[trade(T2_ENTRY, T2_FILL)])
+        m = mission(tmp_path, to_open=False)
+        RC.MissionReconciler(venue=v, contract_id=CID).reconcile(
+            m, custom_tag="EXPBOT-tok-PRAC-20260825-T2")
+        assert T2_ENTRY not in (m.protective_order_ids or [])
+        assert set(m.protective_order_ids or []) >= {T2_STOP, T2_TARGET}
