@@ -309,6 +309,19 @@ executable identity -- the ids are. The mechanical layer validates side,
 freshness, geometry, reward-to-risk and risk after your selection; choosing an
 object does not authorize it.
 
+WHAT AN OBJECTIVE'S RELATIVE FIELDS ARE MEASURED FROM (mandatory):
+Every objective row carries `reference_price`, `reference_basis` and
+`reference_semantics`. Its `side`, `valid_for`, `distance_from_reference` and
+intervening-structure fields are relative to THAT reference and to nothing else.
+When `reference_semantics` is `settled_market_truth` the reference is the newest
+SETTLED close, which is structural market truth and is NOT a tradeable quote.
+The objective you select is revalidated later against a FRESH EXECUTABLE
+reference, so an objective shown as valid on one side can become non-executable
+if price crosses it before the candidate is built, and the trade is then refused
+rather than repriced. Treat objective metadata as evidence for your reasoning,
+never as a guarantee of present executability. This says nothing about WHICH
+objective to prefer -- it tells you what the numbers on the row mean.
+
 HISTORICAL DESCRIPTIVE ANALOGS — AUTHORITY BOUNDARY (mandatory):
 Any analog carrying authority "CONTEXT_ONLY" describes a prior market state. It
 is NOT an outcome-validated trading recommendation. It records what was

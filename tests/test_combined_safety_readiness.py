@@ -522,6 +522,20 @@ class TestStrategyUntouched:
             This is precisely the contamination-handling edit the paragraph
             above says must invalidate a minted authorization, so the
             fingerprint moving here is the binding working, not a regression.
+
+            brain:07bf24372b59c85d  ->  brain:255412c75252aec0
+            LUNA-OBJECTIVE-CATALOG-REFERENCE-SEMANTICS-1 (2026-09-02). Every
+            Brain-visible objective row now names the reference its `side`,
+            `valid_for`, distance and intervening-structure fields were measured
+            from. PROD-20260902 published the Brain's catalog from
+            `market.current_price` (settled_close:1m, 29110.00) while the
+            candidate was priced from the fresh executable bid (29117.00): two
+            deliberately separate authorities, 7.00 points apart, and a row that
+            named neither. Both `luna_candidate_producer` (catalog producer) and
+            `brain_prompt` (what the row MEANS) are closure-bound, so the
+            fingerprint moves. No reference authority changed: the catalog still
+            uses settled structural truth and the producer still rebuilds and
+            revalidates against the executable quote.
         """
         # THIS DIGEST EQUALS UPSTREAM LUNA'S, AND THAT IS THE CORRECT RESULT.
         #
@@ -549,7 +563,7 @@ class TestStrategyUntouched:
         # inherits no account, credentials, authorization or operational
         # certification from upstream.
         from ai_brain.production_model import brain_contract_fingerprint
-        assert brain_contract_fingerprint() == "brain:07bf24372b59c85d"
+        assert brain_contract_fingerprint() == "brain:255412c75252aec0"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.

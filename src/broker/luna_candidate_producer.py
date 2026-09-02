@@ -229,13 +229,53 @@ def objective_id(objective: dict, index: int) -> str:
     return f"{prefix}{'_' + tag if tag else ''}_{index}"
 
 
+#: WHAT AN OBJECTIVE ROW'S RELATIVE FIELDS WERE MEASURED FROM.
+#:
+#: `settled_market_truth` is the newest SETTLED close published as
+#: `market.current_price` with `market.settled_price_basis` -- structural market
+#: truth, explicitly NOT an executable price (`brain_input._settled_price`).
+#: `caller_supplied_reference` is any other reference the caller passed, and
+#: claims nothing about its provenance: the candidate producer rebuilds this
+#: catalog against the FRESH EXECUTABLE quote before binding, and a row built
+#: that way must not describe itself as settled truth.
+REFERENCE_SETTLED_MARKET_TRUTH = "settled_market_truth"
+REFERENCE_CALLER_SUPPLIED = "caller_supplied_reference"
+
+
 def authorized_objective_catalog(snapshot: dict, brain_input: dict,
                                  reference_price: float = None) -> list:
     """The catalog PUBLISHED TO THE BRAIN, with stable selectable IDs.
 
     Same producer, same levels, same doctrine as `enumerate_objectives` -- this
     adds identity and directional validity so the Brain can point at one.
+
+    EVERY REFERENCE-RELATIVE FIELD NAMES ITS OWN REFERENCE (2026-09-02).
+    `side`, `valid_for` and the intervening-structure block are all measured
+    FROM a reference price, and the row used to carry them while saying nothing
+    about what that reference was. Two different references legitimately reach
+    this function: `narrative_brain` publishes the Brain's catalog from
+    `market.current_price` (settled structural truth), and
+    `_objective_selected` REBUILDS it from the fresh executable quote before
+    binding the id the Brain chose. Those authorities are deliberately separate
+    and are not being collapsed -- but a row that says `valid_for: bearish`
+    without saying "relative to 29110.00 settled_close:1m" implies a currency
+    the producing mechanism never proved. PROD-20260902 measured the two
+    references 7.00 points apart in the same scan.
+
+    The semantics are DERIVED, never asserted: a reference that is numerically
+    the published settled price IS the settled price, whatever the caller
+    intended; anything else is labelled as merely caller-supplied.
     """
+    mk = (brain_input or {}).get("market") or {}
+    settled = mk.get("current_price")
+    ref_basis, ref_semantics = None, REFERENCE_CALLER_SUPPLIED
+    try:
+        if (reference_price is not None and settled is not None
+                and float(reference_price) == float(settled)):
+            ref_basis = mk.get("settled_price_basis")
+            ref_semantics = REFERENCE_SETTLED_MARKET_TRUTH
+    except (TypeError, ValueError):
+        ref_basis, ref_semantics = None, REFERENCE_CALLER_SUPPLIED
     catalog = []
     for i, o in enumerate(enumerate_objectives(snapshot, brain_input), start=1):
         entry = dict(o)
@@ -247,6 +287,14 @@ def authorized_objective_catalog(snapshot: dict, brain_input: dict,
                                   else "bearish")
             entry.update(_intervening_protected_levels(
                 brain_input, reference_price, o["price"]))
+            # Stamped AFTER the fields it describes, so a row can never carry
+            # reference-relative semantics without the reference itself.
+            entry["reference_price"] = float(reference_price)
+            entry["reference_basis"] = ref_basis
+            entry["reference_semantics"] = ref_semantics
+            entry["distance_from_reference"] = round(
+                abs(float(o["price"]) - float(reference_price)), 6)
+            entry["executable_revalidation_required"] = True
         catalog.append(entry)
     return catalog
 

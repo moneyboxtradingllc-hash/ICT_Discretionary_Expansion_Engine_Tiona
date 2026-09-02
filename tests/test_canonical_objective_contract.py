@@ -248,3 +248,128 @@ class TestSchemaAndPrompt:
         for forbidden in ("gated_submit", "place_order", "issue",
                           "SessionAuthorization"):
             assert forbidden not in called, forbidden
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+class TestReferenceSemantics:
+    """LUNA-OBJECTIVE-CATALOG-REFERENCE-SEMANTICS-1 (2026-09-02).
+
+    PROD-20260902 measured two DIFFERENT and both-legitimate references inside
+    one scan: the Brain's catalog was published from `market.current_price`
+    (settled_close:1m, 29110.00) while the candidate that could actually be
+    executed was priced from the fresh executable bid (29117.00) -- 7.00 points
+    apart. Neither is wrong; they are deliberately separate authorities. What
+    was wrong is that a row said `valid_for: bearish` and carried a distance and
+    an intervening-structure verdict without ever naming what it measured from.
+    """
+
+    REF_FIELDS = ("reference_price", "reference_basis", "reference_semantics",
+                  "distance_from_reference", "executable_revalidation_required")
+
+    def test_every_reference_relative_row_names_its_reference(self):
+        rows = catalog()
+        assert rows
+        for o in rows:
+            for f in self.REF_FIELDS:
+                assert f in o, f"{o['objective_id']} lacks {f}"
+
+    def test_reference_price_is_the_reference_actually_used(self):
+        for o in catalog():
+            assert o["reference_price"] == 29695.75
+
+    def test_reference_basis_is_the_settled_price_authority(self):
+        basis = (BRAIN_INPUT["market"] or {}).get("settled_price_basis")
+        for o in catalog():
+            assert o["reference_basis"] == basis
+
+    def test_settled_reference_is_labelled_settled_market_truth(self):
+        from broker import luna_candidate_producer as P
+        for o in catalog():
+            assert o["reference_semantics"] == P.REFERENCE_SETTLED_MARKET_TRUTH
+
+    def test_a_non_settled_reference_never_claims_settled_truth(self):
+        """The candidate producer REBUILDS this catalog from the executable
+        quote. Such a row must not describe itself as structural truth."""
+        from broker import luna_candidate_producer as P
+        rows = authorized_objective_catalog({}, BRAIN_INPUT, 29702.75)
+        assert rows
+        for o in rows:
+            assert o["reference_semantics"] == P.REFERENCE_CALLER_SUPPLIED
+            assert o["reference_basis"] is None
+            assert o["reference_price"] == 29702.75
+
+    def test_distance_is_measured_from_the_named_reference(self):
+        for o in catalog():
+            assert o["distance_from_reference"] == round(
+                abs(o["price"] - o["reference_price"]), 6)
+
+    def test_objective_ids_are_reference_independent(self):
+        a = [o["objective_id"] for o in authorized_objective_catalog({}, BRAIN_INPUT, 29695.75)]
+        b = [o["objective_id"] for o in authorized_objective_catalog({}, BRAIN_INPUT, 29702.75)]
+        assert a == b and a
+
+    def test_ordering_is_reference_independent(self):
+        a = [o["price"] for o in authorized_objective_catalog({}, BRAIN_INPUT, 29695.75)]
+        b = [o["price"] for o in authorized_objective_catalog({}, BRAIN_INPUT, 29702.75)]
+        assert a == b
+
+    def test_the_row_declares_that_revalidation_is_still_owed(self):
+        for o in catalog():
+            assert o["executable_revalidation_required"] is True
+
+    def test_straddled_objective_is_refused_not_repriced(self):
+        """A row published as bearish against the SETTLED reference must still
+        be refused when the EXECUTABLE reference has crossed it. Selection is
+        not authorisation; the producer revalidates side at the executable
+        price and fails closed."""
+        rows = authorized_objective_catalog({}, BRAIN_INPUT, 29695.75)
+        target = [o for o in rows if o["price"] == 29452.5][0]
+        assert target["valid_for"] == "bearish"      # lawful at the settled ref
+        with pytest.raises(NoCandidate) as e:
+            resolve_objective_by_id(target["objective_id"], rows,
+                                    direction="bearish",
+                                    reference_price=29400.0)  # price crossed it
+        assert e.value.reason == "objective_wrong_side"
+
+    def test_the_catalog_never_rebinds_the_selection_itself(self):
+        """The Brain-facing catalog carries metadata only. It resolves nothing:
+        binding happens in resolve_objective_by_id against the executable ref."""
+        rows = catalog()
+        for o in rows:
+            assert "resolved" not in o and "bound" not in o
+            assert o.get("price") is not None
+
+    def test_prod_20260902_shape_both_references_agree_on_side(self):
+        """Today's measured pair: 29110.00 settled vs 29117.00 executable, with
+        no objective inside the band, so nothing flipped -- and each row says
+        which reference it used."""
+        from broker import luna_candidate_producer as P
+        bi = {
+            "timestamp": "2026-09-02T13:42:00+00:00",
+            "market": _priced({"current_price": 29110.0}),
+            "liquidity": {"nearest_buy_side": 29105.0, "nearest_sell_side": 29044.0},
+            "protected_swings": {
+                "protected_high": {"level": 29149.25,
+                                   "timestamp": "2026-09-02T13:42:00+00:00"},
+                "protected_low": {"level": 29033.0,
+                                  "timestamp": "2026-09-02T13:42:00+00:00"}},
+        }
+        settled = authorized_objective_catalog({}, bi, 29110.0)
+        execref = authorized_objective_catalog({}, bi, 29117.0)
+        assert ([o["valid_for"] for o in settled]
+                == [o["valid_for"] for o in execref])
+        assert all(o["reference_semantics"] == P.REFERENCE_SETTLED_MARKET_TRUTH
+                   for o in settled)
+        assert all(o["reference_semantics"] == P.REFERENCE_CALLER_SUPPLIED
+                   for o in execref)
+        for a, b in zip(settled, execref):
+            assert round(b["distance_from_reference"]
+                         - a["distance_from_reference"], 6) in (7.0, -7.0)
+
+    def test_the_prompt_explains_the_reference(self):
+        from ai_brain.brain_prompt import BRAIN_SYSTEM_PROMPT as _P
+        text = _P if isinstance(_P, str) else str(_P)
+        for token in ("reference_semantics", "settled_market_truth",
+                      "guarantee of present executability",
+                      "revalidated later against a FRESH EXECUTABLE"):
+            assert token.lower() in text.lower(), token
