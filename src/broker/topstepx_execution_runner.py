@@ -191,6 +191,12 @@ class ExecutionRunner:
     submission_record: dict = None
     #: Set when a venue answer could not be persisted. Never cleared silently.
     recording_failure: dict = None
+    #: Emergency closes that were TRANSPORTED while their durable pre-intent
+    #: record could not be written. Its own list, because overwriting
+    #: `recording_failure` would destroy the ENTRY's evidence to describe a
+    #: close, and because "we flattened without a durable record" is a
+    #: first-class operational fact an operator has to see.
+    close_durability_failures: list = field(default_factory=list)
     #: The customTag stamped on our entry; protective legs suffix it.
     submission_custom_tag: str = ""
     #: Called with the venue order id the instant the venue acknowledges, before
@@ -689,6 +695,77 @@ class ExecutionRunner:
             contract_id=self.contract.id,
             symbol=getattr(self.contract, "name", "") or "",
             geometry=(self.geometry.evidence() if self.geometry else {}))
+
+    def _open_close_submission(self, *, round_index: int):
+        """Persist EMERGENCY-CLOSE INTENT before the socket opens. Own record.
+
+        LUNA-VENUE-MINTED-CLOSE-LINEAGE-1 phase 1 (2026-09-02). `close_position`
+        was called as a bare statement: the request left no durable trace and
+        the venue's answer was discarded on the return. PROD-20260902 therefore
+        could not say afterwards that order 3479178907 was its own liquidation,
+        and the 2026-08-05 smoke collapsed a real close into
+        `{"step": "flatten", "accepted": true}` -- so the wire contract of
+        `/api/Position/closeContract` has never once been recorded anywhere.
+
+        A SEPARATE RECORD PER TRANSPORT ATTEMPT. The executor loops, so several
+        ACTION_CLOSE rounds can occur in one liquidation and a single record
+        could not answer "did THIS attempt reach the venue" after a restart. It
+        deliberately does not touch `self.submission_record`, which belongs to
+        the ENTRY: overwriting that would destroy the entry's flight record in
+        order to describe the close.
+
+        Returns None when recording is not configured (smoke tools, unit
+        tests), leaving their behaviour byte-identical.
+        """
+        if not self._recording():
+            return None
+        # The body the session will actually post, minus the account id it
+        # supplies itself. `side`, `size` and `type` are legitimately ABSENT:
+        # closeContract carries none of them and the venue mints the offsetting
+        # order. `operation` is what stops that absence reading as a malformed
+        # place-order.
+        payload = {"contractId": self.contract.id}
+        return SUBREC.open_submission(
+            store_dir=self.submission_store_dir,
+            session_id=self.submission_session_id,
+            mission_id=getattr(self, "submission_mission_id", "") or "",
+            payload=payload, custom_tag="",
+            token_id=getattr(getattr(self, "token", None), "token_id", "") or "",
+            authorization_fingerprint=getattr(
+                self, "submission_authorization_fingerprint", "") or "",
+            account_fingerprint=getattr(self, "account_fingerprint", "") or "",
+            contract_id=self.contract.id,
+            symbol=getattr(self.contract, "name", "") or "",
+            geometry={"emergency_close_round": round_index},
+            operation=SUBREC.OPERATION_POSITION_CLOSE)
+
+    def _record_close_outcome(self, record, *, raw_response=None,
+                              transport_exception: str = None,
+                              state: str = None):
+        """Persist the venue's answer to ONE close attempt, verbatim.
+
+        The whole parsed body reaches the recorder untouched -- no field is
+        selected, dropped or normalised -- because the open question this
+        exists to answer is whether closeContract returns the id of the order
+        the venue mints. Capturing is ALL this phase does: nothing here
+        promotes an id into mission ownership.
+        """
+        if record is None or not self._recording():
+            return record
+        try:
+            return SUBREC.record_response(
+                store_dir=self.submission_store_dir,
+                session_id=self.submission_session_id,
+                submission=record, raw_response=raw_response,
+                transport_exception=transport_exception, state=state)
+        except Exception as exc:  # noqa: BLE001 -- evidence failure may not mask the venue
+            self.recording_failure = {
+                "error": "%s: %s" % (type(exc).__name__, exc),
+                "submission_id": (record or {}).get("submission_id"),
+                "operation": SUBREC.OPERATION_POSITION_CLOSE,
+                "raw_response": dict(raw_response or {}) or None,
+                "transport_exception": transport_exception}
+            return record
 
     @staticmethod
     def _venue_body(obj) -> dict:
@@ -1885,20 +1962,99 @@ class ExecutionRunner:
                 continue        # re-read; PendingCancellation may still fill
 
             if action == EL.ACTION_CLOSE:
+                # EXPOSURE REDUCTION OUTRANKS LOCAL DURABILITY.
+                #
+                # Recording intent before transport is the ENTRY law, and it was
+                # written for NEW EXPOSURE: PROD-20260810 was a rejected entry,
+                # and `open_submission` deliberately mirrors
+                # `MissionState.consume_attempt`. Its purpose is to stop us
+                # creating exposure we cannot account for. An emergency close
+                # REMOVES exposure, so applying the same veto here inverts the
+                # risk it was built to prevent.
+                #
+                # WHAT IS ALREADY TRUE WHEN THIS LINE RUNS. `ACTION_CLOSE` is
+                # only emitted at E3A_EMERGENCY_NAKED, which the planner reaches
+                # after discovery proved COMPLETE, after ownership ambiguity was
+                # excluded, after E1/E2 cancelled and proved terminal every
+                # executable order of ours, and with a measured NONZERO
+                # position. A flat account returns at `size == 0` and can never
+                # reach here. So this is not bookkeeping versus tidiness: it is
+                # a disk failure deciding whether live naked contracts stay in
+                # the market.
+                #
+                # The planner's own doctrine already says which way that goes --
+                # "throwing an exception at an open position would be abandoning
+                # it" -- and the entry recorder's post-transport rule says the
+                # same thing about ordering: broker reality first, evidence
+                # failure second, neither hidden.
+                #
+                # The exception is SCOPED TO THIS BRANCH. Ordinary order
+                # placement still refuses to transmit what it cannot record.
+                close_record = None
                 try:
-                    self.session.close_position(self.contract.id)
+                    close_record = self._open_close_submission(round_index=rounds)
+                except Exception as exc:  # noqa: BLE001
+                    # OBSERVABLE, never swallowed -- and never converted into a
+                    # fabricated durable record claiming a pre-transport write
+                    # that did not happen.
+                    self.close_durability_failures.append(
+                        {"round": rounds, "contract_id": self.contract.id,
+                         "stage": "pre_transport_intent",
+                         "error": "%s: %s" % (type(exc).__name__, exc),
+                         "close_transported_anyway": True})
+                try:
+                    response = self.session.close_position(self.contract.id)
                     close_state = EL.CLOSE_ACKNOWLEDGED
+                    # THE BODY IS KEPT WHOLE. Whether closeContract returns the
+                    # id of the order the venue mints has never been observed;
+                    # discarding this return is precisely why it is unknown.
+                    body = self._venue_body(response)
+                    # THE VENUE ANSWERED, so CLOSE_ACKNOWLEDGED is true about
+                    # the venue whether or not our disk cooperated. It is also
+                    # the safe planner input: the next round returns
+                    # ACTION_PROVE, which re-reads position and proves the close
+                    # terminal instead of sending another one.
+                    close_record = self._record_close_outcome(
+                        close_record, raw_response=body)
+                    if close_record is None:
+                        # No durable pre-intent exists, so the answer is kept in
+                        # memory ONLY. Writing a record now would assert a
+                        # history that never occurred.
+                        self.close_durability_failures.append(
+                            {"round": rounds, "contract_id": self.contract.id,
+                             "stage": "response_not_durably_recorded",
+                             "venue_response": body or None,
+                             "close_transported_anyway": True})
                     # RECORDED, because "did we mutate the account" is a
                     # question callers ask and `close_state` only answers "what
-                    # is in flight right now".
+                    # is in flight right now". The submission id travels for
+                    # observability; the DURABLE ledger, never this list, is
+                    # the authority on whether the venue may have seen it.
                     closes.append({"contract_id": self.contract.id,
                                    "round": rounds,
                                    "size": decision.get("close_size"),
-                                   "side": decision.get("close_side")})
+                                   "side": decision.get("close_side"),
+                                   "submission_id": (close_record or {}).get(
+                                       "submission_id"),
+                                   "durably_recorded": close_record is not None,
+                                   "venue_response": body or None})
                 except Exception as exc:  # noqa: BLE001
                     # AMBIGUOUS. A second close could reverse the account, so
-                    # the planner is told the outcome is unknown and halts.
+                    # the planner is told the outcome is unknown and halts. The
+                    # attempt is journalled as possibly-seen, never as
+                    # rejected: a close can execute perfectly while its answer
+                    # is lost.
                     close_state = EL.CLOSE_STATE_UNKNOWN
+                    self._record_close_outcome(
+                        close_record, raw_response=self._venue_body(exc),
+                        transport_exception="%s: %s" % (type(exc).__name__, exc),
+                        state=SUBREC.SUBMISSION_UNKNOWN)
+                    if close_record is None:
+                        self.close_durability_failures.append(
+                            {"round": rounds, "contract_id": self.contract.id,
+                             "stage": "ambiguous_transport_not_durably_recorded",
+                             "error": "%s: %s" % (type(exc).__name__, exc),
+                             "close_transported_anyway": True})
                     failed.append({"order_id": None,
                                    "error": f"close_position: {type(exc).__name__}: {exc}"})
                 continue

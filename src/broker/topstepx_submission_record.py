@@ -74,6 +74,22 @@ VENUE_MAY_HAVE_SEEN = frozenset({
 #: Only these prove a trade actually happened. A rejection is not one of them.
 FILL_STATES = frozenset({PARTIALLY_FILLED, FILLED})
 
+#: WHICH VENUE OPERATION A RECORD DESCRIBES.
+#:
+#: LUNA-VENUE-MINTED-CLOSE-LINEAGE-1 phase 1 (2026-09-02). This recorder was
+#: written for `/api/Order/place`, whose payload supplies `side`, `size` and
+#: `type`. `/api/Position/closeContract` sends only `{accountId, contractId}`:
+#: the venue mints the offsetting order itself, so those three fields are
+#: legitimately absent rather than zero -- and an absent `order_type` is
+#: otherwise indistinguishable from a malformed place. Naming the operation is
+#: the minimum that lets a reader, and a restart, tell the two apart without
+#: pretending a position close is an ordinary market order.
+#:
+#: Defaults to ORDER_PLACE so every existing caller and every record already on
+#: disk keeps exactly the meaning it had.
+OPERATION_ORDER_PLACE = "ORDER_PLACE"
+OPERATION_POSITION_CLOSE = "POSITION_CLOSE"
+
 
 class SubmissionRecordError(RuntimeError):
     """The durable submission record could not be established."""
@@ -122,7 +138,8 @@ def open_submission(*, store_dir: str, session_id: str, mission_id: str,
                     authorization_fingerprint: str = "",
                     account_fingerprint: str = "", contract_id: str = "",
                     symbol: str = "", geometry: dict = None,
-                    submission_id: str = None) -> dict:
+                    submission_id: str = None,
+                    operation: str = OPERATION_ORDER_PLACE) -> dict:
     """Persist SUBMISSION_STARTED and PROVE it landed, before any transport.
 
     Deliberately mirrors `MissionState.consume_attempt`: it re-reads the ledger
@@ -141,6 +158,7 @@ def open_submission(*, store_dir: str, session_id: str, mission_id: str,
         "state": SUBMISSION_STARTED,
         "session_id": session_id,
         "mission_id": mission_id,
+        "operation": operation,
         "custom_tag": custom_tag,
         "token_id": token_id,
         "authorization_fingerprint": authorization_fingerprint,
