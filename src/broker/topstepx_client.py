@@ -68,11 +68,34 @@ class TopstepXError(RuntimeError):
     PROD-20260810 lost a rejection because the only copy of `errorCode` and
     `errorMessage` was formatted into this exception's string and then dropped;
     the flight recorder reads the structured body from here instead.
+
+    `venue_refused` IS THE ATTRIBUTION SOURCE. PROD-20260904 RULING B attributes
+    the TopstepXError path to the venue, on the stated ground that "the request
+    reached Topstep and Topstep refused it". That holds at every raise site
+    EXCEPT the three below, which wear this same type while proving the
+    opposite:
+
+        URLError            the socket never completed -- the request may be in
+                            flight, and an order can still land after we look
+        HTTP 5xx            the venue received it and did not say what it did;
+                            "server error" is not a refusal
+        retries exhausted   the last attempt's disposition is unknown
+
+    Those raise with `venue_refused=False`, and a submission carrying it may NOT
+    terminalize as VENUE_REJECTED_ZERO_FILL -- it stays under unknown-submission
+    law exactly like the bare-exception path. Everything else (a `success:false`
+    body, HTTP 4xx, HTTP 429) leaves it None, which reads as Ruling B's default:
+    attributed.
+
+    None is NOT False. False is a POSITIVE claim that the venue did not refuse
+    this submission; None is the ordinary case and means nothing was claimed.
     """
 
-    def __init__(self, *args, venue_body: dict = None) -> None:
+    def __init__(self, *args, venue_body: dict = None,
+                 venue_refused: bool = None) -> None:
         super().__init__(*args)
         self.venue_body = dict(venue_body) if venue_body else None
+        self.venue_refused = venue_refused
 
 
 class TopstepXAuthError(TopstepXError):
@@ -174,9 +197,15 @@ def _default_transport(url: str, payload: dict, headers: dict, timeout: float) -
             except (TypeError, ValueError):
                 wait = None      # Retry-After may be an HTTP-date; fall back to backoff
             raise TopstepXRateLimited(f"HTTP 429 from {url}: {detail}", wait) from exc
-        raise TopstepXError(f"HTTP {exc.code} from {url}: {detail}") from exc
+        # 4xx is the venue refusing the request. 5xx is the venue declining to
+        # say what it did with it, which is an UNKNOWN outcome, not a refusal.
+        raise TopstepXError(f"HTTP {exc.code} from {url}: {detail}",
+                            venue_refused=(exc.code < 500)) from exc
     except urllib.error.URLError as exc:
-        raise TopstepXError(f"cannot reach {url}: {exc.reason}") from exc
+        # The socket never completed. The request may still be in flight, so
+        # this can never be read as "the venue refused it".
+        raise TopstepXError(f"cannot reach {url}: {exc.reason}",
+                            venue_refused=False) from exc
     return json.loads(raw) if raw else {}
 
 
@@ -293,7 +322,8 @@ class TopstepXClient:
                     continue
                 raise
         raise TopstepXError(
-            f"gave up after {self.max_retries + 1} attempts against {url}: {last}")
+            f"gave up after {self.max_retries + 1} attempts against {url}: {last}",
+            venue_refused=False)
 
     # ── reads ─────────────────────────────────────────────────────────────────
     def accounts(self, only_active: bool = True) -> list[TopstepXAccount]:

@@ -863,15 +863,42 @@ class ProductionLoop:
                 submitted_at=self.clock().isoformat(),
                 evidence="venue ack at submit")
 
+        def on_rejected(fact: dict):
+            # PROD-20260904 RULING C. The rejection's production writer, and the
+            # structural twin of `on_acknowledged` above: same seam, same
+            # fail-closed contract, same durable record. Until this existed the
+            # canonical transition had NO production caller at all -- its only
+            # callers in the entire tree were tests -- so a positively rejected
+            # submission left the mission in ATTEMPT_CONSUMED, wedging
+            # `active_mission` for the rest of the session.
+            #
+            # It re-states nothing and decides nothing. Every fact here was
+            # proven at the venue by the runner and is passed straight through
+            # to the canonical law, which refuses the write if any of them is
+            # missing. Raising is the point: the runner turns it into
+            # SUBMISSION_RECORD_WRITE_FAILED and halts.
+            mission.venue_rejected_zero_fill(
+                venue_order_id=fact.get("venue_order_id"),
+                error_code=fact.get("error_code"),
+                error_message=fact.get("error_message") or "",
+                positions=fact.get("positions"),
+                working_orders=fact.get("working_orders"),
+                venue_attributed=bool(fact.get("venue_attributed")))
+            if not mission.session_id:
+                mission.session_id = self.mission.authorization.session_id
+                mission.save()
+
         # The runner was already built during sizing, so `build_runner` will not
         # run again inside `submit()` -- these must land on BOTH the session
         # (for any later rebuild) and the live runner, or the hook silently
         # never fires. That is precisely the failure shape this whole mission
         # exists to remove, so it is wired in both places deliberately.
         self.ps.acknowledgement_hook = on_acknowledged
+        self.ps.rejection_hook = on_rejected
         self.ps.trade_mission_id = mission.mission_id
         if self.ps.runner is not None:
             self.ps.runner.on_venue_acknowledged = on_acknowledged
+            self.ps.runner.on_venue_rejected = on_rejected
             self.ps.runner.submission_mission_id = mission.mission_id
 
         try:

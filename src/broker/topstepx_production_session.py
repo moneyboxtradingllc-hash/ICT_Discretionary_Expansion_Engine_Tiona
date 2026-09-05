@@ -240,6 +240,12 @@ class ProductionSession:
         # record before the ack is reported upward -- on V13 it reached the
         # flight recorder and stopped there.
         runner.on_venue_acknowledged = getattr(self, "acknowledgement_hook", None)
+        # PROD-20260904 RULING C. The REJECTION has to reach the durable mission
+        # too, and by the same route -- it was the one venue boundary with no
+        # production writer at all, so PROD-20260810 and PROD-20260904-T1 both
+        # ended as phantom active missions. Assigned from the loop beside
+        # `acknowledgement_hook`; a hook nothing ever assigns is not wiring.
+        runner.on_venue_rejected = getattr(self, "rejection_hook", None)
         self.runner = runner
         self.sizing = sized
         return runner

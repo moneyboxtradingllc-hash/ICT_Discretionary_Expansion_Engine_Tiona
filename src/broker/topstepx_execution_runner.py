@@ -203,6 +203,13 @@ class ExecutionRunner:
     #: the ack is reported upward. The mission-durability seam; None in the
     #: smoke tools and unit tests, which own no mission.
     on_venue_acknowledged: Optional[Any] = None
+    #: PROD-20260904 RULING C. The REJECTION twin of `on_venue_acknowledged`,
+    #: called with one dict of positively-proven facts the instant a submission
+    #: is shown to have been refused with zero fill, before the halt. Same
+    #: shape, same seam, same fail-closed contract -- a rejection we cannot
+    #: record durably is as dangerous as an acknowledgement we cannot record.
+    #: None in the smoke tools and unit tests, which own no mission.
+    on_venue_rejected: Optional[Any] = None
     #: Which doctrine actually judged this runner's trades. The runner is what
     #: enforces max_risk_usd / max_stop_points, so it is also what stamps them
     #: into the evidence -- V13 recorded the smoke constants on a production
@@ -625,12 +632,23 @@ class ExecutionRunner:
             # the halt so it can never read as an ordinary refusal.
             self._record_submission_outcome(
                 raw_response=self._venue_body(exc), transport_exception=str(exc))
-            return self._reconcile_uncertain(f"venue error: {exc}")
+            # RULING B. Attribution is decided HERE, from the exception the
+            # venue raised, and carried into reconciliation. Deciding it later
+            # -- from position=0 and orders=0 -- is exactly how an ambiguous
+            # transport would become a "venue rejection".
+            return self._reconcile_uncertain(
+                f"venue error: {exc}",
+                venue_attributed=self._venue_attributed(exc),
+                venue_body=self._venue_body(exc))
         except Exception as exc:  # noqa: BLE001 — timeouts land here
             self._record_submission_outcome(
                 raw_response=self._venue_body(exc),
                 transport_exception=f"{type(exc).__name__}: {exc}")
-            return self._reconcile_uncertain(f"{type(exc).__name__}: {exc}")
+            # NOT attributed, and no reconciliation may promote it. The venue
+            # may never have been asked, or may have accepted an order whose
+            # response died in transit.
+            return self._reconcile_uncertain(f"{type(exc).__name__}: {exc}",
+                                             venue_attributed=False)
         if not self._record_submission_outcome(raw_response=self._venue_body(result)):
             # The order may be live. Find out from the venue, then halt.
             return self._reconcile_after_recording_failure()
@@ -768,6 +786,25 @@ class ExecutionRunner:
             return record
 
     @staticmethod
+    def _venue_attributed(exc) -> bool:
+        """Did the VENUE positively refuse this submission? PROD-20260904 RULING B.
+
+        THE ONLY SOURCE IS THE EXCEPTION CONTRACT, never the reconciliation that
+        follows it. Flat-and-empty is not evidence of a refusal: a request that
+        timed out can still be in flight, and an order can land after we look.
+
+        `TopstepXError` means the request reached Topstep and Topstep refused
+        it -- with the one carve-out its own `venue_refused=False` marks, for
+        the raise sites that wear that type while proving no answer arrived
+        (unreachable host, HTTP 5xx, retries exhausted). Everything else --
+        every bare exception, every timeout, every unknown transport -- is
+        unattributed, and stays under unknown-submission law.
+        """
+        if not isinstance(exc, TopstepXError):
+            return False
+        return getattr(exc, "venue_refused", None) is not False
+
+    @staticmethod
     def _venue_body(obj) -> dict:
         """The venue's own dict, wherever it is hiding.
 
@@ -873,23 +910,91 @@ class ExecutionRunner:
                    f"{len(orders)} working order(s). The session is HALTED for "
                    f"operator review; NOT resubmitting.", evidence)
 
-    def _reconcile_uncertain(self, why: str) -> dict:
-        """UNKNOWN after submit. Ask the venue; never resubmit."""
+    def _reconcile_uncertain(self, why: str, *, venue_attributed: bool = False,
+                             venue_body: dict = None) -> dict:
+        """UNKNOWN after submit. Ask the venue; never resubmit.
+
+        `venue_attributed` is threaded IN by the caller that caught the
+        exception (RULING B) and is never derived from what this method then
+        sees. It decides one thing only: whether a flat-and-empty venue is
+        allowed to CLOSE the mission as a zero-fill rejection, or must leave it
+        under unknown-submission law.
+        """
         self._to(SUBMIT_UNKNOWN, f"submission outcome unknown ({why}); reconciling")
         try:
-            orders = self.working_orders()
+            # Same contract as `working_orders()` -- discovery must ANSWER or
+            # this raises -- but the completeness label is kept, because
+            # terminalizing a mission on an incomplete order view would be
+            # claiming absence from a surface that is documented to omit
+            # Suspended children.
+            found = self._discover_orders()
+            if not found["answered"]:
+                raise TopstepXError(
+                    "order discovery unavailable: "
+                    + ("; ".join(found["errors"]) or "no order surface answered"))
+            orders = found["working"] or []
             positions = self.session.open_positions()
         except TopstepXError as exc:
             self._halt(SUBMIT_UNKNOWN,
                        f"cannot reconcile after an uncertain submit: {exc}. "
                        f"NOT resubmitting; operator intervention required.")
-        evidence = {"open_orders": len(orders), "open_positions": len(positions)}
+        evidence = {"open_orders": len(orders), "open_positions": len(positions),
+                    "discovery": found["source"],
+                    "discovery_complete": bool(found["complete"]),
+                    "venue_attributed": bool(venue_attributed)}
         if positions:
             self._to(FILLED, "reconciliation found a position; the order did exist", evidence)
             return {"order_id": None, "reconciled": True, "position": positions[0]}
         if orders:
             self._to(ACKNOWLEDGED, "reconciliation found a working order", evidence)
             return {"order_id": orders[0].get("id"), "reconciled": True}
+
+        # ── the entry did not land ────────────────────────────────────────────
+        #
+        # PROD-20260904 RULING C. Every fact the canonical transition demands is
+        # now positively proven and in hand, and this is the only place in
+        # production where that is true. PROD-20260810 and PROD-20260904 both
+        # stranded here: the halt below was the end of the story, and the
+        # durable mission was left in ATTEMPT_CONSUMED as a phantom active
+        # mission forever.
+        #
+        # PRODUCER LEGALITY, in order:
+        #   attributed .......... the venue positively refused (RULING B)
+        #   zero fill ........... no position and no working order below
+        #   positions ........... asked and answered flat
+        #   discovery ........... asked, answered AND complete
+        # Any one of them missing and the mission stays under the existing
+        # unknown-submission law -- it is never closed on a guess.
+        if (venue_attributed and found["complete"]
+                and self.on_venue_rejected is not None):
+            body = venue_body or {}
+            try:
+                self.on_venue_rejected({
+                    # Whatever the venue named, or None. Never invented.
+                    "venue_order_id": (body.get("orderId")
+                                       or body.get("order_id")
+                                       or self.order_id),
+                    "error_code": body.get("errorCode"),
+                    "error_message": body.get("errorMessage") or why,
+                    "positions": len(positions),
+                    "working_orders": len(orders),
+                    "venue_attributed": True,
+                    "venue_body": dict(body) or None,
+                    "evidence": why})
+            except Exception as exc:  # noqa: BLE001 — fail closed, never retry
+                # Identical contract to the acknowledgement seam: a venue
+                # boundary we cannot write down halts the session for an
+                # operator rather than continuing on an unrecorded mission.
+                self.recording_failure = {
+                    "stage": "mission_rejection",
+                    "order_id": body.get("orderId"),
+                    "error": f"{type(exc).__name__}: {exc}"}
+                self._emergency_recording_marker()
+                self._halt(SUBMISSION_RECORD_WRITE_FAILED,
+                           f"the venue rejected the submission with zero fill but "
+                           f"the mission could not record it: "
+                           f"{type(exc).__name__}: {exc}",
+                           dict(self.recording_failure))
         self._halt(SUBMIT_REJECTED,
                    "reconciliation found neither position nor order; the entry did not land. "
                    "The authorization is spent — a new operator phrase is required.", evidence)

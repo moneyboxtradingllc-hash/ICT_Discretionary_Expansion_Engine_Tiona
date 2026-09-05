@@ -145,6 +145,12 @@ class MissionState:
     #: a rejection can never again be reconstructible only from a lost log line.
     venue_error_code: object = None
     venue_error_message: str = ""
+    #: PROD-20260904 RULING A. Did the VENUE ITSELF positively refuse this
+    #: submission? Durable, because it is the fact that made terminalization
+    #: legal without a venue order id, and a later reader must be able to see
+    #: WHY a mission ended rather than re-derive it from a lost exception.
+    #: Conservative default: False. An ambiguous caller cannot terminalize.
+    venue_attributed: bool = False
     #: Provenance carried ON the mission, so a later reader never has to join
     #: across files to learn which session and which approval produced this
     #: trade. V13 filed its flight record under the RETIRED session id and an
@@ -180,6 +186,7 @@ class MissionState:
                 "completion_state": self.completion_state,
                 "venue_error_code": self.venue_error_code,
                 "venue_error_message": self.venue_error_message,
+                "venue_attributed": self.venue_attributed,
                 "session_id": self.session_id,
                 "submitted_at": self.submitted_at,
                 "acknowledged_at": self.acknowledged_at,
@@ -423,7 +430,8 @@ class MissionState:
     # ── the venue said no ─────────────────────────────────────────────────────
     def venue_rejected_zero_fill(self, *, venue_order_id, error_code=None,
                                  error_message: str = "", positions: int = None,
-                                 working_orders: int = None) -> dict:
+                                 working_orders: int = None,
+                                 venue_attributed: bool = False) -> dict:
         """Close the mission on a POSITIVELY CONFIRMED zero-fill rejection.
 
         Refuses unless the venue was actually asked and answered flat. "I did
@@ -431,7 +439,43 @@ class MissionState:
         and only the second may end a mission.
 
         The rejection identity is written INTO the mission so a later reader
-        never has to reconstruct it: order id, code and message all persist.
+        never has to reconstruct it: order id, code, message and the attribution
+        that made this legal all persist.
+
+        PROD-20260904 RULING A -- A MISSING ORDER ID.
+        Topstep can positively refuse a submission WITHOUT minting an order id:
+        the request is judged at the gateway and nothing is ever created. The
+        old law required an id, so the one shape it was written for could not be
+        recorded, and PROD-20260904-T1 stranded in ATTEMPT_CONSUMED exactly as
+        PROD-20260810 had.
+
+        The id is therefore optional ONLY under positive attribution:
+
+            venue_order_id present                 -> legal (the venue named it)
+            venue_order_id None, attributed        -> legal, and NO id is
+                                                      invented; the mission
+                                                      keeps `order_id = None`
+                                                      and says why
+            venue_order_id None, NOT attributed    -> REFUSED
+
+        The default stays False so an ambiguous caller -- a timeout, a dropped
+        socket, any path that merely OBSERVES flat-and-empty -- cannot
+        terminalize by accident. Being flat is not evidence of a refusal; it is
+        equally consistent with a request still in flight.
+
+        PROD-20260904 RULING D -- TOKEN SPENT.
+        A positive venue refusal IS the venue boundary, exactly like an
+        acknowledgement, so the authority behind the request is gone the moment
+        it is crossed. Both legal shapes above are that boundary -- an order id
+        can only have come from the venue -- so `token_spent` is set here and
+        not one step later. Pre-transport and ambiguous outcomes never reach
+        this method, and their tokens are untouched by it.
+
+        LOGGED, NOT FIXED (RULING: OUT OF SCOPE). This method still calls
+        `transition()` directly rather than `_advance()`, so it can be invoked
+        from UNARMED -- a mission that never consumed an attempt can be written
+        terminal by a caller that asks for it. Every production caller reaches
+        it from ATTEMPT_CONSUMED. Deliberately left for its own unit.
         """
         if positions is None or working_orders is None:
             raise MissionStateError(
@@ -441,23 +485,38 @@ class MissionState:
             raise MissionStateError(
                 f"venue is not flat ({positions} position(s), "
                 f"{working_orders} working order(s)); not a zero-fill rejection")
-        if venue_order_id is None:
+        if venue_order_id is None and not venue_attributed:
             raise MissionStateError(
-                "a zero-fill rejection must name the venue order it refers to")
-        self.order_id = venue_order_id
+                "a zero-fill rejection must name the venue order it refers to, "
+                "unless the refusal is positively attributed to the venue "
+                "(venue_attributed=True); an unattributed flat-and-empty read "
+                "is not a rejection")
+        # NEVER INVENT ONE. A mission with no id says so, and the flight
+        # recorder remains the place an id is looked up if one exists.
+        if venue_order_id is not None:
+            self.order_id = venue_order_id
         self.completion_state = VENUE_REJECTED_ZERO_FILL
         self.venue_error_code = error_code
         self.venue_error_message = error_message
+        self.venue_attributed = bool(venue_attributed)
+        self.token_spent = True
+        named = (f"order {venue_order_id}" if venue_order_id is not None
+                 else "this submission (no order id minted)")
         self.transition(VENUE_REJECTED_ZERO_FILL,
-                        f"venue rejected order {venue_order_id} with zero fill"
+                        f"venue rejected {named} with zero fill"
                         + (f": [{error_code}] {error_message}" if error_message else ""))
         verify = load(self.path)
         if verify is None or verify.state != VENUE_REJECTED_ZERO_FILL:
             raise MissionStateError(
                 "could not verify VENUE_REJECTED_ZERO_FILL on disk")
+        if not verify.token_spent:
+            raise MissionStateError(
+                "the rejection did not persist token_spent; a venue boundary "
+                "that is not durable is the PROD-20260811 defect")
         return {"state": self.state, "venue_order_id": venue_order_id,
                 "error_code": error_code, "error_message": error_message,
-                "verified": True}
+                "venue_attributed": self.venue_attributed,
+                "token_spent": self.token_spent, "verified": True}
 
 
 def load(path: str) -> "MissionState | None":
@@ -492,6 +551,10 @@ def load(path: str) -> "MissionState | None":
             completion_state=data.get("completion_state", ""),
             venue_error_code=data.get("venue_error_code"),
             venue_error_message=data.get("venue_error_message", "") or "",
+            # Absent in records written before RULING A. Reading a legacy
+            # rejection back as "unattributed" is the conservative direction:
+            # it never manufactures an attribution nobody proved.
+            venue_attributed=bool(data.get("venue_attributed")),
             session_id=data.get("session_id", "") or "",
             submitted_at=data.get("submitted_at", "") or "",
             acknowledged_at=data.get("acknowledged_at", "") or "",
