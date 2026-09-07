@@ -50,6 +50,7 @@ data/integration/topstepx/submissions_PROD-20260904.jsonl.
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 
@@ -693,10 +694,18 @@ class TestTheAcknowledgementLifecycleIsUnchanged:
 class FakeLiveSession:
     """Stands in for `TopstepXLiveSession`. Reads only; refuses to place."""
 
-    def __init__(self, positions=(), orders=(), complete=True):
-        self.account = type("A", (), {"id": 90000042, "name": "TEST"})()
+    #: The fake venue account. `account_fingerprint` of these two values is what
+    #: the repair now compares against the mission, so the fixture has to carry
+    #: a real identity rather than an arbitrary one.
+    ACCOUNT_ID, ACCOUNT_NAME = 90000042, "TEST"
+
+    def __init__(self, positions=(), orders=(), complete=True,
+                 account_id=None, contract=None):
+        self.account = type("A", (), {"id": account_id or self.ACCOUNT_ID,
+                                      "name": self.ACCOUNT_NAME})()
         self._p, self._o = list(positions), list(orders)
         self.complete = complete
+        self._contract = contract
 
     def authenticate(self):
         return {"ok": True}
@@ -705,7 +714,7 @@ class FakeLiveSession:
         return self.account
 
     def resolve_contract(self, text="MNQ"):
-        return MNQ
+        return self._contract or MNQ
 
     def open_positions(self):
         return list(self._p)
@@ -730,7 +739,14 @@ class TestTheBoundedLocalRepair:
     def repo(self, tmp_path, *, transport_only=False, fill=False):
         """A mission stranded exactly as PROD-20260904-T1 is."""
         from broker import topstepx_submission_record as SUB
+        from broker.topstepx_redaction import account_fingerprint
         sm, m = mission_at(tmp_path)
+        # The mission belongs to the account the repair will pin. Without this
+        # the identity check below correctly refuses -- which is the point of
+        # REVIEW FINDING 3, and is asserted directly in its own class.
+        m.account_fingerprint = account_fingerprint(FakeLiveSession.ACCOUNT_ID,
+                                                    FakeLiveSession.ACCOUNT_NAME)
+        m.save()
         rec = SUB.open_submission(
             store_dir=str(tmp_path), session_id=SESSION, mission_id=m.mission_id,
             payload={"accountId": 90000042, "contractId": CID, "size": 3,
@@ -824,3 +840,236 @@ class TestTheBoundedLocalRepair:
         for forbidden in ("place_order", "cancel_order", "close_position",
                           "modify_order"):
             assert forbidden not in src, f"{forbidden} is reachable"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PROD-20260904 REVIEW FINDINGS. Three paths an independent review reproduced
+# closing a mission as VENUE_REJECTED_ZERO_FILL when nothing had established a
+# refusal. Each is driven through the REAL client, not by injecting the
+# exception the runner would eventually see.
+# ══════════════════════════════════════════════════════════════════════════════
+class RecordingNetwork:
+    """The NETWORK boundary and nothing above it.
+
+    `urlopen` is what gets patched, so the real `_default_transport` -- and
+    therefore the real HTTP-error parser and the real venue_refused marking --
+    runs for every case below. Injecting a ready-made exception into the client
+    would test my own classification rather than the code path production takes.
+    """
+
+    def __init__(self, order_replies=(), login_status=None):
+        self.order_replies = list(order_replies)
+        self.login_status = login_status
+        self.order_requests = 0
+        self.login_requests = 0
+        self.failed_logins = 0
+
+    def _raise(self, url, status):
+        import io
+        import urllib.error
+        raise urllib.error.HTTPError(url, status, "err", {}, io.BytesIO(b"{}"))
+
+    def install(self, monkeypatch):
+        from broker import topstepx_client as C
+
+        class Resp:
+            def __init__(self, body): self._b = body
+            def read(self): return json.dumps(self._b).encode()
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+
+        def urlopen(req, timeout=None):
+            url = req.full_url
+            if url.endswith("/api/Auth/loginKey"):
+                self.login_requests += 1
+                if self.login_status:
+                    self.failed_logins += 1
+                    status, self.login_status = self.login_status, None
+                    self._raise(url, status)
+                return Resp({"success": True, "token": "tok", "errorCode": 0})
+            if url.endswith("/api/Order/place"):
+                self.order_requests += 1
+                reply = self.order_replies.pop(0)
+                if isinstance(reply, int):
+                    self._raise(url, reply)
+                return Resp(reply)
+            return Resp({"success": True, "accounts": []})
+
+        monkeypatch.setattr(C.urllib.request, "urlopen", urlopen)
+        return self
+
+
+def real_client():
+    from broker import topstepx_client as C
+    return C.TopstepXClient(username="u", api_key="k", sleep=lambda _s: None)
+
+
+class TestReviewFinding1OrderIsSentAtMostOnce:
+    """A retry BELOW the runner's one-submit latch is still a second order."""
+
+    def test_a_503_on_place_is_never_replayed(self, monkeypatch):
+        REJECT = {"success": False, "orderId": 1, "errorCode": 2,
+                  "errorMessage": "refused"}
+        t = RecordingNetwork(order_replies=[503, REJECT]).install(monkeypatch)
+        with pytest.raises(TopstepXError) as exc:
+            real_client().place_order_raw({"size": 1})
+        assert t.order_requests == 1, (
+            "the order was transmitted twice; a 503 may have left the first "
+            "one live and the second refusal says nothing about it")
+        assert exc.value.venue_refused is False
+        assert R.ExecutionRunner._venue_attributed(exc.value) is False
+
+    def test_a_429_on_place_is_never_replayed(self, monkeypatch):
+        t = RecordingNetwork(
+            order_replies=[429, {"success": True, "orderId": 9}]).install(monkeypatch)
+        with pytest.raises(TopstepXError) as exc:
+            real_client().place_order_raw({"size": 1})
+        assert t.order_requests == 1
+        assert R.ExecutionRunner._venue_attributed(exc.value) is False
+
+    def test_a_401_on_place_is_never_replayed(self, monkeypatch):
+        """The re-auth retry in `_post` re-sends the order too."""
+        t = RecordingNetwork(
+            order_replies=[401, {"success": True, "orderId": 9}]).install(monkeypatch)
+        with pytest.raises(TopstepXError):
+            real_client().place_order_raw({"size": 1})
+        assert t.order_requests == 1
+
+    def test_a_clean_refusal_still_reaches_the_caller_attributed(self, monkeypatch):
+        """The control: one request, a real refusal, still a venue refusal."""
+        REJECT = {"success": False, "orderId": 3491481775, "errorCode": 2,
+                  "errorMessage": "Brackets cannot be used with Position Brackets."}
+        t = RecordingNetwork(order_replies=[REJECT]).install(monkeypatch)
+        with pytest.raises(TopstepXError) as exc:
+            real_client().place_order_raw({"size": 1})
+        assert t.order_requests == 1
+        assert exc.value.venue_body == REJECT
+        assert R.ExecutionRunner._venue_attributed(exc.value) is True
+
+    def test_read_only_calls_keep_retrying(self, monkeypatch):
+        """Scoped: re-asking a question is free, re-sending an order is not."""
+        from broker import topstepx_client as C
+        calls = {"n": 0}
+
+        class Resp:
+            def read(self): return b'{"success": true, "accounts": []}'
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+
+        def urlopen(req, timeout=None):
+            import io
+            import urllib.error
+            if req.full_url.endswith("/api/Auth/loginKey"):
+                class L(Resp):
+                    def read(self): return b'{"success": true, "token": "t"}'
+                return L()
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise urllib.error.HTTPError(req.full_url, 503, "err", {},
+                                             io.BytesIO(b"{}"))
+            return Resp()
+
+        monkeypatch.setattr(C.urllib.request, "urlopen", urlopen)
+        real_client().accounts()
+        assert calls["n"] == 2, "read-only retry was removed; scope was exceeded"
+
+
+class TestReviewFinding2TheLoginEndpoint:
+    """An HTTP error from /api/Auth/loginKey is not an order refusal."""
+
+    def test_a_401_from_login_is_a_pre_order_auth_failure(self, monkeypatch):
+        from broker.topstepx_client import TopstepXAuthError
+        t = RecordingNetwork(order_replies=[{"success": True, "orderId": 9}],
+                             login_status=401).install(monkeypatch)
+        with pytest.raises(TopstepXAuthError) as exc:
+            real_client().place_order_raw({"size": 1})
+        assert t.failed_logins == 1
+        assert t.order_requests == 0, "no order request was ever sent"
+        assert exc.value.venue_refused is False
+        assert R.ExecutionRunner._venue_attributed(exc.value) is False
+
+    def test_a_503_from_login_is_also_pre_order(self, monkeypatch):
+        from broker.topstepx_client import TopstepXAuthError
+        t = RecordingNetwork(order_replies=[{"success": True, "orderId": 9}],
+                             login_status=503).install(monkeypatch)
+        with pytest.raises(TopstepXAuthError) as exc:
+            real_client().place_order_raw({"size": 1})
+        assert t.order_requests == 0
+        assert R.ExecutionRunner._venue_attributed(exc.value) is False
+
+    def test_a_rejected_login_body_is_still_pre_order(self, monkeypatch):
+        from broker import topstepx_client as C
+        from broker.topstepx_client import TopstepXAuthError
+
+        class Resp:
+            def read(self): return b'{"success": false, "errorCode": 9}'
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+
+        monkeypatch.setattr(C.urllib.request, "urlopen",
+                            lambda req, timeout=None: Resp())
+        with pytest.raises(TopstepXAuthError) as exc:
+            real_client().place_order_raw({"size": 1})
+        assert R.ExecutionRunner._venue_attributed(exc.value) is False
+
+
+class TestReviewFinding3TheRepairIsBoundToTheMission:
+    """Flat SOMEWHERE ELSE is not flat here.
+
+    `prove_at_the_venue` pins whatever account the environment names. That
+    proves we reached the account the CONFIG meant -- never that it is the
+    account whose mission is being closed. Both mismatches were reproduced
+    closing the mission with token_spent=true and exit code 0.
+    """
+
+    def helper(self):
+        return TestTheBoundedLocalRepair()
+
+    def test_a_different_account_refuses_and_writes_nothing(self, tmp_path,
+                                                            monkeypatch):
+        h = self.helper()
+        _, m = h.repo(tmp_path)
+        before = open(m.path, "rb").read()
+        code = h.run(tmp_path, monkeypatch,
+                     venue=FakeLiveSession(account_id=90009999),
+                     extra=["--phrase", "CLOSE THIS MISSION AS VENUE "
+                                        "REJECTED ZERO FILL"])
+        assert code != 0, "a different account's flat reads closed this mission"
+        assert MS.load(m.path).state == MS.ATTEMPT_CONSUMED
+        assert MS.load(m.path).token_spent is False
+        assert open(m.path, "rb").read() == before, "the mission file was touched"
+
+    def test_a_different_contract_refuses_and_writes_nothing(self, tmp_path,
+                                                             monkeypatch):
+        from dataclasses import replace
+        h = self.helper()
+        _, m = h.repo(tmp_path)
+        before = open(m.path, "rb").read()
+        other = replace(MNQ, id="CON.F.US.MES.Z26", name="MESZ6")
+        code = h.run(tmp_path, monkeypatch,
+                     venue=FakeLiveSession(contract=other),
+                     extra=["--phrase", "CLOSE THIS MISSION AS VENUE "
+                                        "REJECTED ZERO FILL"])
+        assert code != 0, "another contract's flat reads closed this mission"
+        assert MS.load(m.path).state == MS.ATTEMPT_CONSUMED
+        assert open(m.path, "rb").read() == before
+
+    def test_the_matching_identity_still_closes_it(self, tmp_path, monkeypatch):
+        """The control: the check must not block the legitimate repair."""
+        h = self.helper()
+        _, m = h.repo(tmp_path)
+        code = h.run(tmp_path, monkeypatch,
+                     extra=["--phrase", "CLOSE THIS MISSION AS VENUE "
+                                        "REJECTED ZERO FILL"])
+        assert code == 0
+        assert MS.load(m.path).state == MS.VENUE_REJECTED_ZERO_FILL
+
+    def test_the_mismatch_is_refused_before_the_phrase_is_even_checked(
+            self, tmp_path, monkeypatch):
+        """Identity is a precondition of the evidence, not a later gate."""
+        h = self.helper()
+        _, m = h.repo(tmp_path)
+        code = h.run(tmp_path, monkeypatch,
+                     venue=FakeLiveSession(account_id=90009999))
+        assert code != 0
+        assert MS.load(m.path).state == MS.ATTEMPT_CONSUMED

@@ -30,6 +30,7 @@ so REST is sufficient; a streaming layer can be added without touching this.
 from __future__ import annotations
 
 import json
+import re
 import time
 import urllib.error
 import urllib.request
@@ -43,6 +44,9 @@ __all__ = [
 ]
 
 BASE_URL = "https://api.topstepx.com"
+
+#: Matches the message `_default_transport` builds for a server-side failure.
+_HTTP_5XX = re.compile(r"^HTTP 5\d\d from ")
 
 # ── enums, verbatim from the swagger definitions ──────────────────────────────
 ORDER_TYPE = {"unknown": 0, "limit": 1, "market": 2, "stop_limit": 3, "stop": 4,
@@ -59,6 +63,21 @@ PLACE_ORDER_ERRORS = {
     7: "UnknownError", 8: "ContractNotFound", 9: "ContractNotActive",
     10: "AccountRejected",
 }
+
+
+def _uncertain(exc: Exception) -> bool:
+    """Would this outcome have been RETRIED, had retrying been allowed?
+
+    Those are exactly the shapes that leave a submission's fate unknown: the
+    venue throttled us, the server declined to say what it did, or the socket
+    never completed. For a request that may only be sent once, each of them
+    means "we do not know", never "it was refused".
+    """
+    text = str(exc)
+    return (isinstance(exc, TopstepXRateLimited)
+            or text.startswith("cannot reach ")
+            or "gave up after" in text
+            or bool(_HTTP_5XX.search(text)))
 
 
 class TopstepXError(RuntimeError):
@@ -272,10 +291,34 @@ class TopstepXClient:
 
     # ── session ───────────────────────────────────────────────────────────────
     def _authenticate(self) -> None:
-        out = self._transport(f"{self.base_url}/api/Auth/loginKey",
-                              {"userName": self.username, "apiKey": self._api_key},
-                              {"Content-Type": "application/json", "accept": "text/plain"},
-                              self.timeout)
+        """Establish a session token. EVERY failure here is pre-order.
+
+        PROD-20260904 REVIEW FINDING 2. Marking `TopstepXAuthError` as
+        pre-transport was not enough, because this method calls `_transport`
+        DIRECTLY: an HTTP 401 from /api/Auth/loginKey escaped as an ordinary
+        `TopstepXError` carrying venue_refused=True, and a mission then closed
+        as VENUE_REJECTED_ZERO_FILL having sent ZERO order requests.
+
+        The authentication boundary is converted here rather than classified
+        downstream, so the type carries the fact wherever it travels. Nothing
+        that fails on this endpoint can describe what happened to an order.
+        """
+        try:
+            out = self._transport(
+                f"{self.base_url}/api/Auth/loginKey",
+                {"userName": self.username, "apiKey": self._api_key},
+                {"Content-Type": "application/json", "accept": "text/plain"},
+                self.timeout)
+        except TopstepXAuthError:
+            raise
+        except TopstepXError as exc:
+            raise TopstepXAuthError(
+                f"TopstepX authentication failed before any order was sent: {exc}",
+                venue_body=getattr(exc, "venue_body", None)) from exc
+        except Exception as exc:  # noqa: BLE001 -- a transport double, a socket
+            raise TopstepXAuthError(
+                f"TopstepX authentication failed before any order was sent: "
+                f"{type(exc).__name__}: {exc}") from exc
         if not out.get("success") or not out.get("token"):
             code = out.get("errorCode")
             msg = out.get("errorMessage") or ""
@@ -296,12 +339,45 @@ class TopstepXClient:
             self._authenticate()
         return self._token  # type: ignore[return-value]
 
-    def _post(self, path: str, payload: dict, *, _retry: bool = True) -> dict:
+    def _post(self, path: str, payload: dict, *, _retry: bool = True,
+              send_at_most_once: bool = False) -> dict:
+        """POST, with the retry policy the CALLER's idempotency allows.
+
+        `send_at_most_once` is the submission guarantee. PROD-20260904 REVIEW
+        FINDING 1: the runner's one-submit latch stops at this method's door,
+        and every retry BELOW it re-transmits the same order. A 503 on
+        /api/Order/place could put a live order on the book and then be
+        followed by a second, separately-judged request; a later `success:
+        false` on that second request says nothing about what the first one
+        did, and the mission would close as a clean zero-fill rejection with an
+        order still unaccounted for.
+
+        So an order-placing request is transmitted ONCE. Anything that would
+        have been retried -- 429, 5xx, a dead socket -- is raised instead as an
+        UNCERTAIN outcome (`venue_refused=False`), which is exactly what it is,
+        and reconciliation treats it under unknown-submission law.
+
+        Read-only calls keep the retry behaviour unchanged: re-asking a
+        question is free, re-sending an order is not.
+        """
         headers = {"Content-Type": "application/json", "accept": "text/plain",
                    "Authorization": f"Bearer {self._session_token()}"}
         try:
-            out = self._request_with_backoff(f"{self.base_url}{path}", payload, headers)
+            if send_at_most_once:
+                out = self._transport(f"{self.base_url}{path}", payload, headers,
+                                      self.timeout)
+            else:
+                out = self._request_with_backoff(f"{self.base_url}{path}", payload,
+                                                 headers)
         except TopstepXError as exc:
+            if send_at_most_once:
+                # NO re-auth retry either: a 401 re-post is a SECOND order.
+                # Whatever this was, the request left once and its outcome is
+                # not established by anything we can do from here.
+                if getattr(exc, "venue_refused", None) is None and _uncertain(exc):
+                    raise TopstepXError(str(exc), venue_body=exc.venue_body,
+                                        venue_refused=False) from exc
+                raise
             if _retry and "HTTP 401" in str(exc):
                 self._token = None                    # expired early; re-auth once
                 return self._post(path, payload, _retry=False)
@@ -827,7 +903,10 @@ class TopstepXClient:
         EXACT validated body is what reaches the venue — rebuilding it here
         would reintroduce the gap between what was checked and what was sent.
         """
-        out = self._post("/api/Order/place", payload)
+        # SEND-AT-MOST-ONCE. This is the one call in the client that can create
+        # a position, so it is the one call that may never be replayed by a
+        # retry the caller cannot see. See `_post`.
+        out = self._post("/api/Order/place", payload, send_at_most_once=True)
         return {"order_id": out.get("orderId"), "accepted": True, "raw": out}
 
     def cancel_order(self, account_id: int, order_id: int) -> dict:

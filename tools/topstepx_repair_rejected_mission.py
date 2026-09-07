@@ -52,7 +52,8 @@ from broker import topstepx_mission_state as MS  # noqa: E402
 from broker import topstepx_order_discovery as DISC  # noqa: E402
 from broker import topstepx_submission_record as SUB  # noqa: E402
 from broker.topstepx_live_session import TopstepXLiveSession  # noqa: E402
-from broker.topstepx_redaction import redacted_account_label  # noqa: E402
+from broker.topstepx_redaction import (account_fingerprint,  # noqa: E402
+                                       redacted_account_label)
 
 STORE_DIR = os.path.join("data", "integration", "topstepx")
 
@@ -82,7 +83,14 @@ def prove_at_the_venue(symbol: str = "MNQ") -> dict:
     for err in found["errors"]:
         print(f"    ! {err}")
     return {"positions": len(positions), "found": found,
-            "contract_id": contract.id}
+            "contract_id": contract.id,
+            # PROD-20260904 REVIEW FINDING 3. The identity the venue reads
+            # actually describe, carried back so `main` can compare it with the
+            # mission being repaired. Pinning proves we reached the account the
+            # ENVIRONMENT names; it says nothing about whether that is the
+            # account whose mission is on the operating table.
+            "account_fingerprint": account_fingerprint(session.account.id,
+                                                       session.account.name)}
 
 
 def main() -> int:
@@ -125,6 +133,31 @@ def main() -> int:
 
     venue = prove_at_the_venue(args.symbol)
     found = venue["found"]
+
+    # ── the venue we just read must BE this mission's venue ──────────────────
+    #
+    # REVIEW FINDING 3. Without this, the tool would pin whatever account the
+    # environment names, read ITS positions and orders, find them flat and
+    # empty -- and close a mission belonging to a different account or a
+    # different contract on that evidence. Both were reproduced closing the
+    # mission with token_spent=true and exit code 0.
+    #
+    # Flat somewhere else is not flat here.
+    if mission.account_fingerprint and \
+            venue["account_fingerprint"] != mission.account_fingerprint:
+        print(f"REFUSED: the pinned account is not this mission's account.\n"
+              f"    mission : {mission.account_fingerprint}\n"
+              f"    pinned  : {venue['account_fingerprint']}\n"
+              f"  The venue reads describe a different account; they cannot "
+              f"prove anything about this mission.")
+        return 8
+    if mission.contract_id and venue["contract_id"] != mission.contract_id:
+        print(f"REFUSED: the resolved contract is not this mission's contract.\n"
+              f"    mission : {mission.contract_id}\n"
+              f"    resolved: {venue['contract_id']}\n"
+              f"  Pass --symbol for the contract this mission actually traded.")
+        return 8
+
     if not found["answered"]:
         print("REFUSED: order discovery did not answer. 'we cannot see' is not "
               "'there is nothing there'.")
