@@ -445,9 +445,17 @@ class MissionState:
         PROD-20260904 RULING A -- A MISSING ORDER ID.
         Topstep can positively refuse a submission WITHOUT minting an order id:
         the request is judged at the gateway and nothing is ever created. The
-        old law required an id, so the one shape it was written for could not be
-        recorded, and PROD-20260904-T1 stranded in ATTEMPT_CONSUMED exactly as
-        PROD-20260810 had.
+        old law required an id, so that shape could not be recorded at all.
+
+        CORRECTION (evidence, 2026-09-06). This is a real gap and worth
+        closing, but it was NOT what stranded PROD-20260904-T1. The flight
+        recorder shows Topstep DID return an order id on that rejection --
+        3491481775, errorCode 2, "Brackets cannot be used with Position
+        Brackets. You must enable Auto OCO Brackets." The old law would have
+        accepted that write. What stranded the mission was RULING C: this
+        method had no production caller, so nothing ever performed the write.
+        The relaxation below is a generalization, not the fix for that
+        incident.
 
         The id is therefore optional ONLY under positive attribution:
 

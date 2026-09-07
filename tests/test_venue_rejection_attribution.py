@@ -1,30 +1,52 @@
-"""PROD-20260904: a positive venue refusal that minted no order id.
+"""PROD-20260904: a positive venue refusal the mission was never told about.
 
-THE LIVE SHAPE. PROD-20260904-T1 consumed its attempt, the request reached
-Topstep, Topstep refused it, and no order id came back at all -- the gateway
-judged the submission before anything was created. The canonical transition
-demanded an order id it could not have, so nothing wrote it down, and the
-mission stranded in ATTEMPT_CONSUMED: a phantom active mission, exactly the
-PROD-20260810 failure with one fact removed.
+THE LIVE SHAPE, corrected against the flight recorder. PROD-20260904-T1
+consumed its attempt, the request reached Topstep, and Topstep refused it:
 
-Two separate holes, either of which alone would have caused it:
+    orderId       3491481775
+    errorCode     2
+    errorMessage  "Brackets cannot be used with Position Brackets.
+                   You must enable Auto OCO Brackets."
 
-  1. `venue_rejected_zero_fill` REQUIRED `venue_order_id`, so the one shape it
-     existed for could not be recorded.
-  2. It had NO PRODUCTION CALLER. Every call site in the whole tree was a test.
-     The runner reconciled, found flat-and-empty, and halted -- and the durable
-     mission was never told.
+The mission stranded in ATTEMPT_CONSUMED with order_id=null and
+token_spent=false -- a phantom active mission that refused every later scan,
+which is PROD-20260810 with the recording hole moved one step later.
+
+WHAT THIS FILE ORIGINALLY SAID, AND WHY IT WAS WRONG. The first version of
+this docstring, and the message of commit d6a3813, said Topstep refused
+"without minting an order id" and that the canonical law "required an id it
+could not have". The ledger says otherwise: the venue DID return
+3491481775, in the body of the very exception the runner caught.
+
+So of the two holes, only the second one actually caused this incident:
+
+  1. `venue_rejected_zero_fill` REQUIRED `venue_order_id`. Real, and worth
+     removing -- a venue CAN refuse before minting an id -- but NOT the
+     blocker here, because the id was available all along.
+  2. It had NO PRODUCTION CALLER. Every call site in the whole tree was a
+     test. The runner reconciled, found flat-and-empty, and halted -- and the
+     durable mission was never told. THIS is what stranded T1.
+
+The distinction matters for anyone reading back: the fix that mattered was
+the wiring, not the relaxation.
 
 WHAT REPLACES IT, and the line these tests are really about:
 
     ATTRIBUTION IS DECIDED AT THE EXCEPTION, NEVER AT THE RECONCILIATION.
 
 Flat-and-empty is not evidence of a refusal. It is equally consistent with a
-request still in flight. So a bare exception, a timeout or an unreachable host
-reconciles to exactly what it did before -- unknown-submission law -- while a
-positive `TopstepXError` refusal, and only that, may close the mission.
+request still in flight, and with one that was never sent at all. So a bare
+exception, a timeout, an unreachable host, a server error and a pre-transport
+auth failure all reconcile to exactly what they did before -- unknown-
+submission law -- while a positive `TopstepXError` refusal, and only that,
+may close the mission.
 
 NO NETWORK. Every venue interaction here is a stub.
+
+FIXTURE, NOT EVIDENCE. `NO_ID_REJECTION` below is a CONSTRUCTED body that
+exercises the no-order-id shape. It is not the PROD-20260904 response, and
+must never be read back as one -- the real body is quoted above and lives in
+data/integration/topstepx/submissions_PROD-20260904.jsonl.
 """
 from __future__ import annotations
 
@@ -53,7 +75,8 @@ SESSION = "PROD-TEST-ATTRIB"
 OPEN_ARGS = dict(positions=0, working_orders=0, unknown_external=False,
                  in_window=True)
 
-#: PROD-20260904's own shape: refused, and NO orderId anywhere in the body.
+#: A CONSTRUCTED no-order-id refusal. NOT the PROD-20260904 body -- that one
+#: carried orderId 3491481775. See the module docstring.
 NO_ID_REJECTION = {"success": False, "errorCode": 2,
                    "errorMessage": "Invalid order: account violation",
                    "fillVolume": 0}
