@@ -318,6 +318,35 @@ class TestRulingBAttributionSource:
             urllib.error.URLError("connection refused")).venue_refused is False, \
             "an unreachable venue never answered"
 
+    def test_an_auth_failure_before_transmit_is_not_attributed(self):
+        """PRE-TRANSPORT. The venue never saw the order, so it never refused it.
+
+        `_authenticate` runs lazily from `_session_token` INSIDE `_post`, so a
+        rejected login raises while the request is still being BUILT. Because
+        `TopstepXAuthError` inherits `TopstepXError`, it would otherwise
+        satisfy RULING B's default and let a flat-and-empty venue close the
+        mission as a zero-fill rejection -- terminal, token spent -- on an
+        order that was never transmitted.
+        """
+        from broker.topstepx_client import TopstepXAuthError, TopstepXPinError
+        for exc in (TopstepXAuthError("TopstepX login rejected (errorCode=9)"),
+                    TopstepXAuthError("needs both a username and an API key"),
+                    TopstepXPinError("account pinning refused")):
+            assert exc.venue_refused is False, f"{type(exc).__name__} must be pre-transport"
+            assert R.ExecutionRunner._venue_attributed(exc) is False, \
+                f"{type(exc).__name__} attributed a refusal to a venue never asked"
+
+    def test_an_http_401_at_the_venue_is_a_different_case(self):
+        """Named deliberately, because it sits on the other side of the line.
+
+        A 401 from the ORDER endpoint means the request DID reach Topstep and
+        Topstep refused it, so it stays attributed like any other 4xx. What is
+        excluded above is the login failing before the order is ever sent.
+        """
+        assert R.ExecutionRunner._venue_attributed(
+            TopstepXError("HTTP 401 from https://api.topstepx.com: ...",
+                          venue_refused=True)) is True
+
     def test_a_success_false_body_stays_attributed(self):
         """The ordinary rejection: `_post` raises with the venue's own body."""
         from broker import topstepx_client as C
@@ -472,6 +501,26 @@ class TestRulingBThroughTheProductionPath:
         _, _, _, mission, _ = armed_rejection(tmp_path, venue=venue)
         assert mission.trade_missions[0].state != MS.VENUE_REJECTED_ZERO_FILL
 
+    def test_7e_an_auth_failure_does_not_terminalize_the_mission(self, tmp_path):
+        """The same law, proven through the REAL loop rather than the helper.
+
+        Before the pre-transport marking, this test closed the mission as
+        VENUE_REJECTED_ZERO_FILL with token_spent=True on an order that never
+        left the process.
+        """
+        from broker.topstepx_client import TopstepXAuthError
+        venue = RefusingVenue(exc=TopstepXAuthError(
+            "TopstepX login rejected (errorCode=9) ApiSubscriptionNotFound"))
+        _, _, _, mission, _ = armed_rejection(tmp_path, venue=venue)
+        m = mission.trade_missions[0]
+        assert m.state != MS.VENUE_REJECTED_ZERO_FILL, (
+            "an authentication failure BEFORE transmit was promoted to a "
+            "positive venue refusal")
+        assert m.state == MS.ATTEMPT_CONSUMED
+        assert m.token_spent is False
+        assert m.venue_attributed is False
+        assert m.must_reconcile() is True
+
     def test_7d_the_unattributed_mission_still_awaits_reconciliation(self, tmp_path):
         """Not terminal, and honestly so: nobody knows what the venue did."""
         venue = RefusingVenue(exc=TimeoutError("read timed out"))
@@ -519,6 +568,70 @@ class TestTheProducerRefusesEveryIncompleteProof:
         _, _, _, mission, _ = armed_rejection(tmp_path, venue=DegradedVenue())
         assert mission.trade_missions[0].state != MS.VENUE_REJECTED_ZERO_FILL
         assert mission.trade_missions[0].state == MS.ATTEMPT_CONSUMED
+
+
+class TestAnEarlierUnknownPoisonsALaterRejection:
+    """The second path PROD-20260904 review asked about.
+
+    A submission whose outcome was never established, followed by a refusal on
+    a later attempt, cannot yield a clean zero-fill rejection: the FIRST order
+    may exist. The final exception plus an empty position/order view is not
+    enough, because "empty right now" says nothing about an order that has not
+    surfaced yet.
+
+    It is refused at three independent layers, which is why the live path can
+    afford not to re-litigate history on every reconcile.
+    """
+
+    def ledger_with_unknown_then_rejection(self, tmp_path):
+        from broker import topstepx_submission_record as SUB
+        sm, m = mission_at(tmp_path)
+        for raw, exc in ((None, "TimeoutError: read timed out"),
+                         ({"orderId": 1, "success": False, "errorCode": 2,
+                           "errorMessage": "refused"}, "TopstepXError")):
+            rec = SUB.open_submission(store_dir=str(tmp_path), session_id=SESSION,
+                                      mission_id=m.mission_id, payload={"size": 1},
+                                      custom_tag="t", token_id="tok:x")
+            SUB.record_response(store_dir=str(tmp_path), session_id=SESSION,
+                                submission=rec, raw_response=raw,
+                                transport_exception=exc)
+        return sm, m
+
+    def test_the_ledger_refuses_it(self, tmp_path):
+        """LAYER 1 -- the evidence the bounded repair reads."""
+        from broker import topstepx_submission_record as SUB
+        _, m = self.ledger_with_unknown_then_rejection(tmp_path)
+        ev = SUB.mission_venue_evidence(str(tmp_path), SESSION, m.mission_id,
+                                        token_id="tok:x")
+        ok, why = SUB.zero_fill_rejection(ev, positions=0, working_orders=0)
+        assert ok is False
+        assert any("unknown" in w for w in why), why
+
+    def test_the_repair_tool_refuses_it(self, tmp_path, monkeypatch):
+        """LAYER 2 -- the operator command, end to end."""
+        helper = TestTheBoundedLocalRepair()
+        _, m = helper.repo(tmp_path, transport_only=True)
+        code = helper.run(tmp_path, monkeypatch,
+                          extra=["--phrase", "CLOSE THIS MISSION AS VENUE "
+                                             "REJECTED ZERO FILL"])
+        assert code != 0
+        assert MS.load(m.path).state == MS.ATTEMPT_CONSUMED
+
+    def test_a_second_attempt_cannot_happen_at_all(self, tmp_path):
+        """LAYER 3 -- and the reason the composite stays unreachable live.
+
+        The runner refuses a second submit outright, the mission refuses a
+        second consumed attempt, and an unreconciled mission blocks opening
+        another one. The live reconciler is never handed a mission with an
+        earlier unknown AND a later refusal to weigh.
+        """
+        sm, m = mission_at(tmp_path)
+        assert m.must_reconcile() is True
+        with pytest.raises(MS.MissionStateError,
+                           match="allowance exhausted|already spent"):
+            m.consume_attempt(candidate_fingerprint="c2", token_id="t2")
+        ok, why = sm.may_open_trade_mission(**OPEN_ARGS)
+        assert ok is False, why
 
 
 class TestTheAcknowledgementLifecycleIsUnchanged:

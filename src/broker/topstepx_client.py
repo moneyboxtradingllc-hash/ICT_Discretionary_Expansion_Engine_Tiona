@@ -99,7 +99,23 @@ class TopstepXError(RuntimeError):
 
 
 class TopstepXAuthError(TopstepXError):
-    """Credentials rejected, or the session could not be established."""
+    """Credentials rejected, or the session could not be established.
+
+    PRE-TRANSPORT BY CONSTRUCTION, and therefore NEVER an order refusal.
+    `_authenticate` runs lazily from `_session_token` INSIDE `_post`, so this
+    is raised while building the request -- before any order body reaches
+    Topstep. The venue has not seen the submission and cannot have refused it.
+
+    It inherits `TopstepXError`, so without this it would satisfy RULING B's
+    default and attribute a rejection to a venue that was never asked: a
+    mission could terminalize as VENUE_REJECTED_ZERO_FILL, spending the token,
+    on a request that was never transmitted. `venue_refused=False` puts it
+    where a bare exception already sits -- unknown-submission law.
+    """
+
+    def __init__(self, *args, venue_body: dict = None,
+                 venue_refused: bool = False) -> None:
+        super().__init__(*args, venue_body=venue_body, venue_refused=venue_refused)
 
 
 class TopstepXRateLimited(TopstepXError):
@@ -116,7 +132,15 @@ class TopstepXPinError(TopstepXError):
     Its own type because the operator response differs from an ordinary venue
     error: a pin failure means the configuration names the wrong account, and
     routing anywhere else would be worse than not trading.
+
+    Pre-transport for the same reason as `TopstepXAuthError`: pinning happens
+    before any order path is reachable, so it can never be a venue refusal of
+    a submission.
     """
+
+    def __init__(self, *args, venue_body: dict = None,
+                 venue_refused: bool = False) -> None:
+        super().__init__(*args, venue_body=venue_body, venue_refused=venue_refused)
 
 
 @dataclass(frozen=True)
