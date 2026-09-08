@@ -63,9 +63,35 @@ def _parse(value):
     return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
 
 
+#: Minute-keyed journals under this store do not all spell the key the same
+#: way. The 1m candle journal writes `timestamp`; the volume-at-price sidecar
+#: (`vap_minute.v1`) writes `minute`. Measured 2026-09-08: keying on
+#: `timestamp` alone made a 170-row vap sidecar parse as ZERO rows, and the
+#: empty branch then reported it as "empty or unreadable" -- a false statement
+#: about a file that was neither. A row this tool cannot read must be COUNTED
+#: and NAMED, never rounded down to an absent file.
+TIMESTAMP_KEYS = ("timestamp", "minute")
+
+
+def _row_ts(row: dict):
+    """(key, parsed) for the first recognised minute key, or (None, None)."""
+    for key in TIMESTAMP_KEYS:
+        if key in row:
+            parsed = CONT.parse_ts(row[key])
+            if parsed is not None:
+                return key, parsed
+    return None, None
+
+
 def read_journal(path: str) -> dict:
-    """Raw rows, unfiltered, plus the shape the journal is IN."""
-    rows, unreadable = [], 0
+    """Raw rows, unfiltered, plus the shape the journal is IN.
+
+    Rows are projected onto `timestamp` so `candle_continuity` -- which owns
+    normalization and gap-finding -- reads every journal through one contract.
+    The key actually found is reported, so a schema surprise is visible rather
+    than silently absorbed.
+    """
+    rows, unreadable, keys_seen = [], 0, set()
     with open(path, encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
@@ -73,15 +99,21 @@ def read_journal(path: str) -> dict:
                 continue
             try:
                 row = json.loads(line)
-                CONT.parse_ts(row["timestamp"])
+                key, parsed = _row_ts(row)
             except Exception:  # noqa: BLE001 -- a bad line is a fact, not a crash
                 unreadable += 1
                 continue
-            rows.append(row)
+            if key is None:
+                unreadable += 1
+                continue
+            keys_seen.add(key)
+            rows.append(row if key == "timestamp"
+                        else {**row, "timestamp": row[key]})
     keys = [CONT.canonical_key(r) for r in rows]
     out_of_order = sum(1 for a, b in zip(keys, keys[1:]) if b < a)
     return {"rows": rows, "unreadable": unreadable, "raw_count": len(rows),
-            "distinct": len(set(keys)), "out_of_order": out_of_order}
+            "distinct": len(set(keys)), "out_of_order": out_of_order,
+            "timestamp_key": "/".join(sorted(keys_seen)) or None}
 
 
 def classify_absences(missing: list) -> dict:
@@ -118,7 +150,11 @@ def audit(path: str, *, session_start=None, session_end=None,
           horizon_minutes: int = 300) -> dict:
     journal = read_journal(path)
     if not journal["rows"]:
-        return {"path": path, "empty": True}
+        # NOT simply "empty". Say which: no lines at all, or lines this tool
+        # could not read. They point at different problems.
+        return {"path": path, "empty": True,
+                "bytes": os.path.getsize(path),
+                "unreadable": journal["unreadable"]}
     ordered = CONT.normalize(journal["rows"])
     first, last = CONT.canonical_key(ordered[0]), CONT.canonical_key(ordered[-1])
 
@@ -153,7 +189,8 @@ def audit(path: str, *, session_start=None, session_end=None,
         "path": path, "empty": False,
         "bytes": os.path.getsize(path),
         "journal": {k: journal[k] for k in
-                    ("raw_count", "distinct", "out_of_order", "unreadable")},
+                    ("raw_count", "distinct", "out_of_order", "unreadable",
+                     "timestamp_key")},
         "stored_first": first.isoformat(), "stored_last": last.isoformat(),
         "stored_bars": len(ordered),
         "elapsed_minutes_between_endpoints": elapsed,
@@ -177,10 +214,17 @@ def audit(path: str, *, session_start=None, session_end=None,
 def render(report: dict) -> None:
     print(f"\n=== {report['path']} ===")
     if report.get("empty"):
-        print("  store is empty or unreadable; nothing to audit.")
+        if report["unreadable"]:
+            print(f"  {report['bytes']} bytes, {report['unreadable']} row(s) "
+                  f"carrying no recognised minute key "
+                  f"({', '.join(TIMESTAMP_KEYS)}). NOT an empty file -- this "
+                  f"tool cannot read its schema. Nothing audited.")
+        else:
+            print(f"  {report['bytes']} bytes and no rows; nothing to audit.")
         return
     j = report["journal"]
     print(f"  bytes                    : {report['bytes']}")
+    print(f"  minute key               : {j['timestamp_key']}")
     print(f"  journal rows             : {j['raw_count']} raw, "
           f"{j['distinct']} distinct minutes, "
           f"{j['out_of_order']} out-of-order, {j['unreadable']} unreadable")
