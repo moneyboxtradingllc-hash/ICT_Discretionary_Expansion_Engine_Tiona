@@ -175,6 +175,7 @@ def execution_path_telemetry(*, armed: bool, mission_id: str, symbol: str) -> st
     """Resolved production doctrine, printed before anything can execute."""
     from datetime import datetime, timezone
 
+    from broker import topstepx_production_doctrine as DOCTRINE
     from broker import topstepx_session_authorization as SA
     from broker.topstepx_combine_risk import SLIPPAGE_RESERVE_TICKS_PER_SIDE
     from doctrine import instrument_identity as II
@@ -183,6 +184,43 @@ def execution_path_telemetry(*, armed: bool, mission_id: str, symbol: str) -> st
 
     _brain = describe_brain(armed=armed)
     _cap = persistence_telemetry(symbol=symbol)
+
+    # ── RESOLVED, NOT RESTATED ────────────────────────────────────────────────
+    # These four lines were literals: "$250.00", "0-35 points", "40 points",
+    # "15 MNQ". Two of them were WRONG -- doctrine is $350.00 and a 50-point
+    # ceiling -- and had been since the constants moved. The other two were
+    # right by coincidence, which is not a property worth relying on.
+    #
+    # The literals enforced nothing. Sizing reads
+    # `topstepx_combine_risk.PRODUCTION_*` through `build_production_bracket`,
+    # and this banner reads a string. That is exactly why it was free to drift:
+    # nothing failed when it did. Now it resolves from the same authority the
+    # startup guard checks, so the next constant change cannot leave the
+    # operator reading a stale number.
+    _doc = DOCTRINE.resolve()
+    _doctrine_risk = float(_doc["production_max_risk_usd"])
+    _budget = SA.DAILY_LOSS_BUDGET_USD
+
+    # THE GOVERNOR, AT SESSION OPEN. `daily_loss_budget.compute` sets
+    #     allowed_planned_risk = min(max_risk_usd, remaining_daily_room)
+    # and `topstepx_production_loop` passes THAT into
+    # `build_production_bracket` as max_risk_usd. At open no loss is realized,
+    # so remaining room is the signed budget itself. Printing the doctrine
+    # maximum as though it were the operative cap would misreport the smaller
+    # number a trade would actually be sized against.
+    #
+    # It only ever tightens intraday: realized losses shrink the room, never
+    # widen it. So this is the CEILING on the effective cap, not a promise.
+    _effective_risk = (min(_doctrine_risk, float(_budget))
+                       if _budget is not None else None)
+    if _effective_risk is None:
+        _risk_line = "UNRESOLVED (authorization carries no signed daily loss budget)"
+    elif _effective_risk < _doctrine_risk:
+        _risk_line = (f"${_effective_risk:,.2f}  GOVERNED BY DAILY LOSS BUDGET "
+                      f"(below the ${_doctrine_risk:,.2f} doctrine maximum)")
+    else:
+        _risk_line = (f"${_effective_risk:,.2f}  (doctrine maximum; the "
+                      f"${float(_budget):,.2f} budget leaves room for it)")
 
     cfg_start, cfg_end, cfg_tz = decision_window()
     _w = effective_window()
@@ -195,10 +233,15 @@ def execution_path_telemetry(*, armed: bool, mission_id: str, symbol: str) -> st
         f"  SESSION ID                   : {session_id}",
         f"  MAXIMUM BOT TRADES           : {SA.MAX_BOT_TRADES_PER_SESSION}",
         f"  MAXIMUM ATTEMPTS PER TRADE   : {SA.MAX_ATTEMPTS_PER_TRADE_MISSION}",
-        "  MAXIMUM ALL-IN RISK          : $250.00",
-        "  PREFERRED STOP RANGE         : 0-35 points",
-        "  ABSOLUTE STOP CEILING        : 40 points",
-        "  MAXIMUM CONTRACTS            : 15 MNQ",
+        f"  ALL-IN RISK (DOCTRINE MAX)   : ${_doctrine_risk:,.2f}",
+        f"  DAILY LOSS BUDGET (SIGNED)   : "
+        f"{'UNSIGNED' if _budget is None else f'${float(_budget):,.2f}'}",
+        f"  EFFECTIVE PER-TRADE CAP      : {_risk_line}",
+        f"  PREFERRED STOP RANGE         : "
+        f"0-{float(_doc['preferred_max_stop_points']):g} points",
+        f"  ABSOLUTE STOP CEILING        : "
+        f"{float(_doc['absolute_max_stop_points']):g} points",
+        f"  MAXIMUM CONTRACTS            : {int(_doc['max_contracts'])} {symbol}",
         f"  COMPOUNDING                  : {'ON' if SA.COMPOUNDING else 'OFF'}",
         f"  DECISION WINDOW (ENFORCED)   : {enforced}",
         f"  DECISION WINDOW (SCAN CFG)   : {cfg_start}-{cfg_end} {cfg_tz}",
