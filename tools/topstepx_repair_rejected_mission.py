@@ -143,7 +143,7 @@ def main() -> int:
     # mission with token_spent=true and exit code 0.
     #
     # Flat somewhere else is not flat here.
-    if mission.account_fingerprint and \
+    if not mission.account_fingerprint or \
             venue["account_fingerprint"] != mission.account_fingerprint:
         print(f"REFUSED: the pinned account is not this mission's account.\n"
               f"    mission : {mission.account_fingerprint}\n"
@@ -151,7 +151,7 @@ def main() -> int:
               f"  The venue reads describe a different account; they cannot "
               f"prove anything about this mission.")
         return 8
-    if mission.contract_id and venue["contract_id"] != mission.contract_id:
+    if not mission.contract_id or venue["contract_id"] != mission.contract_id:
         print(f"REFUSED: the resolved contract is not this mission's contract.\n"
               f"    mission : {mission.contract_id}\n"
               f"    resolved: {venue['contract_id']}\n"
