@@ -74,7 +74,13 @@ def prove_at_the_venue(symbol: str = "MNQ") -> dict:
     # THE COMPLETE SURFACE, not `searchOpen`. `discover_orders` labels its own
     # trustworthiness, and this tool refuses anything short of COMPLETE.
     found = DISC.discover_orders(session, contract_id=contract.id)
-    print(f"  account          : {redacted_account_label(session.account)}")
+    # The NAME, not the account object. `redacted_account_label` masks trailing
+    # digits off a name like "PRACTICEJUL2612345"; handed the dataclass it
+    # masked the CLASS name instead and printed "TopstepXAccount[REDACTED]" --
+    # safe, but it told the operator nothing about which account was pinned,
+    # which is the only reason the line exists. Display only: the identity
+    # PROOF is the computed fingerprint below, never this label.
+    print(f"  account          : {redacted_account_label(session.account.name)}")
     print(f"  contract         : {contract.id}")
     print(f"  open positions   : {len(positions)}")
     print(f"  order discovery  : {found['source']} "
