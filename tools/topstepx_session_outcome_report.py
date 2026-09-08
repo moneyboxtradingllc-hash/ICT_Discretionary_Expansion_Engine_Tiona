@@ -115,13 +115,26 @@ def decisions(session: str) -> dict:
     rows = _rows(os.path.join(root, "candidate_decisions.jsonl"))
     if rows is None:
         return {"present": False, "root": root}
+    # THE WRITER'S OWN KEY NAMES. `build_record` stores the terminal verdict as
+    # `final_disposition` / `final_rejection_reason`; the constructor arguments
+    # are called `disposition` / `rejection_reason` and reading THOSE off the
+    # row yields None for every record. Measured on PROD-20260908: 279 rows all
+    # tallied as "?", which reported the stand-down reasons as unknown when the
+    # ledger held them in full.
+    #
+    # `reconcile` is the module's own owner of the disposition count and is
+    # CALLED rather than reimplemented -- a second tally beside it is how the
+    # evidence and the report drift apart.
+    from broker.candidate_decision_record import reconcile
     tally = collections.Counter()
     for row in rows:
-        tally[(str(row.get("disposition") or "?"),
-               str(row.get("rejection_reason") or ""))] += 1
+        tally[(str(row.get("final_disposition") or "?"),
+               str(row.get("final_rejection_reason") or ""),
+               str(row.get("detail") or ""))] += 1
     first, last = _span(rows, "timestamp_et", "recorded_at")
     return {"present": True, "root": root, "count": len(rows),
-            "first": first, "last": last, "tally": tally}
+            "first": first, "last": last, "tally": tally,
+            "reconciliation": reconcile(rows)}
 
 
 def scans(session: str) -> dict:
@@ -130,7 +143,9 @@ def scans(session: str) -> dict:
     rows = _rows(path)
     if rows is None:
         return {"present": False, "path": path}
-    first, last = _span(rows, "at_et", "at_utc", "recorded_at")
+    # `retrieval_telemetry.build_record` writes `timestamp_et`. Omitting it
+    # printed "first None .. last None" over 279 perfectly good rows.
+    first, last = _span(rows, "timestamp_et", "at_et", "at_utc", "recorded_at")
     return {"present": True, "path": path, "count": len(rows),
             "first": first, "last": last}
 
@@ -286,9 +301,17 @@ def main() -> int:
         print(f"  {dec['count']} recorded decision(s)")
         print(f"  first: {dec['first']}")
         print(f"  last : {dec['last']}")
-        for (disp, reason), n in dec["tally"].most_common():
-            print(f"      {n:>5}  {disp}"
-                  f"{('  ' + reason) if reason else ''}")
+        for (disp, reason, detail), n in dec["tally"].most_common():
+            line = f"      {n:>5}  {disp}"
+            if reason:
+                line += f"  {reason}"
+            if detail and detail != reason:
+                line += f"  -- {detail}"
+            print(line)
+        rec = dec.get("reconciliation") or {}
+        if rec:
+            print(f"  reconciliation (candidate_decision_record.reconcile):")
+            print(f"      {json.dumps(rec, default=str)[:400]}")
     sc = scans(S)
     print(f"  retrieval scan rows        : "
           f"{sc['count'] if sc['present'] else MISSING + ' ' + sc['path']}")
