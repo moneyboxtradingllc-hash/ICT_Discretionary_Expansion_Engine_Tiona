@@ -219,12 +219,35 @@ def analyse(mission: dict, plan: dict, candles: list, after_minutes: int) -> dic
     in_trade = _window(candles, t["entry"], t["exit"])
     out["path"] = excursions(in_trade, entry=entry_ref, bullish=bullish)
 
-    if target_px is not None:
-        out["target_touched_in_trade"] = touched(in_trade, target_px,
-                                                 above=bullish)
-    if stop_px is not None:
-        out["stop_touched_in_trade"] = touched(in_trade, stop_px,
-                                               above=not bullish)
+    # WHY THE PATH MAY BE EMPTY OR SHORT, said out loud. Two cases were
+    # measured on PROD-20260909 and BOTH would otherwise have been reported as
+    # facts about price rather than limits of the record:
+    #
+    #   a trade shorter than a minute      T1 lived 28 seconds. No 1m bar fits
+    #                                      inside it, so the path is empty --
+    #                                      which is not "price did nothing".
+    #   the store ends before the exit     T2 exited at 17:54:31 and the
+    #                                      journal's last bar is 17:53. The
+    #                                      stop-touch search then answered "no"
+    #                                      about a minute it never held.
+    tip = CONT.canonical_key(candles[-1]) if candles else None
+    out["coverage"] = {"store_last_bar": tip,
+                       "store_ends_before_exit": bool(
+                           tip is not None and t["exit"] is not None
+                           and tip < t["exit"]),
+                       "seconds_in_trade": (
+                           (t["exit"] - t["entry"]).total_seconds()
+                           if t["entry"] and t["exit"] else None)}
+
+    # A touch search over a window the store does not fully cover cannot
+    # return "no". It returns UNKNOWN, and says which minutes are missing.
+    partial = out["coverage"]["store_ends_before_exit"] or not in_trade
+    for key, level, above in (("target_touched_in_trade", target_px, bullish),
+                              ("stop_touched_in_trade", stop_px, not bullish)):
+        if level is None:
+            continue
+        hit = touched(in_trade, level, above=above)
+        out[key] = hit if hit is not None else (None if partial else False)
 
     # HOW CLOSE IT CAME. Points still needed at the best moment, and that as a
     # fraction of the distance the trade had to cover.
@@ -278,9 +301,16 @@ def render(a: dict) -> None:
     print(f"    entry time    : {t['entry']}  [{t['entry_source']}]")
     print(f"    exit time     : {t['exit']}  [{t['exit_source']}]")
 
+    cov = a.get("coverage") or {}
     path = a.get("path")
     if not path:
-        print("  PRICE PATH      : UNAVAILABLE (no candles in the window)")
+        secs = cov.get("seconds_in_trade")
+        why = (f"the trade lived {secs:.0f}s -- shorter than one bar, so no 1m "
+               f"candle falls inside it" if secs is not None and secs < 60
+               else "no candles in the window")
+        print(f"  PRICE PATH      : UNAVAILABLE ({why})")
+        print("                    This is a limit of the 1m record, NOT a "
+              "statement that price was flat.")
     else:
         print(f"  THE PRICE PATH WHILE THE TRADE WAS OPEN ({path['bars']} min)")
         print(f"    best it got   : {path['mfe_points']:g} pts in favour "
@@ -293,8 +323,15 @@ def render(a: dict) -> None:
             print(f"    target reach  : "
                   f"{a['fraction_of_target_reached'] * 100:.1f}% of the way "
                   f"({a['points_short_of_target']} pts short at best)")
-        print(f"    touched target: {a.get('target_touched_in_trade') or 'no'}")
-        print(f"    touched stop  : {a.get('stop_touched_in_trade') or 'no'}")
+        def _touch(v):
+            return "UNKNOWN (store does not cover the whole trade)" \
+                if v is None else (v or "no")
+        print(f"    touched target: {_touch(a.get('target_touched_in_trade'))}")
+        print(f"    touched stop  : {_touch(a.get('stop_touched_in_trade'))}")
+        if cov.get("store_ends_before_exit"):
+            print(f"    ! the journal's last bar is {cov['store_last_bar']}, "
+                  f"BEFORE this trade exited. The final minutes -- including "
+                  f"whatever price the exit filled at -- are not in the record.")
 
     after = a.get("after")
     if after:
