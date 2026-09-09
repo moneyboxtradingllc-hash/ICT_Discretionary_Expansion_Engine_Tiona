@@ -75,12 +75,29 @@ def audit_one(path: str) -> dict:
         if isinstance(block, dict):
             statuses[name] = str(block.get("status"))
 
+    # `available` IS A `brain_block` KEY, NOT A `derive` KEY. The archived
+    # snapshot carries the raw `derive()` output, which has no such field, so
+    # reading it here returned None on every record and the audit reported
+    # "the whole block was unavailable" 279 times for a session whose block was
+    # present with four windows throughout. Absence of a key I looked for is
+    # not absence of the thing.
+    #
+    # What is actually knowable from this record is whether ANY window was
+    # published. Both shapes are tolerated: `available` is honoured when the
+    # snapshot happens to carry the compact form, and otherwise the presence of
+    # windows decides.
+    if "available" in ctx:
+        published = bool(ctx.get("available"))
+    else:
+        published = bool(statuses)
+
     return {"path": path, "readable": True,
             "bars": len(ordered), "first": first, "last": last,
             "gap_count": len(gaps),
             "missing_minutes": sum(g["missing_minutes"] for g in gaps),
             "gaps": [(g["first_missing"], g["last_missing"]) for g in gaps[:3]],
-            "context_available": bool(ctx.get("available")) if ctx else False,
+            "context_block_published": published,
+            "context_windows": len(statuses),
             "statuses": statuses}
 
 
@@ -130,8 +147,13 @@ def main() -> int:
         print(f"    ... {len(holed) - args.show_holed} more")
 
     print("\n── SESSION CONTEXT AT DECISION TIME ────────────────────────────")
-    unavailable_block = sum(1 for r in readable if not r["context_available"])
-    print(f"  scans where the whole block was unavailable : {unavailable_block}")
+    no_block = sum(1 for r in readable if not r["context_block_published"])
+    print(f"  scans carrying NO context block at all      : {no_block}")
+    windows = {r["context_windows"] for r in readable}
+    print(f"  context windows present per scan            : "
+          f"{min(windows)}-{max(windows)}" if windows else "  none")
+    print("  (a window reporting UNAVAILABLE_HISTORY IS present -- it is the "
+          "block\n   declaring absence, which is not the same as no block)")
     per_window = collections.defaultdict(collections.Counter)
     for r in readable:
         for name, status in r["statuses"].items():
