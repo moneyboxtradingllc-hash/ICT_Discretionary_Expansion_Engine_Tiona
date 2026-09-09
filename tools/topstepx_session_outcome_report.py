@@ -313,8 +313,10 @@ def main() -> int:
             line = (f"      {r['mission_id']}  {r['operation']}  "
                     f"{r['state']}  success={r['success']}  "
                     f"order={r['venue_order_id']}")
-            if r["error_code"] is not None or r["error_message"]:
-                line += f"  err={r['error_code']} {r['error_message']}"
+            # errorCode 0 IS the ProjectX success code. Printing "err=0"
+            # beside "success=True" reads as a failure that did not happen.
+            if r["error_code"] not in (None, 0) or r["error_message"]:
+                line += f"  err={r['error_code']} {r['error_message'] or ''}"
             if r["transport_exception"]:
                 line += f"  TRANSPORT={r['transport_exception']}"
             print(line)
