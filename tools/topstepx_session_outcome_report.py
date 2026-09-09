@@ -349,6 +349,57 @@ def main() -> int:
     if bc["present"]:
         print(f"  last brain call       : {bc['last']}")
 
+    print("\n── FINAL DURABLE STATE ──────────────────────────────────────────")
+    # PROD-20260908 OWNER FINDING: "process stopped does not by itself identify
+    # those states." It does not, and neither does this tool pretend otherwise.
+    #
+    # THERE IS NO SHUTDOWN RECORD. `topstepx_session_lifecycle` classifies and
+    # never persists, and nothing else writes an end-of-session marker. So the
+    # exit instant is NOT durable; what IS durable is the last artifact each
+    # store wrote, which bounds it from below and nothing more.
+    stamps = []
+    if dec["present"] and dec["last"]:
+        stamps.append(("last decision record", dec["last"]))
+    if sc["present"] and sc["last"]:
+        stamps.append(("last retrieval scan", sc["last"]))
+    if bc["present"] and bc["last"]:
+        stamps.append(("last brain call", bc["last"]))
+    print("  SHUTDOWN TIMESTAMP  : NOT DURABLY RECORDED -- no component writes "
+          "an end-of-session marker.")
+    print("  Lower bound only, from the last write of each store:")
+    for label, stamp in stamps:
+        print(f"      {label:<22}: {stamp}")
+
+    # ARM STATE. `--arm` is a PROCESS FLAG. The authorization authorizes; the
+    # flag arms. Neither the flag nor the fact that a process once held it is
+    # written anywhere, so a finished session has no durable arm state to read.
+    armed_field = auth["doc"].get("armed") if auth["present"] else None
+    print(f"  DURABLE ARM STATE   : "
+          f"{'NONE -- --arm is a process flag, not a signed term; nothing on '
+             'disk records it' if armed_field is None
+             else armed_field}")
+
+    if not auth["present"]:
+        print("  AUTHORIZATION       : no durable record")
+    else:
+        spent = sum(int(m.get("attempt_count") or 0) for m in ms)
+        print(f"  AUTHORIZATION       : record present and UNCONSUMED "
+              f"({len(ms)} mission(s), {spent} attempt(s) spent)")
+        pinned = auth["doc"].get("brain_contract_fingerprint") or ""
+        try:
+            from ai_brain.production_model import brain_contract_fingerprint
+            current = brain_contract_fingerprint()
+        except Exception as exc:  # noqa: BLE001
+            current = f"UNREADABLE ({type(exc).__name__})"
+        print(f"    brain fingerprint bound : {pinned}")
+        print(f"    brain fingerprint now   : {current}")
+        if pinned and current and pinned != current:
+            print("    THIS AUTHORIZATION CANNOT AUTHORIZE A FUTURE SESSION: "
+                  "`verify` refuses with AUTHORIZATION_BRAIN_CONTRACT_CHANGED. "
+                  "Issue a new one bound to the deployed checkout.")
+        print(f"    session_date bound      : "
+              f"{auth['doc'].get('session_date')} (this date only)")
+
     if args.venue:
         print("\n── AT THE VENUE (authenticated read) ────────────────────────")
         since = session_start_iso(session_date)
