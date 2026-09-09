@@ -171,8 +171,17 @@ def descriptive_memory_telemetry() -> dict:
     }
 
 
-def execution_path_telemetry(*, armed: bool, mission_id: str, symbol: str) -> str:
-    """Resolved production doctrine, printed before anything can execute."""
+def execution_path_telemetry(*, armed: bool, mission_id: str, symbol: str,
+                             authorization=None, governor=None) -> str:
+    """Resolved production doctrine, printed before anything can execute.
+
+    `authorization` is the VERIFIED `SessionAuthorization`, and `governor` the
+    resolved `daily_loss_budget` result. Both default to None because at the
+    startup call site NEITHER EXISTS YET: `load_or_refuse_authorization` runs
+    inside `run_production_scans`, after this banner has already printed, and
+    the governor is resolved per-scan inside the loop. Absent them this reports
+    UNRESOLVED and says why -- it does not substitute a configured default.
+    """
     from datetime import datetime, timezone
 
     from broker import topstepx_production_doctrine as DOCTRINE
@@ -199,28 +208,67 @@ def execution_path_telemetry(*, armed: bool, mission_id: str, symbol: str) -> st
     # operator reading a stale number.
     _doc = DOCTRINE.resolve()
     _doctrine_risk = float(_doc["production_max_risk_usd"])
-    _budget = SA.DAILY_LOSS_BUDGET_USD
 
-    # THE GOVERNOR, AT SESSION OPEN. `daily_loss_budget.compute` sets
-    #     allowed_planned_risk = min(max_risk_usd, remaining_daily_room)
-    # and `topstepx_production_loop` passes THAT into
-    # `build_production_bracket` as max_risk_usd. At open no loss is realized,
-    # so remaining room is the signed budget itself. Printing the doctrine
-    # maximum as though it were the operative cap would misreport the smaller
-    # number a trade would actually be sized against.
+    # ── THREE DIFFERENT CLAIMS, NEVER ONE LINE ───────────────────────────────
     #
-    # It only ever tightens intraday: realized losses shrink the room, never
-    # widen it. So this is the CEILING on the effective cap, not a promise.
-    _effective_risk = (min(_doctrine_risk, float(_budget))
-                       if _budget is not None else None)
-    if _effective_risk is None:
-        _risk_line = "UNRESOLVED (authorization carries no signed daily loss budget)"
-    elif _effective_risk < _doctrine_risk:
-        _risk_line = (f"${_effective_risk:,.2f}  GOVERNED BY DAILY LOSS BUDGET "
-                      f"(below the ${_doctrine_risk:,.2f} doctrine maximum)")
+    # PROD-20260908 OWNER FINDING, and it was my error. The first correction
+    # read `SA.DAILY_LOSS_BUDGET_USD` -- a MODULE CONSTANT -- and printed it
+    # under the label "DAILY LOSS BUDGET (SIGNED)". That is configuration
+    # wearing the word "signed", which is the same species of defect as the
+    # $250 literal it replaced: a number presented with an authority it does
+    # not have. It also computed min(doctrine, configured) and called the
+    # result EFFECTIVE, which silently assumes NO PRIOR LOSS -- false on any
+    # restart or recovery, exactly when the banner matters most.
+    #
+    #   CONFIGURED   the module default. What a NEW authorization would be
+    #                issued with. Binding on nothing that is already running.
+    #   SIGNED       the term THIS session's verified authorization committed
+    #                to. `SessionAuthorization.verify` refuses an unsigned
+    #                budget outright, so absent an authorization there is no
+    #                honest value to print.
+    #   EFFECTIVE    `daily_loss_budget`'s resolved `allowed_planned_risk`,
+    #                which is min(max_risk_usd, remaining_daily_room) AFTER
+    #                realized losses -- the number
+    #                `topstepx_production_loop:757` actually hands to
+    #                `build_production_bracket`.
+    #
+    # A configuration-only ceiling is still worth showing, so it is shown --
+    # explicitly named as configuration-only, and never as the effective cap.
+    _configured = SA.DAILY_LOSS_BUDGET_USD
+    _cfg_ceiling = (min(_doctrine_risk, float(_configured))
+                    if _configured is not None else None)
+
+    _signed = getattr(authorization, "daily_loss_budget_usd", None)
+    if authorization is None:
+        _signed_line = ("UNRESOLVED -- no verified authorization at this point "
+                        "(it is loaded when the scan loop starts)")
+    elif _signed is None:
+        _signed_line = ("UNRESOLVED -- this authorization signed no daily loss "
+                        "budget; `verify` refuses execution on it")
     else:
-        _risk_line = (f"${_effective_risk:,.2f}  (doctrine maximum; the "
-                      f"${float(_budget):,.2f} budget leaves room for it)")
+        _signed_line = f"${float(_signed):,.2f}"
+
+    # The governor's own words, never re-derived here. Its `state` carries
+    # CONTAMINATED / UNKNOWN / EXHAUSTED, each of which forbids a new entry
+    # regardless of any cap, so the state travels with the number.
+    if not isinstance(governor, dict):
+        _risk_line = ("UNRESOLVED -- requires the resolved daily-loss governor, "
+                      "which reads the venue at scan time")
+    elif governor.get("allowed_planned_risk") is None:
+        _risk_line = f"UNRESOLVED -- governor state {governor.get('state')}"
+    else:
+        _allowed = float(governor["allowed_planned_risk"])
+        _room = governor.get("remaining_daily_room")
+        _risk_line = f"${_allowed:,.2f}  [governor state {governor.get('state')}]"
+        if not governor.get("entry_permitted"):
+            _risk_line += (f"  NO NEW ENTRY PERMITTED "
+                           f"({governor.get('reason')})")
+        elif _room is not None and float(_room) < _doctrine_risk:
+            _risk_line += (f"  GOVERNED BY REMAINING DAILY ROOM "
+                           f"${float(_room):,.2f} (below the "
+                           f"${_doctrine_risk:,.2f} doctrine maximum)")
+        else:
+            _risk_line += "  (doctrine maximum; remaining room leaves space)"
 
     cfg_start, cfg_end, cfg_tz = decision_window()
     _w = effective_window()
@@ -234,8 +282,13 @@ def execution_path_telemetry(*, armed: bool, mission_id: str, symbol: str) -> st
         f"  MAXIMUM BOT TRADES           : {SA.MAX_BOT_TRADES_PER_SESSION}",
         f"  MAXIMUM ATTEMPTS PER TRADE   : {SA.MAX_ATTEMPTS_PER_TRADE_MISSION}",
         f"  ALL-IN RISK (DOCTRINE MAX)   : ${_doctrine_risk:,.2f}",
-        f"  DAILY LOSS BUDGET (SIGNED)   : "
-        f"{'UNSIGNED' if _budget is None else f'${float(_budget):,.2f}'}",
+        f"  DAILY LOSS BUDGET (CONFIGURED): "
+        f"{'unset' if _configured is None else f'${float(_configured):,.2f}'}"
+        f"  [module default; binds nothing already running]",
+        f"  CONFIGURATION-ONLY CEILING   : "
+        f"{'UNRESOLVED' if _cfg_ceiling is None else f'${_cfg_ceiling:,.2f}'}"
+        f"  [min(doctrine, configured); NOT the effective cap]",
+        f"  DAILY LOSS BUDGET (SIGNED)   : {_signed_line}",
         f"  EFFECTIVE PER-TRADE CAP      : {_risk_line}",
         f"  PREFERRED STOP RANGE         : "
         f"0-{float(_doc['preferred_max_stop_points']):g} points",

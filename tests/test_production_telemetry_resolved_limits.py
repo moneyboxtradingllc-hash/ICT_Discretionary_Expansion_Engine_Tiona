@@ -44,13 +44,15 @@ sys.path.insert(0, os.path.join(ROOT, "src"))
 @pytest.fixture
 def banner(monkeypatch):
     """Render the banner, with the environment a startup would supply."""
-    def render(**env):
+    def render(authorization=None, governor=None, **env):
         monkeypatch.setenv("SCAN_SYMBOL", "MNQ")
         for k, v in env.items():
             monkeypatch.setenv(k, v)
         from tools import topstepx_production_session as PS
         return PS.execution_path_telemetry(armed=False, mission_id="PROD-TEST",
-                                           symbol="MNQ")
+                                           symbol="MNQ",
+                                           authorization=authorization,
+                                           governor=governor)
     return render
 
 
@@ -62,23 +64,13 @@ def _line(text: str, label: str) -> str:
 
 
 class TestOrdinaryLimits:
-    """The signed budget leaves room, so doctrine is the operative cap."""
+    """Doctrine values resolve from the authority, not from literals."""
 
     def test_doctrine_maximum_is_the_constant_not_a_literal(self, banner):
         from broker.topstepx_combine_risk import PRODUCTION_MAX_RISK_USD
         out = banner()
         assert f"${PRODUCTION_MAX_RISK_USD:,.2f}" in _line(
             out, "ALL-IN RISK (DOCTRINE MAX)")
-
-    def test_effective_cap_is_doctrine_when_the_budget_allows_it(self, banner):
-        from broker import topstepx_session_authorization as SA
-        from broker.topstepx_combine_risk import PRODUCTION_MAX_RISK_USD
-        assert SA.DAILY_LOSS_BUDGET_USD > PRODUCTION_MAX_RISK_USD, \
-            "fixture assumption: the shipped budget exceeds the per-trade cap"
-        row = _line(banner(), "EFFECTIVE PER-TRADE CAP")
-        assert f"${PRODUCTION_MAX_RISK_USD:,.2f}" in row
-        assert "doctrine maximum" in row
-        assert "GOVERNED BY" not in row
 
     def test_stop_range_ceiling_and_contracts_resolve(self, banner):
         from broker.topstepx_combine_risk import (
@@ -93,45 +85,96 @@ class TestOrdinaryLimits:
             out, "MAXIMUM CONTRACTS")
 
     def test_the_stale_literals_are_gone(self, banner):
-        """The exact strings the operator was shown while doctrine said otherwise."""
         out = banner()
         assert "$250.00" not in out
         assert "40 points" not in out
 
 
-class TestGovernorLowerThanDoctrine:
-    """A budget below the per-trade cap IS the cap, and must say so."""
+class TestConfiguredIsLabelledConfiguration:
+    """The module constant may be shown -- but never as a signed term."""
 
-    def test_effective_cap_reports_the_budget_and_names_the_governor(
-            self, banner, monkeypatch):
+    def test_configured_is_named_configured_and_the_ceiling_names_itself(
+            self, banner):
         from broker import topstepx_session_authorization as SA
-        from broker.topstepx_combine_risk import PRODUCTION_MAX_RISK_USD
-        monkeypatch.setattr(SA, "DAILY_LOSS_BUDGET_USD", 200.00)
-        row = _line(banner(), "EFFECTIVE PER-TRADE CAP")
+        out = banner()
+        configured = _line(out, "DAILY LOSS BUDGET (CONFIGURED)")
+        assert f"${SA.DAILY_LOSS_BUDGET_USD:,.2f}" in configured
+        assert "module default" in configured
+        ceiling = _line(out, "CONFIGURATION-ONLY CEILING")
+        assert "NOT the effective cap" in ceiling
+
+    def test_the_module_constant_never_appears_as_signed(self, banner):
+        """THE ORIGINAL DEFECT. `SA.DAILY_LOSS_BUDGET_USD` was printed under
+        the label SIGNED, which is configuration wearing an authority it does
+        not have."""
+        assert "UNRESOLVED" in _line(banner(), "DAILY LOSS BUDGET (SIGNED)")
+
+
+class TestSignedComesOnlyFromTheAuthorization:
+
+    def test_signed_reports_the_authorization_not_the_module_default(
+            self, banner):
+        """A signed budget that DIFFERS from the module default."""
+        from broker import topstepx_session_authorization as SA
+        auth = type("A", (), {"daily_loss_budget_usd": 200.00})()
+        row = _line(banner(authorization=auth), "DAILY LOSS BUDGET (SIGNED)")
         assert "$200.00" in row
-        assert "GOVERNED BY DAILY LOSS BUDGET" in row
-        # The doctrine maximum is still disclosed, as context, never as effect.
-        assert f"below the ${PRODUCTION_MAX_RISK_USD:,.2f} doctrine maximum" in row
+        assert f"${SA.DAILY_LOSS_BUDGET_USD:,.2f}" not in row
 
-    def test_the_doctrine_line_still_shows_doctrine(self, banner, monkeypatch):
-        """Lowering the governor must not rewrite what doctrine says."""
-        from broker import topstepx_session_authorization as SA
+    def test_an_authorization_missing_its_budget_is_unresolved(self, banner):
+        """`verify` refuses an unsigned budget; the banner may not supply one."""
+        auth = type("A", (), {"daily_loss_budget_usd": None})()
+        row = _line(banner(authorization=auth), "DAILY LOSS BUDGET (SIGNED)")
+        assert "UNRESOLVED" in row
+        assert "signed no daily loss budget" in row
+
+    def test_no_authorization_says_why_rather_than_defaulting(self, banner):
+        row = _line(banner(), "DAILY LOSS BUDGET (SIGNED)")
+        assert "UNRESOLVED" in row
+        assert "scan loop" in row
+
+
+class TestEffectiveComesOnlyFromTheGovernor:
+
+    def test_without_a_governor_the_effective_cap_is_unresolved(self, banner):
+        row = _line(banner(), "EFFECTIVE PER-TRADE CAP")
+        assert "UNRESOLVED" in row
+        assert "governor" in row
+
+    def test_a_restart_with_prior_losses_reports_the_reduced_room(self, banner):
+        """THE CASE THE FIRST CORRECTION GOT WRONG. min(doctrine, budget)
+        assumed no realized loss. On a restart the room is already spent down,
+        and the governor -- not arithmetic over a constant -- knows it."""
         from broker.topstepx_combine_risk import PRODUCTION_MAX_RISK_USD
-        monkeypatch.setattr(SA, "DAILY_LOSS_BUDGET_USD", 200.00)
-        out = banner()
-        assert f"${PRODUCTION_MAX_RISK_USD:,.2f}" in _line(
-            out, "ALL-IN RISK (DOCTRINE MAX)")
-        assert "$200.00" in _line(out, "DAILY LOSS BUDGET (SIGNED)")
+        governor = {"state": "OK", "entry_permitted": True,
+                    "allowed_planned_risk": 150.00,
+                    "remaining_daily_room": 150.00}
+        row = _line(banner(governor=governor), "EFFECTIVE PER-TRADE CAP")
+        assert "$150.00" in row
+        assert "GOVERNED BY REMAINING DAILY ROOM" in row
+        assert f"${PRODUCTION_MAX_RISK_USD:,.2f}" in row
 
-    def test_an_unsigned_budget_is_unresolved_never_defaulted(
-            self, banner, monkeypatch):
-        """`SessionAuthorization.verify` refuses an unsigned budget. The banner
-        may not quietly supply the number the authorization never signed."""
-        from broker import topstepx_session_authorization as SA
-        monkeypatch.setattr(SA, "DAILY_LOSS_BUDGET_USD", None)
-        out = banner()
-        assert "UNRESOLVED" in _line(out, "EFFECTIVE PER-TRADE CAP")
-        assert "UNSIGNED" in _line(out, "DAILY LOSS BUDGET (SIGNED)")
+    def test_room_above_doctrine_reports_the_doctrine_maximum(self, banner):
+        from broker.topstepx_combine_risk import PRODUCTION_MAX_RISK_USD
+        governor = {"state": "OK", "entry_permitted": True,
+                    "allowed_planned_risk": PRODUCTION_MAX_RISK_USD,
+                    "remaining_daily_room": 725.00}
+        row = _line(banner(governor=governor), "EFFECTIVE PER-TRADE CAP")
+        assert f"${PRODUCTION_MAX_RISK_USD:,.2f}" in row
+        assert "doctrine maximum" in row
+        assert "GOVERNED BY" not in row
+
+    def test_a_governor_forbidding_entry_says_so(self, banner):
+        """CONTAMINATED / UNKNOWN / EXHAUSTED forbid a new entry whatever the
+        cap, so the state must travel with the number."""
+        governor = {"state": "CONTAMINATED", "entry_permitted": False,
+                    "reason": "unattributable_in_session_trade",
+                    "allowed_planned_risk": 0.0,
+                    "remaining_daily_room": 0.0}
+        row = _line(banner(governor=governor), "EFFECTIVE PER-TRADE CAP")
+        assert "CONTAMINATED" in row
+        assert "NO NEW ENTRY PERMITTED" in row
+        assert "unattributable_in_session_trade" in row
 
 
 class TestDriftGuard:
@@ -139,11 +182,9 @@ class TestDriftGuard:
 
     def test_the_banner_follows_the_constants(self, banner, monkeypatch):
         # PATCHED ON `topstepx_production_doctrine`, NOT on
-        # `topstepx_combine_risk`. The doctrine module does `from ... import
-        # PRODUCTION_MAX_RISK_USD`, which binds the VALUE at import time, so
-        # rebinding the source module afterwards would change nothing and the
+        # `topstepx_combine_risk`: the doctrine module binds these VALUES at
+        # import, so rebinding the source module would change nothing and the
         # guard would fail for a reason that says nothing about the banner.
-        # `resolve()` is the authority the banner reads; these are its names.
         from broker import topstepx_production_doctrine as DOCTRINE
         monkeypatch.setattr(DOCTRINE, "PRODUCTION_MAX_RISK_USD", 411.00)
         monkeypatch.setattr(DOCTRINE, "PREFERRED_MAX_STOP_POINTS", 22.0)
@@ -154,14 +195,3 @@ class TestDriftGuard:
         assert "0-22 points" in _line(out, "PREFERRED STOP RANGE")
         assert "33 points" in _line(out, "ABSOLUTE STOP CEILING")
         assert "7 MNQ" in _line(out, "MAXIMUM CONTRACTS")
-
-    def test_a_raised_doctrine_cap_lets_the_budget_govern(
-            self, banner, monkeypatch):
-        """Both halves of the min() are live, not just the budget half."""
-        from broker import topstepx_production_doctrine as DOCTRINE
-        from broker import topstepx_session_authorization as SA
-        monkeypatch.setattr(DOCTRINE, "PRODUCTION_MAX_RISK_USD", 5000.00)
-        monkeypatch.setattr(SA, "DAILY_LOSS_BUDGET_USD", 725.00)
-        row = _line(banner(), "EFFECTIVE PER-TRADE CAP")
-        assert "$725.00" in row
-        assert "GOVERNED BY DAILY LOSS BUDGET" in row
