@@ -38,6 +38,7 @@ from __future__ import annotations
 import argparse
 import glob
 import json
+import math
 import os
 import sys
 from datetime import timedelta
@@ -54,7 +55,8 @@ POINT_VALUE = 2.00          # MNQ, $ per point per contract
 
 def _num(v):
     try:
-        return float(v)
+        value = float(v)
+        return value if math.isfinite(value) else None
     except (TypeError, ValueError):
         return None
 
@@ -185,10 +187,79 @@ def touched(bars: list, level: float, *, above: bool) -> object:
     return None
 
 
+def interval_coverage(candles: list, lo, hi) -> tuple:
+    """Coverage of [lo, hi), using the candle owner's minute identities.
+
+    A candle describes a whole minute, not an instantaneous price. Full bars
+    can witness a touch inside the interval; a boundary bar cannot locate its
+    high/low before versus after a sub-minute entry/exit. Missing/invalid OHLC
+    counts as missing evidence. A last bar alone never proves continuity.
+    """
+    coverage = dict(start=lo, end=hi, resolution="1m", status="UNKNOWN",
+                    missing_minutes=[], boundary_minutes=[], seconds=None)
+    if lo is None or hi is None or hi <= lo:
+        coverage["reason"] = "missing/invalid interval bounds"
+        return coverage, [], []
+    coverage["seconds"] = (hi - lo).total_seconds()
+    indexed = {CONT.canonical_key(c): c for c in CONT.normalize(candles)}
+    cursor = lo.replace(second=0, microsecond=0)
+    overlapping, full = [], []
+    while cursor < hi:
+        candle = indexed.get(cursor)
+        high = _num((candle or {}).get("high"))
+        low = _num((candle or {}).get("low"))
+        if candle is None or high is None or low is None or high < low:
+            coverage["missing_minutes"].append(cursor.isoformat())
+        else:
+            overlapping.append(candle)
+            if cursor >= lo and cursor + CONT.MINUTE <= hi:
+                full.append(candle)
+            else:
+                coverage["boundary_minutes"].append(cursor.isoformat())
+        cursor += CONT.MINUTE
+    coverage.update(status="INCOMPLETE" if coverage["missing_minutes"] else "COMPLETE",
+                    observed_bars=len(overlapping), full_bars=len(full))
+    coverage["reason"] = ("missing minute evidence" if coverage["missing_minutes"]
+                           else "all intersecting minutes recorded")
+    return coverage, overlapping, full
+
+
+def touch_evidence(coverage: dict, overlapping: list, full: list,
+                   level, *, above: bool) -> dict:
+    if level is None:
+        return {"status": "UNKNOWN", "reason": "missing direction/level"}
+    hit = touched(full, level, above=above)
+    if hit is not None:
+        return {"status": "YES", "at": hit, "reason": "touch in a fully contained 1m bar"}
+    if touched(overlapping, level, above=above) is not None:
+        return {"status": "UNKNOWN", "reason": "1m boundary bar cannot locate the touch inside the interval"}
+    if coverage["status"] != "COMPLETE":
+        return {"status": "UNKNOWN", "reason": coverage["reason"]}
+    if coverage.get("boundary_minutes"):
+        return {"status": "UNKNOWN", "reason": "boundary 1m bar is only partially inside the interval"}
+    return {"status": "NO", "reason": "complete minute coverage; no intersecting bar reaches the level"}
+
+
+def _direction(value) -> str | None:
+    value = str(value or "").strip().lower()
+    if value in {"bullish", "long"}:
+        return "bullish"
+    if value in {"bearish", "short"}:
+        return "bearish"
+    return None
+
+
+def _unknown_coverage(reason: str) -> dict:
+    return {"start": None, "end": None, "resolution": "1m",
+            "status": "UNKNOWN", "missing_minutes": [],
+            "boundary_minutes": [], "seconds": None, "observed_bars": 0,
+            "full_bars": 0, "reason": reason}
+
+
 def analyse(mission: dict, plan: dict, candles: list, after_minutes: int) -> dict:
     geo = (plan or {}).get("geometry") or {}
-    direction = str(geo.get("direction") or "")
-    bullish = direction == "bullish"
+    direction = _direction(geo.get("direction"))
+    bullish = direction == "bullish" if direction is not None else None
     entry_plan = _num(geo.get("entry_price"))
     stop_px = _num(geo.get("stop_price"))
     target_px = _num(geo.get("target_price"))
@@ -208,28 +279,21 @@ def analyse(mission: dict, plan: dict, candles: list, after_minutes: int) -> dic
            "exit_price": exit_px, "exit_type": mission.get("exit_type"),
            "state": mission.get("state"), "times": t, "entry_ref": entry_ref}
 
-    if entry_ref is None or not candles:
-        out["path"] = None
-        return out
-
-    if fill is not None and entry_plan is not None:
+    if fill is not None and entry_plan is not None and bullish is not None:
         out["entry_slippage_points"] = round(
             (fill - entry_plan) if bullish else (entry_plan - fill), 2)
 
-    in_trade = _window(candles, t["entry"], t["exit"])
-    out["path"] = excursions(in_trade, entry=entry_ref, bullish=bullish)
+    if t["entry"] is not None and t["exit"] is not None:
+        in_coverage, in_overlap, in_full = interval_coverage(
+            candles, t["entry"], t["exit"])
+    else:
+        in_coverage, in_overlap, in_full = _unknown_coverage(
+            "missing entry or exit timestamp"), [], []
 
-    # WHY THE PATH MAY BE EMPTY OR SHORT, said out loud. Two cases were
-    # measured on PROD-20260909 and BOTH would otherwise have been reported as
-    # facts about price rather than limits of the record:
-    #
-    #   a trade shorter than a minute      T1 lived 28 seconds. No 1m bar fits
-    #                                      inside it, so the path is empty --
-    #                                      which is not "price did nothing".
-    #   the store ends before the exit     T2 exited at 17:54:31 and the
-    #                                      journal's last bar is 17:53. The
-    #                                      stop-touch search then answered "no"
-    #                                      about a minute it never held.
+    out["path"] = (excursions(in_full, entry=entry_ref, bullish=bullish)
+                   if entry_ref is not None and bullish is not None and in_full
+                   else None)
+
     tip = CONT.canonical_key(candles[-1]) if candles else None
     out["coverage"] = {"store_last_bar": tip,
                        "store_ends_before_exit": bool(
@@ -237,55 +301,84 @@ def analyse(mission: dict, plan: dict, candles: list, after_minutes: int) -> dic
                            and tip < t["exit"]),
                        "seconds_in_trade": (
                            (t["exit"] - t["entry"]).total_seconds()
-                           if t["entry"] and t["exit"] else None)}
+                           if t["entry"] and t["exit"] else None),
+                       "in_trade": in_coverage}
+    out["coverage_status"] = in_coverage["status"]
 
-    # A touch search over a window the store does not fully cover cannot
-    # return "no". It returns UNKNOWN, and says which minutes are missing.
-    partial = out["coverage"]["store_ends_before_exit"] or not in_trade
-    for key, level, above in (("target_touched_in_trade", target_px, bullish),
-                              ("stop_touched_in_trade", stop_px, not bullish)):
-        if level is None:
-            continue
-        hit = touched(in_trade, level, above=above)
-        out[key] = hit if hit is not None else (None if partial else False)
+    target_level = target_px if bullish is not None else None
+    stop_level = stop_px if bullish is not None else None
+    out["target_touched_in_trade"] = touch_evidence(
+        in_coverage, in_overlap, in_full, target_level,
+        above=bool(bullish) if bullish is not None else True)
+    out["stop_touched_in_trade"] = touch_evidence(
+        in_coverage, in_overlap, in_full, stop_level,
+        above=not bool(bullish) if bullish is not None else True)
 
     # HOW CLOSE IT CAME. Points still needed at the best moment, and that as a
     # fraction of the distance the trade had to cover.
     mfe = (out["path"] or {}).get("mfe_points")
-    if mfe is not None and target_pts:
-        out["points_short_of_target"] = round(target_pts - mfe, 2)
-        out["fraction_of_target_reached"] = round(mfe / target_pts, 3)
-    if mfe is not None and stop_pts:
-        out["mfe_in_R"] = round(mfe / stop_pts, 2)
+    actual_target_pts = None
+    if fill is not None and target_px is not None and bullish is not None:
+        candidate = (target_px - fill) if bullish else (fill - target_px)
+        if candidate > 0:
+            actual_target_pts = candidate
+            out["target_points_actual_fill_relative"] = round(candidate, 2)
+    if mfe is not None and actual_target_pts:
+        out["points_short_of_target"] = round(actual_target_pts - mfe, 2)
+        out["fraction_of_target_reached"] = round(mfe / actual_target_pts, 3)
+    planned_mfe = None
+    if out["path"] and entry_plan is not None and bullish is not None:
+        planned_mfe = ((out["path"]["mfe_price"] - entry_plan)
+                       if bullish else (entry_plan - out["path"]["mfe_price"]))
+        out["mfe_points_planned_entry_relative"] = round(planned_mfe, 2)
+    if planned_mfe is not None and target_pts and target_pts > 0:
+        out["planned_points_short_of_target"] = round(target_pts - planned_mfe, 2)
+        out["planned_fraction_of_target_reached"] = round(planned_mfe / target_pts, 3)
+    actual_stop_pts = None
+    if fill is not None and stop_px is not None and bullish is not None:
+        candidate = (fill - stop_px) if bullish else (stop_px - fill)
+        if candidate > 0:
+            actual_stop_pts = candidate
+    if mfe is not None and actual_stop_pts:
+        out["mfe_in_R"] = round(mfe / actual_stop_pts, 2)
     mae = (out["path"] or {}).get("mae_points")
-    if mae is not None and stop_pts:
-        out["mae_in_R"] = round(mae / stop_pts, 2)
+    if mae is not None and actual_stop_pts:
+        out["mae_in_R"] = round(mae / actual_stop_pts, 2)
 
     # AFTER THE EXIT. Early vs wrong.
     if t["exit"] is not None:
-        after = _window(candles, t["exit"],
-                        t["exit"] + timedelta(minutes=after_minutes))
-        out["after"] = excursions(after, entry=entry_ref, bullish=bullish)
+        after_coverage, after_overlap, after_full = interval_coverage(
+            candles, t["exit"],
+            t["exit"] + timedelta(minutes=after_minutes))
+        out["after_coverage"] = after_coverage
+        out["after"] = (excursions(after_full, entry=entry_ref, bullish=bullish)
+                         if entry_ref is not None and bullish is not None
+                         and after_full else None)
         out["after_minutes"] = after_minutes
-        if target_px is not None:
-            out["target_reached_after_exit"] = touched(after, target_px,
-                                                       above=bullish)
-    if exit_px is not None and entry_ref is not None:
+        out["target_reached_after_exit"] = touch_evidence(
+            after_coverage, after_overlap, after_full, target_level,
+            above=bool(bullish) if bullish is not None else True)
+    if exit_px is not None and entry_ref is not None and bullish is not None:
         moved = (exit_px - entry_ref) if bullish else (entry_ref - exit_px)
         out["realised_points"] = round(moved, 2)
         if qty:
             out["realised_gross_usd"] = round(moved * POINT_VALUE * qty, 2)
+    else:
+        out["realised_points"] = None
+        out["realised_status"] = "UNKNOWN: missing direction, fill, or exit price"
     return out
 
 
 def render(a: dict) -> None:
-    print(f"\n=== {a['mission_id']}  {a['direction'].upper()} "
+    direction = (a.get("direction") or "UNKNOWN").upper()
+    print(f"\n=== {a['mission_id']}  {direction} "
           f"{a['side'] or ''} x{a['quantity'] or '?'}  [{a['state']}] ===")
     print("  THE PLAN (authored before the order was sent)")
     print(f"    entry planned : {a['planned_entry']}")
     print(f"    stop          : {a['stop_price']}   ({a['stop_points']} pts)")
     print(f"    target        : {a['target_price']}   ({a['target_points']} pts)")
-    if a.get("stop_points") and a.get("target_points"):
+    if (a.get("stop_points") and a.get("target_points")
+            and a["direction"] is not None):
         print(f"    reward:risk   : "
               f"{round(a['target_points'] / a['stop_points'], 2)} : 1")
     print("  WHAT HAPPENED")
@@ -303,11 +396,17 @@ def render(a: dict) -> None:
 
     cov = a.get("coverage") or {}
     path = a.get("path")
+    in_cov = cov.get("in_trade") or {}
     if not path:
         secs = cov.get("seconds_in_trade")
-        why = (f"the trade lived {secs:.0f}s -- shorter than one bar, so no 1m "
-               f"candle falls inside it" if secs is not None and secs < 60
-               else "no candles in the window")
+        if a.get("direction") is None:
+            why = "direction is missing/invalid, so direction-dependent path math is UNKNOWN"
+        elif in_cov.get("status") != "COMPLETE":
+            why = in_cov.get("reason") or "the interval is not fully evidenced"
+        else:
+            why = (f"the trade lived {secs:.0f}s -- shorter than one bar, so no 1m "
+                   f"candle falls inside it" if secs is not None and secs < 60
+                   else "no fully contained candles in the window")
         print(f"  PRICE PATH      : UNAVAILABLE ({why})")
         print("                    This is a limit of the 1m record, NOT a "
               "statement that price was flat.")
@@ -321,17 +420,24 @@ def render(a: dict) -> None:
               + (f"   = {a['mae_in_R']}R" if a.get("mae_in_R") is not None else ""))
         if a.get("points_short_of_target") is not None:
             print(f"    target reach  : "
-                  f"{a['fraction_of_target_reached'] * 100:.1f}% of the way "
-                  f"({a['points_short_of_target']} pts short at best)")
-        def _touch(v):
-            return "UNKNOWN (store does not cover the whole trade)" \
-                if v is None else (v or "no")
-        print(f"    touched target: {_touch(a.get('target_touched_in_trade'))}")
-        print(f"    touched stop  : {_touch(a.get('stop_touched_in_trade'))}")
-        if cov.get("store_ends_before_exit"):
-            print(f"    ! the journal's last bar is {cov['store_last_bar']}, "
-                  f"BEFORE this trade exited. The final minutes -- including "
-                  f"whatever price the exit filled at -- are not in the record.")
+              f"{a['fraction_of_target_reached'] * 100:.1f}% of the way "
+              f"({a['points_short_of_target']} pts short at best; actual-fill-relative)")
+
+    def _touch(v):
+        if isinstance(v, dict):
+            status = v.get("status", "UNKNOWN")
+            return f"{status} (at {v['at']})" if v.get("at") else \
+                f"{status} ({v.get('reason') or 'reason unavailable'})"
+        return "UNKNOWN" if v is None else ("YES" if v else "NO")
+
+    print(f"    in-trade coverage: {in_cov.get('status', 'UNKNOWN')} "
+          f"({in_cov.get('reason') or 'reason unavailable'})")
+    print(f"    touched target: {_touch(a.get('target_touched_in_trade'))}")
+    print(f"    touched stop  : {_touch(a.get('stop_touched_in_trade'))}")
+    if cov.get("store_ends_before_exit"):
+        print(f"    ! the journal's last bar is {cov['store_last_bar']}, "
+              f"BEFORE this trade exited. The final minutes -- including "
+              f"whatever price the exit filled at -- are not in the record.")
 
     after = a.get("after")
     if after:
@@ -339,8 +445,13 @@ def render(a: dict) -> None:
         print(f"    best it would : {after['mfe_points']:g} pts in favour "
               f"(px {after['mfe_price']} at {after['mfe_at']})")
         print(f"    worst it would: {after['mae_points']:g} pts against")
-        reached = a.get("target_reached_after_exit")
-        print(f"    target reached later: {reached or 'no'}")
+    elif a.get("after_coverage"):
+        print(f"  AFTER THE EXIT ({a.get('after_minutes')} min) -- "
+              f"UNAVAILABLE ({a['after_coverage'].get('status', 'UNKNOWN')}: "
+              f"{a['after_coverage'].get('reason') or 'reason unavailable'})")
+    if a.get("after_coverage"):
+        print(f"    target reached later: "
+              f"{_touch(a.get('target_reached_after_exit'))}")
 
 
 def main() -> int:

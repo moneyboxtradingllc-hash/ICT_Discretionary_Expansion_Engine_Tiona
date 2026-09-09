@@ -109,6 +109,81 @@ def missions(store_dir: str, session: str) -> list:
     return out
 
 
+def authorization_accounting(store_dir: str, session: str) -> dict:
+    """Read the allowance owner, without issuing/verifying live authority.
+
+    load_existing revalidates voids against submission evidence. Its historical
+    allowance/attempt counters are reconstructed, but its fill/round-trip
+    counters are NOT: they are callback accumulators in ProductionScanLoop.
+    SessionLedger counts daily attributed trade rows (append, not mission
+    counts); SlippageLedger pairs reliable observations across its shared store.
+    Neither defines complete session-scoped fills/round trips on a cold reload.
+    Mission COMPLETE alone also does not prove a fill (reconcile_flat can close
+    a recorded venue order without observe_position_open). Keep these totals
+    UNKNOWN instead of substituting a different population or default zero.
+    """
+    from broker import topstepx_session_authorization as SA
+    fields = ("trade_missions_allowed", "trade_missions_used", "remaining_allowance",
+              "submissions_made", "entry_attempts", "venue_rejections",
+              "trade_missions_voided", "void_classes", "session_halted_for_review",
+              "may_open_new_trade_mission", "filled_trades", "round_trips")
+    out = dict.fromkeys(fields)
+    out.update(status="UNKNOWN", owner="ProductionSessionMission.load_existing/counters",
+        historical_count_note="UNKNOWN: reload does not reconstruct filled trades or round trips; daily trade rows and shared reliable slippage pairs are different populations.")
+    try:
+        auth = SA.SessionAuthorization.load(os.path.join(
+            store_dir, f"session_auth_{session}.json"))
+        if auth is None:
+            out["reason"] = "no durable authorization record"
+            return out
+        if auth.session_id != session:
+            raise ValueError("authorization session identity mismatch")
+        if type(auth.maximum_trades) is not int or auth.maximum_trades < 0:
+            raise ValueError("missing/invalid signed trade allowance")
+        owner = SA.ProductionSessionMission(auth, store_dir)
+        owner.load_existing()
+        counters = owner.counters()
+        for key in fields:
+            if key in counters and key not in ("filled_trades", "round_trips"):
+                out[key] = counters[key]
+        out["remaining_allowance"] = max(
+            counters["trade_missions_allowed"] - counters["trade_missions_used"], 0)
+        # A permissive HYPOTHETICAL venue/window tests for durable owner vetoes.
+        # False is a proven durable veto. True is NOT real permission: current
+        # venue, window, authorization verification and runtime arm are unknown.
+        conditional, reason = owner.may_open_trade_mission(
+            positions=0, working_orders=0, unknown_external=False, in_window=True)
+        out.update(status="OWNER_DERIVED", may_open_new_trade_mission=(
+            None if conditional else False), permission_reason=(
+                "UNKNOWN: no durable owner veto, but current venue/window/authorization/arm state has not been verified"
+                if conditional else reason))
+    except (OSError, ValueError, TypeError, SA.AuthorizationRefused) as exc:
+        out = dict.fromkeys(fields) | {"status": "UNKNOWN", "reason": str(exc),
+            "historical_count_note": out["historical_count_note"]}
+    return out
+
+
+def render_authorization_accounting(accounting: dict) -> None:
+    print(f"  AUTHORIZATION ACCOUNTING: {accounting['status']}")
+    labels = {"trade_missions_allowed": "trade missions allowed",
+              "trade_missions_used": "trade missions used",
+              "remaining_allowance": "remaining allowance",
+              "submissions_made": "submissions made",
+              "entry_attempts": "entry attempts",
+              "venue_rejections": "venue rejections",
+              "trade_missions_voided": "voided missions",
+              "void_classes": "void classes",
+              "session_halted_for_review": "session halted for review",
+              "may_open_new_trade_mission": "may open new trade mission",
+              "filled_trades": "historical filled trades",
+              "round_trips": "historical round trips"}
+    for key, label in labels.items():
+        value = accounting.get(key)
+        print(f"    {label:<27}: {json.dumps(value) if value is not None else 'UNKNOWN'}")
+    print(f"    permission: {accounting.get('permission_reason') or accounting.get('reason')}")
+    print(f"    {accounting['historical_count_note']}")
+
+
 def decisions(session: str) -> dict:
     from ai_retrieval.retrieval_telemetry import session_root
     root = session_root(session)
@@ -412,23 +487,7 @@ def main() -> int:
     if not auth["present"]:
         print("  AUTHORIZATION       : no durable record")
     else:
-        # NOT A FIXED WORD. "UNCONSUMED" was printed unconditionally, so a
-        # session that opened two missions and spent both attempts still read
-        # as unconsumed -- the report contradicting the two mission lines
-        # directly above it. Consumption is computed against the
-        # authorization's own trade law.
-        spent = sum(int(m.get("attempt_count") or 0) for m in ms)
-        allowed = auth["doc"].get("maximum_trades")
-        if not ms:
-            state = "UNCONSUMED"
-        elif allowed is not None and len(ms) >= int(allowed):
-            state = (f"ENTRY AUTHORITY EXHAUSTED ({len(ms)}/{allowed} trades "
-                     f"opened; no further entry was permitted)")
-        else:
-            state = f"PARTIALLY CONSUMED ({len(ms)}/{allowed} trades opened)"
-        print(f"  AUTHORIZATION       : record present -- {state}")
-        print(f"    missions opened         : {len(ms)}")
-        print(f"    attempts spent          : {spent}")
+        render_authorization_accounting(authorization_accounting(args.store_dir, S))
         pinned = auth["doc"].get("brain_contract_fingerprint") or ""
         try:
             from ai_brain.production_model import brain_contract_fingerprint
