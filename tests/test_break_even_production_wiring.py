@@ -28,6 +28,9 @@ from broker import break_even as BE                                  # noqa: E40
 from broker import break_even_actuator as ACT                        # noqa: E402
 from broker import topstepx_mission_state as MS                      # noqa: E402
 from broker import topstepx_production_loop as PL                    # noqa: E402
+from broker import topstepx_session_authorization as SA
+from broker import topstepx_submission_record as SUB
+from broker.topstepx_slippage import ExecutionContext
 
 CID = "CON.F.US.MNQ.U26"
 
@@ -96,6 +99,9 @@ class Ctx:
 class Runner:
     def __init__(self):
         self.execution_context = Ctx()
+        self.order_id = T2_ENTRY
+        self.account_fingerprint = "acct:aaaaaaaaaaaa"
+        self.contract = Contract()
         self.flattens = []
 
     def emergency_flatten(self, reason):
@@ -167,6 +173,8 @@ class PS:
     def __init__(self, venue, quote, runner):
         self.session, self.quote_provider, self.runner = venue, quote, runner
         self.contract = Contract()
+        self.account_fingerprint = "acct:aaaaaaaaaaaa"
+        self.session_id = "PRAC-20260825"
 
 
 class Mission:
@@ -174,10 +182,10 @@ class Mission:
 
     def __init__(self, store_dir, session_id="PRAC-20260825", state=MS.POSITION_OPEN):
         self.store_dir, self.session_id = store_dir, session_id
-        self.authorization = type("A", (), {"session_id": session_id,
-                                            "maximum_trades": 2})()
-        self._m = type("M", (), {"order_id": T2_ENTRY, "state": state,
-                                 "mission_id": f"{session_id}-T2"})()
+        self.authorization = fixture_authorization(session_id)
+        self._m = MS.load(self.mission_path(2))
+        self._m.state = state
+        self._m.save()
 
     @property
     def active_mission(self):
@@ -193,21 +201,35 @@ class Mission:
     trade_missions = []
 
 
+def fixture_authorization(session_id):
+    auth = SA.SessionAuthorization(session_id=session_id,
+        account_fingerprint="acct:aaaaaaaaaaaa", contract_id=CID,
+        session_date="20260825", decision_window="09:30-14:00", daily_loss_budget_usd=725)
+    auth.authorization_fingerprint = auth.fingerprint()
+    return auth
+
+
 def write_durable(tmp_path, *, session_id="PRAC-20260825", fill=T2_FILL,
                   stop=T2_STOP_PX, size=T2_SIZE, direction="long"):
     """The two artifacts the R baseline is reconstructed from."""
     mid = f"{session_id}-T2"
-    mp = os.path.join(str(tmp_path), f"trade_mission_{session_id}_1.json")
+    mp = os.path.join(str(tmp_path), f"trade_mission_{session_id}_2.json")
     with open(mp, "w", encoding="utf-8") as fh:
         json.dump({"mission_id": mid, "contract_id": CID, "order_id": T2_ENTRY,
                    "account_fingerprint": "acct:aaaaaaaaaaaa",
                    "fill_price": fill, "filled_quantity": size,
-                   "token_id": "tok"}, fh)
+                   "token_id": "tok", "session_id": session_id,
+                   "state": MS.POSITION_OPEN,
+                   "authorization_fingerprint": fixture_authorization(session_id).fingerprint()}, fh)
     sp = os.path.join(str(tmp_path), f"submissions_{session_id}.jsonl")
     with open(sp, "w", encoding="utf-8") as fh:
         fh.write(json.dumps({
             "mission_id": mid, "submission_id": "s1", "token_id": "tok",
-            "state": "SUBMISSION_STARTED",
+            "session_id": session_id, "account_fingerprint": "acct:aaaaaaaaaaaa",
+            "contract_id": CID, "operation": SUB.OPERATION_ORDER_PLACE,
+            "authorization_fingerprint": fixture_authorization(session_id).fingerprint(),
+            "quantity": size, "side": 0 if direction == "long" else 1,
+            "state": "VENUE_ACKNOWLEDGED", "success": True, "venue_order_id": T2_ENTRY,
             "geometry": {"direction": direction, "entry_price": fill,
                          "stop_price": stop, "target_price": T2_TARGET_PX,
                          "stop_points": 30.0, "size": size,
@@ -225,6 +247,17 @@ def loop_for(tmp_path, *, bid, ask, stop_px=T2_STOP_PX, positions=None,
     loop = PL.ProductionLoop.__new__(PL.ProductionLoop)
     loop.ps = PS(venue, Quote(bid, ask), runner)
     loop.mission = Mission(str(tmp_path), state=state)
+    runner.execution_context = ExecutionContext(
+        candidate_id="test", candidate_fingerprint="test", snapshot_id="test",
+        mission_id=loop.mission.active_mission.mission_id,
+        account_fingerprint=runner.account_fingerprint, contract_id=CID,
+        direction="long", quantity=T2_SIZE, entry_order_id=T2_ENTRY,
+        entry_fill_price=T2_FILL, structural_stop_price=T2_STOP_PX,
+        original_thesis_invalidation=T2_STOP_PX, liquidity_target_price=T2_TARGET_PX,
+        active_protective_stop=stop_px, protection_baseline_armed=True,
+        session_id=loop.ps.session_id, token_id="tok",
+        authorization_fingerprint=loop.mission.authorization.fingerprint(),
+        position_id=t2_position()["id"], stop_order_id=T2_STOP, target_order_id=T2_TARGET)
     return loop, venue, runner
 
 
@@ -369,4 +402,4 @@ class TestManagementIsDeterministic:
         loop.ps.session = None                # catastrophic input
         out = loop.manage_open_position()
         assert out["status"] in ("error", ACT.REFUSED, "no_live_mission",
-                                 "venue_unreadable_for_effect_identity")
+                                 "venue_unreadable_for_effect_identity", "identity_unavailable")

@@ -166,7 +166,8 @@ def inspect_protection(*, session, contract_id, entry_order_id) -> dict:
 
 
 def apply_break_even(*, session, contract_id, entry_order_id, direction,
-                     proposed_stop, expected_size=None, may_write=True) -> dict:
+                     proposed_stop, expected_size=None, may_write=True,
+                     expected_position_id=None, expected_fill_price=None) -> dict:
     """Advance the owned protective stop to `proposed_stop`. One effect, or none.
 
     Returns APPLIED / HELD / REJECTED / AMBIGUOUS / PROTECTION_DEFECT / REFUSED
@@ -197,6 +198,14 @@ def apply_break_even(*, session, contract_id, entry_order_id, direction,
     size = RECON.position_size(seen["positions"], contract_id)
     if not size:
         return out(HELD, NO_POSITION, "no live exposure to protect")
+    if expected_position_id is not None:
+        from broker import break_even_binding as BIND
+        try:
+            BIND.position(seen["positions"], contract_id=contract_id,
+                direction=PS.normalized_direction(direction), quantity=expected_size,
+                fill=expected_fill_price, position_id=expected_position_id)
+        except Exception as exc:
+            return out(REFUSED, "position_identity_changed", str(exc))
     # THE POSITION MUST STILL BE THE ONE WE ARE MANAGING. `position_size` is an
     # ABSOLUTE magnitude, so a flip from short to long presents an identical
     # number -- and the stop would then be "advanced" under the wrong side's
@@ -314,6 +323,14 @@ def apply_break_even(*, session, contract_id, entry_order_id, direction,
                    "position closed during the modify; no retry",
                    stop_order_id=stop_id, error=error, response=response,
                    retryable=False)
+
+    if expected_position_id is not None:
+        try:
+            BIND.position(after["positions"], contract_id=contract_id,
+                direction=PS.normalized_direction(direction), quantity=expected_size,
+                fill=expected_fill_price, position_id=expected_position_id)
+        except Exception as exc:
+            return out(AMBIGUOUS, "position_identity_changed", str(exc), retryable=False)
 
     if stop_after is None:
         return out(PROTECTION_DEFECT, NO_STOP,

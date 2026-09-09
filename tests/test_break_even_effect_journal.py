@@ -197,7 +197,7 @@ class TestRecoveryOutcomes:
         loop, venue, _ = self.latch(tmp_path)
         venue._p = []
         out = loop.manage_open_position()
-        assert out["actuation"]["outcome"] == ACT.HELD
+        assert out["status"] == "identity_unavailable"
         assert len(venue.modifies) == 1
 
     def test_case_C_a_missing_stop_reaches_the_emergency_authority(self, tmp_path):
@@ -219,9 +219,10 @@ class TestRecoveryOutcomes:
         # No identity can be derived without venue truth, so it bails BEFORE
         # journalling anything -- a spurious intent under a bogus identity
         # would be worse than no row.
-        assert out["status"] == "venue_unreadable_for_effect_identity"
-        assert J.is_unresolved(str(tmp_path), SESSION,
-                               J.unresolved_effects(str(tmp_path), SESSION)[0]["effect_id"])
+        assert out["status"] == "identity_unavailable"
+        # The prior write remains latched; the identity gate must not erase or
+        # re-send it merely because fresh venue truth is unavailable.
+        assert len(J.unresolved_effects(str(tmp_path), SESSION)) == 1
 
     def test_case_F_still_original_stays_latched(self, tmp_path):
         loop, venue, _ = self.latch(tmp_path)

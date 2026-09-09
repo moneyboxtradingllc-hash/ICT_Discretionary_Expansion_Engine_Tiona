@@ -343,6 +343,12 @@ class ExecutionContext:
     stop_order_id: object = None
     target_order_id: object = None
     entry_capture: dict = None
+    # BE authority is tied to the acknowledged trade, not the session-level
+    # measurement mission. Legacy contexts lack these and cannot authorize BE.
+    session_id: str = ""
+    token_id: str = ""
+    authorization_fingerprint: str = ""
+    position_id: object = None
     path: str = ""
 
     def as_dict(self) -> dict:
@@ -373,6 +379,8 @@ class ExecutionContext:
         # to disk and then silently dropped on load. That is precisely how a
         # restart would forget an advanced protective stop and fall back to the
         # original invalidation, so protection fields belong here or nowhere.
+        if not isinstance(d, dict):
+            return None
         ctx = cls(**{k: d.get(k) for k in
                      ("candidate_id", "candidate_fingerprint", "snapshot_id",
                       "mission_id", "account_fingerprint", "contract_id",
@@ -380,10 +388,12 @@ class ExecutionContext:
                       "entry_fill_price", "structural_stop_price",
                       "liquidity_target_price", "stop_order_id", "target_order_id",
                       "entry_capture", "original_thesis_invalidation",
-                      "active_protective_stop", "protection_baseline_armed")})
+                      "active_protective_stop", "protection_baseline_armed",
+                      "session_id", "token_id", "authorization_fingerprint",
+                      "position_id")})
         # A context written before this unit has no flag at all, and a missing
         # flag must never read as "armed".
-        ctx.protection_baseline_armed = bool(ctx.protection_baseline_armed)
+        ctx.protection_baseline_armed = ctx.protection_baseline_armed is True
         ctx.path = path
         return ctx
 

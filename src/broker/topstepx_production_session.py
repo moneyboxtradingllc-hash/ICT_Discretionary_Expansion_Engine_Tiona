@@ -262,6 +262,105 @@ class ProductionSession:
             quote_provider=self.quote_provider)
 
     # ── reconciliation ────────────────────────────────────────────────────────
+    def arm_break_even_after_submit(self, owner, mission, candidate) -> dict:
+        """Real production seam, AFTER full fill and structural readback.
+
+        Recording failure removes BE authority, never changes the entry result
+        or destroys protection which the runner has already established.
+        """
+        from broker import break_even_binding as BIND
+        from broker import break_even_actuator as ACT
+        try:
+            BIND.identity(owner, mission, self)
+            runner = self.runner
+            BIND.same(runner.order_id, mission.order_id, "fresh runner entry")
+            if runner.execution_context is not None:
+                raise BIND.BindingRefused("fresh lifecycle already has context")
+            outcome = runner.protection_outcome or {}
+            fill, anchor = outcome.get("fill") or {}, outcome.get("anchor") or {}
+            if (outcome.get("established") is not True or fill.get("complete") is not True
+                    or anchor.get("reanchored") is not True
+                    or (anchor.get("verification") or {}).get("verified") is not True):
+                raise BIND.BindingRefused("full fill and structural readback not proven")
+            # Re-read order-linked fills and the current position; no intent or
+            # contract-only reconciler fallback may seed management authority.
+            trades = [t for t in self.session.recent_trades()
+                      if str(t.get("orderId")) == str(mission.order_id)]
+            qty = sum(int(t.get("size") or 0) for t in trades)
+            if not trades or qty <= 0:
+                raise BIND.BindingRefused("no order-linked fill evidence")
+            vwap = sum(float(t["price"]) * int(t["size"]) for t in trades) / qty
+            BIND.number(qty, fill.get("size"), "full fill quantity")
+            BIND.number(vwap, fill.get("fill_price"), "full fill price")
+            pos = BIND.position(self.session.open_positions(), contract_id=self.contract.id,
+                direction=BIND.BB._side(runner.geometry.direction), quantity=qty, fill=vwap)
+            ids = anchor["child_ids"]
+            mission.observe_position_open(filled_quantity=qty, fill_price=vwap,
+                protective_order_ids=list(ids.values()), evidence="bound prompt full fill and structural readback")
+            baseline = BIND.recover(owner, mission, self)
+            # Build without saving/arming; all identities and fresh children
+            # must agree before the durable flag can become authoritative.
+            ctx = runner.build_execution_context(candidate_snapshot=candidate,
+                mission_id=mission.mission_id, fill_event={"price": vwap},
+                stop_order_id=ids["stop"], target_order_id=ids["target"])
+            ctx.session_id = baseline["session_id"]
+            ctx.token_id = baseline["token_id"]
+            ctx.authorization_fingerprint = baseline["authorization_fingerprint"]
+            ctx.position_id = pos["id"]
+            # Validate geometry before arm; no baseline may be silently rebuilt
+            # from the current stop (which is allowed to move later).
+            BIND.number(ctx.structural_stop_price, baseline["original_initial_stop"], "fresh stop")
+            BIND.number(ctx.liquidity_target_price, baseline["original_target_price"], "fresh target")
+            probe = ACT.inspect_protection(session=self.session, contract_id=self.contract.id,
+                                           entry_order_id=mission.order_id)
+            BIND.protection(probe, ctx, target_price=BIND.aligned_target(ctx, self.contract))
+            BIND.number(probe["stop"]["stop_price"], anchor["authorization"]["aligned_stop_price"],
+                        "fresh structural stop")
+            armed = runner._arm_protection_baseline(
+                thesis_invalidation=baseline["original_initial_stop"],
+                proven_stop_price=probe["stop"]["stop_price"])
+            BIND.context(baseline, ctx, runner)
+            ctx.path = self.context_path
+            ctx.save()
+            return {"status": "armed", "mission_id": mission.mission_id, "arming": armed}
+        except Exception as exc:  # management failure cannot undo a protected entry
+            if self.runner is not None:
+                self.runner.execution_context = None
+            return {"status": "management_unavailable", "reason": str(exc)[:200]}
+
+    def restore_break_even_management(self, owner, mission) -> dict:
+        """Restore only management authority. No entry, reanchor or order write."""
+        from broker import break_even_binding as BIND
+        from broker import break_even_actuator as ACT
+        try:
+            baseline = BIND.recover(owner, mission, self)
+            ctx = SL.ExecutionContext.load(self.context_path)
+            runner = R.ExecutionRunner(session=self.session,
+                account_fingerprint=self.account_fingerprint, contract=self.contract, clock=self.clock)
+            runner.order_id = mission.order_id
+            runner.execution_context = ctx
+            BIND.context(baseline, ctx, runner)
+            BIND.venue_position(self.session, baseline, ctx)
+            probe = ACT.inspect_protection(session=self.session, contract_id=self.contract.id,
+                                           entry_order_id=mission.order_id)
+            BIND.protection(probe, ctx, target_price=BIND.aligned_target(ctx, self.contract))
+            # Existing venue->local truth law; never writes local belief back
+            # to the venue, and never substitutes this moving stop for R.
+            from broker import protection_state as PROTECTION
+            adoption = PROTECTION.reconcile_with_venue(direction=ctx.direction,
+                active_protective_stop=ctx.active_protective_stop,
+                venue_stop_price=probe["stop"]["stop_price"])
+            ctx.active_protective_stop = adoption["adopted"]
+            ctx.save()
+            runner.submission_store_dir = self.store_dir
+            runner.submission_session_id = self.session_id
+            runner.submission_mission_id = mission.mission_id
+            runner.submission_authorization_fingerprint = baseline["authorization_fingerprint"]
+            self.runner = runner
+            return {"status": "restored", "mission_id": mission.mission_id, "adoption": adoption}
+        except Exception as exc:
+            return {"status": "management_unavailable", "reason": str(exc)[:200]}
+
     def _orders_index(self, orders: list) -> dict:
         idx = {}
         for o in orders or []:

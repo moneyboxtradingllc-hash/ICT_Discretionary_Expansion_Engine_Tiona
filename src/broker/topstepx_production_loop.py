@@ -384,19 +384,22 @@ class ProductionLoop:
 
             from broker import break_even as BE
             from broker import break_even_actuator as ACT
-            from broker import break_even_baseline as BB
-            from broker import topstepx_submission_record as SUBREC
+            from broker import break_even_binding as BIND
 
             # R FROM PRIMITIVES. The recovered baseline is actual fill + ORIGINAL
             # initial stop -- never the live stop, which may already have moved,
             # and never the requested entry, which is not a fill.
-            index = getattr(mission, "_slot", None) or 1
-            baseline = BB.recover(
-                mission_path=self.mission.mission_path(index),
-                submissions_path=SUBREC.ledger_path(
-                    self.mission.store_dir, self.mission.authorization.session_id))
-            if baseline.get("status") != BB.RECOVERED:
-                return out("baseline_unavailable", baseline=baseline)
+            try:
+                baseline = BIND.recover(self.mission, mission, self.ps)
+                if self.ps.runner is None:
+                    recovery = self.ps.restore_break_even_management(self.mission, mission)
+                    if recovery["status"] != "restored":
+                        return out("identity_unavailable", recovery=recovery)
+                ctx = self.ps.runner.execution_context
+                BIND.context(baseline, ctx, self.ps.runner)
+                BIND.venue_position(self.ps.session, baseline, ctx)
+            except Exception as exc:
+                return out("identity_unavailable", reason=str(exc)[:200])
 
             direction = baseline.get("direction")
             # FRESH EXECUTABLE QUOTE, SIDED. A long is triggered by the BID it
@@ -407,9 +410,8 @@ class ProductionLoop:
             if trigger is None:
                 return out("no_fresh_quote", direction=direction)
 
-            ctx = getattr(self.ps.runner, "execution_context", None) if self.ps.runner else None
-            armed = bool(getattr(ctx, "protection_baseline_armed", False))
-            active_stop = getattr(ctx, "active_protective_stop", None)
+            armed = ctx.protection_baseline_armed
+            active_stop = ctx.active_protective_stop
 
             decision = BE.evaluate(
                 direction=direction,
@@ -495,7 +497,9 @@ class ProductionLoop:
                     session=self.ps.session, contract_id=self.ps.contract.id,
                     entry_order_id=mission.order_id, direction=direction,
                     proposed_stop=proposed,
-                    expected_size=baseline.get("quantity"), may_write=False)
+                    expected_size=baseline.get("quantity"), may_write=False,
+                    expected_position_id=ctx.position_id,
+                    expected_fill_price=baseline["entry_fill_price"])
                 JOURNAL.record(store_dir=store, session_id=session_id,
                                effect_id=eid,
                                state=_journal_state_for(resolved, JOURNAL),
@@ -533,7 +537,9 @@ class ProductionLoop:
                 session=self.ps.session, contract_id=self.ps.contract.id,
                 entry_order_id=mission.order_id, direction=direction,
                 proposed_stop=proposed,
-                expected_size=baseline.get("quantity"))
+                expected_size=baseline.get("quantity"),
+                expected_position_id=ctx.position_id,
+                expected_fill_price=baseline["entry_fill_price"])
 
             # POST-WRITE. If THIS fails to persist, the local picture is
             # already potentially ambiguous -- the intent is on disk, so the
@@ -752,9 +758,16 @@ class ProductionLoop:
         # Production sizing. A rejection here is the doctrine working: the
         # invalidation is the thesis and is never moved to make a setup fit.
         try:
-            self.ps.runner = None                 # a new candidate, a new bracket
-            runner = self.ps.build_runner(
-                candidate, max_risk_usd=budget["allowed_planned_risk"])
+            managed_runner = self.ps.runner
+            try:
+                runner = self.ps.build_runner(
+                    candidate, max_risk_usd=budget["allowed_planned_risk"])
+            finally:
+                # Sizing a candidate does not own an already-open lifecycle.
+                # Preserve all existing scan/entry gates, including disarmed
+                # candidate observation, without losing management authority.
+                if self.mission.active_mission is not None:
+                    self.ps.runner = managed_runner
         except RiskRejection as exc:
             return {"outcome": RISK_REJECTED, "candidate_id": candidate.candidate_id,
                     "reason": getattr(exc, "reason", ""), "detail": str(exc),
@@ -912,7 +925,9 @@ class ProductionLoop:
                     "mission_state": mission.state,
                     "attempt_consumed": mission.attempt_count > 0}
 
+        management = self.ps.arm_break_even_after_submit(self.mission, mission, candidate)
         return {"outcome": SUBMITTED, "candidate_id": candidate.candidate_id,
+                "break_even_management": management,
                 "sizing": sized, "mission_id": mission.mission_id,
                 "mission_state": mission.state, "result": result,
                 "attempt_consumed": mission.attempt_count > 0}
