@@ -173,9 +173,26 @@ def submissions(store_dir: str, session: str) -> dict:
     rows = _rows(path)
     if rows is None:
         return {"present": False, "path": path}
+    # THE WRITER'S KEY IS `state`. `open_submission` writes state /
+    # operation / success / venue_order_id; there is no `phase` and no `event`.
+    # Measured on PROD-20260909: four real submission rows all printed as "?",
+    # which reported the flight recorder as unreadable for the first session
+    # that actually used it.
     return {"present": True, "path": path, "count": len(rows),
-            "phases": collections.Counter(str(r.get("phase") or r.get("event")
-                                              or "?") for r in rows)}
+            "states": collections.Counter(str(r.get("state") or "?")
+                                          for r in rows),
+            "operations": collections.Counter(str(r.get("operation") or "?")
+                                              for r in rows),
+            "rows": [{"submission_id": r.get("submission_id"),
+                      "mission_id": r.get("mission_id"),
+                      "state": r.get("state"),
+                      "operation": r.get("operation"),
+                      "success": r.get("success"),
+                      "venue_order_id": r.get("venue_order_id"),
+                      "error_code": r.get("error_code"),
+                      "error_message": r.get("error_message"),
+                      "transport_exception": r.get("transport_exception")}
+                     for r in rows]}
 
 
 def incidents(session_date: str) -> dict:
@@ -288,8 +305,19 @@ def main() -> int:
               "an absent ledger cannot hide a sent order.")
     else:
         print(f"  {sub['count']} row(s) in {sub['path']}")
-        for phase, n in sub["phases"].most_common():
-            print(f"      {n:>5}  {phase}")
+        for state, n in sub["states"].most_common():
+            print(f"      state {state:<28} {n}")
+        for op, n in sub["operations"].most_common():
+            print(f"      op    {op:<28} {n}")
+        for r in sub["rows"]:
+            line = (f"      {r['mission_id']}  {r['operation']}  "
+                    f"{r['state']}  success={r['success']}  "
+                    f"order={r['venue_order_id']}")
+            if r["error_code"] is not None or r["error_message"]:
+                line += f"  err={r['error_code']} {r['error_message']}"
+            if r["transport_exception"]:
+                line += f"  TRANSPORT={r['transport_exception']}"
+            print(line)
 
     print("\n── SCANS AND STAND-DOWNS ────────────────────────────────────────")
     dec = decisions(S)
@@ -382,9 +410,23 @@ def main() -> int:
     if not auth["present"]:
         print("  AUTHORIZATION       : no durable record")
     else:
+        # NOT A FIXED WORD. "UNCONSUMED" was printed unconditionally, so a
+        # session that opened two missions and spent both attempts still read
+        # as unconsumed -- the report contradicting the two mission lines
+        # directly above it. Consumption is computed against the
+        # authorization's own trade law.
         spent = sum(int(m.get("attempt_count") or 0) for m in ms)
-        print(f"  AUTHORIZATION       : record present and UNCONSUMED "
-              f"({len(ms)} mission(s), {spent} attempt(s) spent)")
+        allowed = auth["doc"].get("maximum_trades")
+        if not ms:
+            state = "UNCONSUMED"
+        elif allowed is not None and len(ms) >= int(allowed):
+            state = (f"ENTRY AUTHORITY EXHAUSTED ({len(ms)}/{allowed} trades "
+                     f"opened; no further entry was permitted)")
+        else:
+            state = f"PARTIALLY CONSUMED ({len(ms)}/{allowed} trades opened)"
+        print(f"  AUTHORIZATION       : record present -- {state}")
+        print(f"    missions opened         : {len(ms)}")
+        print(f"    attempts spent          : {spent}")
         pinned = auth["doc"].get("brain_contract_fingerprint") or ""
         try:
             from ai_brain.production_model import brain_contract_fingerprint
