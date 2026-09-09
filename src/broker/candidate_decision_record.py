@@ -82,6 +82,26 @@ _REASON_TO_DISPOSITION = {
     "fallback_not_authoritative": BRAIN_UNUSABLE,
     "window_closed": WINDOW_CLOSED,
     "stand_down": STOOD_DOWN,
+    # PROD-20260908. `luna_candidate_producer` raises this as a STAND-DOWN
+    # (`NoCandidate(..., stand_down=True)`), and it was the session's ONLY
+    # rejection reason: 279 of 279 decisions. Absent from this map it fell to
+    # UNCLASSIFIED, so `reconcile` returned
+    # CANDIDATE_DECISION_ACCOUNTING_FAILURE for a session that had in fact
+    # accounted for every scan. The reasons were durable and complete; only the
+    # classifier could not count them.
+    #
+    # ACCOUNTING ONLY. `terminal_disposition` is read by `reconcile` and by the
+    # decision ledger; no eligibility, sizing or execution path consults it.
+    #
+    # STILL UNMAPPED, DELIBERATELY (12, all raised by the producer):
+    # action_declines_entry, candle_gap_unrecovered, derived_state_stale,
+    # execution_price_unavailable, hybrid_envelope_unauthorized,
+    # objective_ambiguous, tool_direction_mismatch, tool_not_detected,
+    # tool_not_execution_eligible, tool_occurrence_ambiguous,
+    # tool_occurrence_unknown, tool_selection_ambiguous.
+    # Each needs its own ruling about which terminal disposition it IS; a bulk
+    # sweep into STOOD_DOWN would trade one accounting error for a larger one.
+    "session_phase_blocks_entry": STOOD_DOWN,
 }
 
 
