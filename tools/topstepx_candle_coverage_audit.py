@@ -172,12 +172,23 @@ def audit(path: str, *, session_start=None, session_end=None,
     # WARM-UP / COLLECTION BOUNDARY. Absences before the session started are
     # not this session's blindness; they are what the archive did not have when
     # it opened. Named separately rather than folded into either side.
-    pre_session = [m for m in unexplained if session_start and m < session_start]
+    # WITHOUT A WINDOW THESE ARE NOT ZERO, THEY ARE NOT COMPUTED.
+    # Measured 2026-09-10: run with no --session-start, the three lines below
+    # printed "0 / 0 / 0" beneath an unexplained run that fell INSIDE the
+    # session. A reader takes three zeros as a finding. They were the guard
+    # `if session_start and ...` yielding an empty list, which is the same
+    # manufactured-absence failure this tool exists to prevent -- committed by
+    # the tool itself.
+    windowed = session_start is not None
+    pre_session = [m for m in unexplained
+                   if windowed and m < session_start] if windowed else None
     in_session = [m for m in unexplained
-                  if session_start and m >= session_start
-                  and (session_end is None or m <= session_end)]
+                  if windowed and m >= session_start
+                  and (session_end is None or m <= session_end)
+                  ] if windowed else None
     post_session = [m for m in unexplained
-                    if session_end and m > session_end]
+                    if session_end and m > session_end
+                    ] if session_end is not None else None
 
     # Did an unexplained absence sit inside the lookback a decision reads?
     horizon_floor = (session_start - timedelta(minutes=horizon_minutes)
@@ -202,12 +213,14 @@ def audit(path: str, *, session_start=None, session_end=None,
         "by_rule": classes["by_rule"],
         "unexplained_runs": _runs(unexplained),
         "unknown_runs": _runs(classes["unknown"]),
-        "unexplained_pre_session": len(pre_session),
-        "unexplained_in_session": len(in_session),
-        "unexplained_post_session": len(post_session),
-        "unexplained_in_lookback_horizon": len(in_horizon),
+        "unexplained_pre_session": None if pre_session is None else len(pre_session),
+        "unexplained_in_session": None if in_session is None else len(in_session),
+        "unexplained_post_session": (None if post_session is None
+                                     else len(post_session)),
+        "unexplained_in_lookback_horizon": (None if horizon_floor is None
+                                            else len(in_horizon)),
         "horizon_minutes": horizon_minutes,
-        "in_session_runs": _runs(in_session),
+        "in_session_runs": _runs(in_session or []),
     }
 
 
@@ -258,14 +271,22 @@ def render(report: dict) -> None:
         if len(runs) > 20:
             print(f"      ... {len(runs) - 20} more")
     print("  -- placed against the session window --")
-    print(f"  unexplained BEFORE session start (warm-up / collection downtime)"
-          f" : {report['unexplained_pre_session']}")
-    print(f"  unexplained INSIDE the session                                 "
-          f" : {report['unexplained_in_session']}")
-    print(f"  unexplained AFTER session end                                  "
-          f" : {report['unexplained_post_session']}")
-    print(f"  unexplained inside the {report['horizon_minutes']}-minute lookback "
-          f"behind the open : {report['unexplained_in_lookback_horizon']}")
+    if report["unexplained_pre_session"] is None:
+        print("  NOT COMPUTED -- no --session-start was given, so these "
+              "absences have\n  not been placed against any session. This is "
+              "not a count of zero.")
+    else:
+        def _n(v):
+            return "NOT COMPUTED" if v is None else v
+        print(f"  unexplained BEFORE session start (warm-up / collection "
+              f"downtime) : {_n(report['unexplained_pre_session'])}")
+        print(f"  unexplained INSIDE the session                             "
+              f"     : {_n(report['unexplained_in_session'])}")
+        print(f"  unexplained AFTER session end                              "
+              f"     : {_n(report['unexplained_post_session'])}")
+        print(f"  unexplained inside the {report['horizon_minutes']}-minute "
+              f"lookback behind the open : "
+              f"{_n(report['unexplained_in_lookback_horizon'])}")
     for run in report["in_session_runs"]:
         print(f"      IN-SESSION HOLE {run['first']} .. {run['last']}  "
               f"({run['minutes']} min)")
