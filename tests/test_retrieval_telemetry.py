@@ -352,12 +352,36 @@ class TestDurableStorage:
         assert [r["scan_id"] for r in rows] == ["s0", "s1", "s2"]
 
     def test_27_a_write_failure_is_loud_and_does_not_gate_trading(self, live,
-                                                                  monkeypatch):
+                                                                  monkeypatch,
+                                                                  tmp_path):
         """Telemetry is not execution authority. Refusing to trade because a log
         file could not be opened converts a reporting fault into a trading
-        fault -- but it must never be swallowed."""
+        fault -- but it must never be swallowed.
+
+        THE FAILURE IS INJECTED PORTABLY, AND THAT IS THE POINT.
+
+        This test previously used `os.path.join("Z:\\", "nope", "x.jsonl")`,
+        which is a dead drive on Windows and therefore unwritable there. On
+        POSIX the same string is 'Z:\\/nope/x.jsonl' -- `os.path.isabs` says
+        False -- so it is an ordinary RELATIVE path. `record_scan` calls
+        `os.makedirs(..., exist_ok=True)`, the directory was created, the write
+        SUCCEEDED, and the assertion below failed. Measured 2026-09-10: green on
+        Windows, one failure on macOS/Linux, and a stray "Z:\\" directory left
+        in the REPOSITORY ROOT -- which also dirtied the working tree that the
+        pre-arm checklist requires to be clean.
+
+        A regular file standing where a directory must be is unwritable on every
+        supported platform, for the same reason, with no drive letters, no
+        permission games, no shell and no umask. `makedirs` raises
+        NotADirectoryError/FileExistsError, and the write fails deterministically.
+
+        It lives under `tmp_path`, so the repository cannot be touched at all --
+        a stronger invariant than ignoring the artifact would have been.
+        """
+        blocker = tmp_path / "not-a-directory"
+        blocker.write_text("a regular file, standing where a directory must be")
         monkeypatch.setattr(T, "telemetry_path",
-                            lambda sid: os.path.join("Z:\\", "nope", "x.jsonl"))
+                            lambda sid: str(blocker / "nope" / "x.jsonl"))
         s = T.RetrievalTelemetrySession("PROD-FAIL")
         rec = s.record_scan(scan_id="x",
                             result=R.retrieve_for_snapshot(snap(), "MNQ"),
