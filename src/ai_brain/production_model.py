@@ -285,6 +285,12 @@ def brain_contract_fingerprint() -> str:
     happened on 2026-08-06, when the semantic contract was repaired mid-session.
     Hashing the sources makes that change invalidate the authorization.
 
+    Canonicalize CRLF to LF so Git checkout policy cannot change identity
+    across platforms. Nothing else is normalized: comments, whitespace,
+    literal escapes and every other byte remain bound. Old noncanonical
+    approvals are not migrated or accepted as aliases; a mismatching
+    authorization still requires fresh issuance.
+
     Contains no secret: these are committed source files.
     """
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -299,7 +305,7 @@ def brain_contract_fingerprint() -> str:
         h.update(label.encode())
         try:
             with open(path, "rb") as fh:
-                h.update(fh.read())
+                h.update(fh.read().replace(b"\r\n", b"\n"))
         except OSError:
             h.update(b"<missing>")
     # BUILD-SAFE-DESCRIPTIVE-SESSION-MEMORY: retrieval changes what the Brain

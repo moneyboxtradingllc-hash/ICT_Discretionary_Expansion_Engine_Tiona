@@ -309,10 +309,8 @@ class TestRetiredQqqThesisArchived:
             assert "_quarantine" not in path
 
     def test_no_production_module_references_the_quarantine_directory(self):
-        import subprocess
-        r = subprocess.run(["grep", "-rn", "replay_sessions", "--include=*.py",
-                            "src", "tools"], capture_output=True, text=True)
-        offenders = [l for l in r.stdout.splitlines()
+        from _repo_source_scan import matching_python_lines
+        offenders = [l for l in matching_python_lines("replay_sessions")
                      if "_quarantine" in l or "retired_instrument" in l]
         # the launcher may NAME the directory for telemetry, but must not load it
         assert not [l for l in offenders if "open(" in l or "json.load" in l], offenders

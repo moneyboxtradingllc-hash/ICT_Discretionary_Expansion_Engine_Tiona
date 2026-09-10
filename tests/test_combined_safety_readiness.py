@@ -537,33 +537,28 @@ class TestStrategyUntouched:
             uses settled structural truth and the producer still rebuilds and
             revalidates against the executable quote.
         """
-        # THIS DIGEST EQUALS UPSTREAM LUNA'S, AND THAT IS THE CORRECT RESULT.
+        # LOCAL RECERTIFICATION (2026-09-10), with source history audited first.
+        # 0f972d3's brain:255412c75252aec0 is reproduced EXACTLY using CRLF;
+        # its identical LF sources hash to brain:28f76437b382b798. Raw-byte
+        # hashing made the old certification platform-dependent.
         #
-        # Proven per source, not inferred: all 30 decision-bearing closure
-        # sources are byte-equivalent between this tree and the upstream
-        # certified organism under the repository's canonical line-ending
-        # representation. Equality is therefore a PARITY RESULT -- the
-        # decision-bearing code really is the same code.
+        # Since then only tools/topstepx_production_session.py changed among
+        # the 30 closure sources: 75c3a57 resolves displayed doctrine limits;
+        # b1fff43 distinguishes configured, signed and effective limits. Both
+        # are documented display corrections, not Brain strategy changes.
+        # The other 29 sources and resolved retrieval policy are unchanged.
+        # Their current LF contract is brain:d532190cab2f3d73; the former raw
+        # CRLF result was brain:465722910c6feaa9. ce95a26 changed no member.
         #
-        # IT IS NOT EVIDENCE THAT SANITIZATION FAILED. This tree's differences
-        # -- omitted broker lanes, the `integrations/topstepx/` layout,
-        # configuration-supplied account identity, absent runtime data,
-        # launchers and fixtures -- all live OUTSIDE the semantic closure, so
-        # none of them can move this digest.
-        #
-        # DO NOT INFER FINGERPRINT DIVERGENCE FROM SANITIZATION. Removing
-        # lanes, moving a namespace or externalising configuration changes the
-        # tree without necessarily changing this digest, because those files are
-        # not closure sources. Compute and certify the fingerprint from the
-        # ACTUAL FINAL DISTRIBUTION BYTES -- a value taken from a working copy
-        # can differ for reasons that have nothing to do with semantics, such as
-        # line-ending representation.
+        # Only CRLF -> LF is canonicalized; all other bytes remain bound.
+        # See docs/REPOSITORY_CERTIFICATION_20260910.md for the exact closure,
+        # algorithm, history proof and authorization compatibility boundary.
         #
         # FINGERPRINT PARITY IS NOT AUTHORIZATION PARITY. This repository
         # inherits no account, credentials, authorization or operational
         # certification from upstream.
         from ai_brain.production_model import brain_contract_fingerprint
-        assert brain_contract_fingerprint() == "brain:255412c75252aec0"
+        assert brain_contract_fingerprint() == "brain:d532190cab2f3d73"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.

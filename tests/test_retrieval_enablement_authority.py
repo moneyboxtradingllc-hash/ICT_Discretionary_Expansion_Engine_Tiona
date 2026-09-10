@@ -109,11 +109,8 @@ class TestOneAuthoritativeResolver:
         """Two modules interpreting the variable differently is how
         `AI_RETRIEVAL_ENABLED=on` reads enabled to an operator and disabled to
         the runtime."""
-        import subprocess
-        r = subprocess.run(["grep", "-rn", "AI_RETRIEVAL_ENABLED",
-                            "--include=*.py", "src", "tools"],
-                           capture_output=True, text=True)
-        parsers = [ln for ln in r.stdout.splitlines()
+        from _repo_source_scan import matching_python_lines
+        parsers = [ln for ln in matching_python_lines("AI_RETRIEVAL_ENABLED")
                    if "getenv" in ln and "retrieval.py" not in ln]
         assert not parsers, f"a second parser exists: {parsers}"
 
