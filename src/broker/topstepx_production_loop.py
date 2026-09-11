@@ -73,6 +73,31 @@ def _journal_state_for(result: dict, JOURNAL) -> str:
     return JOURNAL.READBACK_UNPROVEN
 
 
+def _select_protection_advance(*, direction, break_even: dict, trailing: dict) -> dict:
+    """Choose one currently lawful destination; never issue two stop writes.
+
+    Break-even and trailing are independent pure proposals.  The actuator is
+    deliberately invoked once with the more-protective price, so a direct jump
+    past 2R cannot physically visit break-even and then trail in one tick.
+    """
+    candidates = []
+    if break_even.get("outcome") == "propose_break_even":
+        candidates.append(("break_even", break_even.get("break_even_price")))
+    if trailing.get("outcome") == "propose_trailing":
+        candidates.append(("trailing", trailing.get("desired_stop")))
+    candidates = [(kind, price) for kind, price in candidates if price is not None]
+    if not candidates:
+        # Preserve the established break-even decision surface on a decline;
+        # existing audit evidence reads its open_r and baseline fields.
+        return dict(break_even, break_even=break_even, trailing=trailing)
+    long = str(direction or "").lower() in ("long", "buy", "bullish")
+    kind, price = (max(candidates, key=lambda item: item[1]) if long
+                   else min(candidates, key=lambda item: item[1]))
+    source = break_even if kind == "break_even" else trailing
+    return dict(source, management_kind=kind, proposed_stop=price,
+                break_even=break_even, trailing=trailing)
+
+
 class ProductionLoop:
     """One production organism: scan -> Luna -> candidate -> (armed) execution."""
 
@@ -387,6 +412,7 @@ class ProductionLoop:
             from broker import break_even as BE
             from broker import break_even_actuator as ACT
             from broker import break_even_binding as BIND
+            from broker import trailing_protection as TRAIL
 
             # R FROM PRIMITIVES. The recovered baseline is actual fill + ORIGINAL
             # initial stop -- never the live stop, which may already have moved,
@@ -415,7 +441,7 @@ class ProductionLoop:
             armed = ctx.protection_baseline_armed
             active_stop = ctx.active_protective_stop
 
-            decision = BE.evaluate(
+            break_even_decision = BE.evaluate(
                 direction=direction,
                 entry_fill_price=baseline.get("entry_fill_price"),
                 initial_stop_price=baseline.get("original_initial_stop"),
@@ -423,7 +449,16 @@ class ProductionLoop:
                 current_price=trigger, armed=armed,
                 contract=self.ps.contract,
                 quantity=baseline.get("quantity") or 1)
-            if decision.get("outcome") != BE.PROPOSE:
+            trailing_decision = TRAIL.evaluate(
+                direction=direction,
+                entry_fill_price=baseline.get("entry_fill_price"),
+                initial_stop_price=baseline.get("original_initial_stop"),
+                current_price=trigger, armed=armed,
+                tick_size=getattr(self.ps.contract, "tick_size", None))
+            decision = _select_protection_advance(
+                direction=direction, break_even=break_even_decision,
+                trailing=trailing_decision)
+            if decision.get("proposed_stop") is None:
                 # The baseline travels with a DECLINE too: "why did break-even
                 # not fire" needs the same primitives as "why did it".
                 return out("decision_declines", decision=decision,
@@ -439,7 +474,8 @@ class ProductionLoop:
             from broker import break_even_journal as JOURNAL
             store = self.mission.store_dir
             session_id = self.mission.authorization.session_id
-            proposed = decision.get("break_even_price")
+            proposed = decision.get("proposed_stop")
+            management_kind = decision.get("management_kind")
 
             probe = ACT.inspect_protection(
                 session=self.ps.session, contract_id=self.ps.contract.id,
@@ -482,11 +518,43 @@ class ProductionLoop:
                            baseline=baseline, probe=probe, flattened=flat)
 
             stop_order_id = (probe.get("stop") or {}).get("id")
+            # An earlier stop amendment may still be propagating.  A newer,
+            # more-protective stair step is not permission to overlap writes:
+            # reconcile the old intent first, then let a later management tick
+            # compute the current destination from fresh venue truth.
+            unresolved = [row for row in JOURNAL.unresolved_effects(store, session_id)
+                          if row.get("mission_id") == mission.mission_id]
+            if unresolved:
+                prior = unresolved[-1]
+                prior_stop = prior.get("proposed_stop")
+                resolved = ACT.apply_break_even(
+                    session=self.ps.session, contract_id=self.ps.contract.id,
+                    entry_order_id=mission.order_id, direction=direction,
+                    proposed_stop=prior_stop,
+                    expected_size=baseline.get("quantity"), may_write=False,
+                    expected_position_id=ctx.position_id,
+                    expected_fill_price=baseline["entry_fill_price"])
+                JOURNAL.record(store_dir=store, session_id=session_id,
+                               effect_id=prior.get("effect_id"),
+                               state=_journal_state_for(resolved, JOURNAL),
+                               outcome=resolved.get("outcome"),
+                               reason=resolved.get("reason"),
+                               active_protective_stop=resolved.get(
+                                   "active_protective_stop"),
+                               recovered=True,
+                               management_kind=prior.get("management_kind"))
+                if (resolved.get("outcome") in (ACT.APPLIED, ACT.HELD)
+                        and resolved.get("active_protective_stop") is not None):
+                    ctx.active_protective_stop = resolved["active_protective_stop"]
+                return out("unresolved_effect_reconciled", actuation=resolved,
+                           decision=decision, effect_id=prior.get("effect_id"),
+                           baseline=baseline)
             eid = JOURNAL.effect_id(
                 mission_id=mission.mission_id, contract_id=self.ps.contract.id,
                 entry_order_id=mission.order_id, stop_order_id=stop_order_id,
                 proposed_stop=proposed,
-                account_fingerprint=baseline.get("account_fingerprint") or "")
+                account_fingerprint=baseline.get("account_fingerprint") or "",
+                effect_kind=management_kind)
 
             # RECONCILE-BEFORE-RETRY, ENFORCED. A prior attempt at THIS exact
             # effect may still be in flight at the venue, so no second mutation
@@ -509,7 +577,7 @@ class ProductionLoop:
                                reason=resolved.get("reason"),
                                active_protective_stop=resolved.get(
                                    "active_protective_stop"),
-                               recovered=True)
+                               recovered=True, management_kind=management_kind)
                 return out("unresolved_effect_reconciled", actuation=resolved,
                            decision=decision, effect_id=eid, baseline=baseline)
 
@@ -529,6 +597,7 @@ class ProductionLoop:
                 current_protective_stop=(probe.get("stop") or {}).get("stop_price"),
                 target_price=(probe.get("target") or {}).get("limit_price"),
                 proposed_stop=proposed, trigger_price=trigger,
+                management_kind=management_kind,
                 trigger_side="bid" if str(direction).lower() in ("long", "bullish")
                 else "ask")
             if not wrote_intent:
@@ -543,6 +612,14 @@ class ProductionLoop:
                 expected_position_id=ctx.position_id,
                 expected_fill_price=baseline["entry_fill_price"])
 
+            # The venue readback is the live protection truth.  Keep the
+            # execution context synchronized after a proven advance so later
+            # management evidence names the stop the venue actually holds;
+            # this never authorizes a move and never overwrites venue truth.
+            if (applied.get("outcome") in (ACT.APPLIED, ACT.HELD)
+                    and applied.get("active_protective_stop") is not None):
+                ctx.active_protective_stop = applied["active_protective_stop"]
+
             # POST-WRITE. If THIS fails to persist, the local picture is
             # already potentially ambiguous -- the intent is on disk, so the
             # latch still forbids a blind second write on the next tick, which
@@ -554,6 +631,7 @@ class ProductionLoop:
                            active_protective_stop=applied.get("active_protective_stop"),
                            previous_protective_stop=applied.get(
                                "previous_protective_stop"),
+                           management_kind=management_kind,
                            target=applied.get("target"),
                            venue_rejection=applied.get("venue_rejection"),
                            error=applied.get("error"))

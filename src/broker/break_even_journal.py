@@ -65,7 +65,7 @@ def journal_path(store_dir: str, session_id: str) -> str:
 
 
 def effect_id(*, mission_id, contract_id, entry_order_id, stop_order_id,
-              proposed_stop, account_fingerprint="") -> str:
+              proposed_stop, account_fingerprint="", effect_kind="break_even") -> str:
     """Stable identity for ONE intended advancement.
 
     Deliberately NOT time-based: two processes reconstructing the same desired
@@ -77,13 +77,19 @@ def effect_id(*, mission_id, contract_id, entry_order_id, stop_order_id,
         px = round(float(proposed_stop), 4)
     except (TypeError, ValueError):
         px = proposed_stop
+    kind = str(effect_kind or "break_even")
     basis = json.dumps({"mission_id": str(mission_id or ""),
                         "account": str(account_fingerprint or ""),
                         "contract_id": str(contract_id or ""),
                         "entry_order_id": str(entry_order_id or ""),
                         "stop_order_id": str(stop_order_id or ""),
-                        "proposed_stop": px}, sort_keys=True)
-    return "be:" + hashlib.sha256(basis.encode()).hexdigest()[:16]
+                        "proposed_stop": px,
+                        # Preserve the historical BE identity byte-for-byte;
+                        # non-BE protection effects must not share its latch.
+                        **({} if kind == "break_even" else {"effect_kind": kind})},
+                       sort_keys=True)
+    prefix = "be" if kind == "break_even" else "trail"
+    return prefix + ":" + hashlib.sha256(basis.encode()).hexdigest()[:16]
 
 
 def record(*, store_dir, session_id, effect_id, state, **evidence) -> bool:
