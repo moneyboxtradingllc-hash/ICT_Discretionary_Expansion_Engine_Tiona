@@ -63,13 +63,17 @@ _log = logging.getLogger(__name__)
 # through `_call_llm`'s signature would break every existing test double
 # (`lambda bi, repair=None`) and, worse, would make the accounting change the
 # call contract. They ride here instead: set once per scan, read at call time.
-_CALL_CONTEXT = {"session_id": "", "scan": None, "attempt": 1}
+_CALL_CONTEXT = {"session_id": "", "contract_id": "", "scan": None,
+                 "attempt": 1, "observed_at": None}
 
 
 def set_call_context(*, session_id: str = "", scan: object = None,
-                     attempt: int = 1) -> None:
-    _CALL_CONTEXT.update({"session_id": session_id or "", "scan": scan,
-                          "attempt": int(attempt)})
+                     attempt: int = 1, contract_id: str = "",
+                     observed_at=None) -> None:
+    _CALL_CONTEXT.update({"session_id": session_id or "",
+                          "contract_id": contract_id or "", "scan": scan,
+                          "attempt": int(attempt),
+                          "observed_at": observed_at})
 
 
 def _purpose_for(repair) -> str:
@@ -439,7 +443,8 @@ def _call_llm(brain_input: dict, repair: "dict | None" = None) -> dict:
         system_prompt = system_prompt + MARKET_COMMANDER_ADDENDUM
     out = {"parsed": None, "ok": False, "model": None, "prompt": system_prompt,
            "user_content": user_content, "raw_response": None, "usage": None,
-           "fallback_reason": None, "is_repair": bool(repair)}
+           "fallback_reason": None, "is_repair": bool(repair),
+           "provider_request_attempted": False}
     try:
         from ai_layer.ai_api_adapter import _openai, _OPENAI_AVAILABLE  # type: ignore
     except Exception:
@@ -498,6 +503,7 @@ def _call_llm(brain_input: dict, repair: "dict | None" = None) -> dict:
         if json_mode_enabled():
             create_kwargs["response_format"] = {"type": "json_object"}
         _started = time.time()
+        out["provider_request_attempted"] = True
         # `with_raw_response` exposes the HTTP headers, which is the only place
         # OpenAI's `x-request-id` lives. Falls back to the plain call when the
         # SDK (or a test double) does not offer it -- instrumentation may never
@@ -566,6 +572,7 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
         # object was meant; it failed on 17 of 23. Publishing the catalog HERE,
         # before the call, lets Terra select an id and removes prose from the
         # execution join entirely.
+        catalogs_ok = True
         try:
             from broker.luna_candidate_producer import (
                 authorized_invalidation_catalog, authorized_objective_catalog)
@@ -574,6 +581,7 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
                 snapshot, brain_input, reference)
             brain_input["authorized_invalidations"] =                 authorized_invalidation_catalog(brain_input)
         except Exception:  # noqa: BLE001 -- a catalog failure must not kill the read
+            catalogs_ok = False
             brain_input["authorized_objectives"] = []
             brain_input["authorized_invalidations"] = []
 
@@ -706,7 +714,101 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             pass
 
         # ── AI-BRAIN-H1: LLM path with normalize → repair → explicit fallback ─
+        # EVENT-DRIVEN-BRAIN-WAKE-1. This is the final pre-provider boundary:
+        # every mechanical fact and selectable catalog the external Brain will
+        # receive now exists, while no provider response exists yet. OFF does
+        # not even run the observer, preserving the previous path exactly.
+        # AUDIT observes but never suppresses. ENFORCE may return the explicit
+        # ordinary stand-down below, but only after complete unchanged evidence
+        # has earned it. Any controller failure leaves the call reachable.
+        wake_api = None
+        wake_controller = None
+        wake_decision = None
+        wake_telemetry = None
+        if _llm_enabled():
+            try:
+                from ai_brain import wake_controller as wake_api
+                wake_mode = wake_api.configured_mode()
+                if wake_mode != wake_api.OFF:
+                    from ai_brain.ecu import ecu_enabled
+                    pipeline_mode = ("ecu_pre_provider" if ecu_enabled()
+                                     else "non_ecu")
+                    session_id = str(_CALL_CONTEXT.get("session_id") or "")
+                    contract_id = str(_CALL_CONTEXT.get("contract_id")
+                                      or snapshot.get("contract_id") or "")
+                    scan = _CALL_CONTEXT.get("scan")
+                    observed_at = (_CALL_CONTEXT.get("observed_at")
+                                   or snapshot.get("timestamp"))
+                    wake_controller = wake_api.controller_for(
+                        session_id=session_id, contract_id=contract_id,
+                        pipeline_mode=pipeline_mode)
+                    wake_decision = wake_controller.observe(
+                        snapshot=snapshot, brain_input=brain_input,
+                        session_id=session_id, contract_id=contract_id,
+                        scan=scan, now=observed_at,
+                        pipeline_mode=pipeline_mode,
+                        catalogs_ok=catalogs_ok)
+                    if not isinstance(wake_decision, dict) or \
+                            wake_decision.get("decision") not in (
+                                wake_api.WAKE, wake_api.HOLD):
+                        raise RuntimeError("invalid wake-controller decision")
+            except Exception as exc:  # noqa: BLE001 -- uncertainty calls Brain
+                _log.warning("Brain wake controller failed open (%s)", exc)
+                if wake_api is not None:
+                    wake_decision = wake_api.fail_open_decision(
+                        mode=wake_api.configured_mode(),
+                        reason=f"controller_exception:{type(exc).__name__}",
+                        session_id=str(_CALL_CONTEXT.get("session_id") or ""),
+                        contract_id=str(_CALL_CONTEXT.get("contract_id")
+                                        or snapshot.get("contract_id") or ""),
+                        scan=_CALL_CONTEXT.get("scan"),
+                        now=(_CALL_CONTEXT.get("observed_at")
+                             or snapshot.get("timestamp")))
+                    wake_controller = None
+
+        if (wake_api is not None and wake_decision is not None
+                and wake_decision.get("provider_call_suppressed") is True):
+            # No output, fallback, stance mutation or Brain archive: this scan
+            # intentionally bought no cognition. Wake accounting is its own
+            # evidence lane and cannot gate the result if it fails.
+            try:
+                wake_telemetry = wake_api.write_telemetry(
+                    wake_decision, primary_provider_request=False,
+                    repair_provider_requests=0)
+            except Exception as exc:  # noqa: BLE001 -- logging cannot cost scan
+                wake_telemetry = {"ok": False,
+                                  "error": f"wake telemetry exception: {exc}"}
+            held = {
+                "enabled": True,
+                "authority": "observe_only",
+                "source": wake_api.HOLD_SOURCE,
+                "llm_enabled": True,
+                "llm_model": None,
+                "llm_usage": None,
+                "fallback_reason": None,
+                "degraded_reason": None,
+                "normalization_notes": [],
+                "repair_attempted": False,
+                "family_repair_attempted": False,
+                "family_repair_fixed": False,
+                "invalidation_repair_attempted": False,
+                "invalidation_repair_fixed": False,
+                "invalidation_side_check_flagged": False,
+                "invalidation_side_check_stripped": None,
+                "shallow_reasoning_kept": False,
+                "input_degraded": brain_input.get("degraded", []),
+                "output": None,
+                "persisted": None,
+                "provider_call_suppressed": True,
+                "wake_decision": wake_decision,
+                "wake_telemetry_write_ok": bool(wake_telemetry.get("ok")),
+            }
+            if not wake_telemetry.get("ok"):
+                held["wake_telemetry_write_error"] = wake_telemetry.get("error")
+            return held
+
         llm_call = None
+        repair_provider_requests = 0
         ai_market_commander = None   # MARKET COMMANDER B2 (observe-only side output)
         source, fallback_reason = "deterministic", None
         norm_notes, repair_errors, repaired = [], [], False
@@ -744,6 +846,8 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
                     rep = _call_llm(brain_input, repair={"purpose": LEDGER.PURPOSE_JSON_REPAIR,
                                                         "previous": parsed,
                                                          "errors": repair_errors})
+                    repair_provider_requests += int(bool(
+                        rep.get("provider_request_attempted")))
                     if rep["ok"]:
                         llm_call["repair_usage"] = rep.get("usage")
                         llm_call["repair_raw"] = rep.get("raw_response")
@@ -795,6 +899,8 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
                         frep = _call_llm(brain_input, repair={
                             "purpose": LEDGER.PURPOSE_FAMILY_REPAIR,
                             "previous": parsed, "errors": family_errors})
+                        repair_provider_requests += int(bool(
+                            frep.get("provider_request_attempted")))
                         if frep["ok"]:
                             cand, cand_notes = normalize_output(frep["parsed"], analogs)
                             still_hard, _ = needs_repair(cand)
@@ -842,6 +948,8 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
                         irep = _call_llm(brain_input, repair={
                             "purpose": LEDGER.PURPOSE_INVALIDATION_REPAIR,
                             "previous": parsed, "errors": invalidation_errors})
+                        repair_provider_requests += int(bool(
+                            irep.get("provider_request_attempted")))
                         if irep["ok"]:
                             cand, cand_notes = normalize_output(irep["parsed"], analogs)
                             still_hard, _ = needs_repair(cand)
@@ -886,6 +994,31 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             output = empty_brain_output()
             output["warnings"] = [f"schema fallback: {vreason}"]
             source = "degraded"
+
+        if wake_decision is not None and wake_api is not None:
+            primary_provider_request = bool(
+                (llm_call or {}).get("provider_request_attempted"))
+            provider_result_sovereign = (
+                source == SOVEREIGN_SOURCE and not fallback_reason)
+            wake_decision["primary_provider_request"] = primary_provider_request
+            wake_decision["repair_provider_requests"] = repair_provider_requests
+            wake_decision["provider_result_sovereign"] = provider_result_sovereign
+            try:
+                if wake_controller is not None:
+                    wake_controller.note_provider_result(
+                        wake_decision,
+                        request_attempted=primary_provider_request,
+                        sovereign=provider_result_sovereign)
+            except Exception as exc:  # noqa: BLE001 -- next scan will fail open
+                _log.warning("Brain wake provider accounting failed open (%s)", exc)
+            try:
+                wake_telemetry = wake_api.write_telemetry(
+                    wake_decision,
+                    primary_provider_request=primary_provider_request,
+                    repair_provider_requests=repair_provider_requests)
+            except Exception as exc:  # noqa: BLE001 -- logging cannot cost scan
+                wake_telemetry = {"ok": False,
+                                  "error": f"wake telemetry exception: {exc}"}
 
         if stance_memory:
             stance_memory.record(snapshot.get("timestamp", ""), output)
@@ -948,9 +1081,15 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             "fields_persisted_not_yet_consumed": [k for k in output
                                                   if k not in _CONSUMED_FIELDS_AB1],
         }
+        if wake_decision is not None:
+            record["wake_decision"] = wake_decision
+            record["wake_telemetry_write_ok"] = bool(
+                (wake_telemetry or {}).get("ok"))
+            if wake_telemetry and not wake_telemetry.get("ok"):
+                record["wake_telemetry_write_error"] = wake_telemetry.get("error")
         persisted_path = persist_brain_call(symbol, record)
 
-        return {
+        result = {
             "enabled": True,
             "authority": "observe_only",
             "source": source,                                   # llm | deterministic | llm_failed_fallback | degraded
@@ -984,6 +1123,14 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             "ai_market_commander": ai_market_commander, # MARKET COMMANDER B2 (observe_only)
             "persisted": persisted_path,
         }
+        if wake_decision is not None:
+            result["provider_call_suppressed"] = False
+            result["wake_decision"] = wake_decision
+            result["wake_telemetry_write_ok"] = bool(
+                (wake_telemetry or {}).get("ok"))
+            if wake_telemetry and not wake_telemetry.get("ok"):
+                result["wake_telemetry_write_error"] = wake_telemetry.get("error")
+        return result
     except Exception as exc:  # noqa: BLE001
         out = empty_brain_output()
         out["warnings"] = [f"brain error (observe-only, non-blocking): {exc}"]

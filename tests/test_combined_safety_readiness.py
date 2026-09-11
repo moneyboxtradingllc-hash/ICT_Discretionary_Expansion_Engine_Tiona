@@ -555,8 +555,10 @@ class TestStrategyUntouched:
         # without changing cognition or trading authority: narrative_brain now
         # has its missing deepcopy fallback import, and production_scan_cycle
         # retains the session/scan identity already supplied to shadow
-        # accounting. The resulting canonical contract is
-        # brain:595d0db2043dcb3b.
+        # accounting. The resulting maintenance contract was
+        # brain:595d0db2043dcb3b. The event-driven Brain wake boundary on this
+        # feature branch produces a new fingerprint; that does not migrate any
+        # historical authorization record.
         #
         # Only CRLF -> LF is canonicalized; all other bytes remain bound.
         # See docs/REPOSITORY_CERTIFICATION_20260910.md for the exact closure,
@@ -566,7 +568,7 @@ class TestStrategyUntouched:
         # inherits no account, credentials, authorization or operational
         # certification from upstream.
         from ai_brain.production_model import brain_contract_fingerprint
-        assert brain_contract_fingerprint() == "brain:595d0db2043dcb3b"
+        assert brain_contract_fingerprint() == "brain:5db77eab2b66b53e"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.

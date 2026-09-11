@@ -489,6 +489,28 @@ class TestShadowWiring:
             assert c._two_brain_shadow(hostile) in (None,) or isinstance(
                 c._two_brain_shadow(hostile), dict)
 
+    def test_primary_sleep_hold_cannot_reach_second_paid_brain(self,
+                                                               monkeypatch):
+        monkeypatch.setenv("TWO_BRAIN_MODE", TB.SHADOW)
+        c = self.cycle()
+        monkeypatch.setattr(
+            c, "_two_brain_shadow",
+            lambda _snapshot: pytest.fail("HOLD reached two-Brain adjudication"))
+        assert c._two_brain_after_primary(
+            {"snapshot": "still mechanically complete"},
+            {"source": "brain_sleep_hold", "output": None}) is None
+
+    def test_a_real_primary_result_preserves_existing_shadow_path(self,
+                                                                   monkeypatch):
+        c = self.cycle()
+        seen = []
+        monkeypatch.setattr(c, "_two_brain_shadow",
+                            lambda snapshot: seen.append(snapshot) or {"ok": True})
+        snapshot = {"snapshot_id": "S1"}
+        assert c._two_brain_after_primary(
+            snapshot, {"source": "llm"}) == {"ok": True}
+        assert seen == [snapshot]
+
     def test_a_raising_adjudicator_is_absorbed(self):
         def boom(_packet):
             raise RuntimeError("provider down")

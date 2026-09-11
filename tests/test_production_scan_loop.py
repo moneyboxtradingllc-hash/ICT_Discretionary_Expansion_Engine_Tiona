@@ -201,6 +201,27 @@ class Cycle:
                 "scan_count": self.scans, "source": self.source}
 
 
+class HoldCycle(Cycle):
+    """A completed mechanical scan whose external Brain intentionally slept."""
+
+    def __init__(self, events=None):
+        super().__init__(source="brain_sleep_hold", output={})
+        self.events = events
+
+    def scan(self, bars, now=None, deep_1m=None):
+        if self.events is not None:
+            self.events.append("mechanical_scan")
+        out = super().scan(bars, now=now, deep_1m=deep_1m)
+        decision = {"decision": "HOLD", "mode": "ENFORCE",
+                    "reasons": [], "provider_call_suppressed": True}
+        out["brain_block"].update({"output": None,
+                                   "provider_call_suppressed": True,
+                                   "wake_decision": decision})
+        out["brain_result"] = ProductionScanCycle.to_brain_result(
+            out["brain_block"])
+        return out
+
+
 def authorization(tmp_path, session_id="S1", **over):
     kw = dict(session_id=session_id, account_fingerprint=FP, contract_id=CID,
               session_date=NOW.strftime("%Y%m%d"), decision_window="09:30-14:00",
@@ -319,6 +340,45 @@ class TestLunaGating:
         loop, _, _, m = build(tmp_path, cycle=Cycle(output=parsed(invalidation_level=None)))
         assert loop.scan_once()["outcome"] == PL.NO_CANDIDATE
         assert m.candidate_count == 0
+
+
+class TestBrainSleepHold:
+
+    def test_hold_keeps_mechanics_and_position_safety_live_but_authors_nothing(
+            self, tmp_path):
+        events = []
+        loop, _, session, mission = build(
+            tmp_path, armed=True, cycle=HoldCycle(events))
+        loop.active_candidate = object()
+
+        def reconcile():
+            events.append("reconcile")
+            return {"reports": []}
+
+        def manage():
+            events.append("position_management")
+            return {"status": "APPLIED", "reason": "break_even_advanced"}
+
+        class ProducerMustNotRun:
+            def produce(self, **_kwargs):
+                pytest.fail("HOLD reached CandidateProducer")
+
+        loop.reconcile_missions = reconcile
+        loop.manage_open_position = manage
+        loop._record_decision = lambda *_args, **_kwargs: None
+        loop.producer = ProducerMustNotRun()
+
+        out = loop.scan_once()
+
+        assert events == ["reconcile", "position_management", "mechanical_scan"]
+        assert loop.last_management["status"] == "APPLIED"
+        assert out["outcome"] == PL.BRAIN_SLEEP_HOLD
+        assert out["provider_call_suppressed"] is True
+        assert loop.active_candidate is None
+        assert mission.candidate_count == 0
+        assert mission.token_count == 0
+        assert mission.entry_attempt_count == 0
+        assert session.place_calls == 0
 
 
 class TestProductionSizingReachesTheRunner:

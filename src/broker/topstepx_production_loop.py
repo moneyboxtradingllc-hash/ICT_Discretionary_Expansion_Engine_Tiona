@@ -33,6 +33,7 @@ from live_scan.production_scan_cycle import ProductionScanCycle
 # outcomes
 NO_CANDLES = "NO_CANDLES"
 BRAIN_DEGRADED = "BRAIN_DEGRADED"
+BRAIN_SLEEP_HOLD = "BRAIN_SLEEP_HOLD"
 NO_CANDIDATE = "NO_CANDIDATE"
 RISK_REJECTED = "RISK_REJECTED"
 QUALIFIED_CANDIDATE_OBSERVED = "QUALIFIED_CANDIDATE_OBSERVED"
@@ -277,6 +278,7 @@ class ProductionLoop:
         try:
             from ai_brain import narrative_brain as _nb
             _nb.set_call_context(session_id=self.mission.authorization.session_id,
+                                 contract_id=str(self.ps.contract.id),
                                  scan=len(self.outcomes) + 1)
         except Exception:  # noqa: BLE001 — accounting may never cost a scan
             pass
@@ -679,6 +681,21 @@ class ProductionLoop:
         scan = self.cycle.scan(bars, now=self.clock(), deep_1m=deep)
         brain = scan["brain_block"]
         source = (brain or {}).get("source")
+
+        # An earned HOLD is an ordinary no-new-candidate scan, not an outage.
+        # Clear the lane explicitly so no candidate authored on an earlier scan
+        # can remain available as fresh exposure. Reconciliation and open-
+        # position protection already ran at the top of this tick.
+        if source == "brain_sleep_hold":
+            self.active_candidate = None
+            self._record_decision(
+                scan, "HELD", "brain_sleep_hold",
+                "external cognition intentionally held; no material semantic change")
+            return {"outcome": BRAIN_SLEEP_HOLD, "source": source,
+                    "detail": "external Brain intentionally not invoked",
+                    "provider_call_suppressed": True,
+                    "wake_decision": (brain or {}).get("wake_decision"),
+                    "scan": scan["scan_count"]}
 
         # Degraded is a BRAIN failure, not a market stand-down. Reporting it as
         # "no setup" would quietly convert an outage into evidence about price.

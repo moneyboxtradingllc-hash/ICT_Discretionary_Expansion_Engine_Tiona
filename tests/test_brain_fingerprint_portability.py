@@ -41,7 +41,10 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
         elif style == "mixed_lines":
             # Include a mixed-EOL single file, not only different file styles.
             source_bytes[path] = data.replace(b"\n", b"\r\n", 1)
-    assert PM.brain_contract_fingerprint() == "brain:595d0db2043dcb3b"
+    # Feature-branch source includes the deterministic Brain wake boundary.
+    # This is a new contract fingerprint, not a historical authorization
+    # migration.
+    assert PM.brain_contract_fingerprint() == "brain:5db77eab2b66b53e"
 
 
 @pytest.mark.parametrize("addition", [

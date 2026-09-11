@@ -31,6 +31,7 @@ from data_feed.timeframe_builder import build_timeframes
 from market_data.snapshot_builder import build_snapshot
 
 SOURCE_LLM = "llm"
+SOURCE_BRAIN_SLEEP_HOLD = "brain_sleep_hold"
 
 
 #: ACTIVE-PATH-STATE-1 — ledger health that permits authoritative derivation.
@@ -550,7 +551,10 @@ class ProductionScanCycle:
         # `brain_result` -- the only thing CandidateProducer reads -- is built
         # below from `brain_block` and never sees this. Off unless
         # TWO_BRAIN_MODE says otherwise; never raises.
-        shadow = self._two_brain_shadow(snapshot)
+        # An intentional external-Brain HOLD cannot leak into a second paid
+        # adjudication path. Mechanics and position management have already run;
+        # only fresh discretionary authorship is absent on this scan.
+        shadow = self._two_brain_after_primary(snapshot, brain_block)
 
         return {
             "snapshot": snapshot,
@@ -711,6 +715,12 @@ class ProductionScanCycle:
                 scan=self.scan_count)
         except Exception:  # noqa: BLE001 — an observation may never cost a scan
             return None
+
+    def _two_brain_after_primary(self, snapshot: dict, brain_block: dict):
+        """Run optional adjudication only when primary cognition actually ran."""
+        if (brain_block or {}).get("source") == SOURCE_BRAIN_SLEEP_HOLD:
+            return None
+        return self._two_brain_shadow(snapshot)
 
     @staticmethod
     def to_brain_result(brain_block: dict) -> dict:
