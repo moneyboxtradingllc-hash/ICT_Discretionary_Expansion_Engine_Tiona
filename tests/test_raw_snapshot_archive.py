@@ -18,6 +18,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 
+from ai_brain import narrative_brain as NB  # noqa: E402
 from ai_brain.narrative_brain import _ACCOUNT_BLOCKS, _archivable_snapshot  # noqa: E402
 
 
@@ -57,6 +58,24 @@ class TestArchivableSnapshot:
         before = dict(snap)
         _archivable_snapshot(snap)
         assert snap == before, "the archiver must not touch the live snapshot"
+
+    def test_json_detachment_failure_uses_detached_deepcopy_fallback(self,
+                                                                     monkeypatch):
+        snap = {"market": {"current_price": 1.0},
+                "liquidity": {"events": [{"kind": "sweep"}]}}
+
+        def fail_json_detachment(*_args, **_kwargs):
+            raise ValueError("forced JSON detachment failure")
+
+        monkeypatch.setattr(NB.json, "dumps", fail_json_detachment)
+        out = NB._archivable_snapshot(snap)
+
+        assert out == snap
+        assert out is not snap
+        assert out["market"] is not snap["market"]
+        assert out["liquidity"]["events"] is not snap["liquidity"]["events"]
+        out["liquidity"]["events"][0]["kind"] = "mutated"
+        assert snap["liquidity"]["events"][0]["kind"] == "sweep"
 
     def test_the_record_carries_it(self):
         """It must actually reach the persisted artifact, next to input_payload."""

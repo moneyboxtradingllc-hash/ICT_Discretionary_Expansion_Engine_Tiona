@@ -8,12 +8,13 @@ execution, or position protection. The experiment is **not historically
 validated** because no raw PROD-20260908, PROD-20260909, or PROD-20260910
 replay bundle was available in this checkout.
 
-The reconciled local checkout is `claude/optimistic-turing-bxpw5k` at
-`1bbb8dcc8f73643d848ee94b8c6a59e727260b4e`, tracking the same remote tip. The
-audit was initially developed at `0cb155ce8ee0f83197c54ec499a12a3db03d2eac`;
-the uncommitted files were preserved while the branch was fast-forwarded. The
-two incoming commits modify only `tests/test_retrieval_telemetry.py` and
-`tools/topstepx_candle_coverage_audit.py`.
+Development provenance: the audit was initially developed at
+`0cb155ce8ee0f83197c54ec499a12a3db03d2eac`, then preserved while
+`claude/optimistic-turing-bxpw5k` was reconciled through
+`1bbb8dcc8f73643d848ee94b8c6a59e727260b4e`. The audit document, offline tool,
+and synthetic tests were committed in `f5b09db` as experimental,
+non-production audit tooling. These hashes record development history; they do
+not assert the current branch tip.
 
 ## Production call graph inspected
 
@@ -160,7 +161,8 @@ reported 34 subtests and 9 warnings. Compilation passed and no tracked or
 untracked trailing whitespace was found. The three missing-session CLI probes
 returned exit code 2 with `MISSING_EVIDENCE`.
 
-The prototype remains uncommitted by design. No production file was modified,
-and no wake-gate or model-cost optimization should begin until independently
-auditable replay bundles are available. `action_declines_entry`, shutdown
-durability, and process-local arm state remain separate follow-up audits.
+The prototype is committed as experimental, non-production audit tooling. No
+production file was modified by that experiment, and no wake-gate or model-cost
+optimization should begin until independently auditable replay bundles are
+available. `action_declines_entry`, shutdown durability, and process-local arm
+state remain separate follow-up audits.

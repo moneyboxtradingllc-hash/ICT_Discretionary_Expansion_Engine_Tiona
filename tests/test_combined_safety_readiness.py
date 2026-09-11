@@ -547,8 +547,16 @@ class TestStrategyUntouched:
         # b1fff43 distinguishes configured, signed and effective limits. Both
         # are documented display corrections, not Brain strategy changes.
         # The other 29 sources and resolved retrieval policy are unchanged.
-        # Their current LF contract is brain:d532190cab2f3d73; the former raw
-        # CRLF result was brain:465722910c6feaa9. ce95a26 changed no member.
+        # Their LF contract through ce95a26 was brain:d532190cab2f3d73; the
+        # former raw CRLF result was brain:465722910c6feaa9. ce95a26 changed no
+        # member.
+        #
+        # EVIDENCE-PLUMBING-MAINTENANCE (2026-09-10). Two closure members moved
+        # without changing cognition or trading authority: narrative_brain now
+        # has its missing deepcopy fallback import, and production_scan_cycle
+        # retains the session/scan identity already supplied to shadow
+        # accounting. The resulting canonical contract is
+        # brain:595d0db2043dcb3b.
         #
         # Only CRLF -> LF is canonicalized; all other bytes remain bound.
         # See docs/REPOSITORY_CERTIFICATION_20260910.md for the exact closure,
@@ -558,7 +566,7 @@ class TestStrategyUntouched:
         # inherits no account, credentials, authorization or operational
         # certification from upstream.
         from ai_brain.production_model import brain_contract_fingerprint
-        assert brain_contract_fingerprint() == "brain:d532190cab2f3d73"
+        assert brain_contract_fingerprint() == "brain:595d0db2043dcb3b"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.

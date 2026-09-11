@@ -41,7 +41,7 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
         elif style == "mixed_lines":
             # Include a mixed-EOL single file, not only different file styles.
             source_bytes[path] = data.replace(b"\n", b"\r\n", 1)
-    assert PM.brain_contract_fingerprint() == "brain:d532190cab2f3d73"
+    assert PM.brain_contract_fingerprint() == "brain:595d0db2043dcb3b"
 
 
 @pytest.mark.parametrize("addition", [

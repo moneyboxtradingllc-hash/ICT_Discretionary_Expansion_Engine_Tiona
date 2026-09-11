@@ -622,6 +622,39 @@ class TestAdjudicatorInjection:
         assert len(seen) == 1, "Terra was never asked"
         assert out["envelope"]["hybrid_disposition"] == TB.SHADOW_RECORDED_ONLY
 
+    def test_shadow_receives_cycle_session_and_current_scan_identity(self,
+                                                                     monkeypatch):
+        monkeypatch.setenv("TWO_BRAIN_MODE", TB.SHADOW)
+        from live_scan.production_scan_cycle import ProductionScanCycle
+        seen = []
+
+        def adjudicator(packet, **identity):
+            seen.append(identity)
+            return review(TB.CONFIRM, p=_p_from(packet))
+
+        monkeypatch.setattr(TB, "accounted_adjudicator", adjudicator)
+        c = ProductionScanCycle(symbol="MNQ", session_id="PROD-20260910")
+        c.scan_count = 17
+        snapshot = {"market": _priced({"current_price": 29700.0}),
+                    "liquidity": {"nearest_buy_side": 29850.0,
+                                  "nearest_sell_side": 29400.0,
+                                  "active_draw": {"side": "sell_side",
+                                                  "level": 29400.0}},
+                    "protected_swings": {"protected_high": {"level": 29855.0},
+                                         "protected_low": {"level": 29390.0}},
+                    "narrative_authority": {"narrative_direction": "bearish"}}
+        monkeypatch.setattr(c, "_brain_input", lambda _snapshot: snapshot)
+        monkeypatch.setattr("ai_brain.narrative_brain._deterministic",
+                            lambda _snapshot, _brain_input, _analogs:
+                            thesis("bearish"))
+
+        out = c._two_brain_shadow(snapshot)
+
+        assert out["outcome"] == "ADJUDICATED"
+        assert len(seen) == 1
+        assert (seen[0]["session_id"], seen[0]["scan"]) == (
+            "PROD-20260910", 17)
+
 
 def _p_from(packet):
     return packet["mechanical_proposal"]

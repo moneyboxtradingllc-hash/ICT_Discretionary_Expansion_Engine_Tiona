@@ -17,6 +17,7 @@ data/ai_brain/. No consumer is wired yet (gate/playbook/toolbox seeding are
 later AB phases, gated separately). Rollback: AI_BRAIN_ENABLED=false. Never
 raises — any failure yields a degraded, schema-valid witness output.
 """
+import copy
 import json
 import time
 

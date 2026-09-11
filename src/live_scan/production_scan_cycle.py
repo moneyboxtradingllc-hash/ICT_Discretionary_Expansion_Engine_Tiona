@@ -101,8 +101,9 @@ class ProductionScanCycle:
         # memory: written under the session archive root, never into the
         # retrieval corpus.
         from ai_retrieval.retrieval_telemetry import RetrievalTelemetrySession
+        self.session_id = session_id or ""
         self.retrieval_telemetry = RetrievalTelemetrySession(
-            session_id or "UNSCOPED", instrument=symbol, contract=contract_id)
+            self.session_id or "UNSCOPED", instrument=symbol, contract=contract_id)
 
         # LIQUIDITY-SWEEP-EPISODE-IDENTITY-1 — THE SOLE PRODUCTION WRITER of the
         # observed-occurrence ledger. `sweep_detected` is a two-candle predicate:
@@ -207,7 +208,7 @@ class ProductionScanCycle:
     #: Terra's own stance because a data hole was repaired would destroy
     #: cognition the repair has no claim over.
     STATE_NOT_CANDLE_DERIVED = (
-        "symbol", "account_provider", "capital_identity", "scan_count",
+        "symbol", "session_id", "account_provider", "capital_identity", "scan_count",
         "retrieval_telemetry", "meta_engine",
         # EXEC-PRICE-FRESHNESS-1. A live connection to the venue quote stream:
         # config/identity like `account_provider`, and emphatically NOT derived
@@ -706,8 +707,8 @@ class ProductionScanCycle:
                 invalidation_catalog=invalidations,
                 snapshot_id=str(snapshot.get("snapshot_id")
                                 or snapshot.get("timestamp") or ""),
-                session_id=getattr(self, "session_id", "") or "",
-                scan=getattr(self, "scan_number", None))
+                session_id=self.session_id,
+                scan=self.scan_count)
         except Exception:  # noqa: BLE001 — an observation may never cost a scan
             return None
 
