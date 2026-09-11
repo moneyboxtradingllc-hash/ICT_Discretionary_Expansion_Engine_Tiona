@@ -428,13 +428,14 @@ class TestNothingElseMoved:
         src = inspect.getsource(CandidateProducer._assert_tool_detected)
         assert src.index("TOOL_DIRECTION_MISMATCH") < src.index("TOOL_OCCURRENCE_UNKNOWN")
 
-    def test_invalidation_id_was_deliberately_NOT_repaired(self):
-        """A separate, recorded defect. Repairing it here would expand scope."""
+    def test_invalidation_id_is_canonically_repaired(self):
+        """The Brain-selected structural invalidation is now the binding key."""
         import inspect
         from broker import luna_candidate_producer as P
         src = inspect.getsource(P.CandidateProducer._invalidation)
         assert 'parsed.get("invalidation_level")' in src
-        assert "invalidation_id" not in src
+        assert 'parsed.get("invalidation_id")' in src
+        assert "authorized_invalidation_catalog" in src
 
     def test_objective_selection_is_untouched(self):
         import inspect

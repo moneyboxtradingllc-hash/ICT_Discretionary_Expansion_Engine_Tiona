@@ -78,7 +78,8 @@ def parsed(**over):
 
 def produce(p, *, prose=False):
     return CandidateProducer(account_fingerprint="acct:test", contract=MNQ,
-                             allow_prose_objective_fallback=prose).produce(
+                             allow_prose_objective_fallback=prose,
+                             allow_numeric_invalidation_fallback=True).produce(
         brain_result={"ok": True, "parsed": p, "fallback_reason": None,
                       "model": PRODUCTION_MODEL},
         brain_input=BRAIN_INPUT, snapshot=_detected("ifvg", "fvg"),

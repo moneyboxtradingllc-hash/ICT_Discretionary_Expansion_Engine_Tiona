@@ -67,7 +67,8 @@ def brain_input(price=29880.0, buy_side=29910.25, sell_side=29840.0,
 
 def parsed(**over):
     p = {"narrative_direction": "bullish", "narrative_phase": "continuation",
-         "invalidation_level": 29875.0, "active_draw": "buy side liquidity above",
+         "invalidation_id": "INV_PL_1", "invalidation_level": 29875.0,
+         "active_draw": "buy side liquidity above",
          "recommended_playbook_family": "continuation",
          "recommended_tool_family": ["fvg"], "market_story": "bullish continuation",
          "current_action": "await_retest"}
@@ -84,6 +85,7 @@ def result(**over):
 
 def producer():
     return CandidateProducer(allow_prose_objective_fallback=True,
+                             allow_numeric_invalidation_fallback=True,
                                       account_fingerprint=FP, contract=MNQ)
 
 
@@ -117,7 +119,8 @@ class TestValidCandidates:
         # stop 29885 (5.00 risk), target 29840 (40.00 reward) -> 8.0R
         c = produce(bi=brain_input(prot_high=29885.0),
                     res=result(parsed=parsed(
-                        narrative_direction="bearish", invalidation_level=29885.0,
+                        narrative_direction="bearish", invalidation_id="INV_PH_1",
+                        invalidation_level=29885.0,
                         active_draw="sell side liquidity below")))
         assert c.direction == "bearish"
         assert c.objective.price == 29840.0
@@ -178,12 +181,14 @@ class TestStandDownAndRejection:
 
     def test_a_wrong_side_invalidation_rejects(self):
         with pytest.raises(NoCandidate) as exc:
-            produce(res=result(parsed=parsed(invalidation_level=29890.0)))
+            produce(bi=brain_input(prot_low=29890.0),
+                    res=result(parsed=parsed(invalidation_level=29890.0)))
         assert exc.value.reason == "invalidation_wrong_side"
 
     def test_an_off_tick_invalidation_rejects(self):
         with pytest.raises(NoCandidate) as exc:
-            produce(res=result(parsed=parsed(invalidation_level=29875.13)))
+            produce(bi=brain_input(prot_low=29875.13),
+                    res=result(parsed=parsed(invalidation_level=29875.13)))
         assert exc.value.reason == "invalidation_off_tick"
 
     def test_an_unresolvable_draw_rejects(self):
@@ -196,10 +201,14 @@ class TestStandDownAndRejection:
         # Without the execution block this would refuse one stage earlier and
         # stop proving anything about objectives.
         with pytest.raises(NoCandidate) as exc:
-            produce(bi={"timestamp": "t",
+            produce(res=result(parsed=parsed(invalidation_id="INV_X",
+                                            invalidation_level=29875.0)),
+                    bi={"timestamp": "t",
+                        "structure_flips": [{"invalidation_id": "INV_X",
+                                             "price": 29875.0}],
                         "market": {"current_price": 29880.0,
                                    "execution_price": execution_block(29880.0, 29880.0)}})
-        assert exc.value.reason == "objective_missing"
+        assert exc.value.reason == "invalidation_id_unknown"
 
     def test_a_wrong_side_objective_rejects(self):
         with pytest.raises(NoCandidate) as exc:
@@ -314,7 +323,8 @@ class TestFingerprintDeterminism:
 
     def test_a_one_tick_stop_change_changes_the_fingerprint(self):
         a = produce().fingerprint()
-        b = produce(res=result(parsed=parsed(invalidation_level=29874.75))).fingerprint()
+        b = produce(bi=brain_input(prot_low=29874.75),
+                    res=result(parsed=parsed(invalidation_level=29874.75))).fingerprint()
         assert a != b
 
     def test_a_one_tick_target_change_changes_the_fingerprint(self):

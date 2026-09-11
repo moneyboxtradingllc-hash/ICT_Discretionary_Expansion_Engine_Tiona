@@ -182,12 +182,16 @@ class StructuralInvalidation:
     structure_identity: str
     evidence_source: str
     evidence_timestamp: str
+    catalog_row: dict = field(default_factory=dict)
 
     def evidence(self) -> dict:
-        return {"price": self.price, "structure_type": self.structure_type,
+        evidence = {"price": self.price, "structure_type": self.structure_type,
                 "structure_identity": self.structure_identity,
                 "evidence_source": self.evidence_source,
                 "evidence_timestamp": self.evidence_timestamp}
+        if self.catalog_row:
+            evidence["authorized_catalog_row"] = dict(self.catalog_row)
+        return evidence
 
 
 def _digest(obj) -> str:
@@ -1120,6 +1124,9 @@ class CandidateProducer:
     #: Legacy prose binding. FALSE in production. True only for replaying
     #: archives authored before the canonical catalog existed.
     allow_prose_objective_fallback: bool = False
+    #: Explicit non-production compatibility for archives/tests authored before
+    #: invalidation identity was published. Live production leaves this false.
+    allow_numeric_invalidation_fallback: bool = False
     _superseded: list = field(default_factory=list)
     #: Stage-by-stage record of the LAST produce() call. Written only; the
     #: producer never reads it back, so evidence cannot become authority.
@@ -1169,6 +1176,7 @@ class CandidateProducer:
         self.last_decision_trace = trace
         _p = brain_result.get("parsed") or {}
         trace["requested_objective_id"] = _p.get("objective_id")
+        trace["requested_invalidation_level"] = _p.get("invalidation_level")
         trace["requested_invalidation_id"] = _p.get("invalidation_id")
         # OBSERVABILITY (2026-08-11). These were populated only AFTER the
         # action check, so all 108 stand-down scans of 2026-08-10 recorded
@@ -1793,13 +1801,64 @@ class CandidateProducer:
 
     def _invalidation(self, parsed: dict, snapshot: dict, brain_input: dict,
                       direction: str, reference_price: float) -> StructuralInvalidation:
-        raw = parsed.get("invalidation_level")
+        selected_id = str(parsed.get("invalidation_id") or "").strip()
+        if "authorized_invalidations" in (brain_input or {}):
+            catalog = list(brain_input.get("authorized_invalidations") or [])
+        else:
+            catalog = authorized_invalidation_catalog(
+                brain_input, (snapshot or {}).get("structure_flips") or [])
+        if not catalog and not self.allow_numeric_invalidation_fallback:
+            raise NoCandidate("invalidation_id_missing",
+                              "entry proposed without an authorized invalidation catalog")
+        if not selected_id and not self.allow_numeric_invalidation_fallback:
+            raise NoCandidate("invalidation_id_missing",
+                              "entry proposed without invalidation_id")
+        if self.allow_numeric_invalidation_fallback and not selected_id:
+            raw = parsed.get("invalidation_level")
+            try:
+                price = float(raw)
+            except (TypeError, ValueError):
+                raise NoCandidate("invalidation_missing",
+                                  "a directional thesis must name a numeric invalidation") from None
+            tick = float(getattr(self.contract, "tick_size", 0) or 0)
+            if tick > 0 and abs(price / tick - round(price / tick)) > 1e-6:
+                raise NoCandidate("invalidation_off_tick", f"{price} is not on the {tick} grid")
+            if direction == "bullish" and price >= reference_price:
+                raise NoCandidate("invalidation_wrong_side", f"bullish invalidation {price} at/above price {reference_price}")
+            if direction == "bearish" and price <= reference_price:
+                raise NoCandidate("invalidation_wrong_side", f"bearish invalidation {price} at/below price {reference_price}")
+            prot = brain_input.get("protected_swings") or {}
+            key = "protected_low" if direction == "bullish" else "protected_high"
+            block = prot.get(key) if isinstance(prot.get(key), dict) else {}
+            return StructuralInvalidation(
+                price=price,
+                structure_type="legacy_numeric_invalidation",
+                structure_identity=f"{key}@{block.get('level', price)}",
+                evidence_source=f"legacy.luna.invalidation_level+{key}",
+                evidence_timestamp=str(brain_input.get("timestamp") or ""))
+        matches = [row for row in catalog
+                   if str(row.get("invalidation_id") or "").strip() == selected_id]
+        if not matches:
+            raise NoCandidate("invalidation_id_unknown",
+                              f"invalidation_id {selected_id!r} is not in the authorized catalog")
+        if len(matches) != 1:
+            raise NoCandidate("invalidation_id_ambiguous",
+                              f"invalidation_id {selected_id!r} matched {len(matches)} catalog rows")
+        row = matches[0]
         try:
-            price = float(raw)
+            price = float(row.get("price"))
+        except (TypeError, ValueError):
+            raise NoCandidate("invalidation_invalid",
+                              f"authorized invalidation {selected_id!r} has no numeric price") from None
+        try:
+            brain_level = float(parsed.get("invalidation_level"))
         except (TypeError, ValueError):
             raise NoCandidate("invalidation_missing",
                               "a directional thesis must name a numeric invalidation") from None
         tick = float(getattr(self.contract, "tick_size", 0) or 0)
+        if tick > 0 and abs((brain_level - price) / tick) > 1e-6:
+            raise NoCandidate("invalidation_level_mismatch",
+                              f"invalidation_level {brain_level} disagrees with {selected_id} price {price}")
         if tick > 0 and abs(price / tick - round(price / tick)) > 1e-6:
             raise NoCandidate("invalidation_off_tick", f"{price} is not on the {tick} grid")
         if direction == "bullish" and price >= reference_price:
@@ -1814,10 +1873,11 @@ class CandidateProducer:
         block = prot.get(key) if isinstance(prot.get(key), dict) else {}
         return StructuralInvalidation(
             price=price,
-            structure_type=str(parsed.get("narrative_phase") or "thesis_invalidation"),
-            structure_identity=f"{key}@{block.get('level', price)}",
-            evidence_source=f"luna.invalidation_level+{key}",
-            evidence_timestamp=str(brain_input.get("timestamp") or ""))
+            structure_type=str(row.get("type") or "thesis_invalidation"),
+            structure_identity=selected_id,
+            evidence_source=str(row.get("source") or "authorized_invalidations"),
+            evidence_timestamp=str(row.get("registered_at") or brain_input.get("timestamp") or ""),
+            catalog_row=row)
 
     def _objective_selected(self, parsed: dict, snapshot: dict,
                             brain_input: dict, direction: str,

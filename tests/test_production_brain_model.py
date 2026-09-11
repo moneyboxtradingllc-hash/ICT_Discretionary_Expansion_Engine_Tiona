@@ -281,6 +281,7 @@ class TestSafetyRepairsPreserved:
     def test_a_directional_stand_down_produces_no_candidate(self):
         with pytest.raises(NoCandidate) as e:
             CandidateProducer(allow_prose_objective_fallback=True,
+                              allow_numeric_invalidation_fallback=True,
                                       account_fingerprint="acct:x", contract=MNQ).produce(
                 brain_result={"ok": True, "parsed": self.output(), "fallback_reason": None,
                               "model": PM.PRODUCTION_MODEL},

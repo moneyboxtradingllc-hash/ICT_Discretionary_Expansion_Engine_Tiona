@@ -102,9 +102,10 @@ def execution_fields(candidate):
 
 def produce_with(snapshot, invalidation=S1):
     return LCP.produce(
-        res=LCP.result(parsed=LCP.parsed(invalidation_level=invalidation,
+        res=LCP.result(parsed=LCP.parsed(invalidation_id="INV_PL_1",
+                                         invalidation_level=invalidation,
                                          recommended_tool_family=["fvg"])),
-        bi=LCP.brain_input(price=REF_PRICE),
+        bi=LCP.brain_input(price=REF_PRICE, prot_low=invalidation),
         snapshot=snapshot)
 
 

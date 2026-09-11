@@ -239,7 +239,8 @@ class TestTraceIsWrittenByTheProducer:
                   "invalidation_level": 29780.0,
                   "active_draw": "Sell-side liquidity at 29452.50"}
         parsed.update(over.pop("parsed", {}))
-        p = CandidateProducer(account_fingerprint="acct:test", contract=mnq)
+        p = CandidateProducer(account_fingerprint="acct:test", contract=mnq,
+                              allow_numeric_invalidation_fallback=True)
         try:
             p.produce(brain_result={"ok": True, "parsed": parsed,
                                     # The PRODUCTION constant, not a literal. These tests are about the

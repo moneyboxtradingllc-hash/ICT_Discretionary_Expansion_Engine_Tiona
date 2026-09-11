@@ -61,7 +61,8 @@ def produce(objective_price):
               "recommended_tool_family": [EXEMPLAR],
               "invalidation_level": STOP,
               "objective_id": match[0]["objective_id"]}
-    producer = CandidateProducer(account_fingerprint="acct:test", contract=MNQ)
+    producer = CandidateProducer(account_fingerprint="acct:test", contract=MNQ,
+                                 allow_numeric_invalidation_fallback=True)
     try:
         candidate = producer.produce(
             brain_result={"ok": True, "parsed": parsed, "fallback_reason": None,

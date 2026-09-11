@@ -424,6 +424,7 @@ class TestRetrievedMemoryCannotAct:
         # test would pass for the wrong reason.
         snapshot = {**(snapshot or {}), **_detected("ifvg", "fvg")}
         p = CandidateProducer(allow_prose_objective_fallback=True,
+                              allow_numeric_invalidation_fallback=True,
                                       account_fingerprint="acct:test", contract=MNQ)
         return p.produce(
             brain_result={"ok": True, "parsed": parsed, "fallback_reason": None,

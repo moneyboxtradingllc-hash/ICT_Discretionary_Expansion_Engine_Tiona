@@ -193,6 +193,7 @@ class TestTheElevenOhTwoRegression:
                   "market_story": "rejected buy-side raid, bearish delivery toward 29240.25",
                   "current_action": "await_retest"}
         producer = CandidateProducer(allow_prose_objective_fallback=True,
+                                     allow_numeric_invalidation_fallback=True,
                                      account_fingerprint=FP, contract=MNQ)
         return producer.produce(
             brain_result={"ok": True, "parsed": parsed, "fallback_reason": None,

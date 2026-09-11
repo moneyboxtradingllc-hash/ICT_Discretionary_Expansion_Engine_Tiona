@@ -315,7 +315,8 @@ class TestBaselineParity:
 
     def produce(self, brain_result):
         return CandidateProducer(account_fingerprint="acct:test",
-                                 contract=MNQ).produce(
+                                 contract=MNQ,
+                                 allow_numeric_invalidation_fallback=True).produce(
             brain_result=brain_result, brain_input=self.BI, snapshot=_detected("ifvg", "fvg"),
             qualification={"qualified": True}, engine_inventory={},
             snapshot_id="s1", market_data_timestamp=self.BI["timestamp"],
@@ -385,7 +386,8 @@ class TestMechanicalSovereignty:
                   "invalidation_level": 29855.0,
                   "objective_id": ssl["objective_id"]}
         with pytest.raises(NoCandidate) as exc:
-            CandidateProducer(account_fingerprint="a", contract=MNQ).produce(
+            CandidateProducer(account_fingerprint="a", contract=MNQ,
+                              allow_numeric_invalidation_fallback=True).produce(
                 brain_result={"ok": True, "parsed": parsed, "fallback_reason": None,
                               TB.HYBRID_ENVELOPE_KEY: env},
                 brain_input=self.BI, snapshot=_detected("ifvg", "fvg"),

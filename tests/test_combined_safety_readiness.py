@@ -568,7 +568,7 @@ class TestStrategyUntouched:
         # inherits no account, credentials, authorization or operational
         # certification from upstream.
         from ai_brain.production_model import brain_contract_fingerprint
-        assert brain_contract_fingerprint() == "brain:5db77eab2b66b53e"
+        assert brain_contract_fingerprint() == "brain:1ff74ffd7cf676bf"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.

@@ -335,6 +335,7 @@ class TestProductionHookConsumesTheCorpus:
         assert snapshot["ai_retrieval"]["analogs"]      # memory IS present
         with pytest.raises(NoCandidate):
             CandidateProducer(allow_prose_objective_fallback=True,
+                              allow_numeric_invalidation_fallback=True,
                                       account_fingerprint="acct:t", contract=mnq).produce(
                 brain_result={"ok": True, "parsed": {}, "fallback_reason": None,
                               "model": "gpt-5.6-terra"},

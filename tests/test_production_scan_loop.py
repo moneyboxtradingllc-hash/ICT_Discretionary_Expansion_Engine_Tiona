@@ -259,6 +259,7 @@ def build(tmp_path, *, armed=False, cycle=None, session=None, candles=None,
     loop = PL.ProductionLoop(
         production_session=ps, session_mission=mission,
         producer=CandidateProducer(allow_prose_objective_fallback=True,
+                                    allow_numeric_invalidation_fallback=True,
                                       account_fingerprint=FP, contract=MNQ),
         candles=candles or Candles(), runtime=rt, account_id=77, armed=armed,
         scan_cycle=cycle or Cycle(), clock=lambda: NOW, in_window=lambda: in_window)
