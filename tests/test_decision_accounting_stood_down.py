@@ -34,6 +34,9 @@ class TestTheMapping:
     def test_the_session_phase_stand_down_counts_as_stood_down(self):
         assert terminal_disposition("session_phase_blocks_entry") == STOOD_DOWN
 
+    def test_action_declines_entry_is_a_stood_down(self):
+        assert terminal_disposition("action_declines_entry") == STOOD_DOWN
+
     def test_a_created_candidate_still_wins(self):
         """`created` is decided by the live path, never by the reason string."""
         assert terminal_disposition("session_phase_blocks_entry",

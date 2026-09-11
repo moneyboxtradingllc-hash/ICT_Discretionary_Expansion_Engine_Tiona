@@ -82,6 +82,9 @@ _REASON_TO_DISPOSITION = {
     "fallback_not_authoritative": BRAIN_UNUSABLE,
     "window_closed": WINDOW_CLOSED,
     "stand_down": STOOD_DOWN,
+    # ACCOUNTING ONLY. The Brain has already emitted the deterministic action
+    # token; this maps that exact producer reason to its terminal ledger class.
+    "action_declines_entry": STOOD_DOWN,
     # PROD-20260908. `luna_candidate_producer` raises this as a STAND-DOWN
     # (`NoCandidate(..., stand_down=True)`), and it was the session's ONLY
     # rejection reason: 279 of 279 decisions. Absent from this map it fell to

@@ -367,9 +367,12 @@ def main() -> int:
         print("  (an explicit zero: the store was read and held no "
               f"trade_mission_{S}_*.json)")
     for m in ms:
+        attribution = (str(m["venue_attributed"]).lower()
+                       if m["state"] == "VENUE_REJECTED_ZERO_FILL"
+                       else "N/A")
         print(f"  {m['mission_id']}: state={m['state']} "
               f"attempts={m['attempt_count']} token_spent={m['token_spent']} "
-              f"order_id={m['order_id']} attributed={m['venue_attributed']}")
+              f"order_id={m['order_id']} venue attribution={attribution}")
 
     print("\n── FLIGHT RECORDER (submissions) ────────────────────────────────")
     sub = submissions(args.store_dir, S)
