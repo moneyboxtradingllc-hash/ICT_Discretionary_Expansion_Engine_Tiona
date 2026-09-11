@@ -1,5 +1,10 @@
 # Pre-Brain Wake Shadow Audit — 2026-09-10
 
+> Historical v1 record. The whole-block shadow described below was superseded
+> on 2026-09-11 by the shared semantic production/replay controller documented
+> in `EVENT_DRIVEN_BRAIN_WAKE_20260911.md`. This file remains as provenance for
+> why raw-block hashing was not promoted.
+
 ## Decision
 
 This is an offline, observe-only experiment. It does not change the production
