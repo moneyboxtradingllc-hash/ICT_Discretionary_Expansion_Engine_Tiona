@@ -307,6 +307,57 @@ class TestAmbiguousTimeout:
         assert again["reason"] == ACT.ALREADY_PROTECTED
         assert len(v.modifies) == 1, "a second write followed a late landing"
 
+    def test_incomplete_post_write_absence_is_unknown_not_protection_defect(self,
+                                                                            monkeypatch):
+        v = Venue(positions=[position()], orders=[stop_order(), target_order()])
+        before = {"positions": [position()],
+                  "orders": [stop_order(), target_order()],
+                  "orders_complete": True}
+        after = {"positions": [position()],
+                 "orders": [target_order()],
+                 "orders_complete": False,
+                 "discovery": "fallback_search_open"}
+        calls = iter([(before, True), (after, True)])
+        monkeypatch.setattr(ACT, "_observe", lambda session, contract_id: next(calls))
+
+        out = apply_short(v)
+        assert out["outcome"] == ACT.PROTECTION_UNKNOWN
+        assert out["reason"] == ACT.DISCOVERY_INCOMPLETE
+        assert out["retryable"] is False
+        assert out["write_suppressed"] is True
+        assert v.modifies == [{"order_id": STOP_ID, "stop_price": S_BE,
+                               "limit_price": None}]
+
+    def test_complete_post_write_missing_stop_remains_protection_defect(self,
+                                                                        monkeypatch):
+        v = Venue(positions=[position()], orders=[stop_order(), target_order()])
+        before = {"positions": [position()],
+                  "orders": [stop_order(), target_order()],
+                  "orders_complete": True}
+        after = {"positions": [position()], "orders": [target_order()],
+                 "orders_complete": True}
+        calls = iter([(before, True), (after, True)])
+        monkeypatch.setattr(ACT, "_observe", lambda session, contract_id: next(calls))
+
+        out = apply_short(v)
+        assert out["outcome"] == ACT.PROTECTION_DEFECT
+        assert out["reason"] == ACT.NO_STOP
+
+    def test_incomplete_post_write_with_positive_stop_and_target_can_apply(self,
+                                                                            monkeypatch):
+        v = Venue(positions=[position()], orders=[stop_order(), target_order()])
+        before = {"positions": [position()],
+                  "orders": [stop_order(), target_order()],
+                  "orders_complete": True}
+        after = {"positions": [position()],
+                 "orders": [stop_order(S_BE), target_order()],
+                 "orders_complete": False}
+        calls = iter([(before, True), (after, True)])
+        monkeypatch.setattr(ACT, "_observe", lambda session, contract_id: next(calls))
+
+        out = apply_short(v)
+        assert out["outcome"] == ACT.APPLIED
+
 
 # ══ 9 · REJECTION ═══════════════════════════════════════════════════════════
 class TestRejectionLeavesProtectionAlone:

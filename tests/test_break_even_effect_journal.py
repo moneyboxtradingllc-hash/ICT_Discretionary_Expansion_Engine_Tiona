@@ -98,6 +98,40 @@ class TestJournal:
         assert J.latest_state(str(tmp_path), SESSION, "be:x") == J.READBACK_APPLIED
         assert J.is_unresolved(str(tmp_path), SESSION, "be:x") is False
 
+    def test_latest_unresolved_state_recovers_immutable_intent_identity(self, tmp_path):
+        eid = "trail:step-a"
+        J.record(store_dir=str(tmp_path), session_id=SESSION, effect_id=eid,
+                 state=J.INTENT, mission_id="PRAC-20260825-T2",
+                 proposed_stop=29260.50, management_kind="trailing",
+                 contract_id=CID, entry_order_id=T2_ENTRY, stop_order_id=T2_STOP)
+        J.record(store_dir=str(tmp_path), session_id=SESSION, effect_id=eid,
+                 state=J.READBACK_UNPROVEN, outcome="ambiguous")
+
+        row = J.unresolved_effects(str(tmp_path), SESSION)[0]
+        assert row["effect_id"] == eid
+        assert row["mission_id"] == "PRAC-20260825-T2"
+        assert row["proposed_stop"] == 29260.50
+        assert row["management_kind"] == "trailing"
+        assert row["identity_complete"] is True
+
+    def test_legacy_break_even_identity_infers_management_kind(self, tmp_path):
+        kw = dict(mission_id="PRAC-20260825-T2", contract_id=CID,
+                  entry_order_id=T2_ENTRY, stop_order_id=T2_STOP,
+                  proposed_stop=29210.75,
+                  account_fingerprint="acct:aaaaaaaaaaaa")
+        eid = J.effect_id(**kw)
+        J.record(store_dir=str(tmp_path), session_id=SESSION, effect_id=eid,
+                 state=J.INTENT, **{k: kw[k] for k in (
+                     "mission_id", "contract_id", "entry_order_id",
+                     "stop_order_id", "proposed_stop")})
+        J.record(store_dir=str(tmp_path), session_id=SESSION, effect_id=eid,
+                 state=J.READBACK_UNPROVEN, outcome="ambiguous")
+
+        row = J.unresolved_effects(str(tmp_path), SESSION)[0]
+        assert row["management_kind"] == "break_even"
+        assert row["identity_complete"] is True
+        assert eid == J.effect_id(**kw)
+
     def test_unresolved_states_forbid_a_write(self, tmp_path):
         for state in (J.INTENT, J.ACCEPTED, J.TRANSPORT_AMBIGUOUS,
                       J.READBACK_UNPROVEN):

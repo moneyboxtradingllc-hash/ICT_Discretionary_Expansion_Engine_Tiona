@@ -312,8 +312,10 @@ def apply_break_even(*, session, contract_id, entry_order_id, direction,
                    error=error, response=response, retryable=False)
 
     size_after = RECON.position_size(after["positions"], contract_id)
+    after_complete = bool(after.get("orders_complete"))
     stop_after, target_after, problem_after = _owned(
-        after["orders"], contract_id=contract_id, entry_order_id=entry_order_id)
+        after["orders"], contract_id=contract_id, entry_order_id=entry_order_id,
+        complete=after_complete)
     now = _stop_price(stop_after)
 
     if not size_after:
@@ -332,6 +334,15 @@ def apply_break_even(*, session, contract_id, entry_order_id, direction,
         except Exception as exc:
             return out(AMBIGUOUS, "position_identity_changed", str(exc), retryable=False)
 
+    if stop_after is None and problem_after is UNKNOWN_PROBLEM:
+        return out(PROTECTION_UNKNOWN, DISCOVERY_INCOMPLETE,
+                   "post-write order discovery is incomplete; stop absence is "
+                   "unknown and no protection conclusion is permitted",
+                   stop_order_id=stop_id, active_protective_stop=active,
+                   position_size=size_after, error=error, response=response,
+                   retryable=False, write_suppressed=True,
+                   discovery=after.get("discovery"))
+
     if stop_after is None:
         return out(PROTECTION_DEFECT, NO_STOP,
                    "position is open but no owned protective stop can be proven "
@@ -343,6 +354,16 @@ def apply_break_even(*, session, contract_id, entry_order_id, direction,
     # or better. `_is_at_or_better` answers "would we still want to advance?" --
     # if not, the effect is present however it got there.
     landed, landed_verdict = _is_at_or_better(direction, active=now, wanted=want)
+    if (not after_complete and target_before["id"] is not None
+            and target_after is None):
+        return out(PROTECTION_UNKNOWN, DISCOVERY_INCOMPLETE,
+                   "post-write order discovery is incomplete; target preservation "
+                   "is unproven",
+                   stop_order_id=stop_id, active_protective_stop=now,
+                   position_size=size_after, error=error, response=response,
+                   retryable=False, write_suppressed=True,
+                   discovery=after.get("discovery"))
+
     target_now = {"id": None if target_after is None else target_after.get("id"),
                   "limit_price": None if target_after is None
                   else _num(target_after.get("limit_price"))}

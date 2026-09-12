@@ -116,6 +116,82 @@ class TestProductionStairStep:
         assert later["status"] == "unresolved_effect_reconciled"
         assert venue2.modifies == []
 
+    def test_unresolved_first_step_blocks_later_step_in_same_process(self, tmp_path):
+        first_bid = T2_FILL + (2.2 * T2_R)
+        loop, venue, _ = loop_for(tmp_path, bid=first_bid,
+                                  ask=first_bid + .25)
+
+        def accepted_but_invisible(order_id, **kwargs):
+            venue.modifies.append({"order_id": order_id,
+                                   "stop_price": kwargs.get("stop_price")})
+            return {"success": True}
+        venue.modify_order = accepted_but_invisible
+
+        first = loop.manage_open_position()
+        assert first["status"] == ACT.AMBIGUOUS
+        assert len(venue.modifies) == 1
+
+        loop.ps.quote_provider.bid = T2_FILL + (3.2 * T2_R)
+        loop.ps.quote_provider.ask = loop.ps.quote_provider.bid + .25
+        second = loop.manage_open_position()
+        assert second["status"] == "unresolved_effect_reconciled"
+        assert second["actuation"]["write_suppressed"] is True
+        assert len(venue.modifies) == 1
+
+    def test_unresolved_first_step_blocks_later_step_after_restart(self, tmp_path):
+        first_bid = T2_FILL + (2.2 * T2_R)
+        loop, venue, _ = loop_for(tmp_path, bid=first_bid,
+                                  ask=first_bid + .25)
+
+        def accepted_but_invisible(order_id, **kwargs):
+            venue.modifies.append({"order_id": order_id,
+                                   "stop_price": kwargs.get("stop_price")})
+            return {"success": True}
+        venue.modify_order = accepted_but_invisible
+        loop.manage_open_position()
+        assert len(venue.modifies) == 1
+
+        later_bid = T2_FILL + (3.2 * T2_R)
+        cold, venue2, _ = loop_for(tmp_path, bid=later_bid,
+                                   ask=later_bid + .25)
+        accepts_without_effect = lambda order_id, **kwargs: {
+            "success": True}
+        venue2.modify_order = accepts_without_effect
+        out = cold.manage_open_position()
+        assert out["status"] == "unresolved_effect_reconciled"
+        assert venue2.modifies == []
+
+    def test_later_step_may_write_only_on_a_later_tick_after_resolution(self,
+                                                                        tmp_path):
+        first_bid = T2_FILL + (2.2 * T2_R)
+        loop, venue, _ = loop_for(tmp_path, bid=first_bid,
+                                  ask=first_bid + .25)
+
+        def accepted_but_invisible(order_id, **kwargs):
+            venue.modifies.append({"order_id": order_id,
+                                   "stop_price": kwargs.get("stop_price")})
+            return {"success": True}
+        venue.modify_order = accepted_but_invisible
+        loop.manage_open_position()
+
+        loop.ps.quote_provider.bid = T2_FILL + (3.2 * T2_R)
+        loop.ps.quote_provider.ask = loop.ps.quote_provider.bid + .25
+        loop.manage_open_position()
+        assert len(venue.modifies) == 1
+
+        for order in venue._o:
+            if order["id"] == T2_STOP:
+                order["stop_price"] = T2_FILL + T2_R
+
+        resolved = loop.manage_open_position()
+        assert resolved["status"] == "unresolved_effect_reconciled"
+        assert len(venue.modifies) == 1
+
+        later = loop.manage_open_position()
+        assert later["status"] == ACT.AMBIGUOUS
+        assert len(venue.modifies) == 2
+        assert venue.modifies[-1]["stop_price"] == T2_FILL + (2 * T2_R)
+
     def test_position_management_needs_no_brain(self, tmp_path):
         import ai_brain.narrative_brain as brain
         calls, original = [], brain.run_narrative_brain

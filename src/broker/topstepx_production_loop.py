@@ -522,8 +522,16 @@ class ProductionLoop:
             # more-protective stair step is not permission to overlap writes:
             # reconcile the old intent first, then let a later management tick
             # compute the current destination from fresh venue truth.
-            unresolved = [row for row in JOURNAL.unresolved_effects(store, session_id)
+            all_unresolved = JOURNAL.unresolved_effects(store, session_id)
+            unresolved = [row for row in all_unresolved
                           if row.get("mission_id") == mission.mission_id]
+            incomplete_unresolved = [row for row in all_unresolved
+                                     if not row.get("identity_complete")]
+            if incomplete_unresolved:
+                return out("unresolved_effect_identity_unavailable",
+                           effects=[row.get("effect_id")
+                                    for row in incomplete_unresolved],
+                           decision=decision, baseline=baseline)
             if unresolved:
                 prior = unresolved[-1]
                 prior_stop = prior.get("proposed_stop")
@@ -537,6 +545,8 @@ class ProductionLoop:
                 JOURNAL.record(store_dir=store, session_id=session_id,
                                effect_id=prior.get("effect_id"),
                                state=_journal_state_for(resolved, JOURNAL),
+                               mission_id=prior.get("mission_id"),
+                               proposed_stop=prior.get("proposed_stop"),
                                outcome=resolved.get("outcome"),
                                reason=resolved.get("reason"),
                                active_protective_stop=resolved.get(
@@ -626,12 +636,14 @@ class ProductionLoop:
             # is the fail-closed direction.
             JOURNAL.record(store_dir=store, session_id=session_id, effect_id=eid,
                            state=_journal_state_for(applied, JOURNAL),
+                           mission_id=mission.mission_id,
+                           proposed_stop=proposed,
+                           management_kind=management_kind,
                            outcome=applied.get("outcome"),
                            reason=applied.get("reason"),
                            active_protective_stop=applied.get("active_protective_stop"),
                            previous_protective_stop=applied.get(
                                "previous_protective_stop"),
-                           management_kind=management_kind,
                            target=applied.get("target"),
                            venue_rejection=applied.get("venue_rejection"),
                            error=applied.get("error"))

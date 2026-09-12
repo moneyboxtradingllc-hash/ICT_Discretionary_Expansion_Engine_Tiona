@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 from datetime import datetime, timezone
 
@@ -149,11 +150,68 @@ def is_unresolved(store_dir: str, session_id: str, effect_id: str) -> bool:
     return latest_state(store_dir, session_id, effect_id) in UNRESOLVED
 
 
+_IDENTITY_FIELDS = ("mission_id", "proposed_stop", "management_kind",
+                    "contract_id", "entry_order_id", "stop_order_id")
+
+
+def _identity_value_valid(field, value) -> bool:
+    if value is None:
+        return False
+    if field == "proposed_stop":
+        if isinstance(value, bool):
+            return False
+        try:
+            return math.isfinite(float(value))
+        except (TypeError, ValueError):
+            return False
+    return bool(str(value).strip())
+
+
+def _with_recovered_identity(rows: list, effect_id: str) -> dict:
+    """Return the latest state while retaining immutable intent evidence.
+
+    Older journals recorded identity only on INTENT. Later state rows are
+    allowed to contain only the actuator result, so selecting the latest row
+    must not erase the fields needed to attribute an unresolved effect.
+    Conflicting immutable values are marked incomplete rather than guessed.
+    """
+    latest = dict(rows[-1])
+    values = {}
+    conflicts = []
+    for field in _IDENTITY_FIELDS:
+        observed = [row.get(field) for row in rows
+                    if _identity_value_valid(field, row.get(field))]
+        if observed:
+            first = observed[0]
+            if any(value != first for value in observed[1:]):
+                conflicts.append(field)
+            else:
+                values[field] = first
+        elif field == "management_kind":
+            prefix = str(effect_id).split(":", 1)[0]
+            values[field] = "trailing" if prefix == "trail" else "break_even"
+    for field, value in values.items():
+        if not _identity_value_valid(field, latest.get(field)):
+            latest[field] = value
+    latest["effect_id"] = effect_id
+    latest["identity_conflicts"] = conflicts
+    latest["identity_complete"] = (
+        not conflicts
+        and _identity_value_valid("mission_id", latest.get("mission_id"))
+        and _identity_value_valid("proposed_stop", latest.get("proposed_stop"))
+        and _identity_value_valid("management_kind", latest.get("management_kind")))
+    return latest
+
+
 def unresolved_effects(store_dir: str, session_id: str) -> list:
-    """Every effect id whose latest recorded state still forbids a write."""
-    latest = {}
+    """Every unresolved effect, with immutable identity folded from history."""
+    history = {}
     for row in load(store_dir, session_id):
         eid = row.get("effect_id")
         if eid:
-            latest[eid] = row
-    return [row for row in latest.values() if row.get("state") in UNRESOLVED]
+            history.setdefault(eid, []).append(row)
+    unresolved = []
+    for eid, rows in history.items():
+        if rows[-1].get("state") in UNRESOLVED:
+            unresolved.append(_with_recovered_identity(rows, eid))
+    return unresolved
