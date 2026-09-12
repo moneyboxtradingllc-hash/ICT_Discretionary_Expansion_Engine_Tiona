@@ -5,6 +5,7 @@ import copy
 import os
 import sys
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -13,6 +14,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from ai_brain import narrative_brain as NB  # noqa: E402
 from ai_brain import wake_controller as W  # noqa: E402
+from broker.topstepx_production_loop import ProductionLoop  # noqa: E402
+from live_scan.wake_registry import WakeRegistry  # noqa: E402
 
 
 NOW = datetime(2026, 9, 11, 14, 0, tzinfo=timezone.utc)
@@ -306,3 +309,67 @@ def test_ecu_uncertainty_always_wakes_even_in_enforce(monkeypatch):
     assert first["source"] == second["source"] == "llm"
     assert second["wake_decision"]["reasons"] == [
         "unsupported_pipeline_state:ecu_pre_provider"]
+
+
+def test_consumed_registry_event_reaches_final_provider_gate_once(monkeypatch):
+    """Exercise registry -> production scan context -> Narrative Brain gate."""
+    monkeypatch.setenv("BRAIN_WAKE_MODE", W.ENFORCE)
+    snapshot, payload = evidence()
+    provider, _, _ = install_boundaries(monkeypatch, payload)
+    registry = WakeRegistry()
+    registry._armed = (("FVG-1", "bullish", 99.0, 99.5, False),)
+
+    times = iter((NOW, NOW + timedelta(seconds=60),
+                  NOW + timedelta(seconds=120),
+                  NOW + timedelta(seconds=180)))
+    loop = object.__new__(ProductionLoop)
+    loop.clock = Mock(side_effect=times)
+    loop.candles = SimpleNamespace(wake_registry=registry)
+    loop.mission = SimpleNamespace(
+        authorization=SimpleNamespace(session_id="SESSION"))
+    loop.ps = SimpleNamespace(contract=SimpleNamespace(id="CON.TEST"))
+    loop.outcomes = []
+
+    def brain_scan(*, observed_at=None):
+        current = copy.deepcopy(snapshot)
+        current["timestamp"] = (NOW - timedelta(days=2)).isoformat()
+        current["execution_price"]["captured_at"] = observed_at.isoformat()
+        return NB.run_narrative_brain(current, "MNQ", None)
+
+    loop._scan_once = brain_scan
+    first = loop.scan_once()
+    held = loop.scan_once()
+    assert first["source"] == "llm"
+    assert held["source"] == W.HOLD_SOURCE
+
+    # The production pump's on_quote detector raises the actionable fact; the
+    # launcher contract consumes its wait bit before invoking the next scan.
+    registry.on_quote(bid=100.0, ask=100.25,
+                      observed_at=NOW + timedelta(seconds=90))  # seed OUTSIDE
+    fired = registry.on_quote(bid=99.0, ask=99.25,
+                              observed_at=NOW + timedelta(seconds=90))
+    assert fired and registry.consume_interaction() is True
+
+    woke = loop.scan_once()
+    after = loop.scan_once()
+    assert woke["source"] == "llm"
+    assert woke["wake_decision"]["reasons"] == [
+        "actionable_mechanical_event:entered_zone:FVG-1"]
+    assert after["source"] == W.HOLD_SOURCE
+    assert provider.call_count == 2
+    assert loop.clock.call_count == 4
+    assert woke["wake_decision"]["timestamp"] == (
+        NOW + timedelta(seconds=120)).isoformat()
+
+
+def test_missing_production_observation_time_does_not_fall_back_to_candle(
+        monkeypatch):
+    monkeypatch.setenv("BRAIN_WAKE_MODE", W.ENFORCE)
+    snapshot, payload = evidence()
+    provider, _, _ = install_boundaries(monkeypatch, payload)
+    NB.set_call_context(session_id="SESSION", contract_id="CON.TEST", scan=1,
+                        observed_at=None)
+    result = NB.run_narrative_brain(copy.deepcopy(snapshot), "MNQ", None)
+    assert result["source"] == "llm"
+    assert "invalid_observation_time" in result["wake_decision"]["reasons"]
+    assert provider.call_count == 1

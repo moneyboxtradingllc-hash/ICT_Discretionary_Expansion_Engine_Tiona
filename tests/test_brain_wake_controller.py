@@ -89,7 +89,7 @@ def valid_evidence():
 
 def observe(controller, sequence=1, when=NOW, *, snapshot=None,
             brain_input=None, session="SESSION", contract="CON.TEST",
-            pipeline="non_ecu", catalogs_ok=True):
+            pipeline="non_ecu", catalogs_ok=True, wake_event=None):
     default_snapshot, default_input = valid_evidence()
     snapshot = default_snapshot if snapshot is None else snapshot
     brain_input = default_input if brain_input is None else brain_input
@@ -98,7 +98,20 @@ def observe(controller, sequence=1, when=NOW, *, snapshot=None,
     return controller.observe(
         snapshot=snapshot, brain_input=brain_input, session_id=session,
         contract_id=contract, scan=sequence, now=when,
-        pipeline_mode=pipeline, catalogs_ok=catalogs_ok)
+        pipeline_mode=pipeline, catalogs_ok=catalogs_ok,
+        wake_event=wake_event)
+
+
+def actionable_event(event_id="wake-registry:1", when=NOW):
+    return {
+        "schema": W.WAKE_EVENT_SCHEMA,
+        "source": W.WAKE_EVENT_SOURCE,
+        "event_id": event_id,
+        "observed_at": when.isoformat(),
+        "actionable": True,
+        "events": [{"occurrence_id": "FVG-1", "reason": "entered_zone",
+                    "observed_at": when.isoformat()}],
+    }
 
 
 def establish(controller, *, mode_result=None):
@@ -141,6 +154,160 @@ def test_raw_quote_tick_and_age_noise_do_not_change_semantic_state():
     held = observe(controller, 2, NOW + timedelta(seconds=60),
                    snapshot=snapshot, brain_input=brain_input)
     assert held["decision"] == W.HOLD
+
+
+def test_actionable_mechanical_event_forces_one_wake_then_expires():
+    controller = W.BrainWakeController(mode=W.ENFORCE)
+    establish(controller)
+    event = actionable_event(when=NOW + timedelta(seconds=30))
+    woke = observe(controller, 2, NOW + timedelta(seconds=60), wake_event=event)
+    assert woke["decision"] == W.WAKE
+    assert woke["reasons"] == [
+        "actionable_mechanical_event:entered_zone:FVG-1"]
+    controller.note_provider_result(woke, request_attempted=True, sovereign=True)
+    held = observe(controller, 3, NOW + timedelta(seconds=120))
+    assert held["decision"] == W.HOLD
+
+
+def test_duplicate_event_identity_cannot_create_repeated_cognition():
+    controller = W.BrainWakeController(mode=W.ENFORCE)
+    establish(controller)
+    event = actionable_event(when=NOW + timedelta(seconds=30))
+    woke = observe(controller, 2, NOW + timedelta(seconds=60), wake_event=event)
+    controller.note_provider_result(woke, request_attempted=True, sovereign=True)
+    replay = observe(controller, 3, NOW + timedelta(seconds=120),
+                     wake_event=event)
+    assert replay["decision"] == W.HOLD
+    assert replay["wake_event_duplicate"] is True
+
+
+def test_stale_or_malformed_actionable_event_fails_open_to_wake():
+    controller = W.BrainWakeController(mode=W.ENFORCE)
+    establish(controller)
+    stale = actionable_event("wake-registry:2", NOW)
+    result = observe(controller, 2, NOW + timedelta(seconds=60),
+                     wake_event=stale)
+    assert result["decision"] == W.WAKE
+    assert "stale_actionable_wake_event" in result["reasons"]
+
+    controller = W.BrainWakeController(mode=W.ENFORCE)
+    establish(controller)
+    malformed = {"schema": W.WAKE_EVENT_SCHEMA, "source": W.WAKE_EVENT_SOURCE,
+                 "actionable": True, "events": []}
+    result = observe(controller, 2, NOW + timedelta(seconds=60),
+                     wake_event=malformed)
+    assert result["decision"] == W.WAKE
+    assert any(reason.startswith("malformed_actionable_wake_event")
+               for reason in result["reasons"])
+
+
+@pytest.mark.parametrize("field", ["best_bid", "best_ask"])
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_nonfinite_quote_never_earns_hold(field, bad):
+    controller = W.BrainWakeController(mode=W.ENFORCE)
+    establish(controller)
+    snapshot, brain_input = valid_evidence()
+    snapshot["execution_price"][field] = bad
+    brain_input["market"]["execution_price"][field] = bad
+    result = observe(controller, 2, NOW + timedelta(seconds=60),
+                     snapshot=snapshot, brain_input=brain_input)
+    assert result["decision"] == W.WAKE
+    assert f"malformed_required_evidence:{field}" in result["reasons"]
+
+
+def test_crossed_quote_wakes_but_equal_quote_remains_hold_eligible():
+    controller = W.BrainWakeController(mode=W.ENFORCE)
+    establish(controller)
+    snapshot, brain_input = valid_evidence()
+    snapshot["execution_price"].update({"best_bid": 101.0, "best_ask": 100.0})
+    brain_input["market"]["execution_price"] = snapshot["execution_price"]
+    crossed = observe(controller, 2, NOW + timedelta(seconds=60),
+                      snapshot=snapshot, brain_input=brain_input)
+    assert crossed["decision"] == W.WAKE
+    assert "incoherent_executable_quote:crossed" in crossed["reasons"]
+
+    controller = W.BrainWakeController(mode=W.ENFORCE)
+    establish(controller)
+    snapshot, brain_input = valid_evidence()
+    snapshot["execution_price"].update({"best_bid": 100.0, "best_ask": 100.0})
+    brain_input["market"]["execution_price"] = snapshot["execution_price"]
+    equal = observe(controller, 2, NOW + timedelta(seconds=60),
+                    snapshot=snapshot, brain_input=brain_input)
+    assert equal["decision"] == W.HOLD
+
+
+@pytest.mark.parametrize(("mutate", "path"), [
+    (lambda s, b: s["active_path_state"].update(
+        {"load_bearing_structure": []}), "active_path_state.load_bearing_structure"),
+    (lambda s, b: b.update({"liquidity_events": [("not", "a", "mapping")]}),
+     "brain_input.liquidity_events"),
+    (lambda s, b: s["mtf_market_state"]["synthesis"].update(
+        {"conflicts": {"not": "a list"}}),
+     "mtf_market_state.synthesis.conflicts"),
+])
+def test_malformed_nested_detector_evidence_cannot_sanitize_to_hold(mutate, path):
+    controller = W.BrainWakeController(mode=W.ENFORCE)
+    establish(controller)
+    snapshot, brain_input = valid_evidence()
+    mutate(snapshot, brain_input)
+    result = observe(controller, 2, NOW + timedelta(seconds=60),
+                     snapshot=snapshot, brain_input=brain_input)
+    assert result["decision"] == W.WAKE
+    assert any(path in reason for reason in result["reasons"])
+
+
+def test_present_malformed_quote_cannot_hide_behind_other_quote_copy():
+    controller = W.BrainWakeController(mode=W.ENFORCE)
+    establish(controller)
+    snapshot, brain_input = valid_evidence()
+    snapshot["execution_price"] = ["malformed"]
+    result = observe(controller, 2, NOW + timedelta(seconds=60),
+                     snapshot=snapshot, brain_input=brain_input)
+    assert result["decision"] == W.WAKE
+    assert "malformed_required_evidence:execution_price" in result["reasons"]
+
+
+def test_optional_memory_absence_does_not_force_permanent_wake():
+    controller = W.BrainWakeController(mode=W.ENFORCE)
+    establish(controller)
+    held = observe(controller, 2, NOW + timedelta(seconds=60))
+    assert held["decision"] == W.HOLD
+
+
+def test_snapshot_timestamp_never_owns_the_max_silence_clock():
+    controller = W.BrainWakeController(mode=W.ENFORCE,
+                                       max_silence_seconds=300)
+    snapshot, brain_input = valid_evidence()
+    snapshot["timestamp"] = (NOW - timedelta(days=5)).isoformat()
+    first = controller.observe(
+        snapshot=snapshot, brain_input=brain_input, session_id="SESSION",
+        contract_id="CON.TEST", scan=1, now=NOW)
+    controller.note_provider_result(first, request_attempted=True, sovereign=True)
+    held = controller.observe(
+        snapshot=snapshot, brain_input=brain_input, session_id="SESSION",
+        contract_id="CON.TEST", scan=2, now=NOW + timedelta(seconds=60))
+    assert held["decision"] == W.HOLD
+    assert held["seconds_since_last_scheduled_wake"] == 60
+
+    fresh_candle = copy.deepcopy(snapshot)
+    fresh_candle["timestamp"] = (NOW + timedelta(seconds=299)).isoformat()
+    wake = controller.observe(
+        snapshot=fresh_candle, brain_input=brain_input, session_id="SESSION",
+        contract_id="CON.TEST", scan=3, now=NOW + timedelta(seconds=301))
+    assert wake["decision"] == W.WAKE
+    assert "maximum_silence_elapsed" in wake["reasons"]
+
+
+def test_missing_or_malformed_observation_time_never_earns_hold():
+    for bad in (None, "not-a-time", datetime(2026, 9, 11, 14, 1)):
+        controller = W.BrainWakeController(mode=W.ENFORCE)
+        establish(controller)
+        snapshot, brain_input = valid_evidence()
+        result = controller.observe(
+            snapshot=snapshot, brain_input=brain_input, session_id="SESSION",
+            contract_id="CON.TEST", scan=2, now=bad)
+        assert result["decision"] == W.WAKE
+        assert "invalid_observation_time" in result["reasons"]
 
 
 @pytest.mark.parametrize(("dimension", "mutate"), [

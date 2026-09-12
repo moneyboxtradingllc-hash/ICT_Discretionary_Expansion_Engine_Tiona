@@ -48,6 +48,7 @@ is not the synchronisation theorem here -- the lock is.
 from __future__ import annotations
 
 import threading
+from datetime import datetime, timezone
 
 #: A published armed occurrence. Immutable by construction: the main thread
 #: swaps a whole new tuple rather than mutating entries the pump may be reading.
@@ -62,6 +63,12 @@ OUTSIDE = "OUTSIDE"
 #: Wake reasons, for telemetry only. They authorize nothing.
 WAKE_ARMED_INSIDE = "armed_while_inside"
 WAKE_ENTERED = "entered_zone"
+
+# One-shot causal evidence passed from the launcher wait seam to the final
+# paid-Brain boundary.  It has no trade authority; it only proves why this scan
+# was requested before the ordinary deadline.
+INTERACTION_SCHEMA = "wake_registry.interaction.v1"
+INTERACTION_SOURCE = "wake_registry"
 
 
 def _num(value):
@@ -104,6 +111,42 @@ class WakeRegistry:
         self.structure_birth = threading.Event()
         self.trade_wake = threading.Event()
         self.wakes: list = []            # telemetry, never authority
+        self._pending_interactions: list = []
+        self._consumed_interaction = None
+        self._wake_sequence = 0
+
+    @staticmethod
+    def _observed_at(value=None) -> str:
+        if isinstance(value, datetime):
+            if value.tzinfo is not None and value.utcoffset() is not None:
+                return value.astimezone(timezone.utc).isoformat()
+            return value.isoformat()
+        if value is not None:
+            return str(value)
+        return datetime.now(timezone.utc).isoformat()
+
+    def _raise_interaction(self, events: list, *, observed_at=None) -> None:
+        """Publish one coalescing wake bit plus its immutable causal facts."""
+        stamp = self._observed_at(observed_at)
+        rows = []
+        for event in events or []:
+            if isinstance(event, dict):
+                row = dict(event)
+                row.setdefault("observed_at", stamp)
+                rows.append(row)
+        if not rows:
+            return
+        with self._lock:
+            known = {(row.get("occurrence_id"), row.get("reason"))
+                     for row in self._pending_interactions}
+            for row in rows:
+                identity = (row.get("occurrence_id"), row.get("reason"))
+                if identity not in known:
+                    self._pending_interactions.append(row)
+                    known.add(identity)
+            self._wake_sequence += 1
+            self.wakes.extend(dict(row) for row in rows)
+            self.trade_wake.set()
 
     # ── PUMP THREAD ─────────────────────────────────────────────────────────
     def note_bar_closed(self) -> None:
@@ -119,7 +162,7 @@ class WakeRegistry:
         with self._lock:
             return self._armed
 
-    def on_quote(self, bid=None, ask=None) -> list:
+    def on_quote(self, bid=None, ask=None, *, observed_at=None) -> list:
         """Detect OUTSIDE -> INSIDE transitions. Returns the wakes it raised.
 
         A missing or unusable sided quote is NOT an interaction: absence of a
@@ -152,8 +195,7 @@ class WakeRegistry:
                 fired.append({"occurrence_id": occurrence_id, "reason": WAKE_ENTERED,
                               "direction": direction, "price": price})
         if fired:
-            self.wakes.extend(fired)
-            self.trade_wake.set()
+            self._raise_interaction(fired, observed_at=observed_at)
         return fired
 
     # ── PRODUCTION MAIN THREAD ──────────────────────────────────────────────
@@ -300,9 +342,9 @@ class WakeRegistry:
         # the entire window.
         first = [oid for oid in armed_inside if oid not in known]
         if first:
-            self.wakes.extend({"occurrence_id": oid, "reason": WAKE_ARMED_INSIDE}
-                              for oid in first)
-            self.trade_wake.set()
+            self._raise_interaction([
+                {"occurrence_id": oid, "reason": WAKE_ARMED_INSIDE}
+                for oid in first])
         return {"armed": len(rows), "refreshed": True,
                 "armed_while_inside": first, "error": None}
 
@@ -332,12 +374,72 @@ class WakeRegistry:
         return was
 
     def consume_interaction(self) -> bool:
-        was = self.trade_wake.is_set()
-        self.trade_wake.clear()
-        return was
+        """Consume the wait bit while retaining one-shot causality for its scan.
+
+        The launcher historically needed only a bool.  That API remains
+        unchanged, but the same registry now retains the structured event until
+        the final pre-provider boundary claims it.  A naked bit (for example a
+        malformed producer) is retained as invalid evidence so it fails open to
+        cognition rather than disappearing.
+        """
+        with self._lock:
+            was = self.trade_wake.is_set()
+            if not was:
+                return False
+            rows = [dict(row) for row in self._pending_interactions]
+            self._pending_interactions = []
+            observed = (rows[-1].get("observed_at") if rows else None)
+            context = {
+                "schema": INTERACTION_SCHEMA,
+                "source": INTERACTION_SOURCE,
+                "event_id": f"wake-registry:{self._wake_sequence}",
+                "observed_at": observed,
+                "actionable": bool(rows),
+                "events": rows,
+            }
+            if not rows:
+                context["error"] = "interaction_identity_unavailable"
+            if self._consumed_interaction is not None:
+                # Two consumed bits before the Brain boundary still buy one
+                # scan. Preserve every distinct fact without creating a queue
+                # of stale snapshots or a provider-call storm.
+                prior = self._consumed_interaction
+                merged = [dict(row) for row in prior.get("events") or []]
+                known = {(row.get("occurrence_id"), row.get("reason"))
+                         for row in merged}
+                for row in rows:
+                    identity = (row.get("occurrence_id"), row.get("reason"))
+                    if identity not in known:
+                        merged.append(row)
+                        known.add(identity)
+                context["events"] = merged
+                context["actionable"] = bool(merged)
+                context["observed_at"] = (observed
+                                            or prior.get("observed_at"))
+                if prior.get("error") and not merged:
+                    context["error"] = prior.get("error")
+            self._consumed_interaction = context
+            self.trade_wake.clear()
+            return True
+
+    def claim_consumed_interaction(self):
+        """Transfer and clear causal context into its one intended scan."""
+        with self._lock:
+            context = self._consumed_interaction
+            self._consumed_interaction = None
+            if context is None:
+                return None
+            return {**context,
+                    "events": [dict(row) for row in context.get("events") or []]}
 
     def health(self) -> dict:
-        return {"armed": len(self.armed()), "episodes": len(self._episode),
+        with self._lock:
+            armed = len(self._armed)
+            consumed_pending = self._consumed_interaction is not None
+            pending_facts = len(self._pending_interactions)
+        return {"armed": armed, "episodes": len(self._episode),
                 "wakes": len(self.wakes),
                 "structure_pending": self.structure_birth.is_set(),
-                "interaction_pending": self.trade_wake.is_set()}
+                "interaction_pending": self.trade_wake.is_set(),
+                "interaction_causality_pending": consumed_pending,
+                "pending_interaction_facts": pending_facts}

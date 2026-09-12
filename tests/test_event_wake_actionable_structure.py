@@ -33,6 +33,7 @@ import os
 import sys
 import threading
 import time
+from datetime import datetime, timezone
 
 import pytest
 
@@ -297,6 +298,29 @@ class TestEventLossAndSingleFlight:
         assert r.trade_wake.is_set()
         assert r.consume_interaction() is True
         assert r.consume_interaction() is False    # one bit, not a queue
+
+    def test_consumption_retains_structured_causality_until_one_shot_claim(self):
+        r = TestEpisodeDoctrine.outside_first()
+        stamp = datetime(2026, 9, 11, 14, 1, tzinfo=timezone.utc)
+        fired = r.on_quote(bid=29249.25, ask=29249.50,
+                           observed_at=stamp)
+        assert fired and r.consume_interaction() is True
+        causal = r.claim_consumed_interaction()
+        assert causal["schema"] == "wake_registry.interaction.v1"
+        assert causal["source"] == "wake_registry"
+        assert causal["actionable"] is True
+        assert causal["events"][0]["observed_at"] == stamp.isoformat()
+        assert causal["events"][0]["reason"] == WAKE_ENTERED
+        assert r.claim_consumed_interaction() is None
+
+    def test_naked_wait_bit_is_retained_as_untrusted_not_forgotten(self):
+        r = WakeRegistry()
+        r.trade_wake.set()
+        assert r.consume_interaction() is True
+        causal = r.claim_consumed_interaction()
+        assert causal["actionable"] is False
+        assert causal["error"] == "interaction_identity_unavailable"
+        assert causal["events"] == []
 
     def test_the_registry_never_calls_the_brain_or_authorizes(self):
         """AST over the module's real names, not its prose."""

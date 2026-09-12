@@ -297,6 +297,24 @@ class ProductionLoop:
 
     # ── one iteration ─────────────────────────────────────────────────────────
     def scan_once(self) -> dict:
+        # One stable wall-clock observation owns this scan's wake accounting.
+        # Candle/snapshot time describes market data; it is not the max-silence
+        # clock.  Capture once and pass the same value through the scan cycle and
+        # final pre-provider context.
+        observed_at = self.clock()
+        wake_event = None
+        try:
+            registry = getattr(self.candles, "wake_registry", None)
+            claim = getattr(registry, "claim_consumed_interaction", None)
+            wake_event = claim() if callable(claim) else None
+        except Exception:  # noqa: BLE001 -- inability to carry causality wakes
+            wake_event = {
+                "schema": "wake_registry.interaction.v1",
+                "source": "wake_registry",
+                "actionable": False,
+                "events": [],
+                "error": "wake_event_source_unavailable",
+            }
         # Stamp every paid AI request this scan makes with the session and scan
         # it belongs to. Set here rather than threaded through `_call_llm`,
         # whose signature is a contract the test doubles depend on.
@@ -304,10 +322,12 @@ class ProductionLoop:
             from ai_brain import narrative_brain as _nb
             _nb.set_call_context(session_id=self.mission.authorization.session_id,
                                  contract_id=str(self.ps.contract.id),
-                                 scan=len(self.outcomes) + 1)
+                                 scan=len(self.outcomes) + 1,
+                                 observed_at=observed_at,
+                                 wake_event=wake_event)
         except Exception:  # noqa: BLE001 — accounting may never cost a scan
             pass
-        out = self._scan_once()
+        out = self._scan_once(observed_at=observed_at)
         self.outcomes.append(out)
         return out
 
@@ -686,7 +706,7 @@ class ProductionLoop:
         except Exception:  # noqa: BLE001 — unavailable, never fabricated
             return None
 
-    def _scan_once(self) -> dict:
+    def _scan_once(self, *, observed_at=None) -> dict:
         # Venue reality first, decisions second.
         self.last_reconciliation = self.reconcile_missions()
         # Deterministic protection management, on every tick, in every
@@ -768,7 +788,8 @@ class ProductionLoop:
                 self.symbol, lookback_bars=SESSION_CONTEXT_DEEP_BARS)
         except Exception:                       # noqa: BLE001 — context is not
             deep = None                         # worth losing a scan over
-        scan = self.cycle.scan(bars, now=self.clock(), deep_1m=deep)
+        scan = self.cycle.scan(bars, now=(observed_at if observed_at is not None
+                                         else self.clock()), deep_1m=deep)
         brain = scan["brain_block"]
         source = (brain or {}).get("source")
 

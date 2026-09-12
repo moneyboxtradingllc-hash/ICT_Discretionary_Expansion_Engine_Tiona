@@ -34,6 +34,10 @@ HOLD_SOURCE = "brain_sleep_hold"
 MODE_ENV = "BRAIN_WAKE_MODE"
 MAX_SILENCE_ENV = "BRAIN_WAKE_MAX_SILENCE_SECONDS"
 
+WAKE_EVENT_SCHEMA = "wake_registry.interaction.v1"
+WAKE_EVENT_SOURCE = "wake_registry"
+ACTIONABLE_WAKE_REASONS = ("armed_while_inside", "entered_zone")
+
 # A configurable backstop, not an acceptance target.  ENFORCE is disabled by
 # default, and historical replay must evaluate other values before deployment.
 DEFAULT_MAX_SILENCE_SECONDS = 300.0
@@ -80,6 +84,246 @@ def _aware_datetime(value) -> "datetime | None":
 def _finite_number(value) -> bool:
     return (isinstance(value, (int, float)) and not isinstance(value, bool)
             and math.isfinite(float(value)))
+
+
+def _json_tree_issues(value, path: str) -> list:
+    """Malformed semantic evidence must not be sanitized into harmless state."""
+    issues = []
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if not isinstance(key, str):
+                issues.append(f"malformed_required_evidence:{path}.key")
+                continue
+            issues.extend(_json_tree_issues(child, f"{path}.{key}"))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            issues.extend(_json_tree_issues(child, f"{path}[{index}]"))
+    elif isinstance(value, float) and not math.isfinite(value):
+        issues.append(f"malformed_required_evidence:{path}")
+    elif value is not None and not isinstance(value, (str, int, float, bool)):
+        issues.append(f"malformed_required_evidence:{path}")
+    return issues
+
+
+def _semantic_shape_issues(snapshot: dict, brain_input: dict) -> list:
+    """Validate raw shapes that the projection's tolerant adapters consume.
+
+    `_dict`/`_list` remain useful for a non-raising projection, but their empty
+    fallbacks may never become evidence that nothing changed. Optional absence
+    stays legal; a present value of the wrong shape is uncertainty and WAKE.
+    """
+    issues = []
+
+    def mapping(parent, key, path, *, required=False, allow_none=False):
+        value = parent.get(key) if isinstance(parent, dict) else None
+        if value is None and allow_none:
+            return None
+        if not isinstance(value, dict):
+            if required or (isinstance(parent, dict) and key in parent):
+                issues.append(f"malformed_required_evidence:{path}")
+            return None
+        return value
+
+    def rows(parent, key, path, *, required=False):
+        value = parent.get(key) if isinstance(parent, dict) else None
+        if not isinstance(value, list):
+            if required or (isinstance(parent, dict) and key in parent):
+                issues.append(f"malformed_required_evidence:{path}")
+            return None
+        if any(not isinstance(row, dict) for row in value):
+            issues.append(f"malformed_required_evidence:{path}")
+        return value
+
+    market = mapping(brain_input, "market", "brain_input.market", required=True)
+    mapping(snapshot, "execution_price", "execution_price")
+    if market is not None:
+        mapping(market, "execution_price", "brain_input.market.execution_price",
+                required=False)
+    delivery = mapping(brain_input, "delivery", "brain_input.delivery",
+                       required=True)
+    if delivery is not None:
+        mapping(delivery, "session_po3", "brain_input.delivery.session_po3",
+                allow_none=True)
+
+    po3 = mapping(snapshot, "session_po3", "session_po3", required=True)
+    if po3 is not None:
+        mapping(po3, "manipulation", "session_po3.manipulation", allow_none=True)
+        if ("preferred_playbook_families" in po3
+                and not isinstance(po3.get("preferred_playbook_families"), list)):
+            issues.append(
+                "malformed_required_evidence:session_po3.preferred_playbook_families")
+
+    mapping(snapshot, "setup_lifecycle", "setup_lifecycle", required=True)
+    active_path = mapping(snapshot, "active_path_state", "active_path_state",
+                          required=True)
+    if active_path is not None:
+        for key in ("origin", "load_bearing_structure", "progression",
+                    "transfer_evidence", "last_invalidated"):
+            mapping(active_path, key, f"active_path_state.{key}", allow_none=True)
+
+    shown_path = mapping(brain_input, "active_path_state",
+                         "brain_input.active_path_state", allow_none=True)
+    if shown_path is not None:
+        for key in ("origin", "load_bearing_structure", "progression",
+                    "transfer_evidence", "last_invalidated"):
+            mapping(shown_path, key, f"brain_input.active_path_state.{key}",
+                    allow_none=True)
+
+    liquidity = mapping(snapshot, "liquidity", "liquidity", required=True)
+    if liquidity is not None and any(not isinstance(row, dict)
+                                     for row in liquidity.values()):
+        issues.append("malformed_required_evidence:liquidity.detector")
+    shown_liquidity = mapping(brain_input, "liquidity",
+                              "brain_input.liquidity", required=True)
+    if shown_liquidity is not None:
+        mapping(shown_liquidity, "active_draw", "brain_input.liquidity.active_draw",
+                allow_none=True)
+        rows(shown_liquidity, "events", "brain_input.liquidity.events")
+    rows(brain_input, "liquidity_events", "brain_input.liquidity_events",
+         required=True)
+
+    for root, label in ((snapshot, "protected_swings"),
+                        (brain_input, "brain_input.protected_swings")):
+        swings = mapping(root, "protected_swings", label, required=True)
+        if swings is None:
+            continue
+        by_tf = mapping(swings, "by_timeframe", f"{label}.by_timeframe",
+                        required=True)
+        if by_tf is not None:
+            for side in ("highs", "lows"):
+                registry = mapping(by_tf, side, f"{label}.by_timeframe.{side}",
+                                   required=True)
+                if registry is not None and any(not isinstance(row, dict)
+                                                for row in registry.values()):
+                    issues.append(
+                        f"malformed_required_evidence:{label}.by_timeframe.{side}.row")
+        for key in ("protected_high", "protected_low", "ordinal_sequence",
+                    "roles"):
+            mapping(swings, key, f"{label}.{key}", allow_none=True)
+
+    rows(snapshot, "structure_flips", "structure_flips", required=True)
+    rows(brain_input, "structure_flips", "brain_input.structure_flips",
+         required=True)
+
+    for root, key, label in (
+            (snapshot, "mtf_market_state", "mtf_market_state"),
+            (brain_input, "MTF_MARKET_STATE", "brain_input.MTF_MARKET_STATE")):
+        mtf = mapping(root, key, label, required=True)
+        if mtf is None:
+            continue
+        mapping(mtf, "synthesis", f"{label}.synthesis", required=True)
+        timeframes = mapping(mtf, "timeframes", f"{label}.timeframes",
+                             required=True)
+        if timeframes is not None:
+            for tf, facts in timeframes.items():
+                if not isinstance(facts, dict):
+                    issues.append(f"malformed_required_evidence:{label}.timeframes.{tf}")
+                    continue
+                for lane in ("confirmed", "realtime"):
+                    mapping(facts, lane, f"{label}.timeframes.{tf}.{lane}",
+                            allow_none=True)
+        synthesis = mtf.get("synthesis")
+        if isinstance(synthesis, dict):
+            for list_key in ("timeframes_stating_something", "conflicts"):
+                if (list_key in synthesis
+                        and not isinstance(synthesis.get(list_key), list)):
+                    issues.append(
+                        f"malformed_required_evidence:{label}.synthesis.{list_key}")
+
+    qualification = mapping(snapshot, "qualification", "qualification",
+                            required=True)
+    if (qualification is not None and "authorized_playbooks" in qualification
+            and not isinstance(qualification.get("authorized_playbooks"), list)):
+        issues.append("malformed_required_evidence:qualification.authorized_playbooks")
+    mapping(snapshot, "market_regime", "market_regime", required=True)
+    toolbox = mapping(snapshot, "toolbox", "toolbox", required=True)
+    if toolbox is not None:
+        for key in ("tool_candidates", "tool_instances"):
+            if key in toolbox:
+                rows(toolbox, key, f"toolbox.{key}")
+
+    for key in ("authorized_tool_catalog", "authorized_objectives",
+                "authorized_invalidations"):
+        rows(brain_input, key, key, required=True)
+
+    memory = mapping(brain_input, "memory_retrieval",
+                     "brain_input.memory_retrieval", allow_none=True)
+    if memory is not None:
+        rows(memory, "analogs", "brain_input.memory_retrieval.analogs")
+
+    semantic_roots = [
+        (snapshot.get(key), key) for key in (
+            "session_po3", "setup_lifecycle", "active_path_state", "liquidity",
+            "protected_swings", "structure_flips", "mtf_market_state",
+            "qualification", "market_regime", "toolbox")
+    ] + [
+        (brain_input.get(key), f"brain_input.{key}") for key in (
+            "market", "delivery", "liquidity", "liquidity_events",
+            "protected_swings", "active_path_state", "structure_flips",
+            "MTF_MARKET_STATE", "authorized_tool_catalog",
+            "authorized_objectives", "authorized_invalidations",
+            "memory_retrieval") if key in brain_input
+    ]
+    for value, path in semantic_roots:
+        issues.extend(_json_tree_issues(value, path))
+    return issues
+
+
+def _wake_event_evidence(value, *, now) -> dict:
+    """Validate a one-shot actionable interaction without granting trade authority."""
+    out = {"present": value is not None, "valid": False, "event_id": None,
+           "observed_at": None, "reasons": [], "issues": [], "event": None}
+    if value is None:
+        return out
+    if not isinstance(value, dict):
+        out["issues"].append("malformed_actionable_wake_event")
+        return out
+    out["event"] = dict(value)
+    out["issues"].extend(_json_tree_issues(value, "wake_event"))
+    if value.get("error"):
+        out["issues"].append("malformed_actionable_wake_event:source_error")
+    if value.get("schema") != WAKE_EVENT_SCHEMA:
+        out["issues"].append("malformed_actionable_wake_event:schema")
+    if value.get("source") != WAKE_EVENT_SOURCE:
+        out["issues"].append("malformed_actionable_wake_event:source")
+    event_id = value.get("event_id")
+    if not isinstance(event_id, str) or not event_id.strip():
+        out["issues"].append("malformed_actionable_wake_event:event_id")
+    else:
+        out["event_id"] = event_id.strip()
+    if value.get("actionable") is not True:
+        out["issues"].append("malformed_actionable_wake_event:actionable")
+    rows = value.get("events")
+    if not isinstance(rows, list) or not rows:
+        out["issues"].append("malformed_actionable_wake_event:events")
+        rows = []
+    for row in rows:
+        if not isinstance(row, dict):
+            out["issues"].append("malformed_actionable_wake_event:event")
+            continue
+        occurrence = row.get("occurrence_id")
+        reason = row.get("reason")
+        if not isinstance(occurrence, str) or not occurrence.strip():
+            out["issues"].append(
+                "malformed_actionable_wake_event:occurrence_id")
+        if reason not in ACTIONABLE_WAKE_REASONS:
+            out["issues"].append("malformed_actionable_wake_event:reason")
+        if (isinstance(occurrence, str) and occurrence.strip()
+                and reason in ACTIONABLE_WAKE_REASONS):
+            out["reasons"].append(
+                f"actionable_mechanical_event:{reason}:{occurrence.strip()}")
+    event_stamp = _aware_datetime(value.get("observed_at"))
+    observation_stamp = _aware_datetime(now)
+    if event_stamp is None:
+        out["issues"].append("malformed_actionable_wake_event:observed_at")
+    elif observation_stamp is not None and event_stamp > observation_stamp:
+        out["issues"].append("actionable_wake_event_after_observation")
+    else:
+        out["observed_at"] = event_stamp
+    out["issues"] = sorted(set(out["issues"]))
+    out["reasons"] = list(dict.fromkeys(out["reasons"]))
+    out["valid"] = not out["issues"]
+    return out
 
 
 def _dict(value) -> dict:
@@ -355,6 +599,7 @@ def evidence_issues(*, snapshot, brain_input, session_id, contract_id, scan,
         return ["malformed_required_evidence:snapshot"]
     if not isinstance(brain_input, dict):
         return ["malformed_required_evidence:brain_input"]
+    issues.extend(_semantic_shape_issues(snapshot, brain_input))
     if not isinstance(session_id, str) or not session_id.strip():
         issues.append("missing_required_identity:session_id")
     if not isinstance(contract_id, str) or not contract_id.strip():
@@ -398,10 +643,14 @@ def evidence_issues(*, snapshot, brain_input, session_id, contract_id, scan,
             issues.append("executable_quote_unavailable")
         if quote.get("fresh") is not True:
             issues.append("executable_quote_stale")
-        if not _finite_number(quote.get("best_bid")):
+        bid = quote.get("best_bid")
+        ask = quote.get("best_ask")
+        if not _finite_number(bid):
             issues.append("malformed_required_evidence:best_bid")
-        if not _finite_number(quote.get("best_ask")):
+        if not _finite_number(ask):
             issues.append("malformed_required_evidence:best_ask")
+        if _finite_number(bid) and _finite_number(ask) and float(bid) > float(ask):
+            issues.append("incoherent_executable_quote:crossed")
 
     required_dicts = (
         "session_po3", "setup_lifecycle", "active_path_state", "liquidity",
@@ -502,10 +751,22 @@ class BrainWakeController:
         self._last_provider_at = None
         self._last_provider_scan = None
         self._force_wake_reason = None
+        self._seen_wake_event_ids = set()
+        self._wake_event_order = []
         self._lock = threading.Lock()
 
+    def _remember_wake_event(self, event_id: str) -> None:
+        if not event_id or event_id in self._seen_wake_event_ids:
+            return
+        self._seen_wake_event_ids.add(event_id)
+        self._wake_event_order.append(event_id)
+        if len(self._wake_event_order) > 1024:
+            oldest = self._wake_event_order.pop(0)
+            self._seen_wake_event_ids.discard(oldest)
+
     def observe(self, *, snapshot, brain_input, session_id, contract_id, scan,
-                now, pipeline_mode="non_ecu", catalogs_ok=True) -> dict:
+                now, pipeline_mode="non_ecu", catalogs_ok=True,
+                wake_event=None) -> dict:
         """Return WAKE/HOLD.  It never intentionally raises."""
         with self._lock:
             mode = configured_mode(self.mode_override)
@@ -523,6 +784,7 @@ class BrainWakeController:
                     session_id=session_id, contract_id=contract_id, scan=scan,
                     now=now, pipeline_mode=pipeline_mode,
                     catalogs_ok=catalogs_ok)
+                event_evidence = _wake_event_evidence(wake_event, now=now)
             except Exception as exc:  # noqa: BLE001 -- uncertainty wakes cognition
                 self._previous = None
                 return fail_open_decision(
@@ -534,6 +796,17 @@ class BrainWakeController:
             reasons = []
             changed = []
             identity = (session_id, contract_id)
+            event_id = event_evidence.get("event_id")
+            event_duplicate = bool(event_evidence.get("valid") and event_id
+                                   and event_id in self._seen_wake_event_ids)
+            if (event_evidence.get("valid") and not event_duplicate and prior
+                    and event_evidence.get("observed_at") <= prior["when"]):
+                event_evidence["valid"] = False
+                event_evidence["issues"].append("stale_actionable_wake_event")
+            if event_evidence.get("present") and not event_duplicate:
+                issues.extend(event_evidence.get("issues") or [])
+            if event_id:
+                self._remember_wake_event(event_id)
             seconds_scheduled = (None if stamp is None or self._last_scheduled_at is None
                                  else max(0.0, (stamp - self._last_scheduled_at).total_seconds()))
             seconds_provider = (None if stamp is None or self._last_provider_at is None
@@ -569,6 +842,9 @@ class BrainWakeController:
 
             if self._force_wake_reason:
                 reasons.append(self._force_wake_reason)
+            if (mode != OFF and event_evidence.get("valid")
+                    and not event_duplicate):
+                reasons.extend(event_evidence.get("reasons") or [])
             if (not reasons and max_silence is not None
                     and seconds_scheduled is not None
                     and seconds_scheduled >= max_silence):
@@ -595,7 +871,8 @@ class BrainWakeController:
             if decision == WAKE:
                 if "maximum_silence_elapsed" in reasons:
                     wake_kind = "maximum_silence"
-                elif changed:
+                elif changed or (event_evidence.get("valid")
+                                 and not event_duplicate):
                     wake_kind = "event"
                 elif issues or self._force_wake_reason:
                     wake_kind = "safety"
@@ -625,6 +902,8 @@ class BrainWakeController:
                 "actually_suppressed": suppressed,
                 "wake_kind": wake_kind,
                 "max_silence_seconds": max_silence,
+                "wake_event": event_evidence.get("event"),
+                "wake_event_duplicate": event_duplicate,
                 "evidence_integrity": {"ok": not issues,
                                        "issues": sorted(set(issues))},
             }
@@ -689,7 +968,8 @@ def write_telemetry(decision: dict, *, primary_provider_request: bool,
             "seconds_since_last_provider_call", "last_brain_scan",
             "last_scheduled_wake_scan", "last_provider_call_scan",
             "would_suppress", "provider_call_suppressed", "actually_suppressed",
-            "max_silence_seconds", "evidence_integrity",
+            "max_silence_seconds", "wake_event", "wake_event_duplicate",
+            "evidence_integrity",
         )
     }
     record["primary_provider_request"] = bool(primary_provider_request)

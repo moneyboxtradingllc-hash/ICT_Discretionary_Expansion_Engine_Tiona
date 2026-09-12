@@ -64,16 +64,24 @@ _log = logging.getLogger(__name__)
 # (`lambda bi, repair=None`) and, worse, would make the accounting change the
 # call contract. They ride here instead: set once per scan, read at call time.
 _CALL_CONTEXT = {"session_id": "", "contract_id": "", "scan": None,
-                 "attempt": 1, "observed_at": None}
+                 "attempt": 1, "observed_at": None, "wake_event": None}
 
 
 def set_call_context(*, session_id: str = "", scan: object = None,
                      attempt: int = 1, contract_id: str = "",
-                     observed_at=None) -> None:
+                     observed_at=None, wake_event=None) -> None:
     _CALL_CONTEXT.update({"session_id": session_id or "",
                           "contract_id": contract_id or "", "scan": scan,
                           "attempt": int(attempt),
-                          "observed_at": observed_at})
+                          "observed_at": observed_at,
+                          "wake_event": wake_event})
+
+
+def _claim_wake_event_context():
+    """Claim this scan's launcher event exactly once at the Brain boundary."""
+    direct = _CALL_CONTEXT.get("wake_event")
+    _CALL_CONTEXT["wake_event"] = None
+    return direct
 
 
 def _purpose_for(repair) -> str:
@@ -725,6 +733,7 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
         wake_controller = None
         wake_decision = None
         wake_telemetry = None
+        wake_event = _claim_wake_event_context() if _llm_enabled() else None
         if _llm_enabled():
             try:
                 from ai_brain import wake_controller as wake_api
@@ -737,8 +746,7 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
                     contract_id = str(_CALL_CONTEXT.get("contract_id")
                                       or snapshot.get("contract_id") or "")
                     scan = _CALL_CONTEXT.get("scan")
-                    observed_at = (_CALL_CONTEXT.get("observed_at")
-                                   or snapshot.get("timestamp"))
+                    observed_at = _CALL_CONTEXT.get("observed_at")
                     wake_controller = wake_api.controller_for(
                         session_id=session_id, contract_id=contract_id,
                         pipeline_mode=pipeline_mode)
@@ -747,7 +755,8 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
                         session_id=session_id, contract_id=contract_id,
                         scan=scan, now=observed_at,
                         pipeline_mode=pipeline_mode,
-                        catalogs_ok=catalogs_ok)
+                        catalogs_ok=catalogs_ok,
+                        wake_event=wake_event)
                     if not isinstance(wake_decision, dict) or \
                             wake_decision.get("decision") not in (
                                 wake_api.WAKE, wake_api.HOLD):
@@ -762,8 +771,7 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
                         contract_id=str(_CALL_CONTEXT.get("contract_id")
                                         or snapshot.get("contract_id") or ""),
                         scan=_CALL_CONTEXT.get("scan"),
-                        now=(_CALL_CONTEXT.get("observed_at")
-                             or snapshot.get("timestamp")))
+                        now=_CALL_CONTEXT.get("observed_at"))
                     wake_controller = None
 
         if (wake_api is not None and wake_decision is not None
