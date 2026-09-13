@@ -420,16 +420,25 @@ class TestProvenanceIsDerivedNotAsserted:
 
 class TestOutOfScope:
 
-    def test_the_extended_stop_lane_stays_starved(self):
-        """`luna_candidate_producer` still does not populate
-        extras["volatility_state"], so the extended lane remains unreachable.
-        2E.3 deliberately did NOT wire it -- that is a separate decision, and
-        one key accidentally absent is not a safety mechanism. Pinned so the
-        starvation stays visible instead of being mistaken for design."""
-        from broker import luna_candidate_producer as LP
-        src = inspect.getsource(LP)
-        assert '"volatility_state"' not in src
-        assert '"volatility_evidence"' not in src
+    def test_malformed_structural_identity_cannot_grant_extended_lane(self):
+        """A truthy value is not necessarily a verified structural identity."""
+        for malformed in (True, 1, ["INV_A"], {"id": "INV_A"}, object()):
+            ok, why = extended_volatility_supported({
+                "volatility_state": "elevated",
+                "expansion_state": "expanding",
+                "structural_level_identity": malformed,
+            })
+            assert ok is False
+            assert "malformed" in why
+
+    def test_malformed_state_cannot_grant_extended_lane(self):
+        for malformed in (True, ["elevated"], {"state": "elevated"}, object()):
+            ok, why = extended_volatility_supported({
+                "volatility_state": malformed,
+                "structural_level_identity": "INV_A",
+            })
+            assert ok is False
+            assert "malformed" in why
 
     def test_toolbox_zone_witness_survived_2f(self):
         """SUPERSEDED BY 2F (2026-08-12). This guarded that 2E.3 had not touched

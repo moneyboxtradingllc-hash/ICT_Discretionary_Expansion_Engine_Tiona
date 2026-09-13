@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -198,6 +199,43 @@ def _digest(obj) -> str:
     """Order-independent digest. Dict insertion order must not change identity."""
     return hashlib.sha256(
         json.dumps(obj, sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+
+def _finite_price(value):
+    """Return a real finite price, or None without coercing bool to 0/1."""
+    if isinstance(value, bool):
+        return None
+    try:
+        price = float(value)
+    except (TypeError, ValueError):
+        return None
+    return price if math.isfinite(price) else None
+
+
+def _volatility_evidence(*, brain_input: dict,
+                         invalidation: StructuralInvalidation,
+                         snapshot_id: str,
+                         market_data_timestamp: str) -> dict:
+    """Bind canonical mechanical state to this candidate for risk review.
+
+    This is transport, not permission. `extended_volatility_supported` still
+    decides whether the state and named structure earn the extended stop lane.
+    """
+    market = (brain_input or {}).get("market")
+    market = market if isinstance(market, dict) else {}
+    return {
+        "schema": "candidate.volatility_evidence.v1",
+        "source": "brain_input.market",
+        "snapshot_id": str(snapshot_id or ""),
+        "market_data_timestamp": str(market_data_timestamp or ""),
+        "brain_input_timestamp": str((brain_input or {}).get("timestamp") or ""),
+        "volatility_state": market.get("volatility_state"),
+        "volatility_state_temporal_class":
+            market.get("volatility_state_temporal_class"),
+        "expansion_state": market.get("expansion_state"),
+        "structural_level_identity": invalidation.structure_identity,
+        "structural_level_source": invalidation.evidence_source,
+    }
 
 
 def _norm(text) -> str:
@@ -1331,6 +1369,15 @@ class CandidateProducer:
                 "settled_price_basis": (brain_input.get("market") or {}
                                         ).get("settled_price_basis"),
                 "structural_invalidation": invalidation.evidence(),
+                # Transport the composed mechanical authority the Brain saw;
+                # do not reclassify volatility here. Risk remains the sole
+                # owner of the >35-point exception, and the structure identity
+                # is the exact catalog object resolved above.
+                "volatility_evidence": _volatility_evidence(
+                    brain_input=brain_input,
+                    invalidation=invalidation,
+                    snapshot_id=snapshot_id,
+                    market_data_timestamp=market_data_timestamp),
                 "liquidity_objective": self._objective_evidence(objective, parsed),
                 "expected_reward_to_risk": round(rr, 3),
                 "source": "live_llm",
@@ -1815,11 +1862,10 @@ class CandidateProducer:
                               "entry proposed without invalidation_id")
         if self.allow_numeric_invalidation_fallback and not selected_id:
             raw = parsed.get("invalidation_level")
-            try:
-                price = float(raw)
-            except (TypeError, ValueError):
+            price = _finite_price(raw)
+            if price is None:
                 raise NoCandidate("invalidation_missing",
-                                  "a directional thesis must name a numeric invalidation") from None
+                                  "a directional thesis must name a finite numeric invalidation")
             tick = float(getattr(self.contract, "tick_size", 0) or 0)
             if tick > 0 and abs(price / tick - round(price / tick)) > 1e-6:
                 raise NoCandidate("invalidation_off_tick", f"{price} is not on the {tick} grid")
@@ -1845,16 +1891,20 @@ class CandidateProducer:
             raise NoCandidate("invalidation_id_ambiguous",
                               f"invalidation_id {selected_id!r} matched {len(matches)} catalog rows")
         row = matches[0]
-        try:
-            price = float(row.get("price"))
-        except (TypeError, ValueError):
+        price = _finite_price(row.get("price"))
+        if price is None:
             raise NoCandidate("invalidation_invalid",
-                              f"authorized invalidation {selected_id!r} has no numeric price") from None
-        try:
-            brain_level = float(parsed.get("invalidation_level"))
-        except (TypeError, ValueError):
-            raise NoCandidate("invalidation_missing",
-                              "a directional thesis must name a numeric invalidation") from None
+                              f"authorized invalidation {selected_id!r} has no finite numeric price")
+        raw_brain_level = parsed.get("invalidation_level")
+        brain_level = _finite_price(raw_brain_level)
+        if brain_level is None:
+            if raw_brain_level is None:
+                raise NoCandidate(
+                    "invalidation_missing",
+                    "a directional thesis must name a finite numeric invalidation")
+            raise NoCandidate(
+                "invalidation_invalid",
+                "the Brain invalidation_level must be a real finite number")
         tick = float(getattr(self.contract, "tick_size", 0) or 0)
         if tick > 0 and abs((brain_level - price) / tick) > 1e-6:
             raise NoCandidate("invalidation_level_mismatch",

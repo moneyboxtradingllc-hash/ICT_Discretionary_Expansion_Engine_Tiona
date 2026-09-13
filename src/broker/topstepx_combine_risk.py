@@ -179,12 +179,21 @@ def extended_volatility_supported(evidence: dict) -> tuple:
     volatility itself. A generally busy market is not a licence for every setup
     to use the ceiling: the specific structure must need the width.
     """
-    e = evidence or {}
-    vol = str(e.get("volatility_state") or "").lower()
-    expansion = str(e.get("expansion_state") or "").lower()
+    if not isinstance(evidence, dict):
+        return False, "volatility evidence is not a canonical mapping"
+    e = evidence
+    raw_vol = e.get("volatility_state")
+    raw_expansion = e.get("expansion_state")
+    raw_structure = e.get("structural_level_identity")
+    if ((raw_vol is not None and not isinstance(raw_vol, str))
+            or (raw_expansion is not None and not isinstance(raw_expansion, str))
+            or not isinstance(raw_structure, str)):
+        return False, "volatility or structural evidence is malformed"
+    vol = (raw_vol or "").strip().lower()
+    expansion = (raw_expansion or "").strip().lower()
     elevated = vol in ("expansion", "elevated", "high", "expanding")
     expanding = expansion in ("expanding", "expansion", "mature_expansion")
-    structural = bool(e.get("structural_level_identity"))
+    structural = bool(raw_structure.strip())
     if not (elevated or expanding):
         return False, ("current volatility state does not support a stop beyond the "
                        f"{PREFERRED_MAX_STOP_POINTS:g}-point preferred range")

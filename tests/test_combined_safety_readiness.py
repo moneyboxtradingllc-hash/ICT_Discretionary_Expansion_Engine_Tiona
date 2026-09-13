@@ -557,8 +557,9 @@ class TestStrategyUntouched:
         # retains the session/scan identity already supplied to shadow
         # accounting. The resulting maintenance contract was
         # brain:595d0db2043dcb3b. The event-driven Brain wake boundary on this
-        # feature branch produces a new fingerprint; that does not migrate any
-        # historical authorization record.
+        # feature branch produces a new fingerprint. Structural-risk evidence
+        # transport and finite invalidation coherence rotate it again; neither
+        # rotation migrates any historical authorization record.
         #
         # Only CRLF -> LF is canonicalized; all other bytes remain bound.
         # See docs/REPOSITORY_CERTIFICATION_20260910.md for the exact closure,
@@ -568,7 +569,7 @@ class TestStrategyUntouched:
         # inherits no account, credentials, authorization or operational
         # certification from upstream.
         from ai_brain.production_model import brain_contract_fingerprint
-        assert brain_contract_fingerprint() == "brain:1ff74ffd7cf676bf"
+        assert brain_contract_fingerprint() == "brain:99d5a62680fb9061"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.

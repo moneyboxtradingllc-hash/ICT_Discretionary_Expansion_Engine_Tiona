@@ -186,15 +186,25 @@ class ProductionSession:
         effective_max_risk = (
             PRODUCTION_MAX_RISK_USD if max_risk_usd is None
             else min(float(PRODUCTION_MAX_RISK_USD), float(max_risk_usd)))
+        extras = candidate.extras or {}
+        # A present canonical block owns this handoff even when malformed. Do
+        # not let `{}` or another falsey corrupt value fall through to legacy
+        # top-level fields and accidentally earn the extended lane. Candidates
+        # that genuinely predate the block retain the explicit legacy shape.
+        if "volatility_evidence" in extras:
+            volatility_evidence = extras.get("volatility_evidence")
+        else:
+            volatility_evidence = {
+                "volatility_state": extras.get("volatility_state", ""),
+                "expansion_state": extras.get("expansion_state", ""),
+                "structural_level_identity": extras.get(
+                    "structural_invalidation", {}).get("structure_identity", ""),
+            }
         sized = build_production_bracket(
             direction=candidate.direction, entry_price=candidate.entry_price,
             invalidation_level=candidate.invalidation_price,
             target_price=candidate.objective.price, contract=self.contract,
-            evidence=(candidate.extras or {}).get("volatility_evidence")
-            or {"volatility_state": (candidate.extras or {}).get("volatility_state", ""),
-                "expansion_state": (candidate.extras or {}).get("expansion_state", ""),
-                "structural_level_identity": (candidate.extras or {})
-                .get("structural_invalidation", {}).get("structure_identity", "")},
+            evidence=volatility_evidence,
             max_risk_usd=effective_max_risk,
             max_contracts=PRODUCTION_MAX_CONTRACTS,
             min_reward_to_risk=MIN_REWARD_TO_RISK)

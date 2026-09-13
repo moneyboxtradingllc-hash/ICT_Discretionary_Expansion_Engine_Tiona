@@ -457,16 +457,17 @@ class TestLegacySummaryHasNoExecutionAuthority:
         assert len(new) == 3
         assert {c["role"] for c in new} == {"context", "transition", "execution"}
 
-    def test_the_stop_price_comes_from_terra_not_from_the_summary(self):
-        """`_invalidation` reads parsed['invalidation_level']; the legacy field
-        only builds the evidence LABEL."""
+    def test_the_stop_price_comes_from_catalog_not_from_the_summary(self):
+        """The selected catalog row owns price; Terra's number is coherence."""
         src = open(os.path.join(ROOT, "src", "broker",
                                 "luna_candidate_producer.py"),
                    encoding="utf-8").read()
         body = src[src.index("def _invalidation(self,"):
                    src.index("def _objective_selected(")]
-        assert 'raw = parsed.get("invalidation_level")' in body
-        assert "price = float(raw)" in body
+        assert 'price = _finite_price(row.get("price"))' in body
+        assert 'raw_brain_level = parsed.get("invalidation_level")' in body
+        assert "brain_level = _finite_price(raw_brain_level)" in body
+        assert "invalidation_level_mismatch" in body
         # the summary appears only inside the identity/evidence strings
         for line in body.splitlines():
             if "protected_high" in line or "protected_low" in line:

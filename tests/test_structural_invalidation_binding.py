@@ -19,7 +19,8 @@ def catalog(*rows):
 
 
 def make(monkeypatch, *, selected="INV_A", level=29330.0, rows=None,
-         direction="bullish", price=29380.0, legacy=True):
+         direction="bullish", price=29380.0, legacy=True,
+         volatility_state=None, expansion_state=None):
     monkeypatch.setattr(producer_module, "authorized_invalidation_catalog",
                         lambda *_args: list(rows if rows is not None else
                                             catalog(("INV_A", 29330.0),
@@ -29,10 +30,18 @@ def make(monkeypatch, *, selected="INV_A", level=29330.0, rows=None,
                          sell_side=(price - 100 if direction == "bearish" else None),
                          prot_low=(29330.0 if direction == "bullish" else None),
                          prot_high=(29400.0 if direction == "bearish" else None))
+    bi["market"].update({
+        "volatility_state": volatility_state,
+        "volatility_state_temporal_class": "authority_settled_baseline",
+        "expansion_state": expansion_state,
+    })
     parsed = LCP.parsed(narrative_direction=direction,
                         active_draw=("buy side liquidity above" if direction == "bullish"
                                      else "sell side liquidity below"),
-                        invalidation_id=selected, invalidation_level=level)
+                        invalidation_id=selected, invalidation_level=level,
+                        objective_id=(None if legacy else
+                                      "OBJ_LIQ_BSL_1" if direction == "bullish"
+                                      else "OBJ_LIQ_SSL_1"))
     return LCP.produce(p=LCP.producer() if legacy else
                        producer_module.CandidateProducer(account_fingerprint=LCP.FP,
                                                          contract=LCP.MNQ),
@@ -110,3 +119,131 @@ def test_quantity_scales_after_stop_is_fixed_and_never_rewrites_it():
     assert far["sizing"]["contracts"] < near["sizing"]["contracts"]
     assert far["geometry"].stop_price == 29950.0
     assert far["geometry"].stop_price != 29990.0
+
+
+def test_candidate_transports_same_scan_mechanical_risk_evidence(monkeypatch):
+    candidate = make(monkeypatch, volatility_state="elevated",
+                     expansion_state="expanding", legacy=False)
+    evidence = candidate.extras["volatility_evidence"]
+    assert evidence == {
+        "schema": "candidate.volatility_evidence.v1",
+        "source": "brain_input.market",
+        "snapshot_id": "snap-1",
+        "market_data_timestamp": "2026-08-05T15:29:30+00:00",
+        "brain_input_timestamp": "2026-08-05T15:29:00+00:00",
+        "volatility_state": "elevated",
+        "volatility_state_temporal_class": "authority_settled_baseline",
+        "expansion_state": "expanding",
+        "structural_level_identity": "INV_A",
+        "structural_level_source": "test.catalog",
+    }
+
+
+@pytest.mark.parametrize("claim", [float("nan"), float("inf"),
+                                    float("-inf"), True, object(), "not-a-price"])
+def test_non_real_brain_invalidation_claim_refuses(monkeypatch, claim):
+    with pytest.raises(NoCandidate) as exc:
+        make(monkeypatch, level=claim, legacy=False)
+    assert exc.value.reason == "invalidation_invalid"
+
+
+@pytest.mark.parametrize("catalog_price", [float("nan"), float("inf"),
+                                            float("-inf"), True, object()])
+def test_non_real_catalog_price_refuses(monkeypatch, catalog_price):
+    with pytest.raises(NoCandidate) as exc:
+        make(monkeypatch, level=29330.0,
+             rows=catalog(("INV_A", catalog_price)), legacy=False)
+    assert exc.value.reason == "invalidation_invalid"
+
+
+def test_finite_claim_within_existing_tick_tolerance_is_accepted(monkeypatch):
+    candidate = make(monkeypatch, level=29330.0 + 1e-8, legacy=False)
+    assert candidate.invalidation_price == 29330.0
+
+
+def test_production_candidate_to_risk_wide_stop_contract(monkeypatch, tmp_path):
+    import test_production_caller as production
+
+    quantities = []
+    for stop_points in (20.0, 36.0, 40.0, 50.0):
+        entry = 30000.0
+        stop = entry - stop_points
+        candidate = make(
+            monkeypatch, selected="INV_WIDE", level=stop,
+            rows=catalog(("INV_WIDE", stop)), price=entry, legacy=False,
+            volatility_state=("elevated" if stop_points > 35.0 else "stable"),
+            expansion_state="compression")
+        session, _, _ = production.make(tmp_path / str(stop_points))
+        runner = session.build_runner(candidate)
+        quantities.append(runner.geometry.size)
+        assert runner.geometry.stop_price == stop
+        assert runner.geometry.stop_points == stop_points
+        assert runner.geometry.size <= 15
+        assert runner.geometry.risk_usd <= 350.0
+
+    assert quantities == sorted(quantities, reverse=True)
+    assert quantities[0] > quantities[-1]
+
+
+def test_extended_stop_without_volatility_justification_refuses(monkeypatch, tmp_path):
+    import test_production_caller as production
+    from broker.topstepx_combine_risk import RiskRejection
+
+    candidate = make(monkeypatch, selected="INV_WIDE", level=29960.0,
+                     rows=catalog(("INV_WIDE", 29960.0)), price=30000.0,
+                     legacy=False, volatility_state="stable",
+                     expansion_state="compression")
+    session, _, _ = production.make(tmp_path)
+    with pytest.raises(RiskRejection, match="extended_volatility_unsupported"):
+        session.build_runner(candidate)
+
+
+def test_extended_stop_without_verified_structural_identity_refuses(
+        monkeypatch, tmp_path):
+    import test_production_caller as production
+    from broker.topstepx_combine_risk import RiskRejection
+
+    candidate = make(monkeypatch, selected="INV_WIDE", level=29960.0,
+                     rows=catalog(("INV_WIDE", 29960.0)), price=30000.0,
+                     legacy=False, volatility_state="elevated")
+    candidate.extras["volatility_evidence"]["structural_level_identity"] = ""
+    session, _, _ = production.make(tmp_path)
+    with pytest.raises(RiskRejection, match="extended_volatility_unsupported"):
+        session.build_runner(candidate)
+
+
+def test_present_malformed_canonical_evidence_cannot_fall_back(monkeypatch, tmp_path):
+    import test_production_caller as production
+    from broker.topstepx_combine_risk import RiskRejection
+
+    candidate = make(monkeypatch, selected="INV_WIDE", level=29960.0,
+                     rows=catalog(("INV_WIDE", 29960.0)), price=30000.0,
+                     legacy=False, volatility_state="elevated")
+    candidate.extras.update(volatility_evidence={},
+                            volatility_state="elevated",
+                            expansion_state="expanding")
+    session, _, _ = production.make(tmp_path)
+    with pytest.raises(RiskRejection, match="extended_volatility_unsupported"):
+        session.build_runner(candidate)
+
+
+def test_stop_above_absolute_ceiling_refuses_even_with_evidence(monkeypatch, tmp_path):
+    import test_production_caller as production
+    from broker.topstepx_combine_risk import RiskRejection
+
+    candidate = make(monkeypatch, selected="INV_WIDE", level=29949.0,
+                     rows=catalog(("INV_WIDE", 29949.0)), price=30000.0,
+                     legacy=False, volatility_state="elevated",
+                     expansion_state="expanding")
+    session, _, _ = production.make(tmp_path)
+    with pytest.raises(RiskRejection, match="stop_distance_above_cap"):
+        session.build_runner(candidate)
+
+
+def test_wide_stop_with_nan_claim_never_reaches_risk(monkeypatch):
+    with pytest.raises(NoCandidate) as exc:
+        make(monkeypatch, selected="INV_WIDE", level=float("nan"),
+             rows=catalog(("INV_WIDE", 29960.0)), price=30000.0,
+             legacy=False, volatility_state="elevated",
+             expansion_state="expanding")
+    assert exc.value.reason == "invalidation_invalid"
