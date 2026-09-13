@@ -439,8 +439,14 @@ class ProductionLoop:
             # and never the requested entry, which is not a fill.
             try:
                 baseline = BIND.recover(self.mission, mission, self.ps)
-                if self.ps.runner is None:
+                if (self.ps.runner is None
+                        or self.ps.runner.execution_context is None):
                     recovery = self.ps.restore_break_even_management(self.mission, mission)
+                    if recovery["status"] == "establishment_recovered":
+                        # Recovery may have performed the one structural stop
+                        # mutation this pass. Ordinary BE/trailing begins on a
+                        # later tick from fresh venue truth, never back-to-back.
+                        return out("establishment_recovered", recovery=recovery)
                     if recovery["status"] != "restored":
                         return out("identity_unavailable", recovery=recovery)
                 ctx = self.ps.runner.execution_context

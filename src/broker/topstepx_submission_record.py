@@ -90,6 +90,15 @@ FILL_STATES = frozenset({PARTIALLY_FILLED, FILLED})
 OPERATION_ORDER_PLACE = "ORDER_PLACE"
 OPERATION_POSITION_CLOSE = "POSITION_CLOSE"
 
+# Post-fill establishment is a sub-lifecycle of the acknowledged entry.  Its
+# stage is deliberately nested on a full copy of the submission row so the
+# venue-reachability state above remains byte-compatible for existing readers.
+ESTABLISHMENT_AUTHORIZED = "POST_FILL_AUTHORIZED"
+ESTABLISHMENT_REFUSED = "POST_FILL_REFUSED"
+ESTABLISHMENT_STOP_PROVEN = "STRUCTURAL_STOP_PROVEN"
+ESTABLISHMENT_PROTECTION_VERIFIED = "STRUCTURAL_PROTECTION_VERIFIED"
+ESTABLISHMENT_COMPLETE = "STRUCTURAL_BASELINE_ARMED"
+
 
 class SubmissionRecordError(RuntimeError):
     """The durable submission record could not be established."""
@@ -236,6 +245,78 @@ def record_reconciliation(*, store_dir: str, session_id: str, submission: dict,
                    "reconciled_at_utc": _now()})
     _append(ledger_path(store_dir, session_id), closed)
     return closed
+
+
+def record_establishment(*, store_dir: str, session_id: str, submission: dict,
+                         stage: str, evidence: dict) -> dict:
+    """Append and verify one mission-attributed post-fill establishment fact.
+
+    The submission state is preserved: this evidence describes what happened
+    after acknowledgement and must not invent a new answer to whether the venue
+    saw the entry.  Repeating an identical stage is idempotent.  Historical
+    rows are never rewritten.
+    """
+    if not isinstance(submission, dict) or not submission.get("submission_id"):
+        raise SubmissionRecordError("post-fill evidence has no submission identity")
+    if stage not in {
+            ESTABLISHMENT_AUTHORIZED, ESTABLISHMENT_REFUSED,
+            ESTABLISHMENT_STOP_PROVEN, ESTABLISHMENT_PROTECTION_VERIFIED,
+            ESTABLISHMENT_COMPLETE}:
+        raise SubmissionRecordError(f"unknown post-fill establishment stage {stage!r}")
+    if not isinstance(evidence, dict):
+        raise SubmissionRecordError("post-fill establishment evidence must be a mapping")
+
+    current = find_submission(store_dir, session_id, submission["submission_id"])
+    if current is None:
+        raise SubmissionRecordError("submission disappeared before post-fill evidence")
+    prior = current.get("post_fill_establishment") or {}
+    if (prior.get("stage") == stage and prior.get("evidence") == evidence):
+        return current
+    row = dict(current)
+    row["post_fill_establishment"] = {
+        "schema_version": "post_fill_establishment.v1",
+        "stage": stage,
+        "recorded_at_utc": _now(),
+        "evidence": dict(evidence),
+    }
+    _append(ledger_path(store_dir, session_id), row)
+    verify = find_submission(store_dir, session_id, submission["submission_id"])
+    block = (verify or {}).get("post_fill_establishment") or {}
+    if block.get("stage") != stage or block.get("evidence") != evidence:
+        raise SubmissionRecordError(
+            f"could not verify post-fill establishment stage {stage} on disk")
+    return verify
+
+
+def recoverable_entry_submissions(*, store_dir: str, session_id: str,
+                                  account_fingerprint: str,
+                                  contract_id: str) -> list:
+    """Uniquely attributable acknowledged entries available to cold recovery.
+
+    This grants no order mutation.  It only lets startup distinguish a durable
+    bot submission from unexplained account activity; the mission, fills,
+    children and venue prices are re-proven by the recovery owner afterwards.
+    """
+    rows = []
+    for row in latest_by_submission(store_dir, session_id).values():
+        if row.get("operation") != OPERATION_ORDER_PLACE:
+            continue
+        if row.get("state") not in (VENUE_ACKNOWLEDGED, PARTIALLY_FILLED, FILLED):
+            continue
+        if row.get("venue_order_id") is None:
+            continue
+        if str(row.get("account_fingerprint") or "") != str(account_fingerprint or ""):
+            continue
+        if str(row.get("contract_id") or "") != str(contract_id or ""):
+            continue
+        geometry = row.get("geometry")
+        if not isinstance(geometry, dict) or not geometry:
+            continue
+        if (geometry.get("governing_caps_declared") is not True
+                or geometry.get("governing_lane") != "production"):
+            continue
+        rows.append(row)
+    return rows
 
 
 # ── reading it back ───────────────────────────────────────────────────────────

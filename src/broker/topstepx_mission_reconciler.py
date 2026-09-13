@@ -73,6 +73,16 @@ from __future__ import annotations
 from broker import topstepx_mission_state as MS
 from broker import topstepx_order_discovery as DISC
 
+
+def _fill_vwap(fills: list):
+    rows = [row for row in (fills or [])
+            if row.get("price") is not None and int(row.get("size") or 0) > 0]
+    quantity = sum(int(row.get("size") or 0) for row in rows)
+    if quantity <= 0:
+        return None
+    return (sum(float(row["price"]) * int(row["size"]) for row in rows)
+            / quantity)
+
 #: What closed the position. `EXIT_UNCLASSIFIED` is deliberate: we know the
 #: position closed and cannot yet say which leg did it. A guess here would put
 #: a fabricated cause into permanent history.
@@ -384,7 +394,7 @@ class MissionReconciler:
             pos = position_for(positions, self.contract_id)
             step(mission.observe_position_open, MS.POSITION_OPEN,
                  filled_quantity=size,
-                 fill_price=(entry_fills[-1].get("price") if entry_fills
+                 fill_price=(_fill_vwap(entry_fills) if entry_fills
                              else pos.get("avg_price", pos.get("averagePrice"))),
                  protective_order_ids=protective_child_ids(
                      every, entry_order_id=mission.order_id),
@@ -424,8 +434,9 @@ class MissionReconciler:
                         # empty and its exit is `unattributed`. A rung that
                         # cannot carry lineage guarantees the lineage is lost.
                         step(mission.observe_position_open, MS.POSITION_OPEN,
-                             filled_quantity=abs(_int(entry_fills[-1].get("size")) or 1),
-                             fill_price=entry_fills[-1].get("price"),
+                             filled_quantity=sum(abs(_int(row.get("size")) or 0)
+                                                 for row in entry_fills),
+                             fill_price=_fill_vwap(entry_fills),
                              protective_order_ids=protective_child_ids(
                                  every, entry_order_id=mission.order_id),
                              evidence="venue trade history (fill seen only after close)")

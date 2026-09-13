@@ -1072,6 +1072,7 @@ def main(argv=None) -> int:
                            account_fingerprint=os.environ["TOPSTEPX_ACCOUNT_FINGERPRINT"],
                            contract=contract,
                            mission_id=args.mission_id or "READONLY-PROOF",
+                           session_id=args.mission_id or "",
                            store_dir=STORE_DIR, runtime=runtime)
     try:
         lane = ps.open_lane()

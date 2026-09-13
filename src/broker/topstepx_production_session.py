@@ -156,6 +156,15 @@ class ProductionSession:
             return {"lane": "RECOVERY", "context": unresolved.as_dict(),
                     "positions": len(positions), "working_orders": len(orders),
                     "new_entry_permitted": False, "ownership": ownership}
+        if positions:
+            recovery = self._startup_recovery_submission()
+            if recovery is not None:
+                return {"lane": "RECOVERY",
+                        "submission_id": recovery.get("submission_id"),
+                        "mission_id": recovery.get("mission_id"),
+                        "positions": len(positions),
+                        "working_orders": len(orders),
+                        "new_entry_permitted": False, "ownership": ownership}
         if positions or orders:
             raise ProductionLaneRefused(
                 f"account is not flat ({len(positions)} position(s), "
@@ -163,6 +172,44 @@ class ProductionSession:
         return {"lane": "OPEN", "new_entry_permitted": True,
                 "ownership": ownership,
                 "quote_provider": self.quote_provider.describe()}
+
+    def _startup_recovery_submission(self):
+        """Return one durable active-mission entry, or refuse ambiguity.
+
+        This is lane admission only. It grants no mutation: the scan owner later
+        re-proves full fills, child lineage, prices and authorization from venue
+        truth before completing establishment.
+        """
+        from broker import topstepx_mission_state as MS
+        from broker import topstepx_submission_record as SUBREC
+        prefix = f"trade_mission_{self.session_id}_"
+        missions = []
+        try:
+            names = sorted(os.listdir(self.store_dir))
+        except OSError:
+            return None
+        for name in names:
+            if not (name.startswith(prefix) and name.endswith(".json")):
+                continue
+            mission = MS.load(os.path.join(self.store_dir, name))
+            if mission is None or mission.state in MS.TERMINAL_STATES:
+                continue
+            if (str(mission.account_fingerprint) != str(self.account_fingerprint)
+                    or str(mission.contract_id) != str(self.contract.id)):
+                continue
+            missions.append(mission)
+        rows = SUBREC.recoverable_entry_submissions(
+            store_dir=self.store_dir, session_id=self.session_id,
+            account_fingerprint=self.account_fingerprint,
+            contract_id=self.contract.id)
+        joined = [(m, row) for m in missions for row in rows
+                  if str(row.get("mission_id")) == str(m.mission_id)
+                  and str(row.get("venue_order_id")) == str(m.order_id)]
+        if len(joined) > 1:
+            raise ProductionLaneRefused(
+                "ambiguous establishment recovery: more than one active "
+                "mission/submission owns the live position")
+        return joined[0][1] if len(joined) == 1 else None
 
     # ── entry ─────────────────────────────────────────────────────────────────
     def build_runner(self, candidate, *, max_risk_usd: float = None) -> "R.ExecutionRunner":
@@ -246,6 +293,9 @@ class ProductionSession:
                                         or self.mission_id)
         runner.submission_authorization_fingerprint = getattr(
             self, "authorization_fingerprint", "") or ""
+        structural = extras.get("structural_invalidation")
+        runner.submission_structural_invalidation = (
+            dict(structural) if isinstance(structural, dict) else None)
         # MISSION-LIFECYCLE. The venue's order id must reach the durable mission
         # record before the ack is reported upward -- on V13 it reached the
         # flight recorder and stopped there.
@@ -280,6 +330,7 @@ class ProductionSession:
         """
         from broker import break_even_binding as BIND
         from broker import break_even_actuator as ACT
+        from broker import topstepx_submission_record as SUBREC
         try:
             BIND.identity(owner, mission, self)
             runner = self.runner
@@ -332,17 +383,188 @@ class ProductionSession:
             BIND.context(baseline, ctx, runner)
             ctx.path = self.context_path
             ctx.save()
+            recorded = runner._record_establishment(
+                SUBREC.ESTABLISHMENT_COMPLETE,
+                {"mission_id": mission.mission_id,
+                 "entry_order_id": mission.order_id,
+                 "actual_fill_price": vwap,
+                 "actual_quantity": qty,
+                 "structural_stop_price": baseline["original_initial_stop"],
+                 "proven_stop_price": probe["stop"]["stop_price"],
+                 "target_price": baseline["original_target_price"],
+                 "stop_order_id": ids["stop"],
+                 "target_order_id": ids["target"],
+                 "position_id": pos["id"],
+                 "context_path": os.path.basename(self.context_path)})
+            if not recorded:
+                raise BIND.BindingRefused(
+                    "structural baseline armed but completion evidence did not persist")
             return {"status": "armed", "mission_id": mission.mission_id, "arming": armed}
         except Exception as exc:  # management failure cannot undo a protected entry
             if self.runner is not None:
                 self.runner.execution_context = None
             return {"status": "management_unavailable", "reason": str(exc)[:200]}
 
+    def _bound_entry_submission(self, mission) -> dict:
+        from broker import topstepx_submission_record as SUBREC
+        rows = [row for row in SUBREC.latest_by_submission(
+                    self.store_dir, self.session_id, mission.mission_id).values()
+                if row.get("operation") == SUBREC.OPERATION_ORDER_PLACE
+                and str(row.get("venue_order_id")) == str(mission.order_id)]
+        if len(rows) != 1:
+            raise ProductionLaneRefused(
+                f"establishment recovery requires one bound entry submission; "
+                f"found {len(rows)}")
+        return rows[0]
+
+    @staticmethod
+    def _geometry_from_submission(row: dict):
+        from broker.topstepx_combine_risk import BracketGeometry
+        geo = row.get("geometry") or {}
+        if geo.get("governing_caps_declared") is not True:
+            raise ProductionLaneRefused(
+                "submission does not preserve the effective mission risk ceiling")
+        required = (
+            "direction", "side", "side_code", "entry_price", "stop_price",
+            "target_price", "stop_points", "target_points", "stop_ticks",
+            "target_ticks", "size", "risk_usd", "reward_usd",
+            "effective_cap_usd", "max_stop_points", "governing_lane")
+        missing = [name for name in required if geo.get(name) is None]
+        if missing:
+            raise ProductionLaneRefused(
+                "submission geometry is incomplete: " + ", ".join(missing))
+        if geo.get("governing_lane") != "production":
+            raise ProductionLaneRefused("submission was not governed by production risk")
+        return BracketGeometry(
+            direction=str(geo["direction"]), side=str(geo["side"]),
+            side_code=int(geo["side_code"]), entry_price=float(geo["entry_price"]),
+            stop_price=float(geo["stop_price"]),
+            target_price=float(geo["target_price"]),
+            stop_points=float(geo["stop_points"]),
+            target_points=float(geo["target_points"]),
+            stop_ticks=int(geo["stop_ticks"]), target_ticks=int(geo["target_ticks"]),
+            size=int(geo["size"]), risk_usd=float(geo["risk_usd"]),
+            reward_usd=float(geo["reward_usd"]),
+            governing_max_risk_usd=float(geo["effective_cap_usd"]),
+            governing_max_stop_points=float(geo["max_stop_points"]),
+            governing_lane=str(geo["governing_lane"]))
+
+    def recover_structural_establishment(self, owner, mission) -> dict:
+        """Complete the existing post-fill establishment after a cold crash."""
+        from broker import break_even_binding as BIND
+        from broker import topstepx_order_discovery as DISC
+        from broker import topstepx_submission_record as SUBREC
+        try:
+            baseline = BIND.recover(owner, mission, self)
+            row = self._bound_entry_submission(mission)
+            geometry = self._geometry_from_submission(row)
+            runner = R.ExecutionRunner(
+                session=self.session, account_fingerprint=self.account_fingerprint,
+                contract=self.contract, clock=self.clock)
+            runner.execution_lane = "production"
+            runner.geometry = geometry
+            runner.max_risk_usd = float(geometry.governing_max_risk_usd)
+            runner.max_stop_points = float(geometry.governing_max_stop_points)
+            runner.max_contracts = PRODUCTION_MAX_CONTRACTS
+            runner.min_reward_to_risk = MIN_REWARD_TO_RISK
+            runner.prompt_fill_authority = True
+            runner.order_id = mission.order_id
+            runner._entry_attempted = True
+            runner.submission_store_dir = self.store_dir
+            runner.submission_session_id = self.session_id
+            runner.submission_mission_id = mission.mission_id
+            runner.submission_authorization_fingerprint = baseline[
+                "authorization_fingerprint"]
+            runner.submission_record = row
+            runner.submission_custom_tag = str(row.get("custom_tag") or "")
+            structural = (row.get("geometry") or {}).get("structural_invalidation")
+            runner.submission_structural_invalidation = (
+                dict(structural) if isinstance(structural, dict) else None)
+
+            fill = runner.acquire_full_fill(
+                deadline_seconds=self.fill_deadline_seconds)
+            if not fill.get("complete"):
+                return {"status": "establishment_unavailable",
+                        "reason": fill.get("reason"), "fill": fill}
+            BIND.number(fill["size"], baseline["quantity"], "recovery fill quantity")
+            BIND.number(fill["fill_price"], baseline["entry_fill_price"],
+                        "recovery fill VWAP")
+            found = DISC.discover_orders(self.session, contract_id=self.contract.id)
+            if not found.get("answered") or not found.get("complete"):
+                return {"status": "establishment_unavailable",
+                        "reason": "complete protection discovery unavailable",
+                        "discovery": found}
+            children = runner.protective_children(found.get("working") or [])
+            position = BIND.position(
+                self.session.open_positions(), contract_id=self.contract.id,
+                direction=baseline["direction"], quantity=fill["size"],
+                fill=fill["fill_price"])
+            # Do not turn a COMPLETE proof of missing/ambiguous children into
+            # a passive recovery hold.  The existing re-anchor owner already
+            # owns that fail-closed decision and its emergency-flat path.  The
+            # provisional context carries only identities positively present;
+            # it is never persisted or accepted as a baseline unless re-anchor
+            # subsequently proves the whole bracket.
+            stop_child = children.get("stop") or {}
+            target_child = children.get("target") or {}
+            ctx = SL.ExecutionContext(
+                candidate_id="", candidate_fingerprint=mission.candidate_fingerprint or "",
+                snapshot_id="", mission_id=mission.mission_id,
+                account_fingerprint=self.account_fingerprint,
+                contract_id=self.contract.id, direction=baseline["direction"],
+                quantity=fill["size"], entry_order_id=mission.order_id,
+                entry_trade_id=(fill.get("trade_ids") or [None])[0],
+                entry_fill_price=fill["fill_price"],
+                structural_stop_price=baseline["original_initial_stop"],
+                liquidity_target_price=baseline["original_target_price"],
+                stop_order_id=stop_child.get("id"),
+                target_order_id=target_child.get("id"),
+                session_id=baseline["session_id"], token_id=baseline["token_id"],
+                authorization_fingerprint=baseline["authorization_fingerprint"],
+                position_id=position["id"], path=self.context_path)
+            runner.execution_context = ctx
+            self.runner = runner
+            anchor = runner.reanchor_protection_to_structure(
+                fill_event={"price": fill["fill_price"], "size": fill["size"],
+                            "contract_id": self.contract.id},
+                working_orders=found.get("working") or [], recovery_mode=True)
+            if not (anchor.get("reanchored") or anchor.get("already_established")):
+                return {"status": "establishment_failed", "anchor": anchor,
+                        "fill": fill}
+            BIND.context(baseline, ctx, runner)
+            complete = {
+                "mission_id": mission.mission_id, "entry_order_id": mission.order_id,
+                "actual_fill_price": fill["fill_price"],
+                "actual_quantity": fill["size"],
+                "structural_stop_price": baseline["original_initial_stop"],
+                "proven_stop_price": ctx.active_protective_stop,
+                "target_price": baseline["original_target_price"],
+                "stop_order_id": ctx.stop_order_id,
+                "target_order_id": ctx.target_order_id,
+                "position_id": ctx.position_id,
+                "context_path": os.path.basename(self.context_path),
+                "recovered": True,
+            }
+            if not runner._record_establishment(SUBREC.ESTABLISHMENT_COMPLETE,
+                                                complete):
+                return {"status": "establishment_unavailable",
+                        "reason": "completed baseline could not be recorded"}
+            runner.protection_outcome = {"established": True, "fill": fill,
+                                         "anchor": anchor, "recovered": True}
+            return {"status": "establishment_recovered",
+                    "mission_id": mission.mission_id, "fill": fill,
+                    "anchor": anchor}
+        except Exception as exc:
+            return {"status": "establishment_unavailable",
+                    "reason": str(exc)[:200]}
+
     def restore_break_even_management(self, owner, mission) -> dict:
         """Restore only management authority. No entry, reanchor or order write."""
         from broker import break_even_binding as BIND
         from broker import break_even_actuator as ACT
         try:
+            if SL.ExecutionContext.load(self.context_path) is None:
+                return self.recover_structural_establishment(owner, mission)
             baseline = BIND.recover(owner, mission, self)
             ctx = SL.ExecutionContext.load(self.context_path)
             runner = R.ExecutionRunner(session=self.session,

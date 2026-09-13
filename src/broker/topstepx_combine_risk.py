@@ -218,8 +218,11 @@ def size_for_risk(stop_points: float, contract: TopstepXContract, *,
     stop_points = float(stop_points)
     if stop_points <= 0:
         raise RiskRejection("zero_distance_stop", "stop distance must be positive")
-    fr = friction_per_contract(contract, slippage_reserve_ticks_per_side)
-    per_contract = stop_points * MNQ_DOLLARS_PER_POINT + fr["total"]
+    economics = all_in_risk_for(
+        stop_points=stop_points, size=1, contract=contract,
+        slippage_reserve_ticks_per_side=slippage_reserve_ticks_per_side)
+    fr = economics["friction_detail"]
+    per_contract = economics["all_in_risk_per_contract"]
     qty = int(float(max_risk_usd) // per_contract) if per_contract > 0 else 0
     qty = max(0, min(qty, int(max_contracts)))
     return {"contracts": qty,
@@ -231,6 +234,41 @@ def size_for_risk(stop_points: float, contract: TopstepXContract, *,
             "all_in_planned_risk": round(qty * per_contract, 2),
             "max_risk_usd": float(max_risk_usd), "max_contracts": int(max_contracts),
             "fits": qty >= 1}
+
+
+def all_in_risk_for(*, stop_points: float, size: int,
+                    contract: TopstepXContract,
+                    slippage_reserve_ticks_per_side: float = SLIPPAGE_RESERVE_TICKS_PER_SIDE) -> dict:
+    """Canonical production economics for an already-known quantity.
+
+    Initial sizing asks how many contracts fit this expression.  Post-fill
+    authorization asks whether the quantity that actually landed still fits
+    after the fill moved.  They are the same monetary law and therefore share
+    this one calculation rather than maintaining gross-only arithmetic beside
+    the friction-inclusive sizing path.
+    """
+    points = float(stop_points)
+    quantity = int(size)
+    if points <= 0:
+        raise RiskRejection("zero_distance_stop", "stop distance must be positive")
+    if quantity <= 0:
+        raise RiskRejection("invalid_quantity", "quantity must be positive")
+    fr = friction_per_contract(contract, slippage_reserve_ticks_per_side)
+    gross_per_contract = points * MNQ_DOLLARS_PER_POINT
+    all_in_per_contract = gross_per_contract + fr["total"]
+    return {
+        "quantity": quantity,
+        "stop_points": points,
+        "gross_stop_risk_per_contract": round(gross_per_contract, 2),
+        "gross_stop_risk": round(quantity * gross_per_contract, 2),
+        "fixed_costs_per_contract": fr["fixed_round_trip"],
+        "slippage_reserve_per_contract": fr["slippage_reserve"],
+        "friction_per_contract": fr["total"],
+        "friction_total": round(quantity * fr["total"], 2),
+        "friction_detail": fr,
+        "all_in_risk_per_contract": round(all_in_per_contract, 2),
+        "all_in_risk": round(quantity * all_in_per_contract, 2),
+    }
 
 
 def effective_max_risk_usd(production_cap: float = MAX_RISK_PER_TRADE_USD,

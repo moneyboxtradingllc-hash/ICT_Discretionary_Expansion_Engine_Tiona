@@ -42,7 +42,8 @@ from broker.topstepx_client import TopstepXError
 from broker.topstepx_combine_risk import (
     ABSOLUTE_MAX_STOP_POINTS, MAX_RISK_PER_TRADE_USD, MIN_REWARD_TO_RISK,
     PRODUCTION_MAX_CONTRACTS, PRODUCTION_MAX_RISK_USD, SMOKE_MAX_CONTRACTS,
-    BracketGeometry, RiskRejection, build_bracket, risk_for, ticks_between,
+    BracketGeometry, RiskRejection, all_in_risk_for, build_bracket, risk_for,
+    ticks_between,
 )
 from broker.topstepx_redaction import assert_clean
 
@@ -189,6 +190,9 @@ class ExecutionRunner:
     submission_mission_id: str = ""
     submission_authorization_fingerprint: str = ""
     submission_record: dict = None
+    #: Exact producer-resolved structural object, carried for audit/recovery.
+    #: It is evidence only; `geometry.stop_price` remains price authority.
+    submission_structural_invalidation: dict = None
     #: Set when a venue answer could not be persisted. Never cleared silently.
     recording_failure: dict = None
     #: Emergency closes that were TRANSPORTED while their durable pre-intent
@@ -698,9 +702,38 @@ class ExecutionRunner:
         return bool(getattr(self, "submission_store_dir", None)
                     and getattr(self, "submission_session_id", None))
 
+    def _record_establishment(self, stage: str, evidence: dict) -> bool:
+        """Durably append one post-fill fact before depending on it."""
+        if not self._recording():
+            return True
+        if not isinstance(self.submission_record, dict):
+            self.recording_failure = {
+                "stage": stage, "error": "entry submission record unavailable"}
+            self._emergency_recording_marker()
+            return False
+        try:
+            self.submission_record = SUBREC.record_establishment(
+                store_dir=self.submission_store_dir,
+                session_id=self.submission_session_id,
+                submission=self.submission_record, stage=stage,
+                evidence=dict(evidence or {}))
+            return True
+        except Exception as exc:  # noqa: BLE001 -- mutation must fail closed
+            self.recording_failure = {
+                "stage": stage,
+                "submission_id": self.submission_record.get("submission_id"),
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+            self._emergency_recording_marker()
+            return False
+
     def _open_submission_record(self, payload: dict, custom_tag: str) -> None:
         if not self._recording():
             return
+        geometry = self.geometry.evidence() if self.geometry else {}
+        structural = getattr(self, "submission_structural_invalidation", None)
+        if isinstance(structural, dict) and structural:
+            geometry["structural_invalidation"] = dict(structural)
         self.submission_record = SUBREC.open_submission(
             store_dir=self.submission_store_dir,
             session_id=self.submission_session_id,
@@ -712,7 +745,7 @@ class ExecutionRunner:
             account_fingerprint=getattr(self, "account_fingerprint", "") or "",
             contract_id=self.contract.id,
             symbol=getattr(self.contract, "name", "") or "",
-            geometry=(self.geometry.evidence() if self.geometry else {}))
+            geometry=geometry)
 
     def _open_close_submission(self, *, round_index: int):
         """Persist EMERGENCY-CLOSE INTENT before the socket opens. Own record.
@@ -1213,17 +1246,30 @@ class ExecutionRunner:
                     "fill_price": fill_price}
 
         risk = risk_for(stop_ticks, size, self.contract)
+        economics = all_in_risk_for(
+            stop_points=stop_ticks * self.contract.tick_size,
+            size=size, contract=self.contract)
+        all_in_risk = economics["all_in_risk"]
         reward = risk_for(target_ticks, size, self.contract)
         stop_points = stop_ticks * self.contract.tick_size
         out = {
             "fill_price": fill_price, "size": size,
+            "actual_full_fill_vwap": fill_price,
+            "actual_attributed_quantity": size,
             "authorized_stop_price": geo.stop_price,
             "authorized_target_price": geo.target_price,
             "aligned_stop_price": aligned["stop_price"],
             "aligned_target_price": aligned["target_price"],
             "stop_points": round(stop_points, 6),
             "reward_points": round(target_ticks * self.contract.tick_size, 6),
-            "risk_usd": risk, "reward_usd": reward,
+            # `risk_usd` remains the historical gross field for evidence
+            # compatibility. Authorization is governed by `all_in_risk_usd`.
+            "risk_usd": risk, "gross_risk_usd": risk,
+            "all_in_risk_usd": all_in_risk,
+            "friction_risk_usd": economics["friction_total"],
+            "friction_per_contract": economics["friction_per_contract"],
+            "friction_detail": economics["friction_detail"],
+            "reward_usd": reward,
             "reward_to_risk": round(reward / risk, 3) if risk else None,
             "max_stop_points": float(self.max_stop_points),
             "max_risk_usd": float(self.max_risk_usd),
@@ -1234,9 +1280,11 @@ class ExecutionRunner:
                     "detail": (f"actual-fill stop distance {stop_points:g} points exceeds the "
                                f"{float(self.max_stop_points):g}-point ceiling. The invalidation "
                                f"is the Brain's and is not adjustable.")}
-        if risk > float(self.max_risk_usd):
+        if all_in_risk > float(self.max_risk_usd):
             return {**out, "authorized": False, "reason": "risk_above_cap",
-                    "detail": (f"actual-fill risk ${risk:,.2f} exceeds the "
+                    "detail": (f"actual-fill all-in risk ${all_in_risk:,.2f} "
+                               f"(gross ${risk:,.2f} + friction "
+                               f"${economics['friction_total']:,.2f}) exceeds the "
                                f"${float(self.max_risk_usd):,.2f} cap")}
         if risk > 0 and (reward / risk) < float(self.min_reward_to_risk):
             return {**out, "authorized": False, "reason": "reward_below_gate",
@@ -1373,7 +1421,8 @@ class ExecutionRunner:
         return {"proven": True, "order_id": order_id, "price": price}
 
     def reanchor_protection_to_structure(self, *, fill_event: dict,
-                                         working_orders: list) -> dict:
+                                         working_orders: list,
+                                         recovery_mode: bool = False) -> dict:
         """Replace provisional fill-relative protection with the authorized levels.
 
         STOP FIRST AND PROVEN FIRST. Protection authority outranks profit-taking
@@ -1422,6 +1471,22 @@ class ExecutionRunner:
                                f"{ctx.active_protective_stop}; re-anchoring to "
                                f"{ctx.original_thesis_invalidation} would restore risk")
         auth = self.authorize_actual_fill(fill_event)
+        auth_evidence = {
+            **auth,
+            "mission_id": self.submission_mission_id,
+            "entry_order_id": self.order_id,
+            "contract_id": self.contract.id,
+            "direction": getattr(self.geometry, "direction", None),
+            "structural_invalidation": dict(
+                getattr(self, "submission_structural_invalidation", None) or {}),
+        }
+        auth_stage = (SUBREC.ESTABLISHMENT_AUTHORIZED if auth.get("authorized")
+                      else SUBREC.ESTABLISHMENT_REFUSED)
+        if not self._record_establishment(auth_stage, auth_evidence):
+            flat = self.emergency_flatten(
+                "post-fill authorization could not be durably recorded")
+            return {"reanchored": False, "authorization": auth,
+                    "reason": "authorization_record_failed", "flattened": flat}
         if not auth.get("authorized"):
             flat = self.emergency_flatten(
                 f"post-fill authorization failed ({auth.get('reason')}): {auth.get('detail')}")
@@ -1440,8 +1505,12 @@ class ExecutionRunner:
                 ("target", ids["target"], auth["aligned_target_price"], "limit_price", False))
         moved, proofs = {}, {}
         for name, order_id, wanted, price_field, is_stop in legs:
+            current = _price_of(children[name])
+            already_correct = (recovery_mode and current is not None
+                               and abs(current - wanted) <= _PRICE_EPSILON)
             try:
-                self.session.modify_order(order_id, **{price_field: wanted})
+                if not already_correct:
+                    self.session.modify_order(order_id, **{price_field: wanted})
             except Exception as exc:  # noqa: BLE001 — unknown is treated as failure
                 flat = self.emergency_flatten(
                     f"{name} modify to {wanted} failed/uncertain: "
@@ -1458,7 +1527,26 @@ class ExecutionRunner:
                 return {"reanchored": False, "authorization": auth, "moved": moved,
                         "reason": proof["reason"], "proofs": proofs,
                         "child_ids": ids, "flattened": flat}
-            moved[name] = wanted
+            if not already_correct:
+                moved[name] = wanted
+            if name == "stop":
+                stop_evidence = {
+                    "mission_id": self.submission_mission_id,
+                    "entry_order_id": self.order_id,
+                    "stop_order_id": order_id,
+                    "structural_stop_price": auth["authorized_stop_price"],
+                    "proven_stop_price": proof["price"],
+                    "actual_fill_price": auth["fill_price"],
+                    "actual_quantity": auth["size"],
+                    "recovery_mode": bool(recovery_mode),
+                }
+                if not self._record_establishment(
+                        SUBREC.ESTABLISHMENT_STOP_PROVEN, stop_evidence):
+                    flat = self.emergency_flatten(
+                        "proven structural stop could not be durably recorded")
+                    return {"reanchored": False, "authorization": auth,
+                            "reason": "stop_proof_record_failed", "moved": moved,
+                            "proofs": proofs, "child_ids": ids, "flattened": flat}
 
         readback = self.verify_protection(self.working_orders(),
                                           fill_price=auth["fill_price"],
@@ -1467,6 +1555,26 @@ class ExecutionRunner:
             return {"reanchored": False, "authorization": auth, "moved": moved,
                     "reason": "readback_failed", "verification": readback,
                     "proofs": proofs, "child_ids": ids}
+        verified_evidence = {
+            "mission_id": self.submission_mission_id,
+            "entry_order_id": self.order_id,
+            "actual_fill_price": auth["fill_price"],
+            "actual_quantity": auth["size"],
+            "structural_stop_price": auth["authorized_stop_price"],
+            "proven_stop_price": auth["aligned_stop_price"],
+            "target_price": auth["authorized_target_price"],
+            "proven_target_price": auth["aligned_target_price"],
+            "child_ids": ids,
+            "recovery_mode": bool(recovery_mode),
+        }
+        if not self._record_establishment(
+                SUBREC.ESTABLISHMENT_PROTECTION_VERIFIED, verified_evidence):
+            flat = self.emergency_flatten(
+                "verified structural protection could not be durably recorded")
+            return {"reanchored": False, "authorization": auth,
+                    "reason": "protection_proof_record_failed", "moved": moved,
+                    "verification": readback, "proofs": proofs,
+                    "child_ids": ids, "flattened": flat}
         # ONLY HERE. Stop modified, stop readback proven, target proven, whole
         # protection verified. This is the first instant at which a stop exists
         # that is both structural and real, so this is where the monotonic law
