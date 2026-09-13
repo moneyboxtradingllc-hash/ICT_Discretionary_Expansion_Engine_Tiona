@@ -161,6 +161,9 @@ def open_submission(*, store_dir: str, session_id: str, mission_id: str,
     """
     submission_id = submission_id or new_submission_id()
     sanitized = sanitize(payload)
+    from broker.execution_observability import invalidation_age
+    prepared_at = _now()
+    structural = (geometry or {}).get("structural_invalidation") or {}
     record = {
         "schema_version": SUBMISSION_SCHEMA,
         "submission_id": submission_id,
@@ -182,7 +185,12 @@ def open_submission(*, store_dir: str, session_id: str, mission_id: str,
         "geometry": dict(geometry or {}),
         "sanitized_payload": sanitized,
         "payload_sha256": payload_digest(sanitized),
-        "prepared_at_utc": _now(),
+        "prepared_at_utc": prepared_at,
+        "observability": {
+            "invalidation_age": invalidation_age(
+                evidence_timestamp=structural.get("evidence_timestamp"),
+                observed_at=prepared_at),
+        },
         # filled in by record_response
         "response_at_utc": None, "success": None, "venue_order_id": None,
         "error_code": None, "error_message": None, "raw_response": None,

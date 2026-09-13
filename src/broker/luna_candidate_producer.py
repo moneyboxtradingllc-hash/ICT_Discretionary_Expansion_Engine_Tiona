@@ -35,6 +35,7 @@ from datetime import datetime, timedelta, timezone
 from broker.topstepx_candidate_freshness import (
     OBJECTIVE_KINDS, CandidateSnapshot, LiquidityObjective,
 )
+from broker.execution_observability import invalidation_age
 
 DEFAULT_TTL_SECONDS = 120.0        # two scan cadences; a candidate is perishable
 # UPGRADE-...-TERRA (2026-08-06): imported from the SINGLE authority rather
@@ -1369,6 +1370,9 @@ class CandidateProducer:
                 "settled_price_basis": (brain_input.get("market") or {}
                                         ).get("settled_price_basis"),
                 "structural_invalidation": invalidation.evidence(),
+                "invalidation_age": invalidation_age(
+                    evidence_timestamp=invalidation.evidence_timestamp,
+                    observed_at=now),
                 # Transport the composed mechanical authority the Brain saw;
                 # do not reclassify volatility here. Risk remains the sole
                 # owner of the >35-point exception, and the structure identity

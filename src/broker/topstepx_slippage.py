@@ -167,6 +167,7 @@ def measure_entry(*, capture: QuoteCapture, direction: str, fill_price: float,
                   candidate_id: str = "", snapshot_id: str = "",
                   account_fingerprint: str = "", trade_id=None) -> dict:
     """Entry slippage from the captured executable reference. Never from P&L."""
+    from broker.execution_observability import elapsed_seconds
     quality = classify_quality(capture, direction=direction, contract_id=contract_id,
                                request_at=request_at, fill_order_id=fill_order_id,
                                expected_order_id=expected_order_id,
@@ -187,6 +188,7 @@ def measure_entry(*, capture: QuoteCapture, direction: str, fill_price: float,
         ticks = round(points / tick_size, 4) if tick_size else None
         dollars = round(ticks * tick_value, 4) if ticks is not None else None
 
+    full_fill_at = fill_at
     return {
         "kind": "ENTRY", "measured_at": _now().isoformat(),
         "candidate_id": candidate_id, "snapshot_id": snapshot_id,
@@ -201,9 +203,19 @@ def measure_entry(*, capture: QuoteCapture, direction: str, fill_price: float,
                                    if dollars is not None else None),
         "request_at": request_at.isoformat() if request_at else None,
         "ack_at": ack_at.isoformat() if ack_at else None,
-        "fill_at": fill_at.isoformat() if fill_at else None,
+        "fill_at": fill_at.isoformat() if hasattr(fill_at, "isoformat")
+        else fill_at,
         "ack_latency_ms": _ms(request_at, ack_at),
         "fill_latency_ms": _ms(request_at, fill_at),
+        "quote_observation_timestamp": capture.captured_at.isoformat(),
+        "executable_quote_price": reference,
+        "full_fill_vwap": fill_price,
+        "full_fill_completion_timestamp": full_fill_at.isoformat()
+        if hasattr(full_fill_at, "isoformat") else full_fill_at,
+        "quote_to_full_fill_seconds": elapsed_seconds(
+            capture.captured_at, full_fill_at),
+        "entry_price_drift_points": points,
+        "entry_price_drift_ticks": ticks,
         "spread_ticks": capture.spread_ticks(tick_size),
         "volatility_state": capture.volatility_state,
         "quality": quality, "reliable": quality == RELIABLE,

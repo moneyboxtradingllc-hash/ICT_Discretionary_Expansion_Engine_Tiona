@@ -44,7 +44,7 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # Feature-branch source includes the deterministic Brain wake boundary and
     # the structural-risk evidence/coherence repair. This is a new contract
     # fingerprint, not a historical authorization migration.
-        assert PM.brain_contract_fingerprint() == "brain:e99510b152dccc49"
+            assert PM.brain_contract_fingerprint() == "brain:3ca8a6dcbff4c614"
 
 
 @pytest.mark.parametrize("addition", [
