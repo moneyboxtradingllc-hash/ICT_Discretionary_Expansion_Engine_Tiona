@@ -1062,6 +1062,14 @@ class ExecutionRunner:
         price = agg["vwap"] if (agg and agg["vwap"] is not None) else fill_event.get("price")
         qty = agg["quantity"] if agg else int(fill_event.get("size") or 0)
         cs = candidate_snapshot
+        # `full_fill_completion_timestamp` is deliberately presence-sensitive:
+        # the prompt lifecycle may positively establish a VWAP while the venue
+        # supplies no usable final-fill timestamp. Do not fall back to an
+        # arbitrary raw row, acknowledgement, or poll time in that case.
+        has_authoritative_completion = "full_fill_completion_timestamp" in fill_event
+        completion_at = (fill_event.get("full_fill_completion_timestamp")
+                         if has_authoritative_completion
+                         else ((agg or {}).get("last_fill_at") or fill_event.get("at")))
         obs = SL.measure_entry(
             capture=self.entry_capture,
             direction=("buy" if self.geometry.direction == "bullish" else "sell"),
@@ -1069,7 +1077,7 @@ class ExecutionRunner:
             tick_size=self.contract.tick_size, tick_value=self.contract.tick_value,
             contract_id=self.contract.id, request_at=self.submit_at,
             ack_at=self.ack_at,
-            fill_at=((agg or {}).get("last_fill_at") or fill_event.get("at")),
+            fill_at=completion_at,
             fill_order_id=(agg or {}).get("order_id") or self.order_id,
             expected_order_id=self.order_id, attribution=attribution,
             candidate_id=(cs.candidate_id if cs is not None else ""),
@@ -1359,6 +1367,15 @@ class ExecutionRunner:
                 notional = sum(float(t.get("price") or 0) * int(t.get("size") or 0)
                                for t in seen)
                 vwap = notional / filled
+                # The completion instant is venue evidence from the SAME
+                # attributed parent fills that established the VWAP. It is
+                # deliberately not poll/ack/wall-clock time: absent or malformed
+                # venue timestamps remain unknown execution telemetry.
+                from broker.execution_observability import parse_timestamp
+                completion_times = [parse_timestamp(t.get("creationTimestamp"))
+                                    for t in seen]
+                completion_times = [t for t in completion_times if t is not None]
+                final_fill_at = max(completion_times) if completion_times else None
                 # Cross-check against the venue's own position before trusting it.
                 try:
                     positions = self.session.open_positions()
@@ -1375,7 +1392,9 @@ class ExecutionRunner:
                 return {"complete": True, "reason": None, "fill_price": vwap,
                         "size": filled, "fill_count": len(seen),
                         "requested_quantity": want, "position_quantity": pos_qty,
-                        "trade_ids": [t.get("id") for t in seen]}
+                        "trade_ids": [t.get("id") for t in seen],
+                        "attributed_fills": list(seen),
+                        "final_fill_at": final_fill_at}
             if filled > want:
                 return {"complete": False, "reason": "overfill",
                         "detail": f"attributed {filled} against a request of {want}", **last}

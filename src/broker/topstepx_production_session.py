@@ -315,11 +315,32 @@ class ProductionSession:
         """Gated submission with the LIVE quote provider attached."""
         if self.runner is None:
             self.build_runner(candidate)
-        return self.runner.gated_submit(
+        result = self.runner.gated_submit(
             account_id=account_id, ledger=self.ledger, candidate_snapshot=candidate,
             market=market, latest_price=latest_price, mint_token=mint_token,
             refresh=refresh, on_attempt_consumed=on_attempt_consumed,
             quote_provider=self.quote_provider)
+        self._record_prompt_entry_observation(candidate)
+        return result
+
+    def _record_prompt_entry_observation(self, candidate) -> None:
+        """Best-effort telemetry from the prompt full-fill lifecycle only."""
+        runner = self.runner
+        outcome = getattr(runner, "protection_outcome", None) or {}
+        fill = outcome.get("fill") or {}
+        if not fill.get("complete"):
+            return
+        try:
+            # No venue read belongs here. These are the exact parent-order fill
+            # rows that already established the authoritative VWAP.
+            runner.measure_entry_slippage(
+                fill_event={"price": fill.get("fill_price"),
+                            "size": fill.get("size"),
+                            "full_fill_completion_timestamp": fill.get("final_fill_at")},
+                candidate_snapshot=candidate, ledger=self.slippage,
+                fills=fill.get("attributed_fills") or [])
+        except Exception:  # telemetry must never alter submitted protection
+            return
 
     # ── reconciliation ────────────────────────────────────────────────────────
     def arm_break_even_after_submit(self, owner, mission, candidate) -> dict:

@@ -14,6 +14,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import pytest
 
+from broker import topstepx_execution_runner as R
+
 from broker import break_even_actuator as ACT
 from broker import break_even_journal as J
 from broker.topstepx_production_session import ProductionSession
@@ -65,8 +67,8 @@ class FilledVenue(Session):
         return {"success": True}
 
 
-def fresh(tmp_path, short=False):
-    venue = FilledVenue(short=short)
+def fresh(tmp_path, short=False, venue=None):
+    venue = venue or FilledVenue(short=short)
     cycle = Cycle()
     if short:
         cycle = Cycle(output=parsed(narrative_direction="bearish", invalidation_level=29885.0,
@@ -82,6 +84,60 @@ def fresh(tmp_path, short=False):
     result = loop.scan_once()
     venue.before_write = None
     return loop, ps, venue, owner, result
+
+
+def test_live_production_path_records_final_fill_latency_once(tmp_path):
+    venue = FilledVenue()
+    original_fill = venue.fill
+
+    def multi_fill(payload):
+        result = original_fill(payload)
+        quantity = int(payload["size"])
+        first = max(1, quantity // 3)
+        venue._trades = [
+            {"id": 201, "orderId": 100, "size": first, "price": 29879.75,
+             "contractId": CID, "creationTimestamp": "2026-08-06T15:00:02+00:00"},
+            {"id": 202, "orderId": 100, "size": quantity - first, "price": 29880.125,
+             "contractId": CID, "creationTimestamp": "2026-08-06T15:00:05+00:00"},
+        ]
+        return result
+
+    venue._place = multi_fill
+    _, ps, venue, _, result = fresh(tmp_path, venue=venue)
+
+    assert result["outcome"] == "SUBMITTED"
+    assert result["break_even_management"]["status"] == "armed"
+    assert len(ps.slippage.observations) == 1
+    observation = ps.slippage.observations[0]
+    assert observation["quote_observation_timestamp"] == NOW.isoformat()
+    assert observation["full_fill_vwap"] == pytest.approx(29880.0)
+    assert observation["full_fill_completion_timestamp"] == "2026-08-06T15:00:05+00:00"
+    assert observation["quote_to_full_fill_seconds"] == pytest.approx(5.0)
+    assert observation["quantity"] == ps.runner.geometry.size
+    assert venue.place_calls == 1
+
+
+def test_live_observability_failure_cannot_change_submitted_or_management(tmp_path, monkeypatch):
+    def unavailable(*args, **kwargs):
+        raise RuntimeError("telemetry ledger unavailable")
+
+    monkeypatch.setattr(R.ExecutionRunner, "measure_entry_slippage", unavailable)
+    _, _, venue, _, result = fresh(tmp_path)
+
+    assert result["outcome"] == "SUBMITTED"
+    assert result["break_even_management"]["status"] == "armed"
+    assert venue.place_calls == 1
+
+
+def test_live_missing_final_fill_timestamp_stays_unknown(tmp_path):
+    _, ps, venue, _, result = fresh(tmp_path)
+
+    assert result["outcome"] == "SUBMITTED"
+    assert len(ps.slippage.observations) == 1
+    observation = ps.slippage.observations[0]
+    assert observation["full_fill_completion_timestamp"] is None
+    assert observation["quote_to_full_fill_seconds"] is None
+    assert venue.place_calls == 1
 
 
 def assert_unarmed(ps):
