@@ -508,8 +508,11 @@ class FillSession(FakeSession):
         return [{"contract_id": MNQ.id, "size": qty}] if qty else []
 
 
-def _trade(price, size, tid=1):
-    return {"id": tid, "orderId": ENTRY_ORDER_ID, "price": price, "size": size}
+def _trade(price, size, tid=1, creation_timestamp=None):
+    row = {"id": tid, "orderId": ENTRY_ORDER_ID, "price": price, "size": size}
+    if creation_timestamp is not None:
+        row["creationTimestamp"] = creation_timestamp
+    return row
 
 
 def _fill_runner(fill, *, batches, positions=None, size=1, orders=None,
@@ -556,6 +559,31 @@ class TestFullFillAuthority:
         # exact prices -- this is the case that proves the grid snap is applied
         # to the LEVEL, not reconstructed from a distance off the fill.
         assert out["anchor"]["moved"] == {"stop": 29996.0, "target": 30012.0}
+
+    def test_all_valid_timestamps_prove_latest_chronological_fill(self):
+        # Lexical ordering would choose 15:00+02; parsed UTC chronology must
+        # choose 14:00:10Z instead.
+        rows = [
+            _trade(30000.0, 1, 1, "2026-08-06T15:00:00+02:00"),
+            _trade(30000.0, 1, 2, "2026-08-06T14:00:10+00:00"),
+        ]
+        r, _ = _fill_runner(30000.0, size=2, batches=[rows],
+                            positions=[{"contract_id": MNQ.id, "size": 2}])
+        fill = r.acquire_full_fill(sleep=lambda _: None)
+        assert fill["complete"] is True
+        assert fill["final_fill_at"] == "2026-08-06T14:00:10+00:00"
+
+    @pytest.mark.parametrize("bad_timestamp", [None, "not-a-timestamp"])
+    def test_any_unusable_component_timestamp_leaves_completion_unknown(self, bad_timestamp):
+        rows = [
+            _trade(30000.0, 1, 1, "2026-08-06T14:00:02+00:00"),
+            _trade(30000.0, 1, 2, bad_timestamp),
+        ]
+        r, _ = _fill_runner(30000.0, size=2, batches=[rows],
+                            positions=[{"contract_id": MNQ.id, "size": 2}])
+        fill = r.acquire_full_fill(sleep=lambda _: None)
+        assert fill["complete"] is True
+        assert fill["final_fill_at"] is None
 
     def test_first_fill_alone_does_not_re_anchor(self):
         r, session = _fill_runner(

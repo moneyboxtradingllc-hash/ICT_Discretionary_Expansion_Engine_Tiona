@@ -115,6 +115,7 @@ def test_live_production_path_records_final_fill_latency_once(tmp_path):
     assert observation["quote_to_full_fill_seconds"] == pytest.approx(5.0)
     assert observation["quantity"] == ps.runner.geometry.size
     assert venue.place_calls == 1
+    assert json.dumps(ps.runner.protection_outcome)
 
 
 def test_live_observability_failure_cannot_change_submitted_or_management(tmp_path, monkeypatch):

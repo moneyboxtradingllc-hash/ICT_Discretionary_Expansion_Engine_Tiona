@@ -1374,8 +1374,14 @@ class ExecutionRunner:
                 from broker.execution_observability import parse_timestamp
                 completion_times = [parse_timestamp(t.get("creationTimestamp"))
                                     for t in seen]
-                completion_times = [t for t in completion_times if t is not None]
-                final_fill_at = max(completion_times) if completion_times else None
+                # A full-fill completion time is a claim about the LAST
+                # attributed execution. One missing or malformed component
+                # means that claim cannot be proven, even when an earlier
+                # valid timestamp exists.
+                final_fill_at = (max(completion_times).isoformat()
+                                 if completion_times and all(t is not None
+                                                           for t in completion_times)
+                                 else None)
                 # Cross-check against the venue's own position before trusting it.
                 try:
                     positions = self.session.open_positions()
