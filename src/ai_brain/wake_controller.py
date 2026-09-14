@@ -308,10 +308,11 @@ def _wake_event_evidence(value, *, now) -> dict:
                 "malformed_actionable_wake_event:occurrence_id")
         if reason not in ACTIONABLE_WAKE_REASONS:
             out["issues"].append("malformed_actionable_wake_event:reason")
-        if (isinstance(occurrence, str) and occurrence.strip()
-                and reason in ACTIONABLE_WAKE_REASONS):
-            out["reasons"].append(
-                f"actionable_mechanical_event:{reason}:{occurrence.strip()}")
+        # A valid raw interaction is a useful causal witness for the mechanical
+        # scan it interrupted, but it is deliberately not a paid-cognition
+        # reason.  The freshly rebuilt canonical projection decides whether
+        # that scan buys a Brain call.  Invalid event evidence remains a
+        # fail-open issue below.
     event_stamp = _aware_datetime(value.get("observed_at"))
     observation_stamp = _aware_datetime(now)
     if event_stamp is None:
@@ -842,9 +843,6 @@ class BrainWakeController:
 
             if self._force_wake_reason:
                 reasons.append(self._force_wake_reason)
-            if (mode != OFF and event_evidence.get("valid")
-                    and not event_duplicate):
-                reasons.extend(event_evidence.get("reasons") or [])
             if (not reasons and max_silence is not None
                     and seconds_scheduled is not None
                     and seconds_scheduled >= max_silence):
@@ -871,8 +869,7 @@ class BrainWakeController:
             if decision == WAKE:
                 if "maximum_silence_elapsed" in reasons:
                     wake_kind = "maximum_silence"
-                elif changed or (event_evidence.get("valid")
-                                 and not event_duplicate):
+                elif changed:
                     wake_kind = "event"
                 elif issues or self._force_wake_reason:
                     wake_kind = "safety"
@@ -909,7 +906,8 @@ class BrainWakeController:
             }
 
     def note_provider_result(self, decision: dict, *, request_attempted: bool,
-                             sovereign: bool) -> None:
+                             sovereign: bool,
+                             hard_quota_circuit_open: bool = False) -> None:
         """Advance actual and counterfactual clocks after the provider path."""
         with self._lock:
             stamp = _aware_datetime((decision or {}).get("timestamp"))
@@ -920,7 +918,12 @@ class BrainWakeController:
                 if (decision or {}).get("decision") == WAKE:
                     self._last_scheduled_at = stamp
                     self._last_scheduled_scan = scan
-            if not request_attempted:
+            if hard_quota_circuit_open:
+                # This is an intentional local refusal after an already-proven
+                # non-retryable quota failure, not a mysteriously skipped
+                # provider request.  Do not manufacture an endless wake loop.
+                self._force_wake_reason = None
+            elif not request_attempted:
                 self._force_wake_reason = "previous_provider_request_not_attempted"
             elif not sovereign:
                 self._force_wake_reason = "previous_brain_not_sovereign"

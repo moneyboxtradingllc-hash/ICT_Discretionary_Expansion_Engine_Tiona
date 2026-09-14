@@ -20,6 +20,7 @@ raises — any failure yields a degraded, schema-valid witness output.
 import copy
 import json
 import time
+import threading
 
 from ai_brain import ai_call_ledger as LEDGER
 import os
@@ -65,6 +66,56 @@ _log = logging.getLogger(__name__)
 # call contract. They ride here instead: set once per scan, read at call time.
 _CALL_CONTEXT = {"session_id": "", "contract_id": "", "scan": None,
                  "attempt": 1, "observed_at": None, "wake_event": None}
+
+# Process-local only.  A process restart deliberately gives a replenished or
+# re-authorized provider a fresh chance; this is not a durable trade state.
+_PROVIDER_CIRCUIT_LOCK = threading.Lock()
+_PROVIDER_CIRCUIT = {"open": False, "reason": None}
+
+
+def provider_circuit_state() -> dict:
+    """Return a copy of the local hard-quota circuit state."""
+    with _PROVIDER_CIRCUIT_LOCK:
+        return dict(_PROVIDER_CIRCUIT)
+
+
+def reset_provider_circuit_for_tests() -> None:
+    """Test-only reset; normal process restart supplies the production reset."""
+    with _PROVIDER_CIRCUIT_LOCK:
+        _PROVIDER_CIRCUIT.update({"open": False, "reason": None})
+
+
+def _hard_quota_reason(exc: Exception) -> str | None:
+    """Recognize only explicit non-retryable credit exhaustion evidence."""
+    values = []
+    for name in ("code", "type", "message"):
+        value = getattr(exc, name, None)
+        if value is not None:
+            values.append(str(value).strip().lower())
+    response = getattr(exc, "response", None)
+    for source in (response, getattr(response, "body", None)):
+        if isinstance(source, dict):
+            for name in ("code", "type", "message", "error"):
+                value = source.get(name)
+                if isinstance(value, dict):
+                    values.extend(str(v).strip().lower()
+                                  for v in value.values() if v is not None)
+                elif value is not None:
+                    values.append(str(value).strip().lower())
+    values.append(str(exc).strip().lower())
+    if any(value == "credit_balance_exhausted" for value in values):
+        return "credit_balance_exhausted"
+    if any(value == "insufficient_quota" for value in values):
+        return "insufficient_quota"
+    if any("no credits remaining" in value for value in values):
+        return "no_credits_remaining"
+    return None
+
+
+def _open_hard_quota_circuit(reason: str) -> None:
+    with _PROVIDER_CIRCUIT_LOCK:
+        _PROVIDER_CIRCUIT["open"] = True
+        _PROVIDER_CIRCUIT["reason"] = reason
 
 
 def set_call_context(*, session_id: str = "", scan: object = None,
@@ -408,6 +459,16 @@ def _call_llm(brain_input: dict, repair: "dict | None" = None) -> dict:
     parsed is None + fallback_reason set on any failure (no silent success).
     `repair` (optional): {"previous": dict, "errors": [...]} adds a repair turn.
     """
+    circuit = provider_circuit_state()
+    if circuit.get("open"):
+        return {
+            "parsed": None, "ok": False, "model": None, "prompt": None,
+            "user_content": None, "raw_response": None, "usage": None,
+            "fallback_reason": "provider_circuit_open:" + str(
+                circuit.get("reason") or "hard_quota"),
+            "is_repair": bool(repair), "provider_request_attempted": False,
+            "provider_circuit_open": True,
+        }
     purpose = _purpose_for(repair)
     session_id, scan, attempt = _call_context()
     user_content = json.dumps(brain_input, default=str)
@@ -557,8 +618,86 @@ def _call_llm(brain_input: dict, repair: "dict | None" = None) -> dict:
         out["parsed"], out["ok"] = parsed, True
         return out
     except Exception as exc:  # noqa: BLE001
-        out["fallback_reason"] = f"llm_error:{type(exc).__name__}:{exc}"
+        hard_quota = _hard_quota_reason(exc)
+        if hard_quota:
+            _open_hard_quota_circuit(hard_quota)
+            out["provider_circuit_open"] = True
+            out["provider_circuit_opened"] = True
+            out["fallback_reason"] = f"provider_hard_quota:{hard_quota}"
+        else:
+            out["fallback_reason"] = f"llm_error:{type(exc).__name__}:{exc}"
+        if out.get("provider_request_attempted"):
+            LEDGER.record(
+                session_id=session_id, scan=scan, role=LEDGER.PRIMARY,
+                purpose=purpose, attempt=attempt,
+                model_requested=out.get("model") or "",
+                client_request_id=out.get("client_request_id") or "",
+                ok=False, fallback_reason=out["fallback_reason"],
+                prompt_cache_key=out.get("prompt_cache_key") or "",
+                cache_mode="implicit",
+                extra={"provider_circuit_opened": bool(hard_quota),
+                       "provider_circuit_reason": hard_quota})
         return out
+
+
+def _provider_circuit_open_result(*, wake_api, wake_controller, wake_decision,
+                                  brain_input: dict) -> dict:
+    """Return local degraded evidence without pretending a healthy HOLD."""
+    circuit = provider_circuit_state()
+    reason = str(circuit.get("reason") or "hard_quota")
+    fallback = f"provider_circuit_open:{reason}"
+    if wake_decision is not None:
+        wake_decision["provider_circuit_open"] = True
+        wake_decision["provider_circuit_reason"] = reason
+        wake_decision["primary_provider_request"] = False
+        wake_decision["repair_provider_requests"] = 0
+        wake_decision["provider_result_sovereign"] = False
+    if wake_controller is not None and wake_decision is not None:
+        wake_controller.note_provider_result(
+            wake_decision, request_attempted=False, sovereign=False,
+            hard_quota_circuit_open=True)
+    wake_telemetry = None
+    if wake_api is not None and wake_decision is not None:
+        try:
+            wake_telemetry = wake_api.write_telemetry(
+                wake_decision, primary_provider_request=False,
+                repair_provider_requests=0)
+        except Exception as exc:  # noqa: BLE001 -- telemetry cannot change refusal
+            wake_telemetry = {"ok": False,
+                              "error": f"wake telemetry exception: {exc}"}
+    output = empty_brain_output()
+    output["warnings"] = [fallback]
+    result = {
+        "enabled": True,
+        "authority": "observe_only",
+        "source": "degraded",
+        "llm_enabled": True,
+        "llm_model": None,
+        "llm_usage": None,
+        "fallback_reason": fallback,
+        "degraded_reason": fallback,
+        "normalization_notes": [],
+        "repair_attempted": False,
+        "family_repair_attempted": False,
+        "family_repair_fixed": False,
+        "invalidation_repair_attempted": False,
+        "invalidation_repair_fixed": False,
+        "invalidation_side_check_flagged": False,
+        "invalidation_side_check_stripped": None,
+        "shallow_reasoning_kept": False,
+        "input_degraded": brain_input.get("degraded", []),
+        "output": output,
+        "persisted": None,
+        "provider_call_suppressed": False,
+        "provider_circuit_open": True,
+        "provider_request_intentionally_skipped": True,
+    }
+    if wake_decision is not None:
+        result["wake_decision"] = wake_decision
+        result["wake_telemetry_write_ok"] = bool((wake_telemetry or {}).get("ok"))
+        if wake_telemetry and not wake_telemetry.get("ok"):
+            result["wake_telemetry_write_error"] = wake_telemetry.get("error")
+    return result
 
 
 # ── Public entry point ────────────────────────────────────────────────────────
@@ -773,6 +912,11 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
                         scan=_CALL_CONTEXT.get("scan"),
                         now=_CALL_CONTEXT.get("observed_at"))
                     wake_controller = None
+
+        if _llm_enabled() and provider_circuit_state().get("open"):
+            return _provider_circuit_open_result(
+                wake_api=wake_api, wake_controller=wake_controller,
+                wake_decision=wake_decision, brain_input=brain_input)
 
         if (wake_api is not None and wake_decision is not None
                 and wake_decision.get("provider_call_suppressed") is True):
@@ -997,6 +1141,18 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
         else:
             output = _deterministic(snapshot, brain_input, analogs)
 
+        # A hard quota error may have happened during the primary call or a
+        # later repair call.  It revokes fresh external-AI judgment for this
+        # process immediately; never let an earlier parsed read authorize a
+        # candidate after the provider circuit has opened.
+        circuit = provider_circuit_state()
+        if circuit.get("open"):
+            source = "degraded"
+            fallback_reason = "provider_circuit_open:" + str(
+                circuit.get("reason") or "hard_quota")
+            output = empty_brain_output()
+            output["warnings"] = [fallback_reason]
+
         ok, vreason = validate_brain_output(output)
         if not ok:   # output must always be schema-valid; guard anyway
             output = empty_brain_output()
@@ -1011,12 +1167,16 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             wake_decision["primary_provider_request"] = primary_provider_request
             wake_decision["repair_provider_requests"] = repair_provider_requests
             wake_decision["provider_result_sovereign"] = provider_result_sovereign
+            wake_decision["provider_circuit_open"] = bool(circuit.get("open"))
+            if circuit.get("open"):
+                wake_decision["provider_circuit_reason"] = circuit.get("reason")
             try:
                 if wake_controller is not None:
                     wake_controller.note_provider_result(
                         wake_decision,
                         request_attempted=primary_provider_request,
-                        sovereign=provider_result_sovereign)
+                        sovereign=provider_result_sovereign,
+                        hard_quota_circuit_open=bool(circuit.get("open")))
             except Exception as exc:  # noqa: BLE001 -- next scan will fail open
                 _log.warning("Brain wake provider accounting failed open (%s)", exc)
             try:
@@ -1133,6 +1293,7 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
         }
         if wake_decision is not None:
             result["provider_call_suppressed"] = False
+            result["provider_circuit_open"] = bool(circuit.get("open"))
             result["wake_decision"] = wake_decision
             result["wake_telemetry_write_ok"] = bool(
                 (wake_telemetry or {}).get("ok"))

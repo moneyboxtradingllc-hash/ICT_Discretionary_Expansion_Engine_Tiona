@@ -153,9 +153,11 @@ def wake_environment(monkeypatch):
     monkeypatch.delenv("BRAIN_FAMILY_REPAIR", raising=False)
     monkeypatch.delenv("BRAIN_INVALIDATION_REPAIR", raising=False)
     W.reset_controller_registry()
+    NB.reset_provider_circuit_for_tests()
     NB.set_call_context()
     yield
     W.reset_controller_registry()
+    NB.reset_provider_circuit_for_tests()
     NB.set_call_context()
 
 
@@ -261,6 +263,140 @@ def test_semantic_zone_crossing_wakes_the_existing_provider_path(monkeypatch):
     assert provider.call_count == 2
 
 
+def test_raw_event_with_material_canonical_change_wakes_for_semantics(monkeypatch):
+    monkeypatch.setenv("BRAIN_WAKE_MODE", W.ENFORCE)
+    snapshot, payload = evidence(relation="above_zone")
+    provider, _, _ = install_boundaries(monkeypatch, payload)
+    call(snapshot, sequence=1, when=NOW)
+    payload["authorized_tool_catalog"][0].update(
+        {"price_relation": "inside_zone", "entered_zone": True})
+    NB.set_call_context(session_id="SESSION", contract_id="CON.TEST", scan=2,
+                        observed_at=NOW + timedelta(seconds=60), wake_event={
+                            "schema": W.WAKE_EVENT_SCHEMA,
+                            "source": W.WAKE_EVENT_SOURCE,
+                            "event_id": "wake-registry:semantic",
+                            "observed_at": (NOW + timedelta(seconds=30)).isoformat(),
+                            "actionable": True,
+                            "events": [{"occurrence_id": "FVG-1",
+                                        "reason": "entered_zone"}],
+                        })
+    changed = NB.run_narrative_brain(copy.deepcopy(snapshot), "MNQ", None)
+    assert changed["source"] == "llm"
+    assert "semantic_change:catalogs" in changed["wake_decision"]["reasons"]
+    assert not any(reason.startswith("actionable_mechanical_event")
+                   for reason in changed["wake_decision"]["reasons"])
+    assert provider.call_count == 2
+
+
+def test_one_hundred_valid_raw_events_buy_zero_provider_calls_when_unchanged(
+        monkeypatch):
+    monkeypatch.setenv("BRAIN_WAKE_MODE", W.ENFORCE)
+    snapshot, payload = evidence()
+    provider, _, _ = install_boundaries(monkeypatch, payload)
+    call(snapshot, sequence=1, when=NOW)
+    for sequence in range(2, 102):
+        when = NOW + timedelta(seconds=sequence)
+        NB.set_call_context(session_id="SESSION", contract_id="CON.TEST",
+                            scan=sequence, observed_at=when, wake_event={
+                                "schema": W.WAKE_EVENT_SCHEMA,
+                                "source": W.WAKE_EVENT_SOURCE,
+                                "event_id": f"wake-registry:{sequence}",
+                                "observed_at": when.isoformat(),
+                                "actionable": True,
+                                "events": [{"occurrence_id": "FVG-1",
+                                            "reason": "entered_zone"}],
+                            })
+        result = NB.run_narrative_brain(copy.deepcopy(snapshot), "MNQ", None)
+        assert result["source"] == W.HOLD_SOURCE
+        assert result["provider_call_suppressed"] is True
+    assert provider.call_count == 1
+
+
+def test_hard_quota_circuit_allows_one_attempt_then_locally_degrades(monkeypatch):
+    monkeypatch.setenv("BRAIN_WAKE_MODE", W.ENFORCE)
+    snapshot, payload = evidence()
+    calls = Mock()
+
+    def quota_provider(*args, **kwargs):
+        calls()
+        NB._open_hard_quota_circuit("credit_balance_exhausted")
+        return {"parsed": None, "ok": False, "model": "gpt-5",
+                "prompt": "prompt", "user_content": "{}", "raw_response": None,
+                "usage": None,
+                "fallback_reason": "provider_hard_quota:credit_balance_exhausted",
+                "provider_request_attempted": True,
+                "provider_circuit_open": True,
+                "provider_circuit_opened": True}
+
+    _, telemetry, _ = install_boundaries(monkeypatch, payload, provider=quota_provider)
+    first = call(snapshot, sequence=1, when=NOW)
+    assert first["source"] == "degraded"
+    assert first["provider_circuit_open"] is True
+    for sequence in range(2, 102):
+        result = call(snapshot, sequence=sequence,
+                      when=NOW + timedelta(seconds=sequence * 60))
+        assert result["source"] == "degraded"
+        assert result["provider_circuit_open"] is True
+        assert result["provider_call_suppressed"] is False
+        assert result["fallback_reason"] == (
+            "provider_circuit_open:credit_balance_exhausted")
+    assert calls.call_count == 1
+    assert telemetry.call_count == 101
+
+
+def test_only_explicit_hard_quota_evidence_opens_the_circuit():
+    assert NB._hard_quota_reason(RuntimeError("429 rate limit exceeded")) is None
+    assert NB._hard_quota_reason(TimeoutError("request timed out")) is None
+    assert NB._hard_quota_reason(RuntimeError("no credits remaining")) == (
+        "no_credits_remaining")
+
+    class QuotaError(RuntimeError):
+        code = "credit_balance_exhausted"
+        type = "insufficient_quota"
+
+    assert NB._hard_quota_reason(QuotaError("quota")) == (
+        "credit_balance_exhausted")
+
+
+def test_real_provider_boundary_latches_only_explicit_credit_exhaustion(
+        monkeypatch):
+    import ai_layer.ai_api_adapter as adapter
+
+    class QuotaError(RuntimeError):
+        code = "credit_balance_exhausted"
+        type = "insufficient_quota"
+
+    class Completions:
+        def __init__(self):
+            self.calls = 0
+            self.with_raw_response = self
+
+        def create(self, **_kwargs):
+            self.calls += 1
+            raise QuotaError("You have no credits remaining")
+
+    completions = Completions()
+
+    class Client:
+        def __init__(self, **_kwargs):
+            self.chat = SimpleNamespace(completions=completions)
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key-not-real")
+    monkeypatch.setenv("AI_BRAIN_MODEL", "gpt-5.6-luna")
+    monkeypatch.setattr(adapter, "_OPENAI_AVAILABLE", True)
+    monkeypatch.setattr(adapter, "_openai", SimpleNamespace(OpenAI=Client))
+
+    first = NB._call_llm({"timestamp": "t", "market": {}})
+    second = NB._call_llm({"timestamp": "t", "market": {}})
+    assert first["provider_request_attempted"] is True
+    assert first["provider_circuit_opened"] is True
+    assert first["fallback_reason"] == (
+        "provider_hard_quota:credit_balance_exhausted")
+    assert second["provider_request_attempted"] is False
+    assert second["provider_circuit_open"] is True
+    assert completions.calls == 1
+
+
 def test_stale_quote_and_controller_exception_both_leave_provider_reachable(
         monkeypatch):
     monkeypatch.setenv("BRAIN_WAKE_MODE", W.ENFORCE)
@@ -350,15 +486,14 @@ def test_consumed_registry_event_reaches_final_provider_gate_once(monkeypatch):
                               observed_at=NOW + timedelta(seconds=90))
     assert fired and registry.consume_interaction() is True
 
-    woke = loop.scan_once()
+    held_after_event = loop.scan_once()
     after = loop.scan_once()
-    assert woke["source"] == "llm"
-    assert woke["wake_decision"]["reasons"] == [
-        "actionable_mechanical_event:entered_zone:FVG-1"]
+    assert held_after_event["source"] == W.HOLD_SOURCE
+    assert held_after_event["wake_decision"]["wake_event"]["actionable"] is True
     assert after["source"] == W.HOLD_SOURCE
-    assert provider.call_count == 2
+    assert provider.call_count == 1
     assert loop.clock.call_count == 4
-    assert woke["wake_decision"]["timestamp"] == (
+    assert held_after_event["wake_decision"]["timestamp"] == (
         NOW + timedelta(seconds=120)).isoformat()
 
 

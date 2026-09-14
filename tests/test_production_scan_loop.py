@@ -381,6 +381,28 @@ class TestBrainSleepHold:
         assert mission.entry_attempt_count == 0
         assert session.place_calls == 0
 
+    def test_provider_circuit_open_keeps_management_live_without_entry(
+            self, tmp_path):
+        events = []
+        cycle = HoldCycle(events)
+        cycle.source = "degraded"
+        cycle.fallback = "provider_circuit_open:credit_balance_exhausted"
+        loop, _, session, mission = build(tmp_path, armed=True, cycle=cycle)
+
+        loop.reconcile_missions = lambda: events.append("reconcile") or {"reports": []}
+        loop.manage_open_position = lambda: events.append("position_management") or {
+            "status": "APPLIED", "reason": "break_even_advanced"}
+        loop._record_decision = lambda *_args, **_kwargs: None
+
+        out = loop.scan_once()
+
+        assert events == ["reconcile", "position_management", "mechanical_scan"]
+        assert out["outcome"] == PL.BRAIN_DEGRADED
+        assert "provider_circuit_open" in out["detail"]
+        assert mission.candidate_count == 0
+        assert mission.entry_attempt_count == 0
+        assert session.place_calls == 0
+
 
 class TestProductionSizingReachesTheRunner:
 

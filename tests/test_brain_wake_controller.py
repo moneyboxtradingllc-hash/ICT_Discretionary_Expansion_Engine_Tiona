@@ -156,25 +156,36 @@ def test_raw_quote_tick_and_age_noise_do_not_change_semantic_state():
     assert held["decision"] == W.HOLD
 
 
-def test_actionable_mechanical_event_forces_one_wake_then_expires():
+def test_valid_actionable_mechanical_event_is_telemetry_not_paid_wake():
     controller = W.BrainWakeController(mode=W.ENFORCE)
     establish(controller)
     event = actionable_event(when=NOW + timedelta(seconds=30))
-    woke = observe(controller, 2, NOW + timedelta(seconds=60), wake_event=event)
-    assert woke["decision"] == W.WAKE
-    assert woke["reasons"] == [
-        "actionable_mechanical_event:entered_zone:FVG-1"]
-    controller.note_provider_result(woke, request_attempted=True, sovereign=True)
-    held = observe(controller, 3, NOW + timedelta(seconds=120))
+    held = observe(controller, 2, NOW + timedelta(seconds=60), wake_event=event)
     assert held["decision"] == W.HOLD
+    assert held["wake_event"]["event_id"] == "wake-registry:1"
+
+
+def test_many_distinct_valid_raw_events_hold_when_canonical_state_is_unchanged():
+    controller = W.BrainWakeController(mode=W.ENFORCE)
+    establish(controller)
+    for sequence in range(2, 102):
+        # Keep this intentionally inside the independent 300-second
+        # maximum-silence backstop: raw events alone must not buy cognition.
+        when = NOW + timedelta(seconds=sequence)
+        held = observe(
+            controller, sequence, when,
+            wake_event=actionable_event(f"wake-registry:{sequence}", when))
+        assert held["decision"] == W.HOLD
+        assert held["provider_call_suppressed"] is True
+        assert held["wake_event"]["event_id"] == f"wake-registry:{sequence}"
 
 
 def test_duplicate_event_identity_cannot_create_repeated_cognition():
     controller = W.BrainWakeController(mode=W.ENFORCE)
     establish(controller)
     event = actionable_event(when=NOW + timedelta(seconds=30))
-    woke = observe(controller, 2, NOW + timedelta(seconds=60), wake_event=event)
-    controller.note_provider_result(woke, request_attempted=True, sovereign=True)
+    held = observe(controller, 2, NOW + timedelta(seconds=60), wake_event=event)
+    assert held["decision"] == W.HOLD
     replay = observe(controller, 3, NOW + timedelta(seconds=120),
                      wake_event=event)
     assert replay["decision"] == W.HOLD
@@ -468,6 +479,17 @@ def test_failed_or_unattempted_provider_forces_next_wake():
     controller.note_provider_result(first, request_attempted=False, sovereign=False)
     second = observe(controller, 2, NOW + timedelta(seconds=60))
     assert "previous_provider_request_not_attempted" in second["reasons"]
+
+
+def test_intentional_hard_quota_circuit_skip_does_not_create_wake_loop():
+    controller = W.BrainWakeController(mode=W.ENFORCE)
+    first = observe(controller)
+    controller.note_provider_result(
+        first, request_attempted=True, sovereign=False,
+        hard_quota_circuit_open=True)
+    second = observe(controller, 2, NOW + timedelta(seconds=60))
+    assert second["decision"] == W.HOLD
+    assert "previous_brain_not_sovereign" not in second["reasons"]
 
 
 def test_controller_exception_fails_open_to_cognition(monkeypatch):
