@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import threading
 from datetime import datetime, timedelta, timezone
 
@@ -62,14 +63,14 @@ _BATCH_TRIM = 1000
 def _parse_ts(value):
     """Any venue timestamp -> aware UTC datetime, or None."""
     if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc) if value.tzinfo else None
     if not isinstance(value, str) or not value.strip():
         return None
     try:
         dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except (ValueError, TypeError):
         return None
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc) if dt.tzinfo else None
 
 
 def minute_floor(dt: datetime) -> datetime:
@@ -83,7 +84,7 @@ def _num(v):
         f = float(v)
     except (TypeError, ValueError):
         return None
-    return f if f == f else None
+    return f if math.isfinite(f) else None
 
 
 class VapCaptureProvider:
@@ -191,7 +192,7 @@ class VapCaptureProvider:
             return False
         ts = _parse_ts(trade.get("timestamp"))
         volume = _num(trade.get("volume"))
-        if ts is None or volume is None:
+        if ts is None or volume is None or volume <= 0:
             return False
         # OFF-GRID IS REFUSED, NOT RELOCATED. Rounding a price the venue cannot
         # quote into a neighbouring bucket would invent a trade there.

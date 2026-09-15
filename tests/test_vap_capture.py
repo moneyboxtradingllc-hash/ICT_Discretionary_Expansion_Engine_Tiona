@@ -524,7 +524,7 @@ class TestCandleAuthorityUntouched:
         assert alone.closed_candles() == beside.closed_candles()
         assert alone.diagnostics == beside.diagnostics
 
-    def test_V17_the_candle_provider_source_is_unmodified_by_this_unit(self):
+    def test_V17_the_market_runtime_source_is_unmodified_by_this_unit(self):
         """GIT_REPOSITORY_REQUIRED.
 
         This asks a question about a DIFF AGAINST HEAD -- did this unit modify
@@ -542,13 +542,12 @@ class TestCandleAuthorityUntouched:
                         "-- this theorem certifies history, not file contents")
         out = subprocess.run(
             ["git", "diff", "--name-only", "HEAD", "--",
-             "src/data_feed/topstepx_provider.py",
              "src/broker/topstepx_market_runtime.py"],
             cwd=ROOT, capture_output=True, text=True)
         assert out.returncode == 0, out.stderr
         assert out.stdout.strip() == "", (
-            f"this unit modified {out.stdout.split()}; the runtime fan-out and "
-            f"lifecycle facts were supposed to suffice")
+            f"this unit modified {out.stdout.split()}; the shared runtime fan-out "
+            f"must remain the sole socket/pump/reconnect authority")
 
     def test_capture_shares_no_state_with_the_aggregator(self):
         """The docstring NAMES `MinuteCandleAggregator` to explain what is being

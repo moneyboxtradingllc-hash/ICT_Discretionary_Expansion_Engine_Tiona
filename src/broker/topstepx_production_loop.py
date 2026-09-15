@@ -12,6 +12,8 @@ Outcomes are returned, never printed from inside, so a test can assert on them.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
+import os
 
 from broker import topstepx_mission_reconciler as RECON
 from broker import daily_loss_budget as DLB
@@ -137,6 +139,19 @@ class ProductionLoop:
         self.last_repair = None
         self.last_window = None
         self.last_daily_loss = None
+        # V1 is an observational subscriber of the already-running runtime.
+        # This loop is outside the cognition closure; it owns neither socket,
+        # pump, reconnect, Brain input, nor candidate construction.
+        self.volume_profile_collector = None
+        try:
+            from data_feed.volume_profile import VolumeAtPriceCollector
+            self.volume_profile_collector = VolumeAtPriceCollector(
+                contract_id=production_session.contract.id,
+                tick_size=production_session.contract.tick_size,
+                store_dir=getattr(candles, "store_dir", "data/market_data/topstepx"),
+                instrument=symbol).attach(runtime)
+        except Exception:
+            self.volume_profile_collector = None
 
     def _record_decision(self, scan: dict, disposition: str, reason, detail: str):
         """One death certificate per scan. Never raises; observability only.
@@ -176,10 +191,50 @@ class ProductionLoop:
                 rejection_reason=reason, detail=detail)
             record["active_draw"] = str(parsed.get("active_draw") or "")[:200]
             record["invalidation_level"] = parsed.get("invalidation_level")
+            # Same-scan descriptive VAP evidence; this writer is best-effort
+            # telemetry and is never read by production authority.
+            record["volume_profile"] = scan.get("volume_profile_evidence")
             with open(_os.path.join(root, "candidate_decisions.jsonl"), "a",
                       encoding="utf-8") as fh:
                 fh.write(_json.dumps(record, default=str) + chr(10))
         except Exception:  # noqa: BLE001 -- evidence must never gate a scan
+            pass
+
+    def _volume_profile_evidence(self, scan: dict, observed_at=None) -> dict:
+        """Read VAP only after cognition; never mutate the scan snapshot."""
+        try:
+            from data_feed.volume_profile import prior_completed_rth_profile, with_price_location
+            snap = scan.get("snapshot") or {}
+            execution = snap.get("execution_price") or {}
+            bid, ask = execution.get("bid"), execution.get("ask")
+            price = ((float(bid) + float(ask)) / 2.0
+                     if bid is not None and ask is not None else None)
+            profile = prior_completed_rth_profile(
+                store_dir=getattr(self.candles, "store_dir", "data/market_data/topstepx"),
+                contract_id=self.ps.contract.id, instrument=self.symbol,
+                now=observed_at or self.clock())
+            return with_price_location(profile, price)
+        except Exception as exc:
+            return {"available": False, "reason": "PROFILE_OBSERVATION_FAILED",
+                    "error": type(exc).__name__}
+
+    def _record_volume_profile_evidence(self, scan: dict) -> None:
+        """Best-effort per-scan JSONL.  No production path reads this ledger."""
+        try:
+            from ai_retrieval.retrieval_telemetry import session_root
+            session_id = getattr(getattr(self.cycle, "retrieval_telemetry", None), "session_id", "") or "UNSCOPED"
+            root = session_root(session_id)
+            os.makedirs(root, exist_ok=True)
+            row = dict(scan.get("volume_profile_evidence") or {})
+            row.update({"schema_version": "volume_profile_observation.v1",
+                        "session_id": session_id, "snapshot_id": scan.get("snapshot_id"),
+                        "scan_count": scan.get("scan_count"),
+                        "market_data_timestamp": scan.get("market_data_timestamp"),
+                        "contract": self.ps.contract.id,
+                        "observed_at": (self.clock().isoformat())})
+            with open(os.path.join(root, "volume_profile_observations.jsonl"), "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(row, default=str) + "\n")
+        except Exception:
             pass
 
     def _attach_evidence(self, candidate, scan: dict) -> None:
@@ -796,6 +851,10 @@ class ProductionLoop:
             deep = None                         # worth losing a scan over
         scan = self.cycle.scan(bars, now=(observed_at if observed_at is not None
                                          else self.clock()), deep_1m=deep)
+        # POST-COGNITION OBSERVATION ONLY.  The cycle has already assembled the
+        # Brain/candidate inputs; this envelope key cannot enter either.
+        scan["volume_profile_evidence"] = self._volume_profile_evidence(scan, observed_at)
+        self._record_volume_profile_evidence(scan)
         brain = scan["brain_block"]
         source = (brain or {}).get("source")
 
