@@ -67,3 +67,28 @@ def test_volume_profile_is_not_delivered_to_brain_input():
                                  "volume_profile": {"available": True, "poc": 1}}, {})
     assert "volume_profile" not in payload
     assert "volume_profile" not in payload.get("market", {})
+
+
+def test_vap_is_attached_only_after_the_cycle_returns_and_never_to_candidate_inputs():
+    """The loop's VAP observer is structurally downstream of cognition."""
+    import inspect
+    from broker.topstepx_production_loop import ProductionLoop
+    source = inspect.getsource(ProductionLoop._scan_once)
+    cycle = source.index("scan = self.cycle.scan(")
+    attach = source.index('scan["volume_profile_evidence"]')
+    candidate = source.index("self.producer.produce(")
+    assert cycle < attach < candidate
+    call = source[candidate:source.index(")", candidate) + 1]
+    assert "volume_profile" not in call
+
+
+def test_extreme_or_malformed_vap_cannot_change_brain_input():
+    from ai_brain.brain_input import build_brain_input
+    base = {"timestamp": "2026-09-15T14:00:00+00:00", "market": {"current_price": 1}}
+    payloads = []
+    for vap in ({"poc": 1, "vah": 999999, "val": -999999},
+                {"available": False, "reason": "MALFORMED"}, {}, None):
+        snap = dict(base)
+        snap["volume_profile"] = vap
+        payloads.append(build_brain_input(snap, {}))
+    assert all(payload == payloads[0] for payload in payloads[1:])
