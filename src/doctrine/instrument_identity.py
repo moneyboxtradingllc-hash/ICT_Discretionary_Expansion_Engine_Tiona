@@ -16,9 +16,39 @@ guessing is precisely how equity evidence would reach a futures decision.
 """
 from __future__ import annotations
 
+import re
+
 PRODUCTION_INSTRUMENT = "MNQ"
-PRODUCTION_CONTRACT = "CON.F.US.MNQ.U26"
 PRODUCTION_VENUE = "TOPSTEPX"
+
+#: CONTRACT-MONTH-AUTHORITY-1 (2026-09-21). TopstepX owns which MNQ month is
+#: active; this module owns which FAMILY is ours. Those are different questions
+#: and conflating them is what broke the September-to-December roll: the guard
+#: below pinned one expiry, so the venue resolved the live contract and the
+#: authorization refused to sign it.
+#:
+#: The safety property this module exists for is unchanged — equity and foreign
+#: futures evidence must never reach an MNQ decision. A family check keeps that
+#: property exactly: ES, MES, ENQ and QQQ are still refused. What it stops doing
+#: is fighting a quarterly roll that the venue, not the repository, decides.
+#:
+#: The month is NOT widened anywhere else. The session still resolves exactly one
+#: active contract from TopstepX, the authorization signs that exact id, and
+#: `SessionAuthorization.verify` refuses any later session whose resolved
+#: contract differs. Structural validity here is not permission to trade a
+#: different month — it is only permission to ASK.
+PRODUCTION_CONTRACT_FAMILY = "CON.F.US.MNQ"
+
+#: A TopstepX contract id is `CON.F.US.<ROOT>.<MONTH><YY>`. The month codes are
+#: the CME set; MNQ lists quarterly (H, M, U, Z) but the structural check does
+#: not second-guess venue listing policy — an unexpected-but-well-formed MNQ
+#: month is the venue's business, a malformed id is ours.
+_MNQ_CONTRACT_RE = re.compile(r"^CON\.F\.US\.MNQ\.[FGHJKMNQUVXZ][0-9]{2}$")
+
+#: A structurally valid member of the family, used as the low-level default for
+#: identity builders that have no contract of their own. It is deliberately NOT
+#: "the active month" — nothing reads it to decide what to trade.
+PRODUCTION_CONTRACT = "CON.F.US.MNQ.U26"
 
 # Retired for good. Listed so a refusal can name what it refused rather than
 # reporting a generic mismatch.
@@ -55,11 +85,24 @@ def assert_production_instrument(symbol, *, where: str = "production") -> str:
 
 
 def assert_production_contract(contract_id, *, where: str = "production") -> str:
+    """Prove a contract id is OUR instrument family, or refuse.
+
+    This answers "is this an MNQ futures contract on TopstepX", never "is this
+    the month we should be trading today". TopstepX answers the second question
+    at startup and the session authorization signs its answer; see
+    CONTRACT-MONTH-AUTHORITY-1 above.
+    """
     c = str(contract_id or "").strip()
-    if c != PRODUCTION_CONTRACT:
+    if not c:
         raise InstrumentIdentityError(
-            f"{where}: contract {c or '<missing>'} is not the active production "
-            f"contract {PRODUCTION_CONTRACT}.")
+            f"{where}: no contract. The production family is "
+            f"{PRODUCTION_CONTRACT_FAMILY}.*; it is never assumed from an "
+            f"empty value.")
+    if not _MNQ_CONTRACT_RE.match(c):
+        raise InstrumentIdentityError(
+            f"{where}: contract {c} is not a {PRODUCTION_CONTRACT_FAMILY}.* "
+            f"futures identity. TopstepX resolves the active month; this guard "
+            f"refuses foreign families and malformed ids.")
     return c
 
 

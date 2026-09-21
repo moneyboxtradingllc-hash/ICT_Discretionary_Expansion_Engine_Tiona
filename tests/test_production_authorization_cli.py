@@ -124,9 +124,22 @@ class TestRefusals:
         with pytest.raises(II.InstrumentIdentityError):
             issue(tmp_path, contract_id="CON.F.US.ES.U26")
 
-    def test_a_stale_mnq_contract_is_refused(self, tmp_path):
-        with pytest.raises(II.InstrumentIdentityError):
-            issue(tmp_path, contract_id="CON.F.US.MNQ.Z26")
+    def test_a_stale_mnq_month_is_refused_by_the_binding_not_the_spelling(
+            self, tmp_path):
+        """CONTRACT-MONTH-AUTHORITY-1 moved this refusal, it did not remove it.
+
+        A retired month is a structurally valid MNQ identity, so the family
+        guard no longer rejects it. What rejects it is the signed authorization:
+        the CLI resolves exactly one active contract from TopstepX, signs that
+        id, and every later verification refuses a different one.
+        """
+        other = "CON.F.US.MNQ.Z26"
+        assert other != CID
+        II.assert_production_contract(other)          # well-formed MNQ identity
+        a = issue(tmp_path)["authorization"]          # signed for CID
+        with pytest.raises(SA.AuthorizationRefused, match="CONTRACT_MISMATCH"):
+            a.verify(account_fingerprint=FP, contract_id=other,
+                     session_date="20260806")
 
     @pytest.mark.parametrize("sym", ["QQQ", "SPY", "NQ", "ES", ""])
     def test_a_non_mnq_instrument_is_refused(self, sym):

@@ -72,9 +72,92 @@ class TestInstrumentLaw:
 
     def test_the_active_contract_must_match(self):
         assert assert_production_contract(PRODUCTION_CONTRACT) == PRODUCTION_CONTRACT
-        for wrong in ("CON.F.US.MNQ.Z26", "CON.F.US.ENQ.U26", "", None):
+        for wrong in ("CON.F.US.ENQ.U26", "", None):
             with pytest.raises(InstrumentIdentityError):
                 assert_production_contract(wrong)
+
+
+class TestContractMonthAuthority:
+    """CONTRACT-MONTH-AUTHORITY-1. TopstepX owns the month; we own the family.
+
+    The September-to-December roll proved the two were conflated: the venue
+    resolved the live contract and the repository refused to sign it because a
+    constant still named the retired expiry.
+    """
+
+    def test_the_venue_resolved_active_month_is_accepted(self):
+        """1. Whatever TopstepX resolves today is a legal identity to ask about."""
+        assert (assert_production_contract("CON.F.US.MNQ.Z26")
+                == "CON.F.US.MNQ.Z26")
+
+    def test_a_prior_month_is_still_structurally_valid(self):
+        """2. A retired month is well-formed. It is refused by the
+        authorization's exact-contract binding, not by spelling."""
+        assert (assert_production_contract("CON.F.US.MNQ.U26")
+                == "CON.F.US.MNQ.U26")
+
+    @pytest.mark.parametrize("foreign", [
+        "CON.F.US.ES.Z26",      # a different future entirely
+        "CON.F.US.MES.Z26",     # the micro S&P, one letter from ours
+        "CON.F.US.ENQ.Z26",     # a near-miss root
+        "CON.F.US.NQ.Z26",      # the full-size NQ, not the micro
+        "QQQ",                  # the retired equity path
+        "CON.F.US.MNQX.Z26",    # family prefix extended
+    ])
+    def test_foreign_families_are_refused(self, foreign):
+        """3. The safety property this module exists for is unchanged."""
+        with pytest.raises(InstrumentIdentityError):
+            assert_production_contract(foreign)
+
+    @pytest.mark.parametrize("malformed", [
+        "CON.F.US.MNQ.",        # no month at all
+        "CON.F.US.MNQ.Z",       # no year
+        "CON.F.US.MNQ.Z2",      # one-digit year
+        "CON.F.US.MNQ.Z266",    # three-digit year
+        "CON.F.US.MNQ.A26",     # not a CME month code
+        "CON.F.US.MNQ.Z26.X",   # trailing segment
+        "con.f.us.mnq.z26",     # lower case is a different id
+    ])
+    def test_malformed_mnq_lookalikes_are_refused(self, malformed):
+        """4. Well-formed is not the same as MNQ-shaped."""
+        with pytest.raises(InstrumentIdentityError):
+            assert_production_contract(malformed)
+
+    def test_surrounding_whitespace_is_stripped_not_refused(self):
+        assert (assert_production_contract("  CON.F.US.MNQ.Z26  ")
+                == "CON.F.US.MNQ.Z26")
+
+    def test_the_authorization_still_binds_one_exact_contract(self):
+        """5. Family validity is permission to ASK, never to trade a different
+        month. The signed authorization refuses a mismatch on any later run."""
+        from datetime import datetime, timezone
+
+        from ai_retrieval.retrieval import retrieval_enabled
+        from broker import topstepx_session_authorization as SA
+
+        fp = "acct:fc84f7a928d9"
+        auth = SA.SessionAuthorization(
+            session_id="PROD-20260921", account_fingerprint=fp,
+            contract_id="CON.F.US.MNQ.Z26", session_date="20260921",
+            decision_window="09:00-14:00 America/New_York",
+            daily_loss_budget_usd=725.0,
+            # Read from the runtime rather than pinned: this test is about the
+            # contract binding, and an unrelated retrieval default must not be
+            # what decides whether it passes.
+            retrieval_enabled=retrieval_enabled(),
+            issued_at=datetime(2026, 9, 21, 12, 0, tzinfo=timezone.utc).isoformat())
+        auth.authorization_fingerprint = auth.fingerprint()
+
+        # The contract it signed verifies.
+        auth.verify(account_fingerprint=fp, contract_id="CON.F.US.MNQ.Z26",
+                    session_date="20260921")
+
+        # A different month in the same family does NOT, even though that month
+        # is structurally legal above.
+        assert_production_contract("CON.F.US.MNQ.H27")
+        with pytest.raises(SA.AuthorizationRefused, match="CONTRACT_MISMATCH"):
+            auth.verify(account_fingerprint=fp, contract_id="CON.F.US.MNQ.H27",
+                        session_date="20260921")
 
 
 class TestEvidenceEligibility:
