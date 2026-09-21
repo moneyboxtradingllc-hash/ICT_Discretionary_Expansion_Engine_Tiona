@@ -51,6 +51,49 @@ def _tracked_clean() -> tuple:
         return False, [f"git unavailable: {type(exc).__name__}"]
 
 
+def _authorization_facts(facts: dict, session_date: str) -> None:
+    """Verify today's authorization against the contract the VENUE resolved.
+
+    CONTRACT-MONTH-AUTHORITY-1 (2026-09-21). This ran before the venue session,
+    so `facts["contract_id"]` did not exist yet and the check fell through to a
+    hardcoded expiry. Every authorization signed for the live contract therefore
+    read as AUTHORIZATION_CONTRACT_MISMATCH the moment a quarterly rolled --
+    FINAL could not pass on any correctly issued record.
+
+    It is called AFTER the venue block now, so the contract compared is the one
+    TopstepX actually resolved. Offline keeps the environment fallback because
+    there is no venue to ask; an offline run cannot prove a live contract and
+    does not pretend to.
+
+    Verification is delegated to `SessionAuthorization.verify`, never
+    re-implemented here.
+    """
+    from broker import topstepx_session_authorization as SA
+    compact = session_date.replace("-", "")
+    found, detail = None, "no authorization record for this session date"
+    for path in sorted(glob.glob(os.path.join(STORE_DIR, "session_auth_*.json"))):
+        record = SA.SessionAuthorization.load(path)
+        if record is None or str(record.session_date) != compact:
+            continue
+        try:
+            record.verify(account_fingerprint=facts["account_fingerprint"] or "",
+                          contract_id=facts.get("contract_id")
+                          or os.getenv("TOPSTEPX_CONTRACT_ID", ""),
+                          session_date=compact)
+            found = record
+            detail = (f"{record.session_id} · auth ...{str(record.authorization_fingerprint)[-6:]} "
+                      f"· brain ...{str(record.brain_contract_fingerprint)[-6:]} · UNSPENT"
+                      if not getattr(record, "spent", False) else record.session_id)
+            break
+        except SA.AuthorizationRefused as exc:
+            detail = f"{os.path.basename(path)}: {exc}"
+    facts["session_authorization_valid"] = found is not None
+    facts["session_authorization_detail"] = detail
+    facts["session_authorization_id"] = getattr(found, "session_id", None)
+    facts["session_authorization_fingerprint"] = getattr(
+        found, "authorization_fingerprint", None)
+
+
 def gather(*, offline: bool, session_date: str) -> dict:
     from ai_brain.narrative_brain import enabled as brain_enabled
     from ai_brain.production_model import brain_contract_fingerprint, resolve_model
@@ -92,33 +135,13 @@ def gather(*, offline: bool, session_date: str) -> dict:
     # `verify()` compares raw strings, so the ISO session date is normalised the
     # way the issuer does -- the exact mismatch that once made a valid
     # authorization read as AUTHORIZATION_EXPIRED.
-    from broker import topstepx_session_authorization as SA
-    compact = session_date.replace("-", "")
-    found, detail = None, "no authorization record for this session date"
-    for path in sorted(glob.glob(os.path.join(STORE_DIR, "session_auth_*.json"))):
-        record = SA.SessionAuthorization.load(path)
-        if record is None or str(record.session_date) != compact:
-            continue
-        try:
-            record.verify(account_fingerprint=facts["account_fingerprint"] or "",
-                          contract_id=facts.get("contract_id")
-                          or os.getenv("TOPSTEPX_CONTRACT_ID", "CON.F.US.MNQ.U26"),
-                          session_date=compact)
-            found = record
-            detail = (f"{record.session_id} · auth ...{str(record.authorization_fingerprint)[-6:]} "
-                      f"· brain ...{str(record.brain_contract_fingerprint)[-6:]} · UNSPENT"
-                      if not getattr(record, "spent", False) else record.session_id)
-            break
-        except SA.AuthorizationRefused as exc:
-            detail = f"{os.path.basename(path)}: {exc}"
-    facts["session_authorization_valid"] = found is not None
-    facts["session_authorization_detail"] = detail
-    facts["session_authorization_id"] = getattr(found, "session_id", None)
-    facts["session_authorization_fingerprint"] = getattr(
-        found, "authorization_fingerprint", None)
+    # The verification itself lives in `_authorization_facts` and runs AFTER the
+    # venue block below, so it compares the authorization against the contract
+    # TopstepX actually resolved rather than a constant.
 
     if offline:
         facts["offline"] = True
+        _authorization_facts(facts, session_date)
         return facts
 
     from broker.topstepx_readonly import TopstepXReadOnlySession
@@ -143,6 +166,7 @@ def gather(*, offline: bool, session_date: str) -> dict:
         "offline": False,
     })
     session.close()
+    _authorization_facts(facts, session_date)
     return facts
 
 
