@@ -172,7 +172,8 @@ def descriptive_memory_telemetry() -> dict:
 
 
 def execution_path_telemetry(*, armed: bool, mission_id: str, symbol: str,
-                             authorization=None, governor=None) -> str:
+                             authorization=None, governor=None,
+                             contract_id: str = "") -> str:
     """Resolved production doctrine, printed before anything can execute.
 
     `authorization` is the VERIFIED `SessionAuthorization`, and `governor` the
@@ -181,6 +182,11 @@ def execution_path_telemetry(*, armed: bool, mission_id: str, symbol: str,
     inside `run_production_scans`, after this banner has already printed, and
     the governor is resolved per-scan inside the loop. Absent them this reports
     UNRESOLVED and says why -- it does not substitute a configured default.
+
+    `contract_id` is the id TopstepX actually resolved, supplied by the caller
+    for the same reason: this function cannot observe the venue, and a banner
+    that names the live contract from a module constant is how a session gets
+    assumed to be on an instrument it is not. Absent it, UNRESOLVED.
     """
     from datetime import datetime, timezone
 
@@ -361,7 +367,13 @@ def execution_path_telemetry(*, armed: bool, mission_id: str, symbol: str,
         "  DATA SOURCE                  : TopstepX",
         "  EXECUTION VENUE              : TopstepX",
         f"  STRATEGY INSTRUMENT          : {II.PRODUCTION_INSTRUMENT}",
-        f"  ACTIVE CONTRACT              : {II.PRODUCTION_CONTRACT}",
+        # CONTRACT-MONTH-AUTHORITY-1 (2026-09-21). This printed the module
+        # constant, so after the quarterly roll the banner reported U26 while
+        # the venue had resolved Z26. The caller supplies the venue-resolved
+        # id; absent one this says UNRESOLVED rather than name a month it has
+        # no evidence for.
+        f"  ACTIVE CONTRACT              : "
+        f"{contract_id or 'UNRESOLVED (no venue-resolved contract supplied)'}",
         # Deliberately NOT "ALPACA RUNTIME: REMOVED". The legacy paper_execution
         # subsystem is still physically present; it is blocked and unreachable,
         # which is a different claim. Telemetry that overstates a retirement is
@@ -898,10 +910,25 @@ def check_startup(session, *, armed: bool, mission_id: str, provider: str,
         refusals.append(
             f"RETIRED_PATH_REACHABLE: this process loaded {', '.join(reachable[:4])}; "
             f"a retired venue must never be importable from the production launcher")
+    # CONTRACT-MONTH-AUTHORITY-1 (2026-09-21). This compared the venue-resolved
+    # contract against one pinned expiry, so the September-to-December roll made
+    # the LIVE LAUNCHER refuse the contract TopstepX had correctly resolved --
+    # Z26 is not U26. The PRAC preflight does not exercise this path, so a 24/24
+    # green preflight coexisted with an entrypoint that could not start.
+    #
+    # The family check is the safety property this guard exists for, and it is
+    # unchanged: ES, MES, ENQ, NQ, QQQ and malformed ids are still refused here.
+    # The exact month is bound downstream where it belongs -- `resolve_contract`
+    # proves exactly one active contract, the session authorization signs that
+    # exact id, and `verify` refuses any exact-contract mismatch on every later
+    # run. Structural validity here is permission to ASK, never to trade a
+    # different month.
     contract = getattr(getattr(session, "contract", None), "id", "")
-    if contract and contract != II.PRODUCTION_CONTRACT:
-        refusals.append(
-            f"FOREIGN_CONTRACT: {contract} is not {II.PRODUCTION_CONTRACT}")
+    if contract:
+        try:
+            II.assert_production_contract(contract, where="production startup")
+        except II.InstrumentIdentityError as exc:
+            refusals.append(f"FOREIGN_CONTRACT: {exc}")
     if provider != "topstepx":
         refusals.append(
             f"FOREIGN_DATA_PROVIDER: DATA_PROVIDER={provider or 'unset'}; production "
@@ -1089,7 +1116,8 @@ def main(argv=None) -> int:
     print(f"  NEW ENTRY PERMITTED          : {lane['new_entry_permitted']}")
     print(f"  ARMED                        : {args.arm}")
     print(execution_path_telemetry(armed=args.arm, mission_id=args.mission_id,
-                                   symbol=args.symbol))
+                                   symbol=args.symbol,
+                                   contract_id=getattr(contract, "id", "")))
     if lane["lane"] == "RECOVERY":
         print("  RECOVERY                     : unresolved context found; "
               "reconciling the existing position, NOT entering again")

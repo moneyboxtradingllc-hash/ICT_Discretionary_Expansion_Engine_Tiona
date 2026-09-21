@@ -44,7 +44,15 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # Feature-branch source includes the deterministic Brain wake boundary and
     # the structural-risk evidence/coherence repair. This is a new contract
     # fingerprint, not a historical authorization migration.
-            assert PM.brain_contract_fingerprint() == "brain:3ca8a6dcbff4c614"
+    #
+    # CONTRACT-MONTH-AUTHORITY-1 (2026-09-21) rotates it again:
+    # brain:3ca8a6dcbff4c614 -> brain:2ea981d173588875. The repair edits
+    # `tools/topstepx_production_session.py`, which is bound into the closure
+    # as `production_entrypoint`, so the rotation is the binding working as
+    # designed. It is recorded here, never suppressed: the PROD-20260921
+    # authorization signed against the old value is stale BY DESIGN and was
+    # reissued rather than migrated.
+            assert PM.brain_contract_fingerprint() == "brain:2ea981d173588875"
 
 
 @pytest.mark.parametrize("addition", [
