@@ -179,8 +179,29 @@ def _semantic_shape_issues(snapshot: dict, brain_input: dict) -> list:
         mapping(shown_liquidity, "active_draw", "brain_input.liquidity.active_draw",
                 allow_none=True)
         rows(shown_liquidity, "events", "brain_input.liquidity.events")
-    rows(brain_input, "liquidity_events", "brain_input.liquidity_events",
-         required=True)
+    # WAKE-EVIDENCE-SHAPE-1 (2026-09-22). This asked for a LIST, but
+    # `brain_input._liquidity_events_block` publishes a BLOCK whose rows live
+    # one level down:
+    #
+    #     {"available": False, "events": []}
+    #
+    # A dict is not a list and the check was required, so every scan of every
+    # session recorded `malformed_required_evidence:brain_input.liquidity_events`
+    # -- correctly treated as uncertainty, correctly answered with a safety
+    # WAKE. The result was that ENFORCE could never suppress anything: PROD-
+    # 20260921 ran 541 scans, 541 WAKEs, 0 suppressions, with
+    # `changed_dimensions` empty on every one of them.
+    #
+    # This is a contract mismatch, not a reason to relax evidence law. The
+    # block is validated as a block and its `events` member as rows, exactly
+    # as `brain_input.liquidity` is handled three lines above. A wrong type at
+    # either level is still malformed, absence is still malformed, and both
+    # still fail open to a safety WAKE.
+    liquidity_events = mapping(brain_input, "liquidity_events",
+                               "brain_input.liquidity_events", required=True)
+    if liquidity_events is not None:
+        rows(liquidity_events, "events", "brain_input.liquidity_events.events",
+             required=True)
 
     for root, label in ((snapshot, "protected_swings"),
                         (brain_input, "brain_input.protected_swings")):
@@ -414,7 +435,22 @@ def _active_path_view(value) -> dict:
 def _liquidity_view(snapshot: dict, brain_input: dict) -> dict:
     shown = _dict(brain_input.get("liquidity"))
     exact = []
-    for event in _list(brain_input.get("liquidity_events")):
+    # WAKE-EVIDENCE-SHAPE-1 (2026-09-22). The same block/list confusion the
+    # validator carried: `_list()` answers [] for a dict, so `exact` was ALWAYS
+    # empty and `event_identities` never contributed to the fingerprint. It is
+    # read one level down now. A bare list is still accepted because this
+    # projection must stay tolerant for replay of archives authored before the
+    # block existed -- a projection that raises costs a scan.
+    #
+    # No WAKE was lost to this on its own: `current_events` below is built from
+    # `snapshot["liquidity"]` sweep facts, which is the SAME source
+    # `_liquidity_events_block` reads, so a real sweep still moved the
+    # fingerprint. It is repaired because a dead evidence path cannot be left
+    # in a gate that is about to start suppressing calls.
+    shown_events = brain_input.get("liquidity_events")
+    if isinstance(shown_events, dict):
+        shown_events = shown_events.get("events")
+    for event in _list(shown_events):
         if isinstance(event, dict):
             exact.append(_pick(event, (
                 "occurrence_id", "timeframe", "tf", "event_time", "side",

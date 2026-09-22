@@ -80,7 +80,7 @@ def observation(sequence=1, *, session=SESSION, relation="above_zone"):
                    "volatility_state": "normal", "expansion_state": "balanced"},
         "delivery": {"session_po3": po3},
         "liquidity": {"events": [], "active_draw": None},
-        "liquidity_events": [],
+        "liquidity_events": {"available": False, "events": []},
         "protected_swings": {"by_timeframe": {"highs": {}, "lows": {}},
                              "protected_high": None,
                              "protected_high_status": "none",

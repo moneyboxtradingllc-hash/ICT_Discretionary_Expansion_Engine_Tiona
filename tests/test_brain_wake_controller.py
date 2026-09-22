@@ -71,7 +71,13 @@ def valid_evidence():
                    "expansion_state": "balanced"},
         "delivery": {"session_po3": po3},
         "liquidity": {"events": [], "active_draw": None},
-        "liquidity_events": [],
+        # WAKE-EVIDENCE-SHAPE-1 (2026-09-22). This fixture published a bare
+        # list, which is NOT what `brain_input._liquidity_events_block` emits.
+        # The validator asked for a list and the fixture agreed with it, so the
+        # tests passed while every production scan recorded
+        # `malformed_required_evidence:brain_input.liquidity_events`. A fixture
+        # that models the wrong contract cannot catch a contract mismatch.
+        "liquidity_events": {"available": False, "events": []},
         "protected_swings": {"by_timeframe": {"highs": {}, "lows": {}},
                              "protected_high": None,
                              "protected_high_status": "none",
@@ -329,7 +335,7 @@ def test_missing_or_malformed_observation_time_never_earns_hold():
     ("active_path", lambda s, b: (
         s["active_path_state"].update({"owner": "bullish", "status": "active"}),
         b["active_path_state"].update({"owner": "bullish", "status": "active"}))),
-    ("liquidity", lambda s, b: b["liquidity_events"].append(
+    ("liquidity", lambda s, b: b["liquidity_events"]["events"].append(
         {"occurrence_id": "SWEEP-2", "timeframe": "1m",
          "liquidity_side_taken": "sell_side", "reclaimed": True})),
     ("protected_swings", lambda s, b: s["protected_swings"]["by_timeframe"][
