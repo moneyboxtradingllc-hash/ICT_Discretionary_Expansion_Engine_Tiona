@@ -39,6 +39,28 @@ RISK_REJECTED = "RISK_REJECTED"
 BRAIN_UNUSABLE = "BRAIN_UNUSABLE"
 WINDOW_CLOSED = "WINDOW_CLOSED"
 STOOD_DOWN = "STOOD_DOWN"
+
+#: DECISION-ACCOUNTING-HELD-1 (2026-09-23). The scan on which the Brain was
+#: never asked. `STOOD_DOWN` means the organism looked at the market and
+#: declined; `HELD` means it did not look, because the wake controller proved
+#: no material semantic change and ENFORCE suppressed the call. Those are
+#: different facts about the session and the ledger must not merge them: a
+#: reader counting stand-downs is counting judgements, and a suppressed scan
+#: contains no judgement to count.
+HELD = "HELD"
+
+#: The deterministic daily-loss governor refused entry on PROVEN truth -- the
+#: budget is spent. This is a decision, not an absence of one.
+BUDGET_EXHAUSTED = "BUDGET_EXHAUSTED"
+
+#: The governor could not ESTABLISH truth, so it refused rather than guess:
+#: order discovery came back incomplete, the venue could not be read, or an
+#: in-session trade could not be attributed. Kept distinct from
+#: `BUDGET_EXHAUSTED` for the reason this codebase keeps every such pair
+#: distinct -- "no" and "cannot tell" are not the same answer, and a ledger
+#: that renders them identically loses the only signal that says go look.
+GOVERNOR_UNPROVEN = "GOVERNOR_UNPROVEN"
+
 UNCLASSIFIED = "UNCLASSIFIED"
 
 TERMINAL_DISPOSITIONS = (
@@ -46,7 +68,9 @@ TERMINAL_DISPOSITIONS = (
     OBJECTIVE_ID_MISSING, OBJECTIVE_ID_UNKNOWN, OBJECTIVE_INVALID,
     INVALIDATION_ID_MISSING, INVALIDATION_ID_UNKNOWN, INVALIDATION_INVALID,
     GEOMETRY_REJECTED, REWARD_BELOW_QUALIFICATION, RISK_REJECTED,
-    BRAIN_UNUSABLE, WINDOW_CLOSED, STOOD_DOWN, UNCLASSIFIED,
+    BRAIN_UNUSABLE, WINDOW_CLOSED, STOOD_DOWN,
+    HELD, BUDGET_EXHAUSTED, GOVERNOR_UNPROVEN,
+    UNCLASSIFIED,
 )
 
 #: producer reason -> terminal disposition. Producer vocabulary is authoritative;
@@ -108,6 +132,39 @@ _REASON_TO_DISPOSITION = {
     # Each needs its own ruling about which terminal disposition it IS; a bulk
     # sweep into STOOD_DOWN would trade one accounting error for a larger one.
     "session_phase_blocks_entry": STOOD_DOWN,
+
+    # DECISION-ACCOUNTING-HELD-1 (2026-09-23). PROD-20260922 was the first
+    # session in which ENFORCE ever suppressed a call: 38 scans held, and all
+    # 38 fell to UNCLASSIFIED because this reason did not exist here. With 4
+    # governor refusals that made 42, and `reconcile` correctly reported
+    # CANDIDATE_DECISION_ACCOUNTING_FAILURE for a session that had in fact
+    # accounted for every scan. Left unrepaired, every future session that
+    # holds would raise the same false alarm and bury a real one.
+    #
+    # DELIBERATELY NOT STOOD_DOWN. The Brain did not evaluate that scan.
+    "brain_sleep_hold": HELD,
+
+    # The daily-loss governor's own vocabulary. `_record_decision` is handed
+    # `budget["state"]`, never the granular reason -- the granular reason
+    # (`order_discovery_incomplete`, `venue_truth_unavailable`, ...) travels in
+    # the record's `detail`, which is where it stays readable. Only refusal
+    # states reach this map: `resolve` records nothing when entry is permitted,
+    # so OK never appears.
+    "EXHAUSTED": BUDGET_EXHAUSTED,
+    "UNKNOWN": GOVERNOR_UNPROVEN,
+    "CONTAMINATED": GOVERNOR_UNPROVEN,
+
+    # The governor's GRANULAR reasons are mapped too, so the classification
+    # holds whichever of the two vocabularies a caller hands over. The live
+    # path passes the state; these are the same refusals named precisely.
+    # `daily_loss_budget_spent` is proven exhaustion; the rest are all forms of
+    # "the truth could not be established", which is never exhaustion.
+    "daily_loss_budget_spent": BUDGET_EXHAUSTED,
+    "order_discovery_incomplete": GOVERNOR_UNPROVEN,
+    "venue_truth_unavailable": GOVERNOR_UNPROVEN,
+    "unattributable_in_session_trade": GOVERNOR_UNPROVEN,
+    "authorization_carries_no_daily_loss_budget": GOVERNOR_UNPROVEN,
+    "daily_loss_budget_is_not_a_positive_number": GOVERNOR_UNPROVEN,
 }
 
 

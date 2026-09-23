@@ -258,6 +258,20 @@ def submissions(store_dir: str, session: str) -> dict:
                                           for r in rows),
             "operations": collections.Counter(str(r.get("operation") or "?")
                                               for r in rows),
+            # ACK-DISPLAY-1 (2026-09-23). `post_fill_establishment` was dropped
+            # here, and it is the ONLY field that distinguishes the post-fill
+            # rows from the acknowledgement row. `record_establishment`
+            # deliberately PRESERVES the submission state -- post-fill evidence
+            # must not invent a new answer to whether the venue saw the entry --
+            # so a filled entry writes one VENUE_ACKNOWLEDGED row from the
+            # submit path and one more per establishment stage, all reading
+            # VENUE_ACKNOWLEDGED.
+            #
+            # On PROD-20260922 that printed as five apparently identical rows
+            # for one order, which was escalated to the owner as a suspected
+            # duplicate-write defect. It was not: four of them were four
+            # distinct facts wearing the same state. The rows were always
+            # truthful; only this projection of them was not.
             "rows": [{"submission_id": r.get("submission_id"),
                       "mission_id": r.get("mission_id"),
                       "state": r.get("state"),
@@ -266,6 +280,8 @@ def submissions(store_dir: str, session: str) -> dict:
                       "venue_order_id": r.get("venue_order_id"),
                       "error_code": r.get("error_code"),
                       "error_message": r.get("error_message"),
+                      "establishment": ((r.get("post_fill_establishment") or {})
+                                        .get("stage")),
                       "transport_exception": r.get("transport_exception")}
                      for r in rows]}
 
@@ -391,6 +407,11 @@ def main() -> int:
             line = (f"      {r['mission_id']}  {r['operation']}  "
                     f"{r['state']}  success={r['success']}  "
                     f"order={r['venue_order_id']}")
+            # The establishment stage is what separates an acknowledgement row
+            # from the post-fill rows that preserve its state. Without it,
+            # five different facts read as one fact written five times.
+            if r.get("establishment"):
+                line += f"  establishment={r['establishment']}"
             # errorCode 0 IS the ProjectX success code. Printing "err=0"
             # beside "success=True" reads as a failure that did not happen.
             if r["error_code"] not in (None, 0) or r["error_message"]:
