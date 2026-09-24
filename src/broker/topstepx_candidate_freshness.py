@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+import math
 
 # Objective kinds the mechanical layer may enumerate. Luna chooses WHICH of
 # these is the live draw; this layer only validates that the choice is real.
@@ -45,6 +46,7 @@ STALE_REASONS = (
     "window_closed", "account_state_changed", "manual_activity",
     "narrative_changed", "objective_unknown_kind", "objective_wrong_side",
     "objective_off_tick",
+    "invalidation_history_unavailable", "current_price_beyond_invalidation",
 )
 
 
@@ -140,6 +142,87 @@ def validate_objective(objective: LiquidityObjective, *, direction: str,
             "age_seconds": round(age.total_seconds(), 1), "valid": True}
 
 
+def _aware_instant(value):
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed.astimezone(timezone.utc)
+
+
+def _validate_protected_swing_history(candidate, timeframes) -> None:
+    """Refuse a protected-swing stop unless its post-registration bars prove it intact."""
+    extras = candidate.extras if isinstance(candidate.extras, dict) else {}
+    invalidation = extras.get("structural_invalidation") or {}
+    row = invalidation.get("authorized_catalog_row") or {}
+    kind = str(row.get("type") or invalidation.get("structure_type") or "")
+    if not kind.startswith("protected_"):
+        return
+
+    side = kind.removeprefix("protected_")
+    expected_side = "low" if candidate.direction == "bullish" else "high"
+    tf = str(row.get("timeframe") or "")
+    registered_at = _aware_instant(row.get("registered_at"))
+    try:
+        level = float(row.get("price"))
+    except (TypeError, ValueError):
+        level = float("nan")
+    if (side != expected_side or tf not in {"1m", "3m", "5m", "15m"}
+            or registered_at is None or not math.isfinite(level)
+            or level != float(candidate.invalidation_price)):
+        raise CandidateStale(
+            "invalidation_history_unavailable",
+            "selected protected swing lacks matching timeframe, level, or aware registration identity")
+
+    block = (timeframes or {}).get(tf) if isinstance(timeframes, dict) else None
+    candles = (block or {}).get("recent_candles") or []
+    if not candles and isinstance((block or {}).get("last_candle"), dict):
+        candles = [block["last_candle"]]
+    parsed = []
+    for candle in candles:
+        if not isinstance(candle, dict):
+            continue
+        stamp = _aware_instant(candle.get("timestamp"))
+        if stamp is None:
+            raise CandidateStale("invalidation_history_unavailable",
+                                 f"{tf} candle has no valid aware timestamp")
+        parsed.append((stamp, candle))
+    if not parsed:
+        raise CandidateStale("invalidation_history_unavailable",
+                             f"no {tf} candle history is available")
+    parsed.sort(key=lambda item: item[0])
+    if parsed[0][0] > registered_at:
+        raise CandidateStale("invalidation_history_unavailable",
+                             f"retained {tf} bars begin after swing registration")
+
+    for stamp, candle in parsed:
+        if stamp < registered_at:
+            continue
+        status = candle.get("temporal_status")
+        if status != "settled" and candle.get("complete") is not True:
+            if status == "forming":
+                continue
+            raise CandidateStale("invalidation_history_unavailable",
+                                 f"{tf} post-registration candle is not proven complete")
+        try:
+            close = float(candle.get("close"))
+        except (TypeError, ValueError):
+            raise CandidateStale("invalidation_history_unavailable",
+                                 f"{tf} completed candle has no valid close") from None
+        if not math.isfinite(close):
+            raise CandidateStale("invalidation_history_unavailable",
+                                 f"{tf} completed candle has no finite close")
+        violated = close > level if side == "high" else close < level
+        if violated:
+            raise CandidateStale(
+                "invalidation_touched",
+                f"completed {tf} close {close} crossed registered protected {side} {level}")
+
+
 @dataclass
 class CandidateSnapshot:
     """Everything a candidate claimed, so drift can be detected rather than assumed."""
@@ -186,7 +269,9 @@ def assess(candidate: CandidateSnapshot, *, current_price: float,
            snapshot_id: str, contract_id: str, account_fingerprint: str,
            account_state_digest: str, data_age_seconds: float,
            in_window: bool, manual_activity: bool, narrative: str = None,
-           max_data_age: float = 90.0, now: datetime = None) -> dict:
+           max_data_age: float = 90.0, now: datetime = None,
+           invalidation_timeframes: dict = None,
+           current_executable_price: float = None) -> dict:
     """Full pre-submit freshness verdict. Raises CandidateStale on any drift.
 
     Ordered so the cheapest, most decisive refusals come first — a superseded
@@ -218,6 +303,25 @@ def assess(candidate: CandidateSnapshot, *, current_price: float,
     if narrative is not None and candidate.narrative and narrative != candidate.narrative:
         raise CandidateStale("narrative_changed",
                              "the candidate no longer belongs to the active narrative")
+
+    _validate_protected_swing_history(candidate, invalidation_timeframes)
+
+    if current_executable_price is not None:
+        try:
+            executable = float(current_executable_price)
+        except (TypeError, ValueError):
+            executable = float("nan")
+        if not math.isfinite(executable):
+            raise CandidateStale("current_price_beyond_invalidation",
+                                 "current executable price is not finite")
+        beyond = (executable <= candidate.invalidation_price
+                  if candidate.direction == "bullish"
+                  else executable >= candidate.invalidation_price)
+        if beyond:
+            raise CandidateStale(
+                "current_price_beyond_invalidation",
+                f"executable price {executable} is at or beyond structural stop "
+                f"{candidate.invalidation_price}")
 
     # invalidation touched — the thesis already failed while we waited
     if candidate.direction == "bullish" and low_since <= candidate.invalidation_price:

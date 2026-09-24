@@ -116,8 +116,9 @@ class TestPerTimeframeProtectedStructure:
         t = tracker_with(highs={"15m": rec(29900.0, "15m"),
                                 "1m": rec(29820.0, "1m")})
         t.update({"timestamp": "t", "liquidity": {}, "structure": {},
-                  # must clear the violation buffer (0.05% of price)
-                  "timeframes": {"1m": {"last_candle": {"close": 29900.0}}}})
+                  # exact completed 1m close clears only the 1m level
+                  "timeframes": {"1m": {"last_candle": {
+                      "close": 29900.0, "complete": True}}}})
         highs = t.state()["by_timeframe"]["highs"]
         assert "1m" not in highs and "15m" in highs
 

@@ -393,7 +393,8 @@ class TestSamePriceReformation:
                 "execution_price": {"available": True, "fresh": True,
                                     "best_bid": price, "best_ask": price + 0.25},
                 "market": {"current_price": price},
-                "timeframes": {"1m": {"last_candle": {"close": price}}}}
+                "timeframes": {"1m": {"last_candle": {"close": price,
+                                                             "complete": True}}}}
 
     @pytest.fixture(scope="class")
     def lives(self):

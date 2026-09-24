@@ -20,8 +20,6 @@ level persists until violated, not until the next scan forgets the sweep.
 
 Never raises. State degrades safely on missing data.
 """
-import os
-
 # MTF-RESTORATION (2026-08-11). Was ("15m", "5m") -- 1m and 3m could never
 # register protected structure at all. On 2026-08-10 that discarded 90 of 140
 # sweep+reclaim events, and they came from exactly the two timeframes the
@@ -42,13 +40,6 @@ def timeframe_role(tf: str) -> str:
     return TIMEFRAME_ROLES.get(str(tf), "unknown")
 
 
-def _violation_buffer_pct() -> float:
-    try:
-        return float(os.getenv("NARRATIVE_PROTECTED_BUFFER_PCT", "0.05")) / 100.0
-    except (TypeError, ValueError):
-        return 0.0005
-
-
 def _current_price(snapshot: dict) -> "float | None":
     tfs = snapshot.get("timeframes", {}) or {}
     for tf in ("1m", "3m", "5m", "15m"):
@@ -64,6 +55,28 @@ def _current_price(snapshot: dict) -> "float | None":
         return float(cp) if cp is not None else None
     except (TypeError, ValueError):
         return None
+
+
+def _completed_close(snapshot: dict, tf: str) -> "float | None":
+    """Return the newest proven completed close for this swing's own TF."""
+    block = (snapshot.get("timeframes") or {}).get(tf) or {}
+    candles = block.get("recent_candles") or []
+    if not candles and isinstance(block.get("last_candle"), dict):
+        candles = [block["last_candle"]]
+    for candle in reversed(candles):
+        if not isinstance(candle, dict):
+            continue
+        # An explicitly settled candle is canonical. The raw builder's
+        # `complete=True` is also a direct completion fact for simple 1m rows.
+        if candle.get("temporal_status") != "settled" and candle.get("complete") is not True:
+            continue
+        try:
+            close = float(candle.get("close"))
+        except (TypeError, ValueError):
+            continue
+        if close == close and abs(close) != float("inf"):
+            return close
+    return None
 
 
 class ProtectedSwingTracker:
@@ -238,15 +251,17 @@ class ProtectedSwingTracker:
                         level=float(st["last_swing_low"]), ts=ts,
                         basis="sell_side_raid_rejected"))
 
-        # ── Violation: a close beyond the level clears THAT timeframe only ───
-        if price is not None:
-            buf = price * _violation_buffer_pct()
-            for tf, rec in list(self.protected_highs.items()):
-                if rec and price > rec["level"] + buf:
-                    self.protected_highs.pop(tf, None)
-            for tf, rec in list(self.protected_lows.items()):
-                if rec and price < rec["level"] - buf:
-                    self.protected_lows.pop(tf, None)
+        # A completed close on the protected swing's OWN timeframe owns
+        # invalidation. Wicks, other timeframe closes, and distance buffers
+        # have no authority here.
+        for tf, rec in list(self.protected_highs.items()):
+            close = _completed_close(snapshot, tf)
+            if rec and close is not None and close > rec["level"]:
+                self.protected_highs.pop(tf, None)
+        for tf, rec in list(self.protected_lows.items()):
+            close = _completed_close(snapshot, tf)
+            if rec and close is not None and close < rec["level"]:
+                self.protected_lows.pop(tf, None)
 
         return self.state()
 

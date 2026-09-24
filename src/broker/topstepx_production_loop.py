@@ -1074,6 +1074,7 @@ class ProductionLoop:
             "account_state_digest": "", "data_age_seconds":
                 self.runtime.health().get("last_quote_age") or 0.0,
             "in_window": in_window, "manual_activity": unknown,
+            "invalidation_timeframes": snap.get("timeframes") or {},
             "now": self.clock()}
 
         def mint():

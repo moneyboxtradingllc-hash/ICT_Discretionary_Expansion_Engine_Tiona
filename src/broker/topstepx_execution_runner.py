@@ -115,6 +115,8 @@ _STALE_REASON_STATE = {
     "objective_swept": OBJECTIVE_SWEPT,
     "objective_materially_delivered": OBJECTIVE_MATERIALLY_DELIVERED,
     "invalidation_touched": INVALIDATION_TOUCHED,
+    "invalidation_history_unavailable": INVALIDATION_TOUCHED,
+    "current_price_beyond_invalidation": INVALIDATION_TOUCHED,
     "snapshot_superseded": SNAPSHOT_SUPERSEDED,
     "account_state_changed": ACCOUNT_STATE_CHANGED,
     "manual_activity": MANUAL_ACTIVITY_DETECTED,
@@ -532,6 +534,21 @@ class ExecutionRunner:
                 self.entry_capture = quote_provider()
             except Exception as exc:  # noqa: BLE001
                 self.capture_failure = f"{type(exc).__name__}"
+
+        # The planned entry can remain on the safe side of a structural stop
+        # while the actual executable quote has already crossed it. Refuse
+        # from the same in-memory quote capture used by the submission path,
+        # before durable attempt consumption or any venue request.
+        if self.entry_capture is not None:
+            try:
+                executable = self.entry_capture.executable_reference(
+                    candidate_snapshot.direction)
+            except Exception:  # noqa: BLE001 -- missing side is not a price
+                executable = None
+            if executable is not None:
+                self._assess_freshness(
+                    candidate_snapshot,
+                    {**market, "current_executable_price": executable})
 
         # 10. DURABLE ATTEMPT CONSUMPTION — persisted and verified BEFORE the
         # request can leave. A crash after this point costs the authorization;

@@ -59,8 +59,10 @@ def brain_input(price=29880.0, buy_side=29910.25, sell_side=29840.0,
                                        else execution_block(price, price))},
         "liquidity": {"nearest_buy_side": buy_side, "nearest_sell_side": sell_side},
         "protected_swings": {
-            "protected_low": {"level": prot_low, "timestamp": "2026-08-05T15:00:00+00:00"},
-            "protected_high": {"level": prot_high, "timestamp": "2026-08-05T15:05:00+00:00"},
+            "protected_low": {"level": prot_low, "timeframe": "5m",
+                              "timestamp": "2026-08-05T15:00:00+00:00"},
+            "protected_high": {"level": prot_high, "timeframe": "5m",
+                               "timestamp": "2026-08-05T15:05:00+00:00"},
         },
     }
 
@@ -397,6 +399,12 @@ class TestRunnerBoundary:
                          low_since=29878.0, tick_size=0.25, snapshot_id="snap-1",
                          contract_id=CID, account_fingerprint=FP,
                          account_state_digest="", data_age_seconds=2.0,
-                         in_window=True, manual_activity=False, now=NOW)
+                         in_window=True, manual_activity=False, now=NOW,
+                         invalidation_timeframes={"5m": {"recent_candles": [
+                             {"timestamp": "2026-08-05T14:55:00+00:00",
+                              "close": 29880.0, "temporal_status": "settled"},
+                             {"timestamp": "2026-08-05T15:25:00+00:00",
+                              "close": 29880.0, "temporal_status": "settled"},
+                         ]}})
         assert verdict["fresh"] is True
         assert verdict["objective_validation"]["valid"] is True

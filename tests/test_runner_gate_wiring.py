@@ -21,6 +21,7 @@ from broker.topstepx_candidate_freshness import (                 # noqa: E402
     CandidateSnapshot, LiquidityObjective,
 )
 from broker.topstepx_client import TopstepXContract               # noqa: E402
+from broker.topstepx_slippage import QuoteCapture                  # noqa: E402
 
 CID = "CON.F.US.MNQ.U26"
 FP = "acct:fc84f7a928d9"
@@ -112,14 +113,53 @@ def approve(r, cs):
     return r
 
 
-def drive(r, cs, mkt, session, latest_price=29885.0, led=None, refresh=None):
+def drive(r, cs, mkt, session, latest_price=29885.0, led=None, refresh=None,
+          quote_provider=None):
     return r.gated_submit(account_id=1, ledger=led, candidate_snapshot=cs,
                           market=mkt, latest_price=latest_price,
-                          mint_token=minter(cs), refresh=refresh)
+                          mint_token=minter(cs), refresh=refresh,
+                          quote_provider=quote_provider)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 class TestGatedPath:
+
+    def test_20260924_stale_protected_level_cannot_reach_submit(self, tmp_path):
+        c = snapshot(extras={"structural_invalidation": {
+            "structure_type": "protected_low",
+            "authorized_catalog_row": {
+                "type": "protected_low", "price": 29875.0, "timeframe": "5m",
+                "registered_at": (NOW - timedelta(minutes=10)).isoformat(),
+                "swing_id": "5m:swing_low:29875"}}})
+        mkt = market(invalidation_timeframes={"5m": {"recent_candles": [
+            {"timestamp": (NOW - timedelta(minutes=20)).isoformat(), "close": 29870.0,
+             "temporal_status": "settled"},
+            {"timestamp": (NOW - timedelta(minutes=5)).isoformat(), "close": 29880.0,
+             "temporal_status": "settled"},
+            {"timestamp": (NOW - timedelta(minutes=2)).isoformat(), "close": 29874.75,
+             "temporal_status": "settled"},
+        ]}})
+        s = BlockedSession()
+        r = approve(runner(s), c)
+        with pytest.raises(R.RunnerHalt) as exc:
+            drive(r, c, mkt, s, led=ledger(tmp_path))
+        assert exc.value.state == R.INVALIDATION_TOUCHED
+        assert s.place_calls == 0
+        assert not r._entry_attempted
+
+    def test_current_executable_quote_beyond_stop_refuses_before_attempt(self, tmp_path):
+        c = snapshot()
+        s = BlockedSession()
+        r = approve(runner(s), c)
+        quote = QuoteCapture(captured_at=NOW, best_bid=29874.5, best_ask=29875.0,
+                             last_trade=29875.0, contract_id=CID,
+                             market_data_age_seconds=0.1)
+        with pytest.raises(R.RunnerHalt) as exc:
+            drive(r, c, market(), s, led=ledger(tmp_path),
+                  quote_provider=lambda: quote)
+        assert exc.value.state == R.INVALIDATION_TOUCHED
+        assert s.place_calls == 0
+        assert not r._entry_attempted
 
     def test_1_a_clean_candidate_reaches_the_blocked_write_boundary(self, tmp_path):
         """The happy path traverses every gate and stops at the blocked seam.

@@ -59,7 +59,10 @@ def _sweep_snapshot(direction="above_high", tf="15m", level=702.50,
                  "nearest_sell_side_liquidity": 699.60},
         },
         "structure": {tf: {swing_key: level}},
-        "timeframes": {"1m": {"last_candle": {"close": price}}},
+        "timeframes": {
+            "1m": {"last_candle": {"close": price, "complete": True}},
+            tf: {"last_candle": {"close": price, "complete": True}},
+        },
     }
 
 
@@ -118,7 +121,8 @@ class T1_ProtectedHighFromBuySideRaid(unittest.TestCase):
         state = tracker.update({
             "timestamp": "20260611T110049",
             "liquidity": {}, "structure": {},
-            "timeframes": {"1m": {"last_candle": {"close": 703.20}}},
+            "timeframes": {"15m": {"last_candle": {
+                "close": 703.20, "complete": True}}},
         })
         self.assertIsNone(state["protected_high"])
 

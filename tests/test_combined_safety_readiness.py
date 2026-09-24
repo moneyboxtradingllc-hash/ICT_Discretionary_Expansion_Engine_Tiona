@@ -569,16 +569,11 @@ class TestStrategyUntouched:
         # inherits no account, credentials, authorization or operational
         # certification from upstream.
         #
-        # CONTRACT-MONTH-AUTHORITY-1 (2026-09-21) rotates it again:
-        # brain:3ca8a6dcbff4c614 -> brain:2ea981d173588875. The live launcher
-        # still refused the venue-resolved contract against a pinned expiry
-        # (Z26 is not U26) and printed the constant as ACTIVE CONTRACT. Both
-        # are repaired in `tools/topstepx_production_session.py`, which is
-        # bound as `production_entrypoint` -- so the fingerprint MUST move.
-        # Cognition, risk, wake, protection and VAP are untouched; the
-        # sibling tests in this class are what prove that, not this constant.
+        # PROTECTED-SWING-TRUTH-20260924 changes the closure-bound structural
+        # invalidation producer. The fingerprint therefore moves, and prior
+        # authorizations remain bound to their historical identity.
         from ai_brain.production_model import brain_contract_fingerprint
-        assert brain_contract_fingerprint() == "brain:2ea981d173588875"
+        assert brain_contract_fingerprint() == "brain:e454284ce616884d"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.

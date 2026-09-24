@@ -69,7 +69,8 @@ def snap(ts, price, *, low=None, high=None):
         st["1m"]["last_swing_high"] = high
     return {"timestamp": ts, "liquidity": liq, "structure": st,
             "market": {"current_price": price},
-            "timeframes": {"1m": {"last_candle": {"close": price}}}}
+            "timeframes": {"1m": {"last_candle": {"close": price,
+                                                         "complete": True}}}}
 
 
 def drive(steps):
@@ -418,10 +419,12 @@ class TestScopeIsHeld:
         src = inspect.getsource(ProtectedSwingTracker._update)
         # registration still requires sweep AND reclaim
         assert 'liq.get("sweep_detected") and liq.get("reclaim_detected")' in src
-        # violation is still a buffered close beyond the level
-        assert "_violation_buffer_pct()" in src
-        assert 'price > rec["level"] + buf' in src
-        assert 'price < rec["level"] - buf' in src
+        # A completed close on each protected swing's own timeframe owns
+        # violation; no percentage or distance buffer participates.
+        assert "_completed_close(snapshot, tf)" in src
+        assert 'close > rec["level"]' in src
+        assert 'close < rec["level"]' in src
+        assert "_violation_buffer_pct" not in src
 
     def test_the_tracker_reaches_no_broker_or_provider(self):
         import inspect
