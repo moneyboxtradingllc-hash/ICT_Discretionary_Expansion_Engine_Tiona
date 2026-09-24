@@ -28,6 +28,7 @@ FP = "acct:fc84f7a928d9"
 NOW = datetime(2026, 8, 5, 15, 30, tzinfo=timezone.utc)
 MNQ = TopstepXContract(id=CID, name="MNQU6", description="MNQ",
                        tick_size=0.25, tick_value=0.5, active=True)
+_DEFAULT_QUOTE = object()
 
 
 class WriteAttempted(AssertionError):
@@ -114,7 +115,11 @@ def approve(r, cs):
 
 
 def drive(r, cs, mkt, session, latest_price=29885.0, led=None, refresh=None,
-          quote_provider=None):
+          quote_provider=_DEFAULT_QUOTE):
+    if quote_provider is _DEFAULT_QUOTE:
+        quote_provider = lambda: QuoteCapture(
+            captured_at=NOW, best_bid=29884.75, best_ask=29885.0,
+            last_trade=29885.0, contract_id=CID, market_data_age_seconds=0.1)
     return r.gated_submit(account_id=1, ledger=led, candidate_snapshot=cs,
                           market=mkt, latest_price=latest_price,
                           mint_token=minter(cs), refresh=refresh,
@@ -160,6 +165,44 @@ class TestGatedPath:
         assert exc.value.state == R.INVALIDATION_TOUCHED
         assert s.place_calls == 0
         assert not r._entry_attempted
+
+    @pytest.mark.parametrize("quote_provider", [
+        None,
+        lambda: (_ for _ in ()).throw(RuntimeError("capture failed")),
+        lambda: None,
+        lambda: QuoteCapture(captured_at=NOW, best_bid=29874.5, best_ask=None,
+                             last_trade=29880.0, contract_id=CID,
+                             market_data_age_seconds=0.1),
+        lambda: QuoteCapture(captured_at=NOW, best_bid=29874.5, best_ask=float("nan"),
+                             last_trade=29880.0, contract_id=CID,
+                             market_data_age_seconds=0.1),
+    ])
+    def test_missing_or_unusable_executable_quote_refuses_without_entry_fallback(
+            self, tmp_path, quote_provider):
+        cs = snapshot(entry_price=29880.0)  # safe-looking planned entry is not a fallback
+        session = BlockedSession()
+        r = approve(runner(session), cs)
+        with pytest.raises(R.RunnerHalt) as exc:
+            drive(r, cs, market(), session, led=ledger(tmp_path),
+                  quote_provider=quote_provider)
+        assert exc.value.state == R.INVALIDATION_TOUCHED
+        assert session.place_calls == 0
+        assert r._entry_attempted is False
+
+    def test_bearish_missing_executable_bid_refuses(self, tmp_path):
+        cs = snapshot(direction="bearish", invalidation_price=29890.0,
+                      entry_price=29880.0,
+                      objective=objective(29850.0))
+        session = BlockedSession()
+        r = approve(runner(session), cs)
+        quote = QuoteCapture(captured_at=NOW, best_bid=None, best_ask=29880.0,
+                             last_trade=29880.0, contract_id=CID,
+                             market_data_age_seconds=0.1)
+        with pytest.raises(R.RunnerHalt) as exc:
+            drive(r, cs, market(high_since=29885.0), session, led=ledger(tmp_path),
+                  quote_provider=lambda: quote)
+        assert exc.value.state == R.INVALIDATION_TOUCHED
+        assert session.place_calls == 0 and not r._entry_attempted
 
     def test_1_a_clean_candidate_reaches_the_blocked_write_boundary(self, tmp_path):
         """The happy path traverses every gate and stops at the blocked seam.
@@ -258,7 +301,11 @@ class TestGatedPath:
         mint = minter(other)          # token bound to a DIFFERENT objective identity
         with pytest.raises(R.RunnerHalt) as exc:
             r.gated_submit(account_id=1, ledger=ledger(tmp_path), candidate_snapshot=cs,
-                           market=market(), latest_price=29885.0, mint_token=mint)
+                           market=market(), latest_price=29885.0, mint_token=mint,
+                           quote_provider=lambda: QuoteCapture(
+                               captured_at=NOW, best_bid=29884.75, best_ask=29885.0,
+                               last_trade=29885.0, contract_id=CID,
+                               market_data_age_seconds=0.1))
         assert exc.value.state == R.TOKEN_BINDING_MISMATCH
         assert s.place_calls == 0
 
@@ -405,7 +452,11 @@ class TestDurableAttemptOrdering:
         with pytest.raises(R.RunnerHalt):
             r.gated_submit(account_id=1, ledger=ledger(tmp_path), candidate_snapshot=cs,
                            market=market(), latest_price=29885.0, mint_token=minter(cs),
-                           on_attempt_consumed=lambda tid: order.append("persisted"))
+                           on_attempt_consumed=lambda tid: order.append("persisted"),
+                           quote_provider=lambda: QuoteCapture(
+                               captured_at=NOW, best_bid=29884.75, best_ask=29885.0,
+                               last_trade=29885.0, contract_id=CID,
+                               market_data_age_seconds=0.1))
         assert order[:2] == ["persisted", "transport"]
 
     def test_a_refused_candidate_never_fires_the_hook(self, tmp_path):
@@ -433,5 +484,9 @@ class TestDurableAttemptOrdering:
         with pytest.raises(RuntimeError):
             r.gated_submit(account_id=1, ledger=ledger(tmp_path), candidate_snapshot=cs,
                            market=market(), latest_price=29885.0, mint_token=minter(cs),
-                           on_attempt_consumed=failing)
+                           on_attempt_consumed=failing,
+                           quote_provider=lambda: QuoteCapture(
+                               captured_at=NOW, best_bid=29884.75, best_ask=29885.0,
+                               last_trade=29885.0, contract_id=CID,
+                               market_data_age_seconds=0.1))
         assert s.place_calls == 0

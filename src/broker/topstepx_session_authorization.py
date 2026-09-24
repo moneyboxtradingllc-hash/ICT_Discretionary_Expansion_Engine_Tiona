@@ -391,10 +391,25 @@ class ProductionSessionMission:
                             f"trade_mission_{self.authorization.session_id}_{index}.json")
 
     def _slot_range(self) -> range:
-        """Slots to scan. Wider than the allowance because a voided mission
-        keeps its slot forever -- the replacement opens beside it, never on it."""
-        return range(1, self.authorization.maximum_trades
-                     + RECOVERY.MAX_VOIDED_MISSIONS_PER_SESSION + 1)
+        """All occupied slots plus the normal bounded recovery allowance.
+
+        A pre-submit terminal refusal keeps its immutable mission record but
+        does not spend a trade. Later candidates must open beside that record,
+        never overwrite it.
+        """
+        limit = (self.authorization.maximum_trades
+                 + RECOVERY.MAX_VOIDED_MISSIONS_PER_SESSION)
+        prefix = f"trade_mission_{self.authorization.session_id}_"
+        try:
+            for name in os.listdir(self.store_dir):
+                if name.startswith(prefix) and name.endswith(".json"):
+                    try:
+                        limit = max(limit, int(name[len(prefix):-5]))
+                    except ValueError:
+                        continue
+        except OSError:
+            pass
+        return range(1, limit + 1)
 
     def next_mission_index(self) -> int:
         """The first unoccupied slot. Never returns an index that would
@@ -475,7 +490,10 @@ class ProductionSessionMission:
         rejected orders. Allowance and permission are separate answers.
         """
         return len([m for m in self.trade_missions
-                    if m.state != MS.VENUE_REJECTED_ZERO_FILL])
+                    if m.state != MS.VENUE_REJECTED_ZERO_FILL
+                    and not (m.state == MS.TERMINAL_REFUSAL
+                             and m.attempt_count == 0
+                             and m.order_id is None and not m.token_spent)])
 
     def may_open_trade_mission(self, *, positions: int, working_orders: int,
                                unknown_external: bool, in_window: bool) -> tuple:

@@ -1170,6 +1170,8 @@ class ProductionLoop:
                 latest_price=candidate.entry_price, mint_token=mint,
                 account_id=self.account_id, on_attempt_consumed=on_consumed)
         except (CandidateStale, Exception) as exc:  # noqa: BLE001
+            self._terminalize_unused_freshness_mission(
+                mission, exc, self.ps.runner)
             return {"outcome": SUBMIT_FAILED, "detail": f"{type(exc).__name__}: {exc}",
                     "candidate_id": candidate.candidate_id, "sizing": sized,
                     "mission_state": mission.state,
@@ -1181,6 +1183,20 @@ class ProductionLoop:
                 "sizing": sized, "mission_id": mission.mission_id,
                 "mission_state": mission.state, "result": result,
                 "attempt_consumed": mission.attempt_count > 0}
+
+    @staticmethod
+    def _terminalize_unused_freshness_mission(mission, exc, runner) -> bool:
+        """Close only a freshness-refused mission proven never attempted."""
+        from broker import topstepx_execution_runner as R
+        if (not isinstance(exc, R.RunnerHalt)
+                or exc.state not in set(R._STALE_REASON_STATE.values())
+                or mission.attempt_count != 0 or mission.order_id is not None
+                or mission.token_spent
+                or getattr(runner, "_entry_attempted", False)):
+            return False
+        mission.transition(MS.TERMINAL_REFUSAL,
+                           f"pre-submit freshness refusal: {exc.state}")
+        return True
 
     # ── reconciliation ────────────────────────────────────────────────────────
     def reconcile_after_fill(self, *, candidate, fill_event: dict, trades: list,

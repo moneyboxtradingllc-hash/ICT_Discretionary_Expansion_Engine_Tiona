@@ -524,11 +524,11 @@ class ExecutionRunner:
         # time, candidate construction or token mint would record a price that
         # was executable minutes ago, which measures nothing useful.
         #
-        # NON-BLOCKING: reads in-memory hub state only. A failure is recorded
-        # and execution continues - evidence collection must never leave an
-        # authorized position unprotected. Missing evidence only makes the
-        # observation unreliable later.
+        # The executable side is a required pre-submit safety fact. Missing or
+        # unresolvable quote evidence refuses before attempt consumption; a
+        # planned entry or candle close is not a substitute.
         self.entry_capture = None
+        self.capture_failure = None
         if quote_provider is not None:
             try:
                 self.entry_capture = quote_provider()
@@ -539,16 +539,22 @@ class ExecutionRunner:
         # while the actual executable quote has already crossed it. Refuse
         # from the same in-memory quote capture used by the submission path,
         # before durable attempt consumption or any venue request.
+        executable = None
         if self.entry_capture is not None:
             try:
                 executable = self.entry_capture.executable_reference(
                     candidate_snapshot.direction)
             except Exception:  # noqa: BLE001 -- missing side is not a price
                 executable = None
-            if executable is not None:
-                self._assess_freshness(
-                    candidate_snapshot,
-                    {**market, "current_executable_price": executable})
+        if executable is None:
+            # Reuse the canonical freshness refusal path; NaN is deliberately
+            # rejected there and cannot fall back to planned/candle prices.
+            self._assess_freshness(
+                candidate_snapshot,
+                {**market, "current_executable_price": float("nan")})
+        self._assess_freshness(
+            candidate_snapshot,
+            {**market, "current_executable_price": executable})
 
         # 10. DURABLE ATTEMPT CONSUMPTION — persisted and verified BEFORE the
         # request can leave. A crash after this point costs the authorization;

@@ -20,6 +20,8 @@ from broker import topstepx_mission_recovery as RECOVERY   # noqa: E402
 from broker import topstepx_mission_state as MS            # noqa: E402
 from broker.topstepx_session_authorization import (         # noqa: E402
     AuthorizationRefused, ProductionSessionMission, SessionAuthorization)
+from broker.topstepx_production_loop import ProductionLoop  # noqa: E402
+from broker.topstepx_execution_runner import RunnerHalt, INVALIDATION_TOUCHED  # noqa: E402
 
 SESSION = "PROD-TEST"
 FINGERPRINT = "acct:test"
@@ -286,6 +288,47 @@ class TestTheLedgerIsNeverTrusted:
 
 
 class TestTheDoctrineCeilingStillHolds:
+
+    def test_production_freshness_refusal_frees_only_never_attempted_mission(self, store):
+        sm = session_mission(store)
+        mission = sm.open_trade_mission(**OPEN_ARGS)
+        runner = type("Runner", (), {"_entry_attempted": False})()
+        refused = ProductionLoop._terminalize_unused_freshness_mission(
+            mission, RunnerHalt(INVALIDATION_TOUCHED, "stale structural level"), runner)
+        assert refused is True
+        assert mission.state == MS.TERMINAL_REFUSAL
+        assert sm.active_mission is None
+        assert sm.trades_used() == 0
+        assert sm.open_trade_mission(**OPEN_ARGS).mission_id.endswith("-T2")
+
+    def test_consumed_attempt_cannot_be_freed_by_freshness_terminalizer(self, store):
+        sm = session_mission(store)
+        mission = sm.open_trade_mission(**OPEN_ARGS)
+        mission.consume_attempt(candidate_fingerprint="cand", token_id="tok")
+        runner = type("Runner", (), {"_entry_attempted": False})()
+        assert not ProductionLoop._terminalize_unused_freshness_mission(
+            mission, RunnerHalt(INVALIDATION_TOUCHED), runner)
+        assert mission.state == MS.ATTEMPT_CONSUMED
+        assert sm.trades_used() == 1
+
+    def test_unattempted_terminal_refusal_does_not_spend_trade_slot(self, store):
+        sm = session_mission(store)
+        refused = sm.open_trade_mission(**OPEN_ARGS)
+        refused.transition(MS.TERMINAL_REFUSAL, "pre-submit freshness refusal")
+        assert sm.active_mission is None
+        assert sm.trades_used() == 0
+
+        next_candidate = sm.open_trade_mission(**OPEN_ARGS)
+        assert next_candidate.mission_id.endswith("-T2")
+        next_candidate.consume_attempt(candidate_fingerprint="valid", token_id="tok-valid")
+        next_candidate.transition(MS.COMPLETE, "attempt history remains spent")
+        assert sm.trades_used() == 1
+
+        second_trade = sm.open_trade_mission(**OPEN_ARGS)
+        second_trade.consume_attempt(candidate_fingerprint="valid-2", token_id="tok-2")
+        second_trade.transition(MS.COMPLETE, "second trade")
+        assert sm.trades_used() == 2
+        assert sm.may_open_trade_mission(**OPEN_ARGS)[0] is False
 
     def test_a_void_cannot_raise_the_session_maximum(self, store):
         """Restored capacity is capacity BACK, never capacity ADDED."""

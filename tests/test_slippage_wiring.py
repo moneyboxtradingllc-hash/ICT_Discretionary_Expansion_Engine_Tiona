@@ -152,8 +152,8 @@ class TestCaptureOrdering:
                            quote_provider=lambda: order.append("capture") or quote())
         assert order == [] and s.place_calls == 0
 
-    def test_capture_failure_does_not_block_execution(self, tmp_path):
-        """Evidence must never leave an authorized position unprotected."""
+    def test_capture_failure_refuses_before_submission(self, tmp_path):
+        """Executable quote proof is required before an entry can be sent."""
         r, s, cs = runner()
 
         def boom():
@@ -164,7 +164,8 @@ class TestCaptureOrdering:
                            market=market(), latest_price=29760.0, mint_token=mint(cs),
                            quote_provider=boom)
         assert r.capture_failure == "RuntimeError"
-        assert s.place_calls == 1        # submission still attempted
+        assert s.place_calls == 0
+        assert not r._entry_attempted
         assert r.entry_capture is None
 
     def test_capture_performs_no_network_call(self):

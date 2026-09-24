@@ -65,6 +65,36 @@ def test_history_since_registration_allows_unbroken_level():
     assert assess(candidate(), **common(invalidation_timeframes=history))["fresh"]
 
 
+def test_opened_before_registration_but_completed_after_is_checked():
+    c = candidate()
+    registered = NOW - timedelta(minutes=8)  # 15:22Z, inside 15:20-15:25 bar
+    c.extras["structural_invalidation"]["authorized_catalog_row"][
+        "registered_at"] = registered.isoformat()
+    history = {"5m": {"recent_candles": [
+        {"timestamp": (NOW - timedelta(minutes=10)).isoformat(),
+         "close": 29871.75, "temporal_status": "settled"},
+        {"timestamp": (NOW - timedelta(minutes=5)).isoformat(),
+         "close": 29880.0, "temporal_status": "settled"},
+    ]}}
+    with pytest.raises(CandidateStale) as exc:
+        assess(c, **common(invalidation_timeframes=history))
+    assert exc.value.reason == "invalidation_touched"
+
+
+def test_candle_completed_before_registration_is_ignored():
+    c = candidate()
+    registered = NOW - timedelta(minutes=5)  # 15:25Z
+    c.extras["structural_invalidation"]["authorized_catalog_row"][
+        "registered_at"] = registered.isoformat()
+    history = {"5m": {"recent_candles": [
+        {"timestamp": (NOW - timedelta(minutes=10)).isoformat(),
+         "close": 29871.75, "temporal_status": "settled"},  # completed 15:25Z
+        {"timestamp": NOW.isoformat(), "close": 29880.0,
+         "temporal_status": "settled"},
+    ]}}
+    assert assess(c, **common(invalidation_timeframes=history))["fresh"]
+
+
 def test_missing_retained_history_refuses_instead_of_assuming_intact():
     too_recent = {"5m": {"recent_candles": [
         {"timestamp": (NOW - timedelta(minutes=2)).isoformat(),

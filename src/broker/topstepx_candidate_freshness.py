@@ -182,6 +182,7 @@ def _validate_protected_swing_history(candidate, timeframes) -> None:
     candles = (block or {}).get("recent_candles") or []
     if not candles and isinstance((block or {}).get("last_candle"), dict):
         candles = [block["last_candle"]]
+    duration = timedelta(minutes=int(tf[:-1]))
     parsed = []
     for candle in candles:
         if not isinstance(candle, dict):
@@ -190,7 +191,7 @@ def _validate_protected_swing_history(candidate, timeframes) -> None:
         if stamp is None:
             raise CandidateStale("invalidation_history_unavailable",
                                  f"{tf} candle has no valid aware timestamp")
-        parsed.append((stamp, candle))
+        parsed.append((stamp, stamp + duration, candle))
     if not parsed:
         raise CandidateStale("invalidation_history_unavailable",
                              f"no {tf} candle history is available")
@@ -199,8 +200,8 @@ def _validate_protected_swing_history(candidate, timeframes) -> None:
         raise CandidateStale("invalidation_history_unavailable",
                              f"retained {tf} bars begin after swing registration")
 
-    for stamp, candle in parsed:
-        if stamp < registered_at:
+    for stamp, completed_at, candle in parsed:
+        if completed_at <= registered_at:
             continue
         status = candle.get("temporal_status")
         if status != "settled" and candle.get("complete") is not True:
