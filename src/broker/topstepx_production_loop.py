@@ -76,28 +76,18 @@ def _journal_state_for(result: dict, JOURNAL) -> str:
 
 
 def _select_protection_advance(*, direction, break_even: dict, trailing: dict) -> dict:
-    """Choose one currently lawful destination; never issue two stop writes.
+    """Return the sole live proposal: deterministic trailing.
 
-    Break-even and trailing are independent pure proposals.  The actuator is
-    deliberately invoked once with the more-protective price, so a direct jump
-    past 2R cannot physically visit break-even and then trail in one tick.
+    The legacy +1R break-even evaluation remains attached as counterfactual
+    evidence, but it has no mutation, journal, or venue authority.
     """
-    candidates = []
-    if break_even.get("outcome") == "propose_break_even":
-        candidates.append(("break_even", break_even.get("break_even_price")))
-    if trailing.get("outcome") == "propose_trailing":
-        candidates.append(("trailing", trailing.get("desired_stop")))
-    candidates = [(kind, price) for kind, price in candidates if price is not None]
-    if not candidates:
-        # Preserve the established break-even decision surface on a decline;
-        # existing audit evidence reads its open_r and baseline fields.
-        return dict(break_even, break_even=break_even, trailing=trailing)
-    long = str(direction or "").lower() in ("long", "buy", "bullish")
-    kind, price = (max(candidates, key=lambda item: item[1]) if long
-                   else min(candidates, key=lambda item: item[1]))
-    source = break_even if kind == "break_even" else trailing
-    return dict(source, management_kind=kind, proposed_stop=price,
-                break_even=break_even, trailing=trailing)
+    if (trailing.get("outcome") == "propose_trailing"
+            and trailing.get("desired_stop") is not None):
+        return dict(trailing, management_kind="trailing",
+                    proposed_stop=trailing.get("desired_stop"),
+                    break_even=break_even, trailing=trailing)
+    return dict(trailing, break_even=break_even, trailing=trailing,
+                management_kind=None, proposed_stop=None)
 
 
 class ProductionLoop:
@@ -234,6 +224,54 @@ class ProductionLoop:
                         "observed_at": (self.clock().isoformat())})
             with open(os.path.join(root, "volume_profile_observations.jsonl"), "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(row, default=str) + "\n")
+        except Exception:
+            pass
+
+    def _record_protection_observation(self, *, mission, baseline: dict,
+                                       trigger, active_stop, break_even: dict,
+                                       trailing: dict, decision: dict) -> None:
+        """Best-effort counterfactual evidence; never management authority."""
+        try:
+            from broker import break_even as BE
+            from broker import trailing_protection as TRAIL
+            session_id = self.mission.authorization.session_id
+            row = {
+                "schema_version": "protection_observation.v1",
+                "session_id": session_id,
+                "mission_id": mission.mission_id,
+                "contract": self.ps.contract.id,
+                "direction": baseline.get("direction"),
+                "actual_fill": baseline.get("entry_fill_price"),
+                "original_structural_stop": baseline.get("original_initial_stop"),
+                "initial_risk_points": baseline.get("initial_risk_points"),
+                "executable_trigger_price": trigger,
+                "open_r": break_even.get("open_r"),
+                "active_protective_stop": active_stop,
+                "legacy_be_trigger_r": BE.TRIGGER_R,
+                "legacy_be_threshold_satisfied": (
+                    break_even.get("open_r") is not None
+                    and break_even.get("open_r") >= BE.TRIGGER_R),
+                "legacy_be_outcome": break_even.get("outcome"),
+                "legacy_be_reason": break_even.get("reason"),
+                "legacy_be_hypothetical_stop": break_even.get("break_even_price"),
+                "trailing_trigger_r": TRAIL.TRIGGER_R,
+                "trailing_threshold_satisfied": (
+                    trailing.get("open_r") is not None
+                    and trailing.get("open_r") >= TRAIL.TRIGGER_R),
+                "trailing_outcome": trailing.get("outcome"),
+                "trailing_reason": trailing.get("reason"),
+                "trailing_locked_r": trailing.get("locked_r"),
+                "trailing_desired_stop": trailing.get("desired_stop"),
+                "selected_management_kind": decision.get("management_kind"),
+                "selected_live_proposed_stop": decision.get("proposed_stop"),
+                "observed_at": getattr(self, "clock", lambda: datetime.now(timezone.utc))().isoformat(),
+            }
+            path = os.path.join(self.mission.store_dir,
+                                f"protection_observations_{session_id}.jsonl")
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(row, default=str) + "\n")
+                fh.flush()
+                os.fsync(fh.fileno())
         except Exception:
             pass
 
@@ -539,11 +577,10 @@ class ProductionLoop:
             decision = _select_protection_advance(
                 direction=direction, break_even=break_even_decision,
                 trailing=trailing_decision)
-            if decision.get("proposed_stop") is None:
-                # The baseline travels with a DECLINE too: "why did break-even
-                # not fire" needs the same primitives as "why did it".
-                return out("decision_declines", decision=decision,
-                           trigger=trigger, baseline=baseline)
+            self._record_protection_observation(
+                mission=mission, baseline=baseline, trigger=trigger,
+                active_stop=active_stop, break_even=break_even_decision,
+                trailing=trailing_decision, decision=decision)
 
             # ── BREAK-EVEN-2C — WRITE-AHEAD AND THE UNRESOLVED LATCH ────────
             #
@@ -557,6 +594,19 @@ class ProductionLoop:
             session_id = self.mission.authorization.session_id
             proposed = decision.get("proposed_stop")
             management_kind = decision.get("management_kind")
+
+            # Legacy +1R no longer moves a stop, but it remains the earliest
+            # profit threshold at which this established position must inspect
+            # venue protection. Below it, preserve the existing no-probe
+            # behaviour; at/above it, a non-proposal cannot hide a proven
+            # missing stop until the live trailing threshold.
+            needs_safety_probe = (
+                proposed is not None
+                or (break_even_decision.get("open_r") is not None
+                    and break_even_decision.get("open_r") >= BE.TRIGGER_R))
+            if not needs_safety_probe:
+                return out("decision_declines", decision=decision,
+                           trigger=trigger, baseline=baseline)
 
             probe = ACT.inspect_protection(
                 session=self.ps.session, contract_id=self.ps.contract.id,
@@ -592,11 +642,17 @@ class ProductionLoop:
                            discovery=probe.get("discovery"))
             if presence == DISC.ABSENT or not (probe.get("stop") or {}).get("id"):
                 flat = (self.ps.runner.emergency_flatten(
-                    "break-even management found no owned protective stop on a "
+                    "protection management found no owned protective stop on a "
                     f"live position: {probe.get('problem') or 'none provable'}")
                     if self.ps.runner else None)
                 return out("protection_defect", decision=decision,
                            baseline=baseline, probe=probe, flattened=flat)
+
+            if proposed is None:
+                # Protection is present, but legacy BE is counterfactual only
+                # and trailing has not yet supplied a lawful live destination.
+                return out("decision_declines", decision=decision,
+                           trigger=trigger, baseline=baseline, probe=probe)
 
             stop_order_id = (probe.get("stop") or {}).get("id")
             # An earlier stop amendment may still be propagating.  A newer,

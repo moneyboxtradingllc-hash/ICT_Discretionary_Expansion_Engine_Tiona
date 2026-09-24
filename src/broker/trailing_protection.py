@@ -10,7 +10,9 @@ import math
 from broker import break_even as BE
 
 SCHEMA = "trailing_protection.v1"
-TRIGGER_R = 2.0
+# Profit protection begins only after the structural stop has had room to work.
+# The first stair at +2.50R still locks +1R under the established formula below.
+TRIGGER_R = 2.5
 PROPOSE = "propose_trailing"
 HOLD = "hold"
 REFUSED = "refused"

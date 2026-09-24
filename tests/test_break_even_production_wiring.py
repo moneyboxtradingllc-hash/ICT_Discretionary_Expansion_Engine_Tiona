@@ -263,7 +263,7 @@ def loop_for(tmp_path, *, bid, ask, stop_px=T2_STOP_PX, positions=None,
 
 # ══ 7 · THE MANAGED ADVANCE, REAL LINEAGE ═══════════════════════════════════
 class TestManagedAdvance:
-    """+1R for this long is bid >= fill + 34.25 = 29260.50 (synthetic move)."""
+    """Legacy +1R is observational; live trailing begins at +2.50R."""
 
     def test_below_1R_sends_no_write(self, tmp_path):
         loop, venue, _ = loop_for(tmp_path, bid=29240.0, ask=29240.25)
@@ -271,8 +271,18 @@ class TestManagedAdvance:
         assert out["status"] == "decision_declines"
         assert venue.modifies == []
 
-    def test_at_1R_the_owned_stop_is_advanced_once(self, tmp_path):
-        loop, venue, _ = loop_for(tmp_path, bid=29261.0, ask=29261.25)
+    @pytest.mark.parametrize("open_r", [1.0, 1.5, 1.85, 2.0, 2.49])
+    def test_no_live_stop_write_before_two_point_five_r(self, tmp_path, open_r):
+        bid = T2_FILL + (open_r * T2_R)
+        loop, venue, _ = loop_for(tmp_path, bid=bid, ask=bid + .25)
+        out = loop.manage_open_position()
+        assert out["status"] == "decision_declines", out
+        assert out["decision"]["proposed_stop"] is None
+        assert venue.modifies == []
+
+    def test_at_two_point_five_r_the_owned_stop_is_advanced_once(self, tmp_path):
+        bid = T2_FILL + (2.5 * T2_R)
+        loop, venue, _ = loop_for(tmp_path, bid=bid, ask=bid + .25)
         out = loop.manage_open_position()
         assert out["status"] == ACT.APPLIED, out
         assert len(venue.modifies) == 1
@@ -280,7 +290,8 @@ class TestManagedAdvance:
         assert venue.modifies[0]["stop_price"] > T2_STOP_PX, "stop must improve"
 
     def test_the_advance_is_exactly_once_across_repeated_ticks(self, tmp_path):
-        loop, venue, _ = loop_for(tmp_path, bid=29261.0, ask=29261.25)
+        bid = T2_FILL + (2.5 * T2_R)
+        loop, venue, _ = loop_for(tmp_path, bid=bid, ask=bid + .25)
         assert loop.manage_open_position()["status"] == ACT.APPLIED
         for _ in range(4):
             again = loop.manage_open_position()
@@ -288,7 +299,8 @@ class TestManagedAdvance:
         assert len(venue.modifies) == 1
 
     def test_the_target_is_never_written(self, tmp_path):
-        loop, venue, _ = loop_for(tmp_path, bid=29261.0, ask=29261.25)
+        bid = T2_FILL + (2.5 * T2_R)
+        loop, venue, _ = loop_for(tmp_path, bid=bid, ask=bid + .25)
         loop.manage_open_position()
         after = [o for o in venue.open_orders() if o["id"] == T2_TARGET][0]
         assert after["limit_price"] == T2_TARGET_PX
@@ -300,6 +312,30 @@ class TestManagedAdvance:
         out = loop.manage_open_position()
         assert out["baseline"]["initial_risk_points"] == T2_R
         assert out["baseline"]["original_initial_stop"] == T2_STOP_PX
+
+    def test_legacy_be_is_counterfactual_telemetry_only(self, tmp_path):
+        bid = T2_FILL + (1.85 * T2_R)
+        loop, venue, _ = loop_for(tmp_path, bid=bid, ask=bid + .25)
+        out = loop.manage_open_position()
+        assert out["status"] == "decision_declines"
+        assert venue.modifies == []
+        path = tmp_path / f"protection_observations_{loop.ps.session_id}.jsonl"
+        row = json.loads(path.read_text(encoding="utf-8").splitlines()[-1])
+        assert row["legacy_be_threshold_satisfied"] is True
+        assert row["trailing_threshold_satisfied"] is False
+        assert row["selected_live_proposed_stop"] is None
+        assert row["active_protective_stop"] == T2_STOP_PX
+
+    def test_trailing_observation_records_first_live_stair(self, tmp_path):
+        bid = T2_FILL + (2.5 * T2_R)
+        loop, _, _ = loop_for(tmp_path, bid=bid, ask=bid + .25)
+        loop.manage_open_position()
+        path = tmp_path / f"protection_observations_{loop.ps.session_id}.jsonl"
+        row = json.loads(path.read_text(encoding="utf-8").splitlines()[-1])
+        assert row["trailing_threshold_satisfied"] is True
+        assert row["trailing_locked_r"] == 1
+        assert row["selected_management_kind"] == "trailing"
+        assert row["selected_live_proposed_stop"] == T2_FILL + T2_R
 
 
 # ══ 5 · TRIGGER SIDE AND FRESHNESS ══════════════════════════════════════════
@@ -327,7 +363,8 @@ class TestProtectionDefectRouting:
         """The one case where HOLD is wrong: the ORIGINAL protection is gone,
         so the reason a failed advance normally holds no longer applies."""
         only_target = [o for o in t2_children() if o["id"] == T2_TARGET]
-        loop, venue, runner = loop_for(tmp_path, bid=29261.0, ask=29261.25,
+        bid = T2_FILL + (1.5 * T2_R)
+        loop, venue, runner = loop_for(tmp_path, bid=bid, ask=bid + .25,
                                        orders=only_target)
         out = loop.manage_open_position()
         assert out["status"] == "protection_defect"
@@ -336,7 +373,8 @@ class TestProtectionDefectRouting:
 
     def test_an_ordinary_failed_advance_does_NOT_flatten(self, tmp_path):
         """Original stop still protects the trade — never kill it."""
-        loop, venue, runner = loop_for(tmp_path, bid=29261.0, ask=29261.25)
+        bid = T2_FILL + (2.5 * T2_R)
+        loop, venue, runner = loop_for(tmp_path, bid=bid, ask=bid + .25)
 
         def refuse(order_id, **kw):
             venue.modifies.append({"order_id": order_id,

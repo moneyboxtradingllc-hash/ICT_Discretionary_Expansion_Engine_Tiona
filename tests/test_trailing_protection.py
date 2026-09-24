@@ -26,12 +26,12 @@ def decision(*, direction="long", fill=100.0, stop=90.0, price=120.0,
 
 
 class TestStairStepDecision:
-    def test_not_active_before_two_r(self):
-        out = decision(price=119.9)
+    def test_not_active_before_two_point_five_r(self):
+        out = decision(price=124.9)
         assert out["outcome"] == TRAIL.HOLD
 
-    def test_first_step_at_two_r_locks_one_r(self):
-        out = decision(price=120.0)
+    def test_first_step_at_two_point_five_r_locks_one_r(self):
+        out = decision(price=125.0)
         assert out["outcome"] == TRAIL.PROPOSE
         assert out["locked_r"] == 1
         assert out["desired_stop"] == 110.0
@@ -48,12 +48,12 @@ class TestStairStepDecision:
         assert jumped["desired_stop"] == 130.0
 
     def test_short_is_the_exact_directional_mirror(self):
-        out = decision(direction="short", fill=100.0, stop=110.0, price=80.0)
+        out = decision(direction="short", fill=100.0, stop=110.0, price=75.0)
         assert out["locked_r"] == 1
         assert out["desired_stop"] == 90.0
 
     def test_actual_fill_and_original_stop_define_the_unchanging_ruler(self):
-        out = decision(fill=100.1, stop=90.0, price=120.3)
+        out = decision(fill=100.1, stop=90.0, price=125.4)
         assert out["initial_risk_points"] == pytest.approx(10.1)
         assert out["desired_stop"] == 110.25  # conservative long tick rounding
 
@@ -66,9 +66,8 @@ class TestStairStepDecision:
 
 
 class TestProductionStairStep:
-    def test_two_r_dominates_break_even_with_one_stop_only_write(self, tmp_path):
-        # +2.2R: BE is eligible too, but +1R trailing is more protective.
-        bid = T2_FILL + (2.2 * T2_R)
+    def test_two_point_five_r_is_first_and_only_live_stop_write(self, tmp_path):
+        bid = T2_FILL + (2.5 * T2_R)
         loop, venue, _ = loop_for(tmp_path, bid=bid, ask=bid + .25)
         out = loop.manage_open_position()
         assert out["status"] == ACT.APPLIED
@@ -98,7 +97,7 @@ class TestProductionStairStep:
         assert runner.execution_context.active_protective_stop == locked
 
     def test_trailing_effect_is_durable_and_a_restart_never_blind_retries(self, tmp_path):
-        bid = T2_FILL + (2.2 * T2_R)
+        bid = T2_FILL + (2.5 * T2_R)
         loop, venue, _ = loop_for(tmp_path, bid=bid, ask=bid + .25)
 
         def accepted_but_invisible(order_id, **kwargs):
@@ -117,7 +116,7 @@ class TestProductionStairStep:
         assert venue2.modifies == []
 
     def test_unresolved_first_step_blocks_later_step_in_same_process(self, tmp_path):
-        first_bid = T2_FILL + (2.2 * T2_R)
+        first_bid = T2_FILL + (2.5 * T2_R)
         loop, venue, _ = loop_for(tmp_path, bid=first_bid,
                                   ask=first_bid + .25)
 
@@ -139,7 +138,7 @@ class TestProductionStairStep:
         assert len(venue.modifies) == 1
 
     def test_unresolved_first_step_blocks_later_step_after_restart(self, tmp_path):
-        first_bid = T2_FILL + (2.2 * T2_R)
+        first_bid = T2_FILL + (2.5 * T2_R)
         loop, venue, _ = loop_for(tmp_path, bid=first_bid,
                                   ask=first_bid + .25)
 
@@ -163,7 +162,7 @@ class TestProductionStairStep:
 
     def test_later_step_may_write_only_on_a_later_tick_after_resolution(self,
                                                                         tmp_path):
-        first_bid = T2_FILL + (2.2 * T2_R)
+        first_bid = T2_FILL + (2.5 * T2_R)
         loop, venue, _ = loop_for(tmp_path, bid=first_bid,
                                   ask=first_bid + .25)
 
@@ -197,7 +196,7 @@ class TestProductionStairStep:
         calls, original = [], brain.run_narrative_brain
         brain.run_narrative_brain = lambda *args, **kwargs: calls.append(True)
         try:
-            bid = T2_FILL + (2.2 * T2_R)
+            bid = T2_FILL + (2.5 * T2_R)
             loop, _, _ = loop_for(tmp_path, bid=bid, ask=bid + .25)
             assert loop.manage_open_position()["status"] == ACT.APPLIED
         finally:

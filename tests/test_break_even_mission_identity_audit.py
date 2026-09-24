@@ -110,7 +110,7 @@ def attach_context(loop, mission, *, stop, direction):
     assert armed["armed"]
 
 
-def loop_for(owner, mission, *, stop, direction="long", quote=30020, armed=True):
+def loop_for(owner, mission, *, stop, direction="long", quote=30025, armed=True):
     oid, qty = mission.order_id, mission.filled_quantity
     target = mission.fill_price + 80 if direction == "long" else mission.fill_price - 80
     orders = [dict(id=oid + 1, contract_id=CID, type=4, status=1,
@@ -210,13 +210,13 @@ def test_t2_at_true_trigger_uses_only_its_owned_stop(tmp_path):
     first = open_filled(owner, fill=30030, stop=30010)
     complete(first)
     second = open_filled(owner, fill=30000, stop=29990)
-    loop, venue = loop_for(owner, second, stop=29990, quote=30010)
+    loop, venue = loop_for(owner, second, stop=29990, quote=30025)
     assert correct_decision(loop, second)["outcome"] == BE.PROPOSE
     result = loop.manage_open_position()
     assert result["status"] == ACT.APPLIED, result
     assert result["baseline"]["mission_id"] == second.mission_id
     assert venue.modifies == [{"order_id": second.order_id + 1,
-                              "stop_price": result["decision"]["break_even_price"]}]
+                              "stop_price": result["decision"]["trailing"]["desired_stop"]}]
     assert loop.manage_open_position()["status"] == ACT.HELD
     assert len(venue.modifies) == 1
 
@@ -226,7 +226,7 @@ def test_different_size_still_uses_correct_geometry_before_actuation(tmp_path):
     first = open_filled(owner, fill=30000, stop=29990, quantity=1)
     complete(first)
     second = open_filled(owner, fill=30015, stop=29995, quantity=2)
-    loop, venue = loop_for(owner, second, stop=29995)
+    loop, venue = loop_for(owner, second, stop=29995, quote=30020)
     result = loop.manage_open_position()
     assert result["status"] == "decision_declines", result
     assert result["baseline"]["mission_id"] == second.mission_id
@@ -241,7 +241,7 @@ def test_audit_opposite_direction_cannot_send_stop_modify(tmp_path):
     second = open_filled(owner, fill=30015, stop=30025, direction="short")
     loop, venue = loop_for(owner, second, stop=30025, direction="short")
     result = loop.manage_open_position()
-    assert result["decision"]["reason"] == BE.NOT_YET
+    assert result["decision"]["reason"] == "below_trailing_trigger"
     assert result["baseline"]["direction"] == "short"
     assert venue.modifies == []
     # Missing local authority is rejected before any proposal or effect.

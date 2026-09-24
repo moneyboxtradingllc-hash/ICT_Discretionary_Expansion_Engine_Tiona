@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from broker import break_even_actuator as ACT                        # noqa: E402
 from broker import break_even_journal as J                           # noqa: E402
 from test_break_even_production_wiring import (                      # noqa: E402
-    CID, T2_ENTRY, T2_STOP, T2_TARGET, T2_STOP_PX, T2_TARGET_PX, loop_for,
+    CID, T2_ENTRY, T2_FILL, T2_R, T2_STOP, T2_TARGET, T2_STOP_PX, T2_TARGET_PX, loop_for,
     t2_children)
 
 SESSION = "PRAC-20260825"
@@ -45,8 +45,9 @@ def accepts_without_effect(venue):
 
 
 def eligible(tmp_path, **kw):
-    """A loop whose long is comfortably past +1R on the bid."""
-    return loop_for(tmp_path, bid=29261.0, ask=29261.25, **kw)
+    """A loop whose long is at the first live +2.50R trailing stair."""
+    bid = T2_FILL + (2.5 * T2_R)
+    return loop_for(tmp_path, bid=bid, ask=bid + .25, **kw)
 
 
 # ══ IDENTITY ════════════════════════════════════════════════════════════════

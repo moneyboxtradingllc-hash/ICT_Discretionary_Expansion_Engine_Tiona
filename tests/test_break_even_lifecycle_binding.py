@@ -160,7 +160,7 @@ def test_full_production_fill_arms_then_manages_and_cold_restores(tmp_path, shor
     risk = abs(ctx.entry_fill_price - original)
     initial_writes = len(venue.modifies)
     assert initial_writes == 2  # both structural legs, with no armed context
-    px = ctx.entry_fill_price + (-risk if short else risk)
+    px = ctx.entry_fill_price + (-2.5 * risk if short else 2.5 * risk)
     venue.market_hub.emit("GatewayQuote", [CID, {"bestBid": px, "bestAsk": px}])
     out = loop.manage_open_position()
     assert out["status"] == ACT.APPLIED, out
