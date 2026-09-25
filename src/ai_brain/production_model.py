@@ -31,16 +31,18 @@ import os
 #
 # Terra returns DELIBERATELY, with its own fresh authorization, when the Combine
 # phase begins -- never as a config toggle.
-PRODUCTION_MODEL = "gpt-5.6-luna"
-PREVIOUS_PRODUCTION_MODEL = "gpt-5.6-terra"
+PRODUCTION_MODEL = "gpt-6-luna"
+PREVIOUS_PRODUCTION_MODEL = "gpt-5.6-luna"
 
 # `gpt-5.6` is an ALIAS that routes to Sol. Naming it here means a refusal can
 # say why rather than reporting a generic mismatch.
 FORBIDDEN_MODELS = {
     "gpt-5.6": "unsuffixed alias routes to gpt-5.6-sol, not the authorized tier",
     "gpt-5.6-sol": "not the authorized production tier",
-    PREVIOUS_PRODUCTION_MODEL: ("reserved for the Combine phase by operator ruling "
-                                "2026-08-19; PRAC validation runs on Luna"),
+    "gpt-5.6-terra": "not the authorized production tier",
+    PREVIOUS_PRODUCTION_MODEL: "previous production model; fresh authorization required",
+    "gpt-6-sol": "not the authorized production tier",
+    "gpt-6-astra": "not the authorized production tier",
     "gpt-4o-mini": "legacy AI_MODEL default; never a production Brain",
 }
 
@@ -94,7 +96,7 @@ def reasoning_effort() -> "str | None":
 def model_matches(returned: str, expected: str = None) -> bool:
     """Whether the model the API actually served matches what we asked for.
 
-    Providers may append a dated suffix (`gpt-5.6-terra-2026-07-01`), so a
+    Providers may append a dated suffix (`gpt-6-luna-2026-09-22`), so a
     prefix match is accepted; a different family is not.
     """
     expected = expected or PRODUCTION_MODEL

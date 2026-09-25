@@ -1,6 +1,6 @@
 """LUNA-LIVE-BRAIN — production Brain health for the TopstepX Combine smoke.
 
-Proves that `gpt-5.6-luna` can serve as the sovereign author of a trade thesis
+Proves that the canonical production Luna model can serve as the sovereign author of a trade thesis
 BEFORE any execution path is armed. It deliberately exercises the REAL
 production code path — `narrative_brain._call_llm`, then the real validators —
 rather than a parallel test path. A health check that proves a different code

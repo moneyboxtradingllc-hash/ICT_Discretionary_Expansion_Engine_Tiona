@@ -53,7 +53,7 @@ class TestThereIsOneIdentity:
         assert MP.PRODUCTION_MODEL is PM.PRODUCTION_MODEL
 
     def test_production_is_luna(self):
-        assert PM.PRODUCTION_MODEL == "gpt-5.6-luna"
+        assert PM.PRODUCTION_MODEL == "gpt-6-luna"
 
 
 class TestPricingOwnsNoModelIdentity:
@@ -100,17 +100,22 @@ class TestPricingOwnsNoModelIdentity:
 class TestCostTelemetryFollowsTheRuling:
     USAGE = {"prompt_tokens": 1_000_000, "completion_tokens": 1_000_000}
 
-    def test_the_default_model_is_priced_as_luna(self):
+    def test_the_default_model_is_priced_as_gpt6_luna(self):
         cost = MP.cost_from_usage(self.USAGE)
-        assert cost["model"] == "gpt-5.6-luna"
-        assert cost["cost_usd"] == 1.40           # 0.20 in + 1.20 out
+        assert cost["model"] == "gpt-6-luna"
+        assert cost["cost_usd"] == 0.60           # 0.10 in + 0.50 out
 
-    def test_the_stale_default_was_12_5x_this(self):
-        """The exact overstatement that shipped, kept as the regression."""
-        terra = MP.cost_from_usage(self.USAGE, model="gpt-5.6-terra")["cost_usd"]
-        luna = MP.cost_from_usage(self.USAGE)["cost_usd"]
-        assert terra == 17.50
-        assert round(terra / luna, 3) == 12.5
+    def test_gpt6_luna_cached_pricing_calculates_correctly(self):
+        cost = MP.cost_from_usage({
+            "prompt_tokens": 1_000_000,
+            "completion_tokens": 1_000_000,
+            "prompt_tokens_details": {"cached_tokens": 400_000},
+        })
+        assert cost["cost_usd"] == 0.564  # 0.6M*0.10 + 0.4M*0.01 + 1M*0.50
+
+    def test_gpt56_luna_historical_pricing_remains_available(self):
+        historical = MP.cost_from_usage(self.USAGE, model="gpt-5.6-luna")
+        assert historical["cost_usd"] == 1.40
 
     def test_terra_is_still_priceable_when_named_explicitly(self):
         """Reserved for the Combine phase, not deleted."""
@@ -143,7 +148,7 @@ class TestTheOwnershipDirectionCannotInvert:
                 capture_output=True, text=True, timeout=60)
             assert out.returncode == 0, out.stderr
             seen.add(out.stdout.strip())
-        assert seen == {"gpt-5.6-luna gpt-5.6-luna"}, seen
+        assert seen == {"gpt-6-luna gpt-6-luna"}, seen
 
 
 class TestThisUnitChangedNothingElse:
@@ -154,5 +159,5 @@ class TestThisUnitChangedNothingElse:
         assert "ai_brain/model_pricing.py" not in sources
 
     def test_the_forbidden_model_ruling_is_untouched(self):
-        assert PM.PREVIOUS_PRODUCTION_MODEL == "gpt-5.6-terra"
+        assert PM.PREVIOUS_PRODUCTION_MODEL == "gpt-5.6-luna"
         assert PM.PREVIOUS_PRODUCTION_MODEL in PM.FORBIDDEN_MODELS

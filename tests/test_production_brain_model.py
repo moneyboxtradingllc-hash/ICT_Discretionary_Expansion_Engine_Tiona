@@ -50,12 +50,12 @@ class TestModelResolution:
         reason is cost: 739,891 tokens across 29 scans in 39 minutes on
         2026-08-19, all stand_downs.
         """
-        assert PM.PRODUCTION_MODEL == "gpt-5.6-luna"
-        assert PM.PREVIOUS_PRODUCTION_MODEL == "gpt-5.6-terra"
+        assert PM.PRODUCTION_MODEL == "gpt-6-luna"
+        assert PM.PREVIOUS_PRODUCTION_MODEL == "gpt-5.6-luna"
 
     def test_the_exact_luna_id_resolves_when_armed(self, monkeypatch):
-        monkeypatch.setenv("AI_BRAIN_MODEL", "gpt-5.6-luna")
-        assert PM.resolve_model(armed=True) == "gpt-5.6-luna"
+        monkeypatch.setenv("AI_BRAIN_MODEL", "gpt-6-luna")
+        assert PM.resolve_model(armed=True) == "gpt-6-luna"
 
     def test_armed_refuses_when_the_model_is_absent(self, monkeypatch):
         monkeypatch.delenv("AI_BRAIN_MODEL", raising=False)
@@ -63,14 +63,10 @@ class TestModelResolution:
         with pytest.raises(PM.ModelResolutionError, match="NO_BRAIN_MODEL"):
             PM.resolve_model(armed=True)
 
-    def test_armed_refuses_terra_while_luna_is_the_prac_doctrine(self, monkeypatch):
-        """Terra is reserved, not deprecated -- and still refused by default.
-
-        It returns for the Combine phase through a deliberate ruling and its own
-        fresh authorization, never as a config toggle left lying around.
-        """
-        monkeypatch.setenv("AI_BRAIN_MODEL", "gpt-5.6-terra")
-        with pytest.raises(PM.ModelResolutionError, match="reserved for the Combine"):
+    @pytest.mark.parametrize("retired", ["gpt-5.6-luna", "gpt-5.6-terra"])
+    def test_armed_refuses_previous_and_other_gpt56_models(self, monkeypatch, retired):
+        monkeypatch.setenv("AI_BRAIN_MODEL", retired)
+        with pytest.raises(PM.ModelResolutionError):
             PM.resolve_model(armed=True)
 
     def test_armed_refuses_the_unsuffixed_alias(self, monkeypatch):
@@ -79,7 +75,10 @@ class TestModelResolution:
         with pytest.raises(PM.ModelResolutionError, match="routes to gpt-5.6-sol"):
             PM.resolve_model(armed=True)
 
-    @pytest.mark.parametrize("bad", ["gpt-5.6-sol", "gpt-4o-mini", "claude-3", "terra"])
+    @pytest.mark.parametrize("bad", [
+        "gpt-5.6-sol", "gpt-6-sol", "gpt-6-astra", "gpt-4o-mini",
+        "arbitrary-model", "claude-3", "terra",
+    ])
     def test_armed_refuses_any_other_model(self, monkeypatch, bad):
         monkeypatch.setenv("AI_BRAIN_MODEL", bad)
         with pytest.raises(PM.ModelResolutionError):
@@ -103,11 +102,14 @@ class TestModelResolution:
 
 class TestModelIdentityMatching:
 
-    @pytest.mark.parametrize("returned", ["gpt-5.6-luna", "gpt-5.6-luna-2026-07-01"])
+    @pytest.mark.parametrize("returned", ["gpt-6-luna", "gpt-6-luna-2026-09-22"])
     def test_the_production_model_and_its_dated_variants_match(self, returned):
         assert PM.model_matches(returned) is True
 
-    @pytest.mark.parametrize("returned", ["gpt-5.6-terra", "gpt-5.6-sol", "gpt-4o-mini", ""])
+    @pytest.mark.parametrize("returned", [
+        "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "gpt-6-sol",
+        "gpt-6-astra", "gpt-4o-mini", "",
+    ])
     def test_a_different_family_does_not_match(self, returned):
         assert PM.model_matches(returned) is False
 
@@ -116,10 +118,10 @@ class TestModelIdentityMatching:
         block = {"source": "llm", "output": {"narrative_direction": "bullish"},
                  "fallback_reason": None}
         assert ProductionScanCycle.is_sovereign(block) is True     # source-level
-        assert PM.model_matches("gpt-5.6-terra") is False          # identity-level
+        assert PM.model_matches("gpt-5.6-luna") is False            # identity-level
         # the two together are what production requires
         assert not (ProductionScanCycle.is_sovereign(block)
-                    and PM.model_matches("gpt-5.6-terra"))
+                    and PM.model_matches("gpt-5.6-luna"))
 
 
 class TestReasoningConfigUnchanged:
@@ -197,7 +199,7 @@ class TestAuthorizationBindsTheBrain:
         return a
 
     def test_the_fingerprint_changes_with_the_model(self):
-        assert self.auth().fingerprint() != self.auth(brain_model="gpt-5.6-terra").fingerprint()
+        assert self.auth().fingerprint() != self.auth(brain_model="gpt-5.6-luna").fingerprint()
 
     def test_the_fingerprint_changes_with_reasoning_effort(self):
         assert self.auth().fingerprint() != self.auth(brain_reasoning_effort="high").fingerprint()
@@ -210,7 +212,7 @@ class TestAuthorizationBindsTheBrain:
         assert self.auth().fingerprint() != self.auth(json_mode_required=False).fingerprint()
 
     def test_an_authorization_issued_for_the_other_tier_cannot_arm_this_one(self):
-        a = self.auth(brain_model="gpt-5.6-terra")
+        a = self.auth(brain_model="gpt-5.6-luna")
         with pytest.raises(SA.AuthorizationRefused, match="BRAIN_MODEL_MISMATCH"):
             a.verify(account_fingerprint="acct:x", contract_id="CON.F.US.MNQ.U26",
                      session_date="20260807")

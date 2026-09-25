@@ -138,7 +138,7 @@ def _token(now=None):
 
 # ══════════════════════════════════════════════════════════════════════════════
 class TestProductionModelPricing:
-    """Rates follow the production model. Terra costs 12.5x Luna on both sides.
+    """Rates follow the production model, with old rates kept for history.
 
     MODEL-IDENTITY-CONSISTENCY-1 (2026-08-20): this class asserted Terra was in
     force, which was true under the 2026-08-06 migration and false after the
@@ -149,14 +149,18 @@ class TestProductionModelPricing:
     """
 
     TERRA = {"input": 2.50, "cached_input": 0.25, "output": 15.00}
-    LUNA = {"input": 0.20, "cached_input": 0.02, "output": 1.20}
+    GPT56_LUNA = {"input": 0.20, "cached_input": 0.02, "output": 1.20}
+    GPT6_LUNA = {"input": 0.10, "cached_input": 0.01, "output": 0.50}
 
     def test_the_production_pricing_is_in_force(self):
-        assert PRICING[PRODUCTION_MODEL] == self.LUNA
+        assert PRODUCTION_MODEL == "gpt-6-luna"
+        assert PRICING[PRODUCTION_MODEL] == self.GPT6_LUNA
 
-    def test_the_reserved_terra_pricing_is_retained_for_historical_cost_audits(self):
-        """August 6-19 ran on Terra; that spend must stay reproducible, and
-        Terra stays priced for the Combine phase it is reserved for."""
+    def test_gpt56_luna_pricing_is_retained_for_historical_cost_audits(self):
+        assert PRICING["gpt-5.6-luna"] == self.GPT56_LUNA
+
+    def test_terra_pricing_is_retained_for_historical_cost_audits(self):
+        """August 6-19 ran on Terra; that spend must stay reproducible."""
         assert PRICING["gpt-5.6-terra"] == self.TERRA
 
     def test_the_operator_worked_example_reproduces_on_terra(self):

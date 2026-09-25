@@ -14,6 +14,7 @@ from __future__ import annotations
 # USD per 1,000,000 tokens. Official standard pricing, operator-supplied
 # 2026-08-04. `cached_input` applies to the cached portion of the prompt.
 PRICING = {
+    "gpt-6-luna":   {"input": 0.10, "cached_input": 0.01, "output": 0.50},
     "gpt-5.6-luna": {"input": 0.20, "cached_input": 0.02, "output": 1.20},
     "gpt-5.6-terra": {"input": 2.50, "cached_input": 0.25, "output": 15.00},
     "gpt-5.6-sol":  {"input": 5.00, "cached_input": 0.50, "output": 30.00},

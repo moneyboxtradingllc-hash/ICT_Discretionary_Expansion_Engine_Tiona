@@ -382,7 +382,7 @@ def test_real_provider_boundary_latches_only_explicit_credit_exhaustion(
             self.chat = SimpleNamespace(completions=completions)
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key-not-real")
-    monkeypatch.setenv("AI_BRAIN_MODEL", "gpt-5.6-luna")
+    monkeypatch.setenv("AI_BRAIN_MODEL", "gpt-6-luna")
     monkeypatch.setattr(adapter, "_OPENAI_AVAILABLE", True)
     monkeypatch.setattr(adapter, "_openai", SimpleNamespace(OpenAI=Client))
 

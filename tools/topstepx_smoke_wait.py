@@ -24,6 +24,7 @@ from datetime import datetime, timedelta, timezone
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
 from dotenv import load_dotenv
+from ai_brain.production_model import PRODUCTION_MODEL
 
 load_dotenv()
 
@@ -210,7 +211,7 @@ def one_scan(session, producer, ledger, fp, contract, n) -> dict:
     try:
         cand = producer.produce(
             brain_result={"ok": True, "parsed": out, "fallback_reason": None,
-                          "model": "gpt-5.6-luna"},
+                          "model": PRODUCTION_MODEL},
             brain_input=cap.get("payload") or {}, snapshot=snap,
             qualification={"qualified": True},
             engine_inventory=audit.audit_payload(cap.get("payload") or {}),
