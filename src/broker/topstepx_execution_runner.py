@@ -316,8 +316,10 @@ class ExecutionRunner:
         # This was a THIRD hardcoded "gpt-5.6-luna" -- after the producer and the
         # pricing table. Each one silently halts every thesis from the new model
         # with no symptom other than trades never happening.
-        from ai_brain.production_model import PRODUCTION_MODEL
-        if prov["model"] != PRODUCTION_MODEL:
+        from ai_brain.production_model import PRODUCTION_MODEL, model_matches
+        # PROVIDER-MODEL-IDENTITY-1: the served identity may carry a provider
+        # date suffix; the single matching rule decides, not string equality.
+        if not model_matches(prov["model"], PRODUCTION_MODEL):
             self._halt(AI_FALLBACK,
                        f"thesis authored by {prov['model']!r}, not {PRODUCTION_MODEL}",
                        {"provenance": prov})

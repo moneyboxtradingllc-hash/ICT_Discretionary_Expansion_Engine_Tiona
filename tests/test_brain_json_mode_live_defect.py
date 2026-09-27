@@ -87,9 +87,12 @@ class FakeChoice:
 
 
 class FakeResponse:
-    def __init__(self, content):
+    def __init__(self, content, model=None):
         self.choices = [FakeChoice(content)]
         self.usage = None
+        # A real provider response names the model that served it; the live
+        # path now refuses one that does not (PROVIDER-MODEL-IDENTITY-1).
+        self.model = model
 
 
 class FakeCompletions:
@@ -101,7 +104,7 @@ class FakeCompletions:
 
     def create(self, **kwargs):
         self.kwargs = kwargs
-        return FakeResponse(self.content)
+        return FakeResponse(self.content, model=kwargs.get("model"))
 
 
 class FakeClient:

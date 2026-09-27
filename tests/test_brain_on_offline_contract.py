@@ -41,9 +41,12 @@ class _Choice:
 
 
 class _Resp:
-    def __init__(self, content):
+    def __init__(self, content, model=None):
         self.choices = [_Choice(content)]
         self.usage = None
+        # A real provider response names the model that served it; the live
+        # path now refuses one that does not (PROVIDER-MODEL-IDENTITY-1).
+        self.model = model
 
 
 class _Completions:
@@ -53,7 +56,7 @@ class _Completions:
 
     def create(self, **kwargs):
         self.calls.append(kwargs)
-        return _Resp(self._script)
+        return _Resp(self._script, model=kwargs.get("model"))
 
 
 class _Chat:

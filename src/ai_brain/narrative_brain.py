@@ -531,6 +531,7 @@ def _call_llm(brain_input: dict, repair: "dict | None" = None) -> dict:
         from ai_brain.production_model import resolve_model
         model = resolve_model(armed=_armed_session())
         out["model"] = model
+        out["model_requested"] = model
         timeout = float(os.getenv("AI_BRAIN_TIMEOUT_SECONDS", "25"))
         client = _openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"),
                                 timeout=timeout, max_retries=0)
@@ -598,14 +599,44 @@ def _call_llm(brain_input: dict, repair: "dict | None" = None) -> dict:
                 out["usage"] = dict(LEDGER.usage_breakdown(u))
         except Exception:  # noqa: BLE001
             pass
+        # PROVIDER-MODEL-IDENTITY-1 (2026-09-27). REQUESTING a model is not
+        # proof of being SERVED by it. `out["model"]` used to stay the requested
+        # name whatever the provider answered, and `resp.model` reached only the
+        # ledger, so a response served by another model would have been parsed,
+        # validated and handed to the producer as if gpt-6-luna had authored it.
+        #
+        # The served identity is now checked with the single matching rule,
+        # `production_model.model_matches`, BEFORE the content is parsed. A
+        # mismatch -- or a response that names no model at all -- is refused
+        # here and never becomes a sovereign read: `parsed` stays None, the
+        # caller takes its existing explicit-fallback branch, and no repair turn
+        # is attempted (repairs run only on an ok primary). There is no retry on
+        # any other model.
+        #
+        # On a match the author IS the served model, verbatim: a dated suffix is
+        # reported as served, never rewritten to the requested name.
+        from ai_brain.production_model import model_matches
+        returned_model = str(getattr(resp, "model", "") or "")
+        out["model_returned"] = returned_model
+        served_ok = model_matches(returned_model, model)
+        if served_ok:
+            out["model"] = returned_model
+        else:
+            out["model"] = None          # no sovereign author for this response
+            out["fallback_reason"] = (
+                f"provider_model_mismatch:requested={model}:"
+                f"returned={returned_model or 'absent'}")
         LEDGER.record(
             session_id=session_id, scan=scan, role=LEDGER.PRIMARY,
             purpose=purpose, attempt=attempt, model_requested=model,
-            model_returned=getattr(resp, "model", "") or "",
+            model_returned=returned_model,
             client_request_id=client_request_id, request_id=out["request_id"],
             response_id=out["response_id"], usage=getattr(resp, "usage", None),
-            ok=True, latency_seconds=_latency, prompt_cache_key=cache_key,
+            ok=served_ok, fallback_reason=(out["fallback_reason"] or ""),
+            latency_seconds=_latency, prompt_cache_key=cache_key,
             cache_mode="implicit")
+        if not served_ok:
+            return out
         start, end = content.find("{"), content.rfind("}")
         if start < 0 or end < 0:
             out["fallback_reason"] = "no_json_in_response"
@@ -630,7 +661,9 @@ def _call_llm(brain_input: dict, repair: "dict | None" = None) -> dict:
             LEDGER.record(
                 session_id=session_id, scan=scan, role=LEDGER.PRIMARY,
                 purpose=purpose, attempt=attempt,
-                model_requested=out.get("model") or "",
+                model_requested=(out.get("model_requested")
+                                 or out.get("model") or ""),
+                model_returned=out.get("model_returned") or "",
                 client_request_id=out.get("client_request_id") or "",
                 ok=False, fallback_reason=out["fallback_reason"],
                 prompt_cache_key=out.get("prompt_cache_key") or "",
@@ -1204,6 +1237,12 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             "source": source,
             "llm_enabled": _llm_enabled(),
             "llm_model": (llm_call or {}).get("model"),
+            # PROVIDER-MODEL-IDENTITY-1: both halves of the identity fact.
+            # `llm_model` is the sovereign author (the served model that
+            # passed model_matches) or None; these keep what was asked for
+            # and what actually answered, even when they disagree.
+            "llm_model_requested": (llm_call or {}).get("model_requested"),
+            "llm_model_returned": (llm_call or {}).get("model_returned"),
             "llm_prompt": (llm_call or {}).get("prompt"),
             "llm_user_content": (llm_call or {}).get("user_content"),
             "llm_raw_response": (llm_call or {}).get("raw_response"),
@@ -1263,6 +1302,12 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             "source": source,                                   # llm | deterministic | llm_failed_fallback | degraded
             "llm_enabled": _llm_enabled(),
             "llm_model": (llm_call or {}).get("model"),
+            # PROVIDER-MODEL-IDENTITY-1: both halves of the identity fact.
+            # `llm_model` is the sovereign author (the served model that
+            # passed model_matches) or None; these keep what was asked for
+            # and what actually answered, even when they disagree.
+            "llm_model_requested": (llm_call or {}).get("model_requested"),
+            "llm_model_returned": (llm_call or {}).get("model_returned"),
             "llm_usage": (llm_call or {}).get("usage"),
             "fallback_reason": fallback_reason,
             # LUNA-DEGRADED-TELEMETRY (2026-08-06): the reason a call was

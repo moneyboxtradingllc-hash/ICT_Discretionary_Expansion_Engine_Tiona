@@ -48,7 +48,10 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # PROTECTED-SWING-TRUTH-20260924 changes the closure-bound structural
     # invalidation producer. The new identity is explicit; old authorization
     # is not migrated.
-            assert PM.brain_contract_fingerprint() == "brain:e454284ce616884d"
+    #
+    # PROVIDER-MODEL-IDENTITY-1 (2026-09-27) makes the closure-bound candidate
+    # producer judge the SERVED model with model_matches(). It rotates again.
+            assert PM.brain_contract_fingerprint() == "brain:3a09895222765f22"
 
 
 @pytest.mark.parametrize("addition", [

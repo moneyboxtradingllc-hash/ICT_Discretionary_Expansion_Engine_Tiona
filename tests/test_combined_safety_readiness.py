@@ -572,8 +572,12 @@ class TestStrategyUntouched:
         # PROTECTED-SWING-TRUTH-20260924 changes the closure-bound structural
         # invalidation producer. The fingerprint therefore moves, and prior
         # authorizations remain bound to their historical identity.
+        #
+        # PROVIDER-MODEL-IDENTITY-1 (2026-09-27) makes the closure-bound
+        # candidate producer judge the SERVED model with model_matches(), so
+        # the fingerprint moves again and PROD-20260928 must be reissued.
         from ai_brain.production_model import brain_contract_fingerprint
-        assert brain_contract_fingerprint() == "brain:e454284ce616884d"
+        assert brain_contract_fingerprint() == "brain:3a09895222765f22"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.

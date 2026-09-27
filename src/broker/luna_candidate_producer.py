@@ -42,7 +42,7 @@ DEFAULT_TTL_SECONDS = 120.0        # two scan cadences; a candidate is perishabl
 # than restated. This was a hardcoded "gpt-5.6-luna" -- a second source of truth
 # that would have rejected every Terra thesis as `wrong_model` and silently
 # blocked all trading after the migration, with no other symptom.
-from ai_brain.production_model import PRODUCTION_MODEL
+from ai_brain.production_model import PRODUCTION_MODEL, model_matches
 # STEP 7 — the approved family vocabulary, owned beside the validator so an
 # unknown token can only ever fail closed.
 from ai_brain.brain_validation import CONCRETE_TOOL_FAMILIES
@@ -1456,7 +1456,11 @@ class CandidateProducer:
                               f"thesis came from a fallback: {r['fallback_reason']}")
         if not r.get("ok") or not r.get("parsed"):
             raise NoCandidate("brain_invalid", "no validated Luna output")
-        if r.get("model") != PRODUCTION_MODEL:
+        # PROVIDER-MODEL-IDENTITY-1: `model` is now the SERVED identity, which a
+        # provider may date-suffix (gpt-6-luna-2026-09-22). Judged by the one
+        # matching rule the live call already enforced -- a string equality
+        # here would refuse a legitimately served thesis as `wrong_model`.
+        if not model_matches(r.get("model"), PRODUCTION_MODEL):
             raise NoCandidate("wrong_model",
                               f"thesis authored by {r.get('model')!r}, not {PRODUCTION_MODEL}")
 
