@@ -20,6 +20,35 @@ from news.breaking_news_provider import BreakingNewsProvider
 from news.news_classifier import classify_news
 from news.event_risk_engine import assess_event_risk
 
+#: NEWS-2 (2026-09-27): ABSENCE OF EVIDENCE IS NOT EVIDENCE OF CALM.
+#: NEWS-1 used to turn a missing, unreadable or never-refreshed source into
+#: "no active events; risk=normal". A source file older than this is STALE.
+DEFAULT_SOURCE_MAX_AGE_HOURS = 24.0
+UNKNOWN_RISK = "unknown"
+
+
+def _source_state(path: str, now_dt, max_age_hours: float) -> dict:
+    """ok | missing | unreadable | stale, with the file's own age. Never raises."""
+    import json as _json
+    from datetime import datetime as _dt, timezone as _tz
+    out = {"path": path, "state": "missing", "as_of": None, "age_hours": None}
+    try:
+        if not path or not os.path.exists(path):
+            return out
+        with open(path, encoding="utf-8") as fh:
+            rows = _json.load(fh)
+        if not isinstance(rows, list):
+            out["state"] = "unreadable"
+            return out
+        mtime = _dt.fromtimestamp(os.path.getmtime(path), tz=_tz.utc)
+        age_h = round((now_dt - mtime).total_seconds() / 3600.0, 2)
+        out.update(as_of=mtime.isoformat(), age_hours=age_h,
+                   state="ok" if age_h <= max_age_hours else "stale")
+        return out
+    except Exception:  # noqa: BLE001
+        out["state"] = "unreadable"
+        return out
+
 
 def news_enabled() -> bool:
     return os.getenv("NEWS_LAYER_ENABLED", "false").lower().strip() == "true"
@@ -38,7 +67,7 @@ def _summary(risk, cal) -> str:
         bits.append(f"breaking {risk.breaking_category} "
                     f"(relevance {risk.breaking_relevance})")
     bits.append(f"risk={risk.risk_state}")
-    return "; ".join(bits) if bits else "no active events; risk=normal"
+    return "; ".join(bits)
 
 
 def build_news_context(now=None,
@@ -52,19 +81,47 @@ def build_news_context(now=None,
        breaking_news_relevance, reasons}
     """
     try:
-        cal = EconomicCalendarProvider(calendar_path).snapshot(now)
-        breaking = BreakingNewsProvider(breaking_path).recent(now)
+        from news.calendar_provider import _parse_dt
+        from datetime import datetime as _dt, timezone as _tz
+        now_dt = _parse_dt(now) or _dt.now(_tz.utc)
+        cal_provider = EconomicCalendarProvider(calendar_path)
+        brk_provider = BreakingNewsProvider(breaking_path)
+        max_age = float(os.getenv("NEWS_SOURCE_MAX_AGE_HOURS",
+                                  DEFAULT_SOURCE_MAX_AGE_HOURS))
+        sources = {"calendar": _source_state(cal_provider.path, now_dt, max_age),
+                   "breaking": _source_state(brk_provider.path, now_dt, max_age)}
+        cal = cal_provider.snapshot(now)
+        breaking = brk_provider.recent(now)
         assessments = [classify_news(b) for b in breaking]
         risk = assess_event_risk(cal, assessments)
 
+        # Evidence of risk from the data we DO have still stands; but "normal"
+        # can only be asserted when every source is present and fresh.
+        unproven = sorted(k for k, v in sources.items() if v["state"] != "ok")
+        risk_state = risk.risk_state
+        data_state = "known" if not unproven else "partial"
+        if unproven and risk_state == "normal":
+            risk_state = UNKNOWN_RISK
+            data_state = "unknown"
+        summary = _summary(risk, cal)
+        if risk_state == UNKNOWN_RISK:
+            summary = ("news state UNKNOWN: "
+                       + ", ".join(f"{k} {sources[k]['state']}" for k in unproven))
+        elif not summary.replace(f"risk={risk.risk_state}", "").strip("; "):
+            summary = (f"no scheduled events in the lookahead window "
+                       f"(calendar as of {sources['calendar']['as_of']}); risk=normal")
+
         return {
             # ── Phase 5 canonical fields ─────────────────────────────────────
-            "risk_state": risk.risk_state,
+            "risk_state": risk_state,
             "active_event": risk.active_event,
             "minutes_to_event": risk.minutes_to_event,
             "breaking_news_active": risk.breaking_news_active,
             "breaking_news_category": risk.breaking_category,
-            "summary": _summary(risk, cal),
+            "summary": summary,
+            "data_state": data_state,
+            "unproven_sources": unproven,
+            "sources": sources,
             # ── non-directional extras (still context-only) ──────────────────
             "scheduled_event_window": cal.scheduled_event_window,
             "impact_level": risk.impact_level,
@@ -75,7 +132,7 @@ def build_news_context(now=None,
         }
     except Exception as exc:  # noqa: BLE001
         return {
-            "risk_state": "normal", "active_event": None,
+            "risk_state": UNKNOWN_RISK, "data_state": "unknown", "active_event": None,
             "minutes_to_event": None, "breaking_news_active": False,
             "breaking_news_category": None,
             "summary": f"news_context_error:{exc}",
