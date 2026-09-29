@@ -586,38 +586,6 @@ class ExecutionRunner:
                         "structural_stop": candidate_snapshot.invalidation_price,
                         "authorized_target": candidate_snapshot.objective.price})
 
-        if int(sized["sizing"]["contracts"]) < ceiling:
-            # A smaller quantity could fit, but it would be a different order
-            # from the one already authorized. Record the recalculated size and
-            # refuse this candidate; a new candidate may be authorized later.
-            from broker.topstepx_combine_risk import all_in_risk_for
-            approved_risk = all_in_risk_for(
-                stop_points=sized["geometry"].stop_points,
-                size=ceiling, contract=self.contract)
-            self.final_quote_economics = {
-                "decision": "REFUSE",
-                "refusal_reason": "final_risk_exceeds_cap_at_authorized_quantity",
-                "final_quote": quote_evidence,
-                "final_entry_reference": float(entry_reference),
-                "final_quote_timestamp": quote_evidence["captured_at"],
-                "structural_stop": sized["geometry"].stop_price,
-                "authorized_target": sized["geometry"].target_price,
-                "stop_distance_points": sized["geometry"].stop_points,
-                "reward_distance_points": sized["geometry"].target_points,
-                "reward_to_risk": sized["reward_to_risk"],
-                "authorized_quantity": ceiling,
-                "recalculated_maximum_quantity": int(sized["sizing"]["contracts"]),
-                "gross_risk_usd_at_authorized_quantity": approved_risk["gross_stop_risk"],
-                "all_in_risk_usd_at_authorized_quantity": approved_risk["all_in_risk"],
-                "risk_cap_usd": float(self.max_risk_usd),
-                "detail": ("final economics require a different, smaller quantity; "
-                           "the existing authorization is refused"),
-            }
-            self._invalidate("final quote requires a different authorized quantity")
-            self._halt(RISK_DRIFTED,
-                       "final quote economics exceed the risk cap at the authorized quantity",
-                       dict(self.final_quote_economics))
-
         completed = self.clock()
         geo = self._stamp_governing_caps(sized["geometry"])
         self.geometry = geo
@@ -642,6 +610,7 @@ class ExecutionRunner:
             "risk_cap_usd": float(self.max_risk_usd),
             "max_contracts": ceiling,
             "quantity_ceiling_from_prior_approval": int(old.size),
+            "quantity_adjusted_downward": int(geo.size) < int(old.size),
             "account_capacity_check": "passed_under_current_daily_loss_budget",
             "decision": "EXECUTE_AS_AUTHORIZED",
             "elapsed_quote_to_economics_ms": round(

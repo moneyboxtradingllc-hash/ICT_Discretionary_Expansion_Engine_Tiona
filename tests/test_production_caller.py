@@ -311,24 +311,27 @@ class TestSubmitPath:
         mk = market(current_price=entry, high_since=entry, low_since=entry)
         return ps, s, cs, runner, calls, mk, mint(cs)
 
-    def test_final_short_quote_refuses_when_authorized_quantity_breaks_cap(self, tmp_path):
+    def test_final_short_quote_resizes_down_to_existing_risk_cap(self, tmp_path):
         ps, s, cs, runner, calls, mk, token = self._final_quote_submit(tmp_path)
         planned_size = runner.geometry.size
-        with pytest.raises(R.RunnerHalt) as exc:
-            ps.submit(candidate=cs, market=mk, latest_price=cs.entry_price,
-                      mint_token=token, account_id=1)
+        result = ps.submit(candidate=cs, market=mk, latest_price=cs.entry_price,
+                           mint_token=token, account_id=1)
         proof = runner.final_quote_economics
-        assert exc.value.state == R.RISK_DRIFTED
-        assert calls == [] and s.place_calls == 0
+        assert result["order_id"] == 9001
+        assert len(calls) == 1
+        assert proof["decision"] == "EXECUTE_AS_AUTHORIZED"
         assert proof["final_entry_reference"] == 30687.5  # SELL uses BID
         assert proof["stop_distance_points"] == 30.25
         assert proof["reward_distance_points"] == 149.75
         assert proof["reward_to_risk"] == pytest.approx(149.75 / 30.25, abs=0.001)
-        assert proof["authorized_quantity"] == planned_size == 10
-        assert proof["recalculated_maximum_quantity"] == 5
-        assert proof["gross_risk_usd_at_authorized_quantity"] == pytest.approx(605.0)
-        assert proof["all_in_risk_usd_at_authorized_quantity"] == pytest.approx(637.2)
-        assert runner.geometry is None  # refused candidate is destroyed
+        assert planned_size == 10
+        assert proof["quantity"] == calls[0]["size"] == runner.geometry.size == 5
+        assert proof["quantity_ceiling_from_prior_approval"] == 10
+        assert proof["quantity_adjusted_downward"] is True
+        assert proof["gross_risk_usd"] == pytest.approx(302.5)
+        assert proof["all_in_risk_usd"] == pytest.approx(318.6)
+        assert runner.geometry.stop_price == cs.invalidation_price
+        assert runner.geometry.target_price == cs.objective.price
 
     def test_valid_final_quote_submits_and_records_same_reference_and_economics(self, tmp_path):
         ps, s, cs, runner, calls, mk, token = self._final_quote_submit(
