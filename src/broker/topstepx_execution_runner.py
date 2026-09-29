@@ -246,6 +246,10 @@ class ExecutionRunner:
     geometry: Optional[BracketGeometry] = None
     order_id: Optional[int] = None
     entry_capture: Optional[Any] = None       # QuoteCapture taken at submit
+    final_quote_economics: dict = field(default_factory=dict)
+    production_volatility_evidence: dict = field(default_factory=dict)
+    approved_quantity_ceiling: Optional[int] = None
+    final_economics_completed_at: Optional[datetime] = None
     execution_context: Optional[Any] = None   # threaded identity for the exit
     # Caps the runner enforces at the final gate. Default to PRODUCTION
     # doctrine; the smoke tooling passes its own explicitly.
@@ -447,6 +451,206 @@ class ExecutionRunner:
                  geo.evidence())
         return geo
 
+    def _capture_final_executable_entry(self, candidate_snapshot, market: dict) -> float:
+        """Capture and validate the exact sided quote used by final economics."""
+        from broker import topstepx_slippage as SL
+
+        self.entry_capture = None
+        self.capture_failure = None
+        if not callable(getattr(self, "_final_quote_provider", None)):
+            self.final_quote_economics = {
+                "decision": "REFUSE",
+                "refusal_reason": "quote_provider_unavailable"}
+            self._invalidate("final executable quote provider unavailable")
+            self._halt(STREAM_STALE, "final executable quote provider unavailable",
+                       {"final_quote_refusal": "quote_provider_unavailable"})
+        try:
+            capture = self._final_quote_provider()
+        except Exception as exc:  # noqa: BLE001
+            self.capture_failure = f"{type(exc).__name__}"
+            self.final_quote_economics = {
+                "decision": "REFUSE", "refusal_reason": "quote_capture_failed",
+                "error_type": type(exc).__name__}
+            self._invalidate("final executable quote capture failed")
+            self._halt(STREAM_STALE, "final executable quote capture failed",
+                       {"final_quote_refusal": "capture_failed",
+                        "error_type": type(exc).__name__})
+        self.entry_capture = capture
+
+        try:
+            bid, ask = float(capture.best_bid), float(capture.best_ask)
+            age = float(capture.market_data_age_seconds)
+            captured_at = capture.captured_at
+            now = self.clock()
+            if (not math.isfinite(bid) or not math.isfinite(ask)
+                    or bid <= 0 or ask <= 0 or bid > ask
+                    or not math.isfinite(age) or age < 0
+                    or age > SL.MAX_QUOTE_AGE_SECONDS
+                    or not isinstance(captured_at, datetime)
+                    or captured_at.tzinfo is None or now.tzinfo is None
+                    or captured_at > now
+                    or str(capture.contract_id) != str(self.contract.id)):
+                raise ValueError("quote is invalid, stale, future-dated or for another contract")
+            reference = float(capture.executable_reference(candidate_snapshot.direction))
+            if (not math.isfinite(reference) or reference <= 0
+                    or abs(reference / self.contract.tick_size
+                            - round(reference / self.contract.tick_size)) > 1e-6):
+                raise ValueError("executable side is missing or off tick")
+            quality = SL.classify_quality(
+                capture, direction=("buy" if candidate_snapshot.direction == "bullish"
+                                    else "sell"),
+                contract_id=self.contract.id, request_at=now)
+            if quality != SL.RELIABLE:
+                raise ValueError(f"quote quality is {quality}")
+        except Exception as exc:  # noqa: BLE001 — no planned-price fallback
+            self.final_quote_economics = {
+                "decision": "REFUSE", "refusal_reason": "unusable_final_quote",
+                "final_quote": (capture.evidence(self.contract.tick_size)
+                                if hasattr(capture, "evidence") else None),
+                "detail": str(exc)}
+            self._invalidate("final executable quote is unusable")
+            self._halt(STREAM_STALE, f"final executable quote is unusable: {exc}",
+                       {"final_quote_refusal": "unusable_quote",
+                        "quote": (capture.evidence(self.contract.tick_size)
+                                  if hasattr(capture, "evidence") else None)})
+
+        final_market = dict(market or {})
+        final_market["current_executable_price"] = reference
+        final_market["now"] = now
+        self.final_quote_economics = {
+            "decision": "PENDING_FINAL_FRESHNESS",
+            "final_quote": capture.evidence(self.contract.tick_size),
+            "final_entry_reference": reference,
+            "final_quote_timestamp": capture.captured_at.isoformat(),
+            "structural_stop": candidate_snapshot.invalidation_price,
+            "authorized_target": candidate_snapshot.objective.price,
+        }
+        try:
+            self._assess_freshness(candidate_snapshot, final_market)
+        except RunnerHalt as exc:
+            self.final_quote_economics.update({
+                "decision": "REFUSE", "refusal_reason": exc.state,
+                "detail": exc.detail})
+            raise
+        return reference
+
+    def _reprice_production_economics(self, candidate_snapshot,
+                                     entry_reference: float) -> BracketGeometry:
+        """Rebuild production economics from the final quote and fixed thesis levels.
+
+        Recompute the quantity at the final price, capped at the quantity
+        already approved. If the approved quantity no longer fits, refuse the
+        candidate instead of silently submitting a different order.
+        """
+        from broker.topstepx_combine_risk import RiskRejection, build_production_bracket
+
+        if self.geometry is None:
+            self._halt(RISK_REJECTED, "production economics were never approved")
+        old = self.geometry
+        quote_evidence = self.entry_capture.evidence(self.contract.tick_size)
+        ceiling = min(int(self.max_contracts),
+                      int(self.approved_quantity_ceiling or old.size))
+        try:
+            sized = build_production_bracket(
+                direction=candidate_snapshot.direction,
+                entry_price=entry_reference,
+                invalidation_level=candidate_snapshot.invalidation_price,
+                target_price=candidate_snapshot.objective.price,
+                contract=self.contract,
+                evidence=dict(self.production_volatility_evidence or {}),
+                max_risk_usd=float(self.max_risk_usd),
+                max_contracts=ceiling,
+                min_reward_to_risk=float(self.min_reward_to_risk))
+        except RiskRejection as exc:
+            if exc.reason in ("wrong_side_target", "reward_below_gate"):
+                state = REWARD_COLLAPSED
+            elif exc.reason == "wrong_side_stop":
+                state = INVALIDATION_TOUCHED
+            else:
+                state = RISK_DRIFTED
+            self.final_quote_economics = {
+                "decision": "REFUSE", "refusal_reason": exc.reason,
+                "final_quote": quote_evidence,
+                "final_entry_reference": float(entry_reference),
+                "final_quote_timestamp": quote_evidence["captured_at"],
+                "structural_stop": candidate_snapshot.invalidation_price,
+                "authorized_target": candidate_snapshot.objective.price,
+                "risk_cap_usd": float(self.max_risk_usd),
+                "approved_quantity": int(old.size),
+                "detail": str(exc)}
+            self._invalidate(f"final quote economics refused: {exc.reason}")
+            self._halt(state, f"final quote economics refused: {exc}",
+                       {"final_entry_reference": entry_reference,
+                        "final_quote": quote_evidence,
+                        "economics_refusal": exc.reason,
+                        "structural_stop": candidate_snapshot.invalidation_price,
+                        "authorized_target": candidate_snapshot.objective.price})
+
+        if int(sized["sizing"]["contracts"]) < ceiling:
+            # A smaller quantity could fit, but it would be a different order
+            # from the one already authorized. Record the recalculated size and
+            # refuse this candidate; a new candidate may be authorized later.
+            from broker.topstepx_combine_risk import all_in_risk_for
+            approved_risk = all_in_risk_for(
+                stop_points=sized["geometry"].stop_points,
+                size=ceiling, contract=self.contract)
+            self.final_quote_economics = {
+                "decision": "REFUSE",
+                "refusal_reason": "final_risk_exceeds_cap_at_authorized_quantity",
+                "final_quote": quote_evidence,
+                "final_entry_reference": float(entry_reference),
+                "final_quote_timestamp": quote_evidence["captured_at"],
+                "structural_stop": sized["geometry"].stop_price,
+                "authorized_target": sized["geometry"].target_price,
+                "stop_distance_points": sized["geometry"].stop_points,
+                "reward_distance_points": sized["geometry"].target_points,
+                "reward_to_risk": sized["reward_to_risk"],
+                "authorized_quantity": ceiling,
+                "recalculated_maximum_quantity": int(sized["sizing"]["contracts"]),
+                "gross_risk_usd_at_authorized_quantity": approved_risk["gross_stop_risk"],
+                "all_in_risk_usd_at_authorized_quantity": approved_risk["all_in_risk"],
+                "risk_cap_usd": float(self.max_risk_usd),
+                "detail": ("final economics require a different, smaller quantity; "
+                           "the existing authorization is refused"),
+            }
+            self._invalidate("final quote requires a different authorized quantity")
+            self._halt(RISK_DRIFTED,
+                       "final quote economics exceed the risk cap at the authorized quantity",
+                       dict(self.final_quote_economics))
+
+        completed = self.clock()
+        geo = self._stamp_governing_caps(sized["geometry"])
+        self.geometry = geo
+        self.final_economics_completed_at = completed
+        self.final_quote_economics = {
+            "final_quote": quote_evidence,
+            "final_entry_reference": float(entry_reference),
+            "final_quote_timestamp": quote_evidence["captured_at"],
+            "final_economics_completed_timestamp": completed.isoformat(),
+            "direction": geo.direction,
+            "structural_stop": geo.stop_price,
+            "authorized_target": geo.target_price,
+            "stop_distance_points": geo.stop_points,
+            "reward_distance_points": geo.target_points,
+            "reward_to_risk": round(geo.reward_usd / geo.risk_usd, 3)
+                                if geo.risk_usd else None,
+            "quantity": geo.size,
+            "gross_risk_usd": geo.risk_usd,
+            "all_in_risk_usd": sized["sizing"]["all_in_planned_risk"],
+            "all_in_risk_per_contract": sized["sizing"]["all_in_risk_per_contract"],
+            "friction": sized["sizing"]["friction_detail"],
+            "risk_cap_usd": float(self.max_risk_usd),
+            "max_contracts": ceiling,
+            "quantity_ceiling_from_prior_approval": int(old.size),
+            "account_capacity_check": "passed_under_current_daily_loss_budget",
+            "decision": "EXECUTE_AS_AUTHORIZED",
+            "elapsed_quote_to_economics_ms": round(
+                (completed - self.entry_capture.captured_at).total_seconds() * 1000, 3),
+        }
+        self._to(RISK_APPROVED, "final quote economics passed",
+                 dict(self.final_quote_economics))
+        return geo
+
     # ── 4. submission ─────────────────────────────────────────────────────────
     # ── the gated submit path ─────────────────────────────────────────────────
     def reconcile_ledger(self, ledger, *, trades=None, orders=None,
@@ -498,14 +702,10 @@ class ExecutionRunner:
         # 4-6. freshness / objective / invalidation (raises with a precise state)
         self._assess_freshness(candidate_snapshot, market)
 
-        # 7. risk + reward recheck at the freshest price
-        self.recheck_risk_at_submit(latest_price)
-
-        # 8. mint the short-lived token only now
-        self.token = mint_token()
-        ledger.record_token(self.token.token_id)
-        self._to(AUTHORIZED, "token minted after all gates passed",
-                 {"token": self.token.describe()})
+        # Smoke callers retain their prior price contract. Production defers
+        # economics until the final executable quote below.
+        if self.execution_lane != "production":
+            self.recheck_risk_at_submit(latest_price)
 
         # 9. FINAL ATOMIC RECHECK — no awaits, no yields, no I/O gaps after this
         if refresh is not None:
@@ -513,7 +713,8 @@ class ExecutionRunner:
             self.reconcile_ledger(
                 ledger, orders=fresh.get("orders"), positions=fresh.get("positions"))
             self._assess_freshness(candidate_snapshot, fresh.get("market") or market)
-            self.recheck_risk_at_submit(fresh.get("latest_price", latest_price))
+            if self.execution_lane != "production":
+                self.recheck_risk_at_submit(fresh.get("latest_price", latest_price))
             if fresh.get("positions"):
                 self._invalidate("account is no longer flat")
                 self._halt(ACCOUNT_STATE_CHANGED, "positions appeared before submit")
@@ -521,42 +722,39 @@ class ExecutionRunner:
                 self._invalidate("working orders appeared")
                 self._halt(ACCOUNT_STATE_CHANGED, "working orders appeared before submit")
 
-        # 9b. CAPTURE THE EXECUTABLE QUOTE - as late as safely possible: after
-        # every gate, before the attempt is persisted. Capturing at thesis
-        # time, candidate construction or token mint would record a price that
-        # was executable minutes ago, which measures nothing useful.
-        #
-        # The executable side is a required pre-submit safety fact. Missing or
-        # unresolvable quote evidence refuses before attempt consumption; a
-        # planned entry or candle close is not a substitute.
-        self.entry_capture = None
-        self.capture_failure = None
-        if quote_provider is not None:
+        # 9b. Capture the sided executable quote after the account and candidate
+        # rechecks. Production recalculates sizing and all economics from it.
+        self._final_quote_provider = quote_provider
+        executable = None
+        if self.execution_lane == "production":
+            executable = self._capture_final_executable_entry(candidate_snapshot, market)
+            self._reprice_production_economics(candidate_snapshot, executable)
+        elif quote_provider is not None:
             try:
                 self.entry_capture = quote_provider()
-            except Exception as exc:  # noqa: BLE001
-                self.capture_failure = f"{type(exc).__name__}"
-
-        # The planned entry can remain on the safe side of a structural stop
-        # while the actual executable quote has already crossed it. Refuse
-        # from the same in-memory quote capture used by the submission path,
-        # before durable attempt consumption or any venue request.
-        executable = None
-        if self.entry_capture is not None:
-            try:
                 executable = self.entry_capture.executable_reference(
                     candidate_snapshot.direction)
-            except Exception:  # noqa: BLE001 -- missing side is not a price
+            except Exception as exc:  # noqa: BLE001 — no planned-price fallback
+                self.capture_failure = f"{type(exc).__name__}"
                 executable = None
-        if executable is None:
-            # Reuse the canonical freshness refusal path; NaN is deliberately
-            # rejected there and cannot fall back to planned/candle prices.
+            if executable is None:
+                self._assess_freshness(
+                    candidate_snapshot,
+                    {**market, "current_executable_price": float("nan")})
+            self._assess_freshness(
+                candidate_snapshot,
+                {**market, "current_executable_price": executable})
+        elif self.execution_lane != "production":
             self._assess_freshness(
                 candidate_snapshot,
                 {**market, "current_executable_price": float("nan")})
-        self._assess_freshness(
-            candidate_snapshot,
-            {**market, "current_executable_price": executable})
+
+        # Authorization is minted only after final production economics pass.
+        self.token = mint_token()
+        ledger.record_token(self.token.token_id)
+        self._to(AUTHORIZED, "token minted after all gates passed",
+                 {"token": self.token.describe(),
+                  "final_quote_economics": dict(self.final_quote_economics)})
 
         # 10. DURABLE ATTEMPT CONSUMPTION — persisted and verified BEFORE the
         # request can leave. A crash after this point costs the authorization;
@@ -651,8 +849,35 @@ class ExecutionRunner:
         self.submission_custom_tag = custom_tag or ""
         self._open_submission_record(payload, custom_tag)
 
+        if self.final_quote_economics and self._recording():
+            try:
+                self.submission_record = SUBREC.record_submit_boundary(
+                    store_dir=self.submission_store_dir,
+                    session_id=self.submission_session_id,
+                    submission=self.submission_record,
+                    venue_submit_intent_timestamp=self.clock().isoformat())
+            except Exception as exc:  # noqa: BLE001 — a missing proof blocks send
+                self.recording_failure = {
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "stage": "final_quote_economics_boundary",
+                }
+                self._halt(SUBMISSION_RECORD_WRITE_FAILED,
+                           "could not durably record final economics before submit",
+                           dict(self.recording_failure))
         started = self.clock()
         self.submit_at = started
+        if self.final_quote_economics:
+            self.final_quote_economics["venue_submit_timestamp"] = started.isoformat()
+            self.final_quote_economics["elapsed_economics_to_submit_ms"] = round(
+                (started - self.final_economics_completed_at).total_seconds() * 1000, 3)
+            if isinstance(self.submission_record, dict):
+                self.submission_record["venue_submit_timestamp"] = started.isoformat()
+                # Submission geometry is immutable across the started and
+                # response ledger rows. Keep transport timing/economics as
+                # additive top-level telemetry so strict recovery binding
+                # continues to see identical structural geometry.
+                self.submission_record["final_quote_economics"] = dict(
+                    self.final_quote_economics)
         try:
             result = self.session.place_order(payload)
         except TopstepXError as exc:
@@ -756,6 +981,8 @@ class ExecutionRunner:
         if not self._recording():
             return
         geometry = self.geometry.evidence() if self.geometry else {}
+        if self.final_quote_economics:
+            geometry["final_quote_economics"] = dict(self.final_quote_economics)
         structural = getattr(self, "submission_structural_invalidation", None)
         if isinstance(structural, dict) and structural:
             geometry["structural_invalidation"] = dict(structural)

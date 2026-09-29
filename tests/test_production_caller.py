@@ -125,7 +125,8 @@ def mint(cs, size=PRODUCTION_MAX_CONTRACTS):
         candidate_fingerprint=cs.fingerprint(), snapshot_id=cs.snapshot_id,
         direction=cs.direction, stop_price=cs.invalidation_price,
         target_price=cs.objective.price, target_identity=cs.objective.identity,
-        max_risk_usd=PRODUCTION_MAX_RISK_USD, max_contracts=size, now=NOW)
+        max_risk_usd=PRODUCTION_MAX_RISK_USD, max_contracts=size,
+        max_stop_points=ABSOLUTE_MAX_STOP_POINTS, now=NOW)
 
 
 def quoted(hub, bid=29759.75, ask=29760.0, cid=CID):
@@ -276,6 +277,7 @@ class TestSubmitPath:
                       mint_token=mint(cs), account_id=1)
         assert ps.runner.entry_capture is not None
         assert ps.runner.entry_capture.best_ask == 29760.0
+        assert ps.runner.final_quote_economics["final_entry_reference"] == 29760.0
         assert s.place_calls == 1            # blocked at the venue seam
 
     def test_a_failed_gate_captures_nothing_and_touches_no_venue(self, tmp_path):
@@ -287,6 +289,209 @@ class TestSubmitPath:
             ps.submit(candidate=cs, market=market(low_since=29740.0),
                       latest_price=29760.0, mint_token=mint(cs), account_id=1)
         assert ps.runner.entry_capture is None and s.place_calls == 0
+
+    def _final_quote_submit(self, tmp_path, *, direction="bearish", entry=30702.75,
+                            stop=30717.75, target=30537.75, bid=30687.5,
+                            ask=30687.75, cap=PRODUCTION_MAX_RISK_USD,
+                            quote_provider=None):
+        ps, s, hub = make(tmp_path)
+        ps.open_lane()
+        cs = snapshot(direction=direction, entry=entry, stop=stop, target=target)
+        runner = ps.build_runner(cs, max_risk_usd=cap)
+        runner.prompt_fill_authority = False  # this test stops at the order seam
+        if quote_provider is None:
+            quoted(hub, bid=bid, ask=ask)
+        calls = []
+
+        def accept(payload):
+            calls.append(dict(payload))
+            return {"order_id": 9001}
+
+        s.place_order = accept
+        mk = market(current_price=entry, high_since=entry, low_since=entry)
+        return ps, s, cs, runner, calls, mk, mint(cs)
+
+    def test_final_short_quote_refuses_when_authorized_quantity_breaks_cap(self, tmp_path):
+        ps, s, cs, runner, calls, mk, token = self._final_quote_submit(tmp_path)
+        planned_size = runner.geometry.size
+        with pytest.raises(R.RunnerHalt) as exc:
+            ps.submit(candidate=cs, market=mk, latest_price=cs.entry_price,
+                      mint_token=token, account_id=1)
+        proof = runner.final_quote_economics
+        assert exc.value.state == R.RISK_DRIFTED
+        assert calls == [] and s.place_calls == 0
+        assert proof["final_entry_reference"] == 30687.5  # SELL uses BID
+        assert proof["stop_distance_points"] == 30.25
+        assert proof["reward_distance_points"] == 149.75
+        assert proof["reward_to_risk"] == pytest.approx(149.75 / 30.25, abs=0.001)
+        assert proof["authorized_quantity"] == planned_size == 10
+        assert proof["recalculated_maximum_quantity"] == 5
+        assert proof["gross_risk_usd_at_authorized_quantity"] == pytest.approx(605.0)
+        assert proof["all_in_risk_usd_at_authorized_quantity"] == pytest.approx(637.2)
+        assert runner.geometry is None  # refused candidate is destroyed
+
+    def test_valid_final_quote_submits_and_records_same_reference_and_economics(self, tmp_path):
+        ps, s, cs, runner, calls, mk, token = self._final_quote_submit(
+            tmp_path, bid=30713.0, ask=30713.25)
+        original_fingerprint = cs.fingerprint()
+        original_direction, original_narrative = cs.direction, cs.narrative
+        original_stop, original_objective = cs.invalidation_price, cs.objective
+        original_extras = dict(cs.extras)
+        planned_size = runner.geometry.size
+        result = ps.submit(candidate=cs, market=mk, latest_price=cs.entry_price,
+                           mint_token=token, account_id=1)
+        proof = runner.final_quote_economics
+        assert result["order_id"] == 9001 and len(calls) == 1
+        assert proof["final_entry_reference"] == 30713.0  # SELL uses BID
+        assert proof["stop_distance_points"] == 4.75
+        assert proof["reward_distance_points"] == 175.25
+        assert proof["quantity"] == planned_size
+        assert calls[0]["size"] == proof["quantity"]
+        assert calls[0]["side"] == 1  # TopstepX SELL enum
+        assert runner.geometry.direction == cs.direction == "bearish"
+        assert cs.fingerprint() == original_fingerprint
+        assert cs.direction == original_direction == "bearish"
+        assert cs.narrative == original_narrative
+        assert cs.invalidation_price == original_stop
+        assert cs.objective is original_objective
+        assert cs.extras == original_extras
+        assert runner.geometry.stop_price == cs.invalidation_price
+        assert runner.geometry.target_price == cs.objective.price
+
+        rows = [json.loads(line) for line in
+                open(os.path.join(str(tmp_path), "submissions_PROD-20260805.jsonl"),
+                     encoding="utf-8")]
+        submitted = rows[-1]
+        durable = submitted["final_quote_economics"]
+        assert durable["final_entry_reference"] == proof["final_entry_reference"]
+        assert durable["quantity"] == calls[0]["size"]
+        assert durable["structural_stop"] == cs.invalidation_price
+        assert durable["authorized_target"] == cs.objective.price
+        assert durable["venue_submit_timestamp"] == submitted["venue_submit_timestamp"]
+        assert durable["elapsed_quote_to_economics_ms"] >= 0
+        assert durable["elapsed_economics_to_submit_ms"] >= 0
+
+    def test_final_quote_risk_above_remaining_account_capacity_never_submits(self, tmp_path):
+        # Planned 15-point geometry fits a $50 remaining budget at one MNQ;
+        # final 30.25-point geometry does not fit even one contract all-in.
+        ps, s, cs, runner, calls, mk, token = self._final_quote_submit(
+            tmp_path, cap=50.0)
+        with pytest.raises(R.RunnerHalt) as exc:
+            ps.submit(candidate=cs, market=mk, latest_price=cs.entry_price,
+                      mint_token=token, account_id=1)
+        assert exc.value.state == R.RISK_DRIFTED
+        assert calls == [] and s.place_calls == 0
+        assert runner.final_quote_economics["decision"] == "REFUSE"
+        assert runner.final_quote_economics["refusal_reason"] == "risk_above_cap"
+
+    def test_price_toward_short_stop_uses_smaller_final_geometry(self, tmp_path):
+        ps, s, cs, runner, calls, mk, token = self._final_quote_submit(
+            tmp_path, bid=30713.0, ask=30713.25)
+        prior_size = runner.geometry.size
+        ps.submit(candidate=cs, market=mk, latest_price=cs.entry_price,
+                  mint_token=token, account_id=1)
+        assert len(calls) == 1
+        assert runner.final_quote_economics["stop_distance_points"] == 4.75
+        assert runner.final_quote_economics["reward_distance_points"] == 175.25
+        assert runner.geometry.size <= prior_size  # favorable drift never scales up
+
+    def test_final_rr_below_floor_refuses_before_venue(self, tmp_path):
+        ps, s, cs, runner, calls, mk, token = self._final_quote_submit(
+            tmp_path, target=30665.0, bid=30690.0, ask=30690.25)
+        with pytest.raises(R.RunnerHalt) as exc:
+            ps.submit(candidate=cs, market=mk, latest_price=cs.entry_price,
+                      mint_token=token, account_id=1)
+        assert exc.value.state == R.REWARD_COLLAPSED
+        assert calls == [] and s.place_calls == 0
+        assert runner.final_quote_economics["refusal_reason"] == "reward_below_gate"
+
+    def test_final_entry_at_or_beyond_stop_refuses_before_venue(self, tmp_path):
+        ps, s, cs, runner, calls, mk, token = self._final_quote_submit(
+            tmp_path, bid=30717.75, ask=30718.0)
+        with pytest.raises(R.RunnerHalt) as exc:
+            ps.submit(candidate=cs, market=mk, latest_price=cs.entry_price,
+                      mint_token=token, account_id=1)
+        assert exc.value.state == R.INVALIDATION_TOUCHED
+        assert calls == [] and s.place_calls == 0
+
+    @pytest.mark.parametrize("direction,missing", [("bullish", "ask"),
+                                                     ("bearish", "bid")])
+    def test_missing_executable_side_fails_closed(self, tmp_path, direction, missing):
+        ps, s, hub = make(tmp_path)
+        ps.open_lane()
+        cs = snapshot(direction=direction)
+        runner = ps.build_runner(cs)
+        runner.prompt_fill_authority = False
+        quote = SL.QuoteCapture(
+            captured_at=NOW,
+            best_bid=None if missing == "bid" else 29759.75,
+            best_ask=None if missing == "ask" else 29760.0,
+            last_trade=29759.75, contract_id=CID, market_data_age_seconds=0.1)
+        ps.quote_provider = lambda: quote
+        calls = []
+        s.place_order = lambda payload: calls.append(payload)
+        mk = market()
+        with pytest.raises(R.RunnerHalt) as exc:
+            ps.submit(candidate=cs, market=mk, latest_price=cs.entry_price,
+                      mint_token=mint(cs), account_id=1)
+        assert exc.value.state == R.STREAM_STALE
+        assert calls == [] and s.place_calls == 0
+
+    def test_quote_capture_exception_fails_closed(self, tmp_path):
+        ps, s, hub = make(tmp_path)
+        ps.open_lane()
+        cs = snapshot()
+        runner = ps.build_runner(cs)
+        runner.prompt_fill_authority = False
+        calls = []
+        s.place_order = lambda payload: calls.append(payload)
+
+        def broken_quote():
+            raise RuntimeError("quote stream unavailable")
+
+        ps.quote_provider = broken_quote
+
+        with pytest.raises(R.RunnerHalt) as exc:
+            ps.submit(candidate=cs, market=market(), latest_price=cs.entry_price,
+                      mint_token=mint(cs), account_id=1)
+        assert exc.value.state == R.STREAM_STALE
+        assert calls == [] and s.place_calls == 0
+
+    def test_invalid_nan_quote_fails_closed(self, tmp_path):
+        ps, s, hub = make(tmp_path)
+        ps.open_lane()
+        cs = snapshot()
+        runner = ps.build_runner(cs)
+        runner.prompt_fill_authority = False
+        quote = SL.QuoteCapture(captured_at=NOW, best_bid=29759.75,
+                                best_ask=float("nan"), last_trade=29759.75,
+                                contract_id=CID, market_data_age_seconds=0.1)
+        ps.quote_provider = lambda: quote
+        calls = []
+        s.place_order = lambda payload: calls.append(payload)
+        with pytest.raises(R.RunnerHalt) as exc:
+            ps.submit(candidate=cs, market=market(), latest_price=cs.entry_price,
+                      mint_token=mint(cs), account_id=1)
+        assert exc.value.state == R.STREAM_STALE
+        assert calls == [] and s.place_calls == 0
+
+    def test_stale_quote_fails_closed(self, tmp_path):
+        ps, s, hub = make(tmp_path)
+        ps.open_lane()
+        cs = snapshot()
+        runner = ps.build_runner(cs)
+        runner.prompt_fill_authority = False
+        quote = SL.QuoteCapture(captured_at=NOW, best_bid=29759.75,
+                                best_ask=29760.0, last_trade=29759.75,
+                                contract_id=CID, market_data_age_seconds=5.01)
+        ps.quote_provider = lambda: quote
+        calls = []
+        s.place_order = lambda payload: calls.append(payload)
+        with pytest.raises(R.RunnerHalt) as exc:
+            ps.submit(candidate=cs, market=market(), latest_price=cs.entry_price,
+                      mint_token=mint(cs), account_id=1)
+        assert exc.value.state == R.STREAM_STALE
+        assert calls == [] and s.place_calls == 0
 
 
 class TestEntryReconciliation:

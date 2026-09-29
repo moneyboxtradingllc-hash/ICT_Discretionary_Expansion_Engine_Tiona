@@ -206,6 +206,25 @@ def open_submission(*, store_dir: str, session_id: str, mission_id: str,
     return record
 
 
+def record_submit_boundary(*, store_dir: str, session_id: str,
+                           submission: dict, venue_submit_intent_timestamp: str) -> dict:
+    """Durably record the immediate pre-transport boundary before the socket opens."""
+    if not isinstance(submission, dict) or not submission.get("submission_id"):
+        raise SubmissionRecordError("submit boundary has no submission identity")
+    if not venue_submit_intent_timestamp:
+        raise SubmissionRecordError("submit boundary has no timestamp")
+    row = dict(submission)
+    row["state"] = SUBMISSION_STARTED
+    row["venue_submit_intent_timestamp"] = str(venue_submit_intent_timestamp)
+    _append(ledger_path(store_dir, session_id), row)
+    verify = find_submission(store_dir, session_id, submission["submission_id"])
+    if (verify is None or verify.get("venue_submit_intent_timestamp")
+            != str(venue_submit_intent_timestamp)):
+        raise SubmissionRecordError(
+            "could not verify the pre-transport timestamp; refusing to transmit")
+    return verify
+
+
 # ── the instant the venue answers ─────────────────────────────────────────────
 def record_response(*, store_dir: str, session_id: str, submission: dict,
                     raw_response: dict = None, transport_exception: str = None,

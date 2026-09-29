@@ -102,6 +102,14 @@ _REASON_TO_DISPOSITION = {
     "reward_below_qualification": REWARD_BELOW_QUALIFICATION,
     "risk_rejected": RISK_REJECTED,
     "size_rejected": RISK_REJECTED,
+    # FINAL-QUOTE-ECONOMICS-1: an existing proposal failed an existing
+    # deterministic pre-submit check at the executable quote.
+    "RISK_DRIFTED": RISK_REJECTED,
+    "REWARD_COLLAPSED": REWARD_BELOW_QUALIFICATION,
+    "INVALIDATION_TOUCHED": GEOMETRY_REJECTED,
+    "OBJECTIVE_SWEPT": OBJECTIVE_INVALID,
+    "OBJECTIVE_MATERIALLY_DELIVERED": OBJECTIVE_INVALID,
+    "STREAM_STALE": QUALIFICATION_REJECTED,
     "brain_invalid": BRAIN_UNUSABLE,
     "brain_timeout": BRAIN_UNUSABLE,
     "brain_superseded": BRAIN_UNUSABLE,
@@ -220,7 +228,7 @@ def blank_trace() -> dict:
 def build_record(*, session_id: str, scan_id: str, timestamp_et: str,
                  instrument: str, contract: str, parsed: dict, trace: dict,
                  disposition: str, rejection_reason=None,
-                 detail: str = "") -> dict:
+                 detail: str = "", execution_economics: dict = None) -> dict:
     """One complete decision record. Carries no secrets and no account ids."""
     parsed = parsed or {}
     record = {
@@ -237,6 +245,8 @@ def build_record(*, session_id: str, scan_id: str, timestamp_et: str,
     record["final_disposition"] = disposition
     record["final_rejection_reason"] = rejection_reason
     record["detail"] = str(detail)[:300]
+    if execution_economics is not None:
+        record["execution_economics"] = dict(execution_economics)
     return record
 
 

@@ -266,6 +266,8 @@ class ProductionSession:
             max_risk_usd=effective_max_risk,
             max_stop_points=ABSOLUTE_MAX_STOP_POINTS,
             lane="production")
+        runner.production_volatility_evidence = dict(volatility_evidence or {})
+        runner.approved_quantity_ceiling = int(runner.geometry.size)
         # Production caps travel WITH the runner so the final risk recheck cannot
         # fall back to smoke defaults.
         runner.max_risk_usd = effective_max_risk

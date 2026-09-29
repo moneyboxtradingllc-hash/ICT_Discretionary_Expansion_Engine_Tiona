@@ -143,7 +143,8 @@ class ProductionLoop:
         except Exception:
             self.volume_profile_collector = None
 
-    def _record_decision(self, scan: dict, disposition: str, reason, detail: str):
+    def _record_decision(self, scan: dict, disposition: str, reason, detail: str,
+                         execution_economics: dict = None):
         """One death certificate per scan. Never raises; observability only.
 
         PROD-20260807 EVIDENCE DEFECT: the live qualification object was never
@@ -178,7 +179,8 @@ class ProductionLoop:
                 parsed=parsed, trace=trace,
                 disposition=terminal_disposition(
                     reason, created=(disposition == "CANDIDATE")),
-                rejection_reason=reason, detail=detail)
+                rejection_reason=reason, detail=detail,
+                execution_economics=execution_economics)
             record["active_draw"] = str(parsed.get("active_draw") or "")[:200]
             record["invalidation_level"] = parsed.get("invalidation_level")
             # Same-scan descriptive VAP evidence; this writer is best-effort
@@ -1172,15 +1174,34 @@ class ProductionLoop:
         except (CandidateStale, Exception) as exc:  # noqa: BLE001
             self._terminalize_unused_freshness_mission(
                 mission, exc, self.ps.runner)
+            runner = self.ps.runner
+            economics = dict(getattr(runner, "final_quote_economics", {}) or {})
+            state = getattr(exc, "state", None) or "execution_refused"
+            if economics:
+                self._record_decision(scan, "REJECTED", state, str(exc),
+                                      execution_economics=economics)
             return {"outcome": SUBMIT_FAILED, "detail": f"{type(exc).__name__}: {exc}",
                     "candidate_id": candidate.candidate_id, "sizing": sized,
+                    "final_quote_economics": economics or None,
                     "mission_state": mission.state,
                     "attempt_consumed": mission.attempt_count > 0}
 
         management = self.ps.arm_break_even_after_submit(self.mission, mission, candidate)
+        final_sizing = dict(sized)
+        if self.ps.runner and self.ps.runner.final_quote_economics:
+            final_sizing.update({
+                "size": self.ps.runner.geometry.size,
+                "stop_points": self.ps.runner.geometry.stop_points,
+                "stop_price": self.ps.runner.geometry.stop_price,
+                "target_price": self.ps.runner.geometry.target_price,
+                "risk_usd": self.ps.runner.geometry.risk_usd,
+                "reward_to_risk": self.ps.runner.final_quote_economics.get(
+                    "reward_to_risk"),
+                "final_quote_economics": dict(self.ps.runner.final_quote_economics),
+            })
         return {"outcome": SUBMITTED, "candidate_id": candidate.candidate_id,
                 "break_even_management": management,
-                "sizing": sized, "mission_id": mission.mission_id,
+                "sizing": final_sizing, "mission_id": mission.mission_id,
                 "mission_state": mission.state, "result": result,
                 "attempt_consumed": mission.attempt_count > 0}
 
