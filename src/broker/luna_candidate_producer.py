@@ -120,10 +120,6 @@ _TRACE_STAGE = {
     "objective_unresolved": ("objective_resolution_status", "UNRESOLVED"),
     "objective_wrong_side": ("objective_resolution_status", "WRONG_SIDE"),
     "objective_off_tick": ("objective_resolution_status", "OFF_TICK"),
-    # LUNA-SESSION-PO3-AUTHORITY-1. Its own stage: "the market is in a phase that
-    # authorizes no new entry" is not an evidence defect, not a geometry defect
-    # and not a Terra defect, and an audit must never have to guess which.
-    "session_phase_blocks_entry": ("session_phase_authorized", False),
     "candle_gap_unrecovered": ("evidence_integrity", "CANDLE_GAP"),
     "derived_state_stale": ("evidence_integrity", "DERIVED_STATE_STALE"),
     "invalidation_missing": ("invalidation_resolution_status", "MISSING"),
@@ -1172,34 +1168,24 @@ class CandidateProducer:
     last_decision_trace: dict = field(default_factory=dict)
 
     @staticmethod
-    def _assert_session_phase_permits_entry(snapshot: dict) -> dict:
-        """THE ACCUMULATION BLOCK. Upstream of playbook, tool, geometry and risk.
-
-        LUNA-SESSION-PO3-AUTHORITY-1. This is the first thing `produce` asks,
-        before Terra's thesis is even read, because the question it answers is
-        about the market and not about the proposal: "is this a phase in which a
-        NEW position may be opened at all?"
-
-        Position MANAGEMENT is untouched -- `manage_open_position` runs before
-        this method is ever reached, and emergency/flatten authority never passes
-        through here. This declines to OPEN exposure; it can never decline to
-        protect it.
-
-        Absence of a session_po3 block is permissive on purpose. A snapshot built
-        by a caller that predates this unit must not be silently converted into a
-        stand-down: the phase authority blocks on PROVEN accumulation, never on
-        its own absence.
-        """
+    def _observe_session_phase(snapshot: dict, parsed: dict) -> dict:
+        """Record the phase opinion and Brain disagreement without a veto."""
+        from structure.session_po3 import entry_context
         block = (snapshot or {}).get("session_po3")
-        if not isinstance(block, dict) or not block.get("phase"):
-            return {"phase": None, "authorized": True, "reason": "no session_po3 block"}
-        if block.get("new_entry_allowed", True):
-            return {"phase": block.get("phase"), "authorized": True, "reason": None}
-        raise NoCandidate(
-            "session_phase_blocks_entry",
-            f"session PO3 phase {block.get('phase')}: "
-            f"{block.get('block_reason') or 'new entry not authorized'}",
-            stand_down=True)
+        context = entry_context(block)
+        phase = block.get("phase") if isinstance(block, dict) else None
+        action = str((parsed or {}).get("current_action") or "").strip().lower()
+        posture = context["mechanical_entry_posture"]
+        disagreed = None
+        if posture and action:
+            declines = any(action.startswith(t) for t in CandidateProducer.NON_ENTRY_ACTIONS)
+            disagreed = ((posture == "caution" and not declines)
+                         or (posture == "permissive" and declines))
+        return {"session_phase": phase,
+                "session_phase_authority_class": context["authority_class"],
+                "session_phase_mechanical_posture": posture,
+                "session_phase_mechanical_reason": context["mechanical_reason"],
+                "session_phase_brain_disagreed": disagreed}
 
     def produce(self, *, brain_result: dict, brain_input: dict, snapshot: dict,
                 qualification: dict, engine_inventory: dict,
@@ -1237,12 +1223,7 @@ class CandidateProducer:
         trace["transition_timeframe_state"] = _mtf.get("transition_state")
         trace["execution_timeframe_state"] = _mtf.get("execution_state")
         try:
-            # PHASE AUTHORITY FIRST. Nothing below -- not Terra's thesis, not the
-            # playbook, not a beautiful MSS/FVG/OTE, not Active Path direction --
-            # may create a new entry inside an unresolved session accumulation.
-            trace["session_phase"] = ((snapshot or {}).get("session_po3") or {}).get("phase")
-            trace["session_phase_authorized"] = (
-                self._assert_session_phase_permits_entry(snapshot)["authorized"])
+            trace.update(self._observe_session_phase(snapshot, _p))
             self._check_brain(brain_result, ai_state)
             parsed = brain_result.get("parsed") or {}
             self._assert_action_permits_entry(parsed)

@@ -577,7 +577,7 @@ class TestStrategyUntouched:
         # candidate producer judge the SERVED model with model_matches(), so
         # the fingerprint moves again and PROD-20260928 must be reissued.
         from ai_brain.production_model import brain_contract_fingerprint
-        assert brain_contract_fingerprint() == "brain:3a09895222765f22"
+        assert brain_contract_fingerprint() == "brain:0cf842782313d826"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.

@@ -417,64 +417,56 @@ class TestPlaybookRouting:
 
 # ── the veto, where it actually lives ─────────────────────────────────────────
 
-class TestEntryAuthorityIsEnforced:
-    def test_execution_gate_blocks_on_an_unresolved_phase(self):
+class TestEntryContextOnly:
+    def test_execution_gate_reports_an_unresolved_phase_without_blocking(self):
         from execution_gate.execution_gate import evaluate_gate
         snap = {"session_po3": {"phase": ACCUMULATION_ESTABLISHED,
                                 "new_entry_allowed": False,
                                 "block_reason": "session accumulation is established"}}
         gate = evaluate_gate(snap)
-        assert gate["session_phase_permits_entry"] is False
-        assert gate["would_authorize_if_enabled"] is False
-        assert any("ACCUMULATION" in f for f in gate["blocking_factors"])
-
-    def test_execution_gate_is_permissive_when_no_phase_block_exists(self):
-        """Absence of the block is not a stand-down: a snapshot from before this
-        unit must behave exactly as it did."""
-        from execution_gate.execution_gate import evaluate_gate
-        gate = evaluate_gate({})
-        assert gate["session_phase_permits_entry"] is True
+        assert gate["session_phase_context"]["authority_class"] == "CONTEXT_ONLY"
+        assert gate["session_phase_context"]["mechanical_entry_posture"] == "caution"
         assert not any("session PO3" in f for f in gate["blocking_factors"])
 
-    def test_S1_the_producer_refuses_before_it_reads_the_thesis(self):
-        """THE HARD BLOCK. A beautiful MSS/FVG/OTE/reversal inside accumulation
-        must die upstream of playbook, tool, geometry and risk — so the refusal
-        must happen even when the Brain result is a perfect proposal."""
-        from broker.luna_candidate_producer import CandidateProducer, NoCandidate
+    def test_execution_gate_reports_absence_without_permission(self):
+        from execution_gate.execution_gate import evaluate_gate
+        gate = evaluate_gate({})
+        assert gate["session_phase_context"]["mechanical_entry_posture"] is None
+        assert not any("session PO3" in f for f in gate["blocking_factors"])
+
+    def test_the_producer_observes_phase_and_brain_action(self):
+        from broker.luna_candidate_producer import CandidateProducer
         snap = {"session_po3": {"phase": ACCUMULATION_ESTABLISHED,
                                 "new_entry_allowed": False,
-                                "block_reason": "session accumulation is established"},
-                "structure": {"3m": {"mss": True}}}
-        with pytest.raises(NoCandidate) as exc:
-            CandidateProducer._assert_session_phase_permits_entry(snap)
-        assert exc.value.reason == "session_phase_blocks_entry"
-        assert exc.value.stand_down is True
+                                "block_reason": "session accumulation is established"}}
+        out = CandidateProducer._observe_session_phase(snap, {"current_action": "propose_entry"})
+        assert out["session_phase_authority_class"] == "CONTEXT_ONLY"
+        assert out["session_phase_mechanical_posture"] == "caution"
+        assert out["session_phase_brain_disagreed"] is True
 
     @pytest.mark.parametrize("phase", [ACCUMULATION_FORMING, ACCUMULATION_ESTABLISHED,
                                        EXCURSION_UNRESOLVED, REACCUMULATION])
-    def test_no_playbook_can_bypass_the_block(self, phase):
-        from broker.luna_candidate_producer import CandidateProducer, NoCandidate
+    def test_unresolved_phase_is_context_for_any_playbook(self, phase):
+        from broker.luna_candidate_producer import CandidateProducer
         allowed, reason = entry_permission(phase)
-        assert allowed is False
+        assert allowed is False  # legacy posture, retained for archive parsing
         snap = {"session_po3": {"phase": phase, "new_entry_allowed": allowed,
                                 "block_reason": reason}}
-        with pytest.raises(NoCandidate):
-            CandidateProducer._assert_session_phase_permits_entry(snap)
+        out = CandidateProducer._observe_session_phase(snap, {"current_action": "propose_entry"})
+        assert out["session_phase_mechanical_posture"] == "caution"
+        assert out["session_phase_brain_disagreed"] is True
 
-    def test_the_producer_is_permissive_without_a_phase_block(self):
+    def test_absent_and_resolved_phase_remain_context(self):
         from broker.luna_candidate_producer import CandidateProducer
-        out = CandidateProducer._assert_session_phase_permits_entry({})
-        assert out["authorized"] is True
-
-    def test_resolved_phases_pass_the_producer(self):
-        from broker.luna_candidate_producer import CandidateProducer
+        assert CandidateProducer._observe_session_phase(
+            {}, {"current_action": "propose_entry"})[
+                "session_phase_mechanical_posture"] is None
         for phase in (MANIPULATION_CONFIRMED, DISTRIBUTION_ACTIVE, UNKNOWN):
             snap = {"session_po3": {"phase": phase, "new_entry_allowed": True}}
-            assert CandidateProducer._assert_session_phase_permits_entry(
-                snap)["authorized"] is True
+            assert CandidateProducer._observe_session_phase(
+                snap, {"current_action": "propose_entry"})[
+                    "session_phase_authority_class"] == "CONTEXT_ONLY"
 
-
-# ── S17 — restart and replay ──────────────────────────────────────────────────
 
 class TestRestartAndReplay:
     def _tapes(self):
@@ -568,6 +560,8 @@ class TestSnapshotIntegration:
         assert block["schema"] == SP3.SCHEMA
         assert block["phase"] in STATES
         assert isinstance(block["new_entry_allowed"], bool)
+        assert block["authority_class"] == "CONTEXT_ONLY"
+        assert block["legacy_permission_fields_non_authoritative"] is True
 
     def test_the_brain_is_shown_the_phase(self):
         from ai_brain.brain_input import _session_po3_block
@@ -587,12 +581,15 @@ class TestSnapshotIntegration:
         assert block["manipulation"]["direction"] == "bearish"
         assert block["range"]["high"] == 29030.0
         assert block["excursion"]["side"] == "above"
+        assert block["authority_class"] == "CONTEXT_ONLY"
+        assert "new_entry_allowed" not in block
 
     def test_absence_is_reported_as_absence_not_as_permission(self):
         from ai_brain.brain_input import _session_po3_block
         block = _session_po3_block({})
         assert block["available"] is False
-        assert block["new_entry_allowed"] is None
+        assert block["mechanical_entry_posture"] is None
+        assert "new_entry_allowed" not in block
 
 
 # ── S18 — the recorded specimen ───────────────────────────────────────────────
@@ -604,7 +601,7 @@ _SPECIMEN = os.path.join(os.path.dirname(__file__), "..", "data", "integration",
 @pytest.mark.skipif(not os.path.isdir(_SPECIMEN),
                     reason="forensic bundle is machine-local runtime evidence")
 class TestAugust25Specimen:
-    """The trades this unit exists to prevent.
+    """Archived proposals that the former hard phase gate would have blocked.
 
     Missions PRAC-20260825-T1 and -T2 filled at 14:48:35 and 14:49:20 UTC. The
     scans that authored them are in this bundle, and on every one of them the
@@ -620,7 +617,9 @@ class TestAugust25Specimen:
             with open(f, encoding="utf-8", errors="replace") as fh:
                 yield json.load(fh)
 
-    def test_S18_every_proposing_scan_would_now_be_refused(self):
+    def test_S18_every_proposing_scan_has_unresolved_context_not_a_veto(self):
+        from ai_brain.brain_input import _session_po3_block
+        from broker.luna_candidate_producer import CandidateProducer
         proposals = 0
         for art in self._scans():
             rs = art.get("raw_snapshot") or {}
@@ -636,6 +635,13 @@ class TestAugust25Specimen:
             assert st["new_entry_allowed"] is False, (art.get("timestamp"), st["phase"])
             assert st["phase"] in (ACCUMULATION_FORMING, ACCUMULATION_ESTABLISHED,
                                    EXCURSION_UNRESOLVED, REACCUMULATION)
+            brain_context = _session_po3_block({"session_po3": st})
+            assert brain_context["authority_class"] == "CONTEXT_ONLY"
+            assert brain_context["mechanical_entry_posture"] == "caution"
+            assert "new_entry_allowed" not in brain_context
+            observed = CandidateProducer._observe_session_phase(
+                {"session_po3": st}, {"current_action": action})
+            assert observed["session_phase_brain_disagreed"] is True
         assert proposals >= 5, f"specimen no longer contains proposals ({proposals})"
 
     def test_S18_the_range_is_the_one_luna_herself_named(self):

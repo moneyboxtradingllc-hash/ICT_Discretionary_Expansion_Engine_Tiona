@@ -546,8 +546,10 @@ def semantic_projection(*, snapshot: dict, brain_input: dict,
     payload = _dict(brain_input)
     market = _dict(payload.get("market"))
     delivery = _dict(payload.get("delivery"))
-    session_po3 = _dict(snap.get("session_po3")) or _dict(
-        delivery.get("session_po3"))
+    # Use the sanitized Brain view; legacy permission fields in the raw snapshot
+    # must not enter the wake projection as apparent execution law.
+    session_po3 = _dict(delivery.get("session_po3")) or _dict(
+        snap.get("session_po3"))
     setup = _dict(snap.get("setup_lifecycle"))
     qualification = _dict(snap.get("qualification"))
     regime = _dict(snap.get("market_regime"))
@@ -579,7 +581,8 @@ def semantic_projection(*, snapshot: dict, brain_input: dict,
             "quote_source": quote.get("source"),
         },
         "session_po3": _pick(session_po3, (
-            "phase", "new_entry_allowed", "block_reason",
+            "phase", "authority_class", "mechanical_entry_posture",
+            "mechanical_reason",
             "distribution_direction", "preferred_playbook_families",
         )) | {"manipulation": _pick(session_po3.get("manipulation"), (
             "classification", "direction", "conflicted",

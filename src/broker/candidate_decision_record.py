@@ -193,10 +193,13 @@ def blank_trace() -> dict:
         "resolved_invalidation_price": None, "invalidation_side_valid": None,
         "invalidation_fresh": None, "invalidation_resolution_status": None,
         "invalidation_rejection_reason": None,
-        # LUNA-SESSION-PO3-AUTHORITY-1 — the canonical session phase, and whether
-        # it authorized a NEW entry. First stage of the funnel, so a record whose
-        # every other stage is None still says why.
-        "session_phase": None, "session_phase_authorized": None,
+        # Contextual mechanical opinion beside the sovereign action. Historical
+        # records with session_phase_authorized remain readable as old records.
+        "session_phase": None, "session_phase_authority_class": None,
+        "session_phase_mechanical_posture": None,
+        "session_phase_mechanical_reason": None,
+        "session_phase_brain_disagreed": None,
+        "session_phase_authorized": None,
         "qualification_result": None, "qualification_reason": None,
         "direction_agreement": None, "playbook_authorized": None,
         # ROADMAP STEP 7 (2026-08-12) — did Terra's selected execution

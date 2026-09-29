@@ -709,23 +709,18 @@ def _session_context_block(snapshot: dict) -> dict:
 
 
 def _session_po3_block(snapshot: dict) -> dict:
-    """The canonical session phase, in the smallest form that can be reasoned on.
-
-    Absence is stated, never faked: a snapshot without the block reports
-    `available: False` so the Brain can tell "no phase authority ran" from "the
-    phase authorizes entry".
-    """
+    """Session phase evidence and mechanical caution, with no entry ruling."""
+    from structure.session_po3 import entry_context
     b = (snapshot or {}).get("session_po3")
     if not isinstance(b, dict) or not b.get("phase"):
-        return {"available": False, "phase": None, "new_entry_allowed": None}
+        return {"available": False, "phase": None, **entry_context(None)}
     rng = b.get("range") or {}
     exc = b.get("excursion") or {}
     manip = b.get("manipulation") or {}
     return {
         "available": True,
         "phase": b.get("phase"),
-        "new_entry_allowed": b.get("new_entry_allowed"),
-        "block_reason": b.get("block_reason"),
+        **entry_context(b),
         "range": ({"high": rng.get("high"), "low": rng.get("low"),
                    "age_bars": rng.get("age_bars"),
                    "established": rng.get("established")} if rng else None),

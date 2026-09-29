@@ -1,4 +1,4 @@
-"""SESSION-PO3 AUTHORITY — the causal Power-of-Three lifecycle above the evidence.
+"""SESSION-PO3 CONTEXT — the causal Power-of-Three lifecycle above the evidence.
 
 LUNA-SESSION-PO3-AUTHORITY-1 (2026-08-29).
 
@@ -10,16 +10,16 @@ on 2026-08-25 Luna filled two practice entries at 14:48 and 14:49 UTC while
 `po3.5m`, `po3.3m` and `po3.1m` all read `accumulation`.
 
 WHAT THIS MODULE ADDS, AND WHAT IT DELIBERATELY DOES NOT. It adds ONE canonical
-session lifecycle and the entry authority that belongs to it. It computes no new
+session lifecycle as contextual evidence. It computes no new
 market primitive: every input is an existing published fact — the per-timeframe
 PO3 phases, `manipulation_detector`'s classification and direction, the settled
 1m series, and the standing directional authority from `structure_hierarchy`.
 `po3_engine` is untouched and remains the evidence producer.
 
-THE LAW IT ENFORCES.
+THE MECHANICAL POSTURE IT REPORTS (NOT ENTRY LAW).
 
-    ACCUMULATION            -> NO NEW ENTRY
-    FIRST EXCURSION         -> NO CHASE; distribution vs manipulation UNRESOLVED
+    ACCUMULATION            -> CAUTION; range not resolved
+    FIRST EXCURSION         -> CAUTION; distribution vs manipulation UNRESOLVED
     FAILED EXCURSION
       + opposite ownership  -> MANIPULATION_CONFIRMED; reversal preferred
     SUSTAINED ESCAPE
@@ -29,7 +29,7 @@ THE LAW IT ENFORCES.
 There is no clock in this file. Accumulation lasts exactly as long as the market
 keeps it, and a genuine opening drive is never banned: a balance that was never
 ESTABLISHED cannot be departed from, so a market that opens delivering produces
-`UNKNOWN` and keeps full entry authority.
+`UNKNOWN` without a phase caution.
 
 DETERMINISM, AND WHY THE PHASE IS RE-DERIVED RATHER THAN REMEMBERED. Live scans
 arrive on a ~79s wall clock; a restart rebuild replays the tape bar by bar. Any
@@ -45,6 +45,7 @@ from __future__ import annotations
 from structure import po3_config as cfg
 
 SCHEMA = "session_po3.v1"
+AUTHORITY_CLASS = "CONTEXT_ONLY"
 
 # ── The canonical states ──────────────────────────────────────────────────────
 UNKNOWN = "UNKNOWN"
@@ -59,10 +60,9 @@ STATES = (UNKNOWN, ACCUMULATION_FORMING, ACCUMULATION_ESTABLISHED,
           EXCURSION_UNRESOLVED, MANIPULATION_CONFIRMED, DISTRIBUTION_ACTIVE,
           REACCUMULATION)
 
-#: THE ENTRY LAW. Read by `entry_permission()` and by nothing else, so there is
-#: exactly one place where "may Luna open a new position in this phase" is
-#: answered. UNKNOWN is permissive on purpose: absence of a proven balance is not
-#: evidence of one, and banning trade on absence would ban every opening drive.
+#: Historical mechanical posture, retained for archive/replay compatibility.
+#: It is not entry authorization. Neither production candidate nor execution
+#: gate may consume this table as a veto.
 _NEW_ENTRY_ALLOWED = {
     UNKNOWN:                  True,
     ACCUMULATION_FORMING:     False,
@@ -74,14 +74,10 @@ _NEW_ENTRY_ALLOWED = {
 }
 
 _BLOCK_REASON = {
-    ACCUMULATION_FORMING: "session accumulation is forming — the range is not yet "
-                          "resolved and no new entry is authorized",
-    ACCUMULATION_ESTABLISHED: "session accumulation is established — no new entry "
-                              "until the range resolves",
-    EXCURSION_UNRESOLVED: "price has left the accumulation range but neither "
-                          "manipulation nor distribution is proven — no chase",
-    REACCUMULATION: "price returned to two-sided rotation — re-accumulation is "
-                    "unresolved and no new entry is authorized",
+    ACCUMULATION_FORMING: "session accumulation is forming; range unresolved",
+    ACCUMULATION_ESTABLISHED: "session accumulation is established; watch for resolution",
+    EXCURSION_UNRESOLVED: "excursion has not proved manipulation or distribution",
+    REACCUMULATION: "price returned to two-sided rotation; resolution uncertain",
 }
 
 #: Which playbook families the phase PREFERS. A preference is not a permission:
@@ -147,10 +143,24 @@ def _floor() -> float:
 
 
 def entry_permission(phase: str) -> tuple:
-    """(allowed, reason). THE single answer to 'may a new entry exist here'."""
+    """Legacy (permissive, reason) opinion; never production entry authority."""
     allowed = _NEW_ENTRY_ALLOWED.get(phase, True)
     return allowed, (None if allowed
                      else _BLOCK_REASON.get(phase, f"session PO3 phase {phase}"))
+
+
+def entry_context(block: dict | None) -> dict:
+    """Read current or archived phase evidence as a non-authorizing opinion."""
+    block = block if isinstance(block, dict) else {}
+    phase = block.get("phase")
+    if not phase:
+        return {"authority_class": AUTHORITY_CLASS,
+                "mechanical_entry_posture": None, "mechanical_reason": None}
+    permissive, reason = entry_permission(phase)
+    return {"authority_class": AUTHORITY_CLASS,
+            "mechanical_entry_posture": block.get("mechanical_entry_posture") or
+                ("permissive" if permissive else "caution"),
+            "mechanical_reason": block.get("mechanical_reason") or reason}
 
 
 # ── evidence readers over the existing engines ────────────────────────────────
@@ -364,7 +374,16 @@ def derive(*, settled_1m: list, po3: dict = None, liquidity: dict = None,
 
     def finish(phase: str) -> dict:
         state["phase"] = phase
-        state["new_entry_allowed"], state["block_reason"] = entry_permission(phase)
+        legacy_permissive, reason = entry_permission(phase)
+        state["authority_class"] = AUTHORITY_CLASS
+        state["mechanical_entry_posture"] = ("permissive" if legacy_permissive
+                                              else "caution")
+        state["mechanical_reason"] = reason
+        # Legacy archive fields are observational only. New Brain and production
+        # execution paths must consume the explicit context fields above.
+        state["legacy_permission_fields_non_authoritative"] = True
+        state["new_entry_allowed"] = legacy_permissive
+        state["block_reason"] = reason
         return state
 
     if len(bars) < MIN_FORMING_BARS:

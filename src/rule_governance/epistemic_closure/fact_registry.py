@@ -1974,11 +1974,10 @@ _RECOVERY = [
 
 
 # == SESSION PO3 =============================================================
-# LUNA-SESSION-PO3-AUTHORITY-1. The first market fact in this registry that can
-# REFUSE a trade outright, so it is also the one that most needed a contract
-# before it was allowed to. Per-timeframe PO3 stays what it was -- uncertified
-# texture at `delivery.po3_15m` -- and is deliberately NOT promoted here: this
-# unit certified the session lifecycle built ON that evidence, not the evidence.
+# LUNA-SESSION-PO3-AUTHORITY-1 originally certified the lifecycle and gave
+# its mechanical posture an entry veto. The lifecycle remains certified evidence;
+# BRAIN-SOVEREIGNTY-SESSION-PO3-CONTEXT-1 removes that veto. Per-timeframe PO3
+# remains uncertified texture at `delivery.po3_15m`.
 _SESSION_PO3 = [
     {
         "fact_id": "session_po3.phase",
@@ -1991,7 +1990,7 @@ _SESSION_PO3 = [
             "manipulation or distribution. UNKNOWN means no established balance "
             "exists -- an absence of evidence, never a claim of balance.",
         "authority_class": CERTIFIED,
-        "decision_influence": (CANDIDATE_GENERATION, BRAIN_NARRATIVE),
+        "decision_influence": (BRAIN_NARRATIVE,),
         "persistence": RECOMPUTED,
         "lifecycle": {
             "formation": "a balance seeded by 3 settled 1m bars, corroborated by "
@@ -2011,16 +2010,8 @@ _SESSION_PO3 = [
         "late_start": "derives from whatever settled history the coherent window "
                       "holds; below 6 bars it reports UNKNOWN rather than guessing",
         "consumers": [
-            {"name": "broker.luna_candidate_producer.produce",
-             "believes": "a phase whose new_entry_allowed is False forbids "
-                         "opening ANY new position, upstream of playbook and tool",
-             "influence": CANDIDATE_GENERATION},
-            {"name": "execution_gate.evaluate_gate",
-             "believes": "the same, as a blocking factor on would_authorize",
-             "influence": CANDIDATE_GENERATION},
             {"name": "ai_brain.brain_input",
-             "believes": "the session's delivery phase and why it does or does "
-                         "not authorize an entry",
+             "believes": "the session's contextual delivery phase",
              "influence": BRAIN_NARRATIVE},
         ],
         "limitations": (
@@ -2034,20 +2025,19 @@ _SESSION_PO3 = [
         ),
         "certification_tests": (f"{T_SP}::TestAccumulationRange",
                                 f"{T_SP}::TestRestartAndReplay",
-                                f"{T_SP}::TestEntryAuthorityIsEnforced"),
+                                f"{T_SP}::TestEntryContextOnly"),
         "semantic_predicates": ("session_po3.recomputed_not_remembered",),
         "scenarios": (PROCESS_RESTART, LATE_START, WARMUP_HISTORY, SESSION_BOUNDARY),
     },
     {
-        "fact_id": "session_po3.new_entry_allowed",
-        "producer_owner": "structure.session_po3.entry_permission",
-        "representation": "delivery.session_po3.new_entry_allowed",
+        "fact_id": "session_po3.mechanical_entry_posture",
+        "producer_owner": "structure.session_po3.entry_context",
+        "representation": "delivery.session_po3.mechanical_entry_posture",
         "semantic_claim":
-            "Whether the session phase authorizes OPENING a new position. It "
-            "says nothing about managing, protecting or closing an existing "
-            "one, and it is never a directional opinion.",
-        "authority_class": CERTIFIED,
-        "decision_influence": (CANDIDATE_GENERATION, EXECUTION),
+            "A contextual caution or permissive opinion associated with the "
+            "phase. It cannot authorize or veto an entry.",
+        "authority_class": ADVISORY,
+        "decision_influence": (BRAIN_NARRATIVE,),
         "persistence": RECOMPUTED,
         "lifecycle": {
             "formation": "a single table keyed by phase; there is exactly one "
@@ -2057,23 +2047,18 @@ _SESSION_PO3 = [
         },
         "temporal": {"observation_time": "the newest settled 1m bar"},
         "restart": "recomputed with the phase",
-        "late_start": "permissive while the phase is UNKNOWN, which is what "
-                      "keeps a genuine opening drive legal",
+        "late_start": "permissive while the phase is UNKNOWN; an opening "
+                      "drive receives no phase caution",
         "consumers": [
-            {"name": "broker.luna_candidate_producer.produce",
-             "believes": "False means raise NoCandidate('session_phase_blocks_entry') "
-                         "before the thesis is read",
-             "influence": CANDIDATE_GENERATION},
-            {"name": "execution_gate.evaluate_gate",
-             "believes": "False means would_authorize is False",
-             "influence": EXECUTION},
+            {"name": "ai_brain.brain_input",
+             "believes": "contextual caution that the Brain may weigh",
+             "influence": BRAIN_NARRATIVE},
         ],
-        "limitations": ("Absence of the block is permissive: a snapshot built "
-                        "without this authority is not converted into a "
-                        "stand-down.",),
+        "limitations": ("Absent phase produces no posture; legacy permission "
+                         "fields remain readable but have no veto authority.",),
         "certification_tests": (f"{T_SP}::TestEntryLaw",
-                                f"{T_SP}::TestEntryAuthorityIsEnforced"),
-        "semantic_predicates": ("session_po3.block_binds_every_consumer",),
+                                f"{T_SP}::TestEntryContextOnly"),
+        "semantic_predicates": ("session_po3.context_never_vetoes",),
         "scenarios": (PROCESS_RESTART, LATE_START),
     },
     {

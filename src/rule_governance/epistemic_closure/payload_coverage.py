@@ -86,12 +86,9 @@ CONTRACTED = {
     "liquidity_events.events[].reclaimed": "liquidity_event.reclaimed",
     "liquidity_events.events[].timeframe": "liquidity_event.timeframe",
     "protected_swings.caused_by": "liquidity_link.occurrence_id",
-    # LUNA-SESSION-PO3-AUTHORITY-1 -- the canonical session phase and the entry
-    # ruling that belongs to it. Registered specifically rather than as one
-    # prefix so the RANGE, the EXCURSION and the detector's verdict each answer
-    # for themselves; the phase is the only one of them that decides.
+    # Session PO3 describes the phase and mechanical posture for Brain judgment.
     "delivery.session_po3.phase": "session_po3.phase",
-    "delivery.session_po3.new_entry_allowed": "session_po3.new_entry_allowed",
+    "delivery.session_po3.mechanical_entry_posture": "session_po3.mechanical_entry_posture",
     "delivery.session_po3.range": "session_po3.range",
     "delivery.session_po3.excursion": "session_po3.excursion",
     "delivery.session_po3.manipulation": "session_po3.manipulation",
@@ -106,9 +103,9 @@ CONTRACTED = {
 #: How the scan went. Never a claim about the market.
 OPERATIONAL_PATHS = (
     "conflicts", "degraded", "warnings", "session", "timestamp",
-    # Whether the phase authority ran at all -- an operational condition, and
-    # deliberately distinct from what it concluded.
+    # Availability and authority label are operational contract facts.
     "delivery.session_po3.available",
+    "delivery.session_po3.authority_class",
     # Whether the cross-session producer ran, which trading day it resolved, and
     # the settled bar its facts are causal through. Operational scaffolding
     # around the claim, not the claim.
@@ -137,10 +134,8 @@ DISPLAY_PATHS = (
     "liquidity.capability_legend", "STRUCTURE_WITNESS._disclaimer",
     "active_path_state.notes", "playbook_toolbox.note", "volume_witness.note",
     "protected_swings.roles", "MTF_MARKET_STATE.roles",
-    # Prose that explains a ruling already declared elsewhere. Carries no market
-    # claim of its own: `block_reason` restates the phase, `transition_reason`
-    # restates the evidence that produced it.
-    "delivery.session_po3.block_reason", "delivery.session_po3.transition_reason",
+    # Prose explaining the contextual opinion and its causal transition.
+    "delivery.session_po3.mechanical_reason", "delivery.session_po3.transition_reason",
     # A standing disclaimer, not a market claim: it tells the reader the block
     # authorises nothing.
     "session_context.note",

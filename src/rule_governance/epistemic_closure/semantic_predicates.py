@@ -460,13 +460,8 @@ def dealing_range_bounds_come_from_one_timeframe():
 
 
 # == SESSION PO3 =============================================================
-# LUNA-SESSION-PO3-AUTHORITY-1. These bind the producer to what the three
-# decision-bearing consumers believe: the candidate producer and the execution
-# gate believe a False `new_entry_allowed` forbids opening a position, and the
-# Brain believes the phase describes the session it is reasoning about. Every
-# one of them runs against the ARCHIVED TAPE through the real builder, so a
-# refactor that quietly changed what the phase means fails here rather than in a
-# live session.
+# Session PO3's phase remains replayable evidence. Its old veto is demoted to a
+# contextual mechanical opinion, verified against the producer and gate here.
 
 def _session_states(limit=60):
     """(at, session_po3 block) for the tail of the archived tape."""
@@ -504,41 +499,32 @@ def session_phase_is_recomputed_never_remembered():
     if bad:
         return False, f"{len(bad)}/{checked} scans differ on restart; first {bad[0]}"
     return True, (f"{checked} scans: a cold derivation reproduces the published "
-                  f"phase and its entry ruling exactly")
+                  f"phase and its legacy mechanical posture exactly")
 
 
-def session_block_refuses_every_consumer_identically():
-    """DECLARED: `new_entry_allowed` False forbids OPENING a position, and both
-    decision-bearing consumers act on it. This is the check that would have
-    caught the 2026-08-25 defect: the phase said accumulation and nothing
-    downstream cared."""
-    from broker.luna_candidate_producer import CandidateProducer, NoCandidate
+def session_context_never_vetoes():
+    """A phase caution is visible, but never an entry veto."""
+    from broker.luna_candidate_producer import CandidateProducer
     from execution_gate.execution_gate import evaluate_gate
-    checked, blocked, bad = 0, 0, []
+    checked, cautions, bad = 0, 0, []
     for at, block, _snap in _session_states():
         checked += 1
-        permits = bool(block.get("new_entry_allowed"))
-        try:
-            CandidateProducer._assert_session_phase_permits_entry(
-                {"session_po3": block})
-            producer_permits = True
-        except NoCandidate as exc:
-            producer_permits = False
-            if exc.reason != "session_phase_blocks_entry" or not exc.stand_down:
-                bad.append((at, f"wrong refusal {exc.reason!r}"))
+        observed = CandidateProducer._observe_session_phase(
+            {"session_po3": block}, {"current_action": "propose_entry"})
         gate = evaluate_gate({"session_po3": block})
-        if producer_permits != permits:
-            bad.append((at, "producer disagrees with the published ruling"))
-        if gate["session_phase_permits_entry"] != permits:
-            bad.append((at, "execution gate disagrees with the published ruling"))
-        if not permits:
-            blocked += 1
-            if gate["would_authorize_if_enabled"]:
-                bad.append((at, "gate would authorize inside a blocking phase"))
+        if observed["session_phase_authority_class"] != "CONTEXT_ONLY":
+            bad.append((at, "producer promoted the phase"))
+        if gate["session_phase_context"]["mechanical_entry_posture"] != \
+                observed["session_phase_mechanical_posture"]:
+            bad.append((at, "context readers disagree"))
+        if observed["session_phase_mechanical_posture"] == "caution":
+            cautions += 1
+        if any("session PO3" in f for f in gate["blocking_factors"]):
+            bad.append((at, "gate uses phase as a blocking factor"))
     if bad:
         return False, f"{len(bad)} disagreements; first {bad[0]}"
-    return True, (f"{checked} scans, {blocked} blocking: producer and gate both "
-                  f"refuse exactly when the phase does")
+    return True, (f"{checked} scans, {cautions} contextual cautions: "
+                  "no Session PO3 execution refusal")
 
 
 def session_range_is_what_the_balance_absorbed():
@@ -1089,8 +1075,7 @@ PREDICATES = {
     "range.bounds_from_one_timeframe": dealing_range_bounds_come_from_one_timeframe,
     "session_po3.recomputed_not_remembered":
         session_phase_is_recomputed_never_remembered,
-    "session_po3.block_binds_every_consumer":
-        session_block_refuses_every_consumer_identically,
+    "session_po3.context_never_vetoes": session_context_never_vetoes,
     "session_po3.range_is_absorbed_bars": session_range_is_what_the_balance_absorbed,
     "session_po3.excursion_needs_establishment":
         session_excursion_requires_an_established_range,

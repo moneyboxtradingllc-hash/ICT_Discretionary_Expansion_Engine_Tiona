@@ -9,12 +9,12 @@ calls everything else "closed", so Asia and London did not exist as concepts at
 all — while the durable tape carried full 23-hour coverage nobody ever read.
 The organism looked back 300 minutes and never saw the night it had recorded.
 
-WHAT THIS IS NOT. It is not a phase authority. `session_po3` decides whether a
-new entry may exist, and this module has no route into that decision — no
-parameter, no import, no callback. That separation is STRUCTURAL, not a promise
-enforced by a test: `session_po3.derive()` has no argument through which a prior
-session could speak. London delivering hard all morning cannot make New York's
-accumulation tradeable, and the code offers no way to express that it could.
+WHAT THIS IS NOT. It does not derive the current session phase. `session_po3`
+reports that phase as contextual evidence, and this module has no route into
+its derivation: no parameter, import or callback. That separation is STRUCTURAL:
+`session_po3.derive()` has no argument through which a prior session could
+change the phase. London delivery and New York accumulation remain separate
+facts for the Brain to weigh.
 
     CANONICAL 1M TAPE
            |

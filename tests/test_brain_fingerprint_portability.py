@@ -51,7 +51,9 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     #
     # PROVIDER-MODEL-IDENTITY-1 (2026-09-27) makes the closure-bound candidate
     # producer judge the SERVED model with model_matches(). It rotates again.
-            assert PM.brain_contract_fingerprint() == "brain:3a09895222765f22"
+    # BRAIN-SOVEREIGNTY-SESSION-PO3-CONTEXT-1 demotes phase permission from
+    # execution law to evidence; previous PROD authorization cannot be reused.
+    assert PM.brain_contract_fingerprint() == "brain:0cf842782313d826"
 
 
 @pytest.mark.parametrize("addition", [
