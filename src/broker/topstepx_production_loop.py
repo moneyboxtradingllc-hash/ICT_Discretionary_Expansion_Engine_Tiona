@@ -126,6 +126,8 @@ class ProductionLoop:
         # thesis the entry was authorized against — re-deriving it later from
         # price is how an exit gets paired to the wrong entry.
         self.active_candidate = None
+        self.active_conditional_plan = None
+        self._pending_wake_event = None
         self.last_repair = None
         self.last_window = None
         self.last_daily_loss = None
@@ -144,7 +146,10 @@ class ProductionLoop:
             self.volume_profile_collector = None
 
     def _record_decision(self, scan: dict, disposition: str, reason, detail: str,
-                         execution_economics: dict = None):
+                         execution_economics: dict = None, *,
+                         brain_output_override: dict = None,
+                         conditional_plan_id: str = None,
+                         plan_authored_scan_id: str = None):
         """One death certificate per scan. Never raises; observability only.
 
         PROD-20260807 EVIDENCE DEFECT: the live qualification object was never
@@ -160,7 +165,8 @@ class ProductionLoop:
             telem = getattr(self.cycle, "retrieval_telemetry", None)
             root = session_root(getattr(telem, "session_id", "") or "UNSCOPED")
             _os.makedirs(root, exist_ok=True)
-            parsed = ((scan.get("brain_block") or {}).get("output") or {})
+            parsed = (brain_output_override if brain_output_override is not None else
+                      ((scan.get("brain_block") or {}).get("output") or {}))
             from broker.candidate_decision_record import (build_record,
                                                           terminal_disposition)
             producer = getattr(self.cycle, "producer", None)
@@ -181,6 +187,20 @@ class ProductionLoop:
                     reason, created=(disposition == "CANDIDATE")),
                 rejection_reason=reason, detail=detail,
                 execution_economics=execution_economics)
+            if conditional_plan_id:
+                record["decision_authority"] = "PREAUTHORIZED_CONDITIONAL_PLAN"
+                record["conditional_plan_id"] = conditional_plan_id
+                record["plan_authored_scan_id"] = plan_authored_scan_id
+            if disposition == "CONDITIONAL_PLAN":
+                from broker.candidate_decision_record import CONDITIONAL_PLAN_PUBLISHED
+                record["final_disposition"] = CONDITIONAL_PLAN_PUBLISHED
+                record["conditional_plan"] = True
+                record["plan_expires_at"] = parsed.get("plan_expires_at")
+                plan = self.active_conditional_plan or {}
+                record["conditional_plan_id"] = plan.get("plan_id")
+                plan_candidate = plan.get("candidate")
+                record["activation_zone"] = ((plan_candidate.extras or {}).get(
+                    "activation_zone") if plan_candidate is not None else None)
             record["active_draw"] = str(parsed.get("active_draw") or "")[:200]
             record["invalidation_level"] = parsed.get("invalidation_level")
             # Same-scan descriptive VAP evidence; this writer is best-effort
@@ -190,6 +210,52 @@ class ProductionLoop:
                       encoding="utf-8") as fh:
                 fh.write(_json.dumps(record, default=str) + chr(10))
         except Exception:  # noqa: BLE001 -- evidence must never gate a scan
+            pass
+
+    def _clear_conditional_plan(self) -> None:
+        plan = self.active_conditional_plan
+        self.active_conditional_plan = None
+        registry = getattr(self.candles, "wake_registry", None)
+        clear = getattr(registry, "clear_conditional_watch", None)
+        if callable(clear):
+            clear(plan_id=(plan or {}).get("plan_id"))
+
+    def _expire_conditional_plan_if_due(self, now=None) -> bool:
+        """Retire an expired/invalid plan before choosing whether to reason."""
+        plan = self.active_conditional_plan
+        if plan is None:
+            return False
+        extras = getattr(plan.get("candidate"), "extras", None) or {}
+        try:
+            expiry = datetime.fromisoformat(
+                str(extras.get("plan_expires_at") or "").replace("Z", "+00:00"))
+            if expiry.tzinfo is None or expiry.utcoffset() is None:
+                raise ValueError("plan expiry must be timezone aware")
+            now = now or self.clock()
+            expired = now >= expiry.astimezone(timezone.utc)
+        except (TypeError, ValueError):
+            expired = True
+        if expired:
+            self._clear_conditional_plan()
+        return expired
+
+    def _record_plan_events(self, plan_id: str, events: list) -> None:
+        """Append additive timing evidence; failures never authorize or block."""
+        if not plan_id or not events:
+            return
+        try:
+            from ai_retrieval.retrieval_telemetry import session_root
+            root = session_root(getattr(
+                getattr(self.cycle, "retrieval_telemetry", None), "session_id", "")
+                or "UNSCOPED")
+            os.makedirs(root, exist_ok=True)
+            path = os.path.join(root, "conditional_plan_events.jsonl")
+            with open(path, "a", encoding="utf-8") as fh:
+                for event in events:
+                    row = {"schema_version": "conditional_plan_event.v1",
+                           "plan_id": plan_id, **dict(event)}
+                    fh.write(json.dumps(row, default=str) + "\n")
+        except Exception:  # noqa: BLE001 -- telemetry is never authority
             pass
 
     def _volume_profile_evidence(self, scan: dict, observed_at=None) -> dict:
@@ -277,7 +343,8 @@ class ProductionLoop:
         except Exception:
             pass
 
-    def _attach_evidence(self, candidate, scan: dict) -> None:
+    def _attach_evidence(self, candidate, scan: dict, *,
+                         brain_result_override: dict = None) -> None:
         """Bind this scan's two-Brain and doctrine evidence to the candidate.
 
         THE JOIN IS BY snapshot_id, never by timestamp, direction or price.
@@ -309,7 +376,8 @@ class ProductionLoop:
             envelope = (shadow or {}).get("envelope") or {}
             proposal = envelope.get("mechanical_proposal") or {}
             review = envelope.get("terra_review") or {}
-            brain = scan.get("brain_result") or {}
+            brain = (brain_result_override if brain_result_override is not None
+                     else (scan.get("brain_result") or {}))
             parsed = brain.get("parsed") or {}
             trace = dict(getattr(self.producer, "last_decision_trace", None) or {})
 
@@ -397,11 +465,13 @@ class ProductionLoop:
         # clock.  Capture once and pass the same value through the scan cycle and
         # final pre-provider context.
         observed_at = self.clock()
-        wake_event = None
+        wake_event = self._pending_wake_event
+        self._pending_wake_event = None
         try:
             registry = getattr(self.candles, "wake_registry", None)
             claim = getattr(registry, "claim_consumed_interaction", None)
-            wake_event = claim() if callable(claim) else None
+            if wake_event is None:
+                wake_event = claim() if callable(claim) else None
         except Exception:  # noqa: BLE001 -- inability to carry causality wakes
             wake_event = {
                 "schema": "wake_registry.interaction.v1",
@@ -422,7 +492,15 @@ class ProductionLoop:
                                  wake_event=wake_event)
         except Exception:  # noqa: BLE001 — accounting may never cost a scan
             pass
-        out = self._scan_once(observed_at=observed_at)
+        # Once the Brain has authorized one exact conditional plan, do not
+        # start another blocking Brain call while its quote trigger is armed.
+        # The watcher can then hand the trigger to the mechanical path without
+        # waiting behind a second 30-40s cognition call. Expiry clears the plan
+        # and restores ordinary Brain cadence on this scan.
+        self._expire_conditional_plan_if_due(observed_at)
+        invoke_brain = self.active_conditional_plan is None
+        out = self._scan_once(observed_at=observed_at,
+                              invoke_brain=invoke_brain)
         self.outcomes.append(out)
         return out
 
@@ -825,7 +903,44 @@ class ProductionLoop:
         except Exception:  # noqa: BLE001 — unavailable, never fabricated
             return None
 
-    def _scan_once(self, *, observed_at=None) -> dict:
+    def handle_pending_conditional_wake(self) -> dict | None:
+        """Execute a matching pre-authorized plan without calling the Brain."""
+        registry = getattr(self.candles, "wake_registry", None)
+        claim = getattr(registry, "claim_consumed_interaction", None)
+        context = claim() if callable(claim) else None
+        if not context:
+            return None
+        plan = self.active_conditional_plan
+        plan_id = (plan or {}).get("plan_id")
+        zone = ((plan or {}).get("candidate").extras or {}).get("activation_zone") if plan else None
+        matching = [row for row in (context.get("events") or [])
+                    if row.get("plan_id") == plan_id
+                    and row.get("occurrence_id") == (zone or {}).get("occurrence_id")]
+        if plan is None or not matching:
+            self._pending_wake_event = context
+            return None
+        result = self._scan_once(observed_at=self.clock(), invoke_brain=False,
+                                 conditional_event=matching[-1])
+        self._record_plan_events(plan_id, [{
+            "event": "trigger_mechanics_scan_completed",
+            "timestamp": self.clock().isoformat(),
+            "scan_id": (result.get("scan") or {}).get("snapshot_id"),
+            "outcome": result.get("outcome"),
+        }])
+        if self.active_conditional_plan is plan:
+            # A mechanical scan that cannot be built is a refusal, not an
+            # invitation to leave an unserviceable plan armed.
+            self._clear_conditional_plan()
+            self._record_plan_events(plan_id, [{
+                "event": "plan_refused", "timestamp": self.clock().isoformat(),
+                "reason": result.get("reason") or "conditional_trigger_scan_failed",
+                "outcome": result.get("outcome"),
+            }])
+        self.outcomes.append(result)
+        return result
+
+    def _scan_once(self, *, observed_at=None, invoke_brain=True,
+                   conditional_event=None) -> dict:
         # Venue reality first, decisions second.
         self.last_reconciliation = self.reconcile_missions()
         # Deterministic protection management, on every tick, in every
@@ -844,6 +959,8 @@ class ProductionLoop:
         # Reconciliation above has already run, so an open position keeps being
         # observed while the model is never consulted.
         if LIFECYCLE.entry_authority_exhausted(self.mission):
+            if self.active_conditional_plan is not None:
+                self._clear_conditional_plan()
             state = LIFECYCLE.resolve(mission=self.mission,
                                       venue=self.ps.session,
                                       contract_id=self.ps.contract.id)
@@ -907,8 +1024,12 @@ class ProductionLoop:
                 self.symbol, lookback_bars=SESSION_CONTEXT_DEEP_BARS)
         except Exception:                       # noqa: BLE001 — context is not
             deep = None                         # worth losing a scan over
-        scan = self.cycle.scan(bars, now=(observed_at if observed_at is not None
-                                         else self.clock()), deep_1m=deep)
+        scan_now = (observed_at if observed_at is not None else self.clock())
+        if invoke_brain:
+            scan = self.cycle.scan(bars, now=scan_now, deep_1m=deep)
+        else:
+            scan = self.cycle.scan(bars, now=scan_now, deep_1m=deep,
+                                   invoke_brain=False)
         # POST-COGNITION OBSERVATION ONLY.  The cycle has already assembled the
         # Brain/candidate inputs; this envelope key cannot enter either.
         scan["volume_profile_evidence"] = self._volume_profile_evidence(scan, observed_at)
@@ -916,12 +1037,20 @@ class ProductionLoop:
         brain = scan["brain_block"]
         source = (brain or {}).get("source")
 
+        if not invoke_brain:
+            if conditional_event is None:
+                return self._observe_conditional_plan(scan)
+            return self._execute_conditional_plan(
+                scan, conditional_event=conditional_event,
+                in_window=bool(self._in_window()))
+
         # An earned HOLD is an ordinary no-new-candidate scan, not an outage.
         # Clear the lane explicitly so no candidate authored on an earlier scan
         # can remain available as fresh exposure. Reconciliation and open-
         # position protection already ran at the top of this tick.
         if source == "brain_sleep_hold":
             self.active_candidate = None
+            self._clear_conditional_plan()
             self._record_decision(
                 scan, "HELD", "brain_sleep_hold",
                 "external cognition intentionally held; no material semantic change")
@@ -955,8 +1084,12 @@ class ProductionLoop:
                 snapshot_id=scan["snapshot_id"],
                 market_data_timestamp=scan["market_data_timestamp"],
                 latest_closed_bar_timestamp=scan["latest_closed_bar_timestamp"],
-                in_window=in_window, now=self.clock())
+                in_window=in_window, now=self.clock(),
+                conditional_plan=(str(((scan.get("brain_result") or {}).get("parsed")
+                                       or {}).get("current_action") or "").lower()
+                                  == "watching"))
         except NoCandidate as exc:
+            self._clear_conditional_plan()
             self._record_decision(scan, "REJECTED", exc.reason, str(exc))
             outcome = WINDOW_CLOSED if exc.reason == "window_closed" else NO_CANDIDATE
             # Direction and action are reported separately. Rendering a bearish
@@ -972,11 +1105,79 @@ class ProductionLoop:
         # it, and it is attached AFTER the candidate already exists, so it cannot
         # participate in whether one was created.
         self._attach_evidence(candidate, scan)
-        self._record_decision(scan, "CANDIDATE", None, "")
-        self.mission.candidate_count += 1
         # A newer candidate supersedes the prior one; stale candidates are never
         # carried between scans.
         self.active_candidate = candidate
+        if candidate.extras.get("conditional_plan"):
+            self._clear_conditional_plan()
+            zone = candidate.extras["activation_zone"]
+            plan_id = candidate.candidate_id
+            self.active_conditional_plan = {
+                "plan_id": plan_id, "candidate": candidate,
+                "parsed": dict(candidate.extras["conditional_plan_brain_output"]),
+                "brain_result": dict(candidate.extras["conditional_plan_brain_result"]),
+                "published_at": self.clock().isoformat(),
+            }
+            brain = scan.get("brain_block") or {}
+            self._record_plan_events(plan_id, [
+                {"event": "brain_call_started",
+                 "timestamp": brain.get("provider_call_started_at")},
+                {"event": "brain_decision_completed",
+                 "timestamp": brain.get("provider_call_completed_at"),
+                 "latency_seconds": brain.get("provider_latency_seconds")},
+                {"event": "plan_published",
+                 "timestamp": self.active_conditional_plan["published_at"],
+                 "expiry": candidate.extras.get("plan_expires_at"),
+                 "occurrence_id": zone.get("occurrence_id")},
+            ])
+            registry = getattr(self.candles, "wake_registry", None)
+            publish = getattr(registry, "publish_conditional_watch", None)
+            if callable(publish):
+                # Brain latency may have made the scan's original quote old by
+                # the time this plan becomes watchable. Seed the level watcher
+                # only from a fresh current capture; an unavailable/stale
+                # capture may still arm future quote observation, but can never
+                # synthesize an immediate zone touch.
+                try:
+                    from broker.topstepx_execution_price import from_capture
+                    current_px = from_capture(self.ps.quote_provider.capture())
+                except Exception:  # noqa: BLE001 -- the streaming watcher remains
+                    current_px = {"fresh": False, "best_bid": None, "best_ask": None}
+                px = current_px if current_px.get("fresh") else {}
+                published = publish(
+                    plan_id=plan_id, occurrence_id=zone["occurrence_id"],
+                    direction=zone["direction"], low=zone["low"], high=zone["high"],
+                    bid=px.get("best_bid"), ask=px.get("best_ask"))
+                if not published.get("published"):
+                    self.active_conditional_plan = None
+                    self.active_candidate = None
+                    getattr(registry, "clear_conditional_watch", lambda **_kwargs: None)(
+                        plan_id=plan_id)
+                    self._record_decision(scan, "REJECTED",
+                                          "conditional_plan_watch_unavailable",
+                                          str(published))
+                    return {"outcome": NO_CANDIDATE,
+                            "reason": "conditional_plan_watch_unavailable",
+                            "detail": str(published), "scan": scan["scan_count"]}
+            else:
+                self.active_conditional_plan = None
+                self.active_candidate = None
+                self._record_decision(scan, "REJECTED",
+                                      "conditional_plan_watch_unavailable",
+                                      "the live quote provider has no plan watcher")
+                return {"outcome": NO_CANDIDATE,
+                        "reason": "conditional_plan_watch_unavailable",
+                        "scan": scan["scan_count"]}
+            self._record_decision(scan, "CONDITIONAL_PLAN", None, "")
+            return {"outcome": "CONDITIONAL_PLAN_PUBLISHED",
+                    "plan_id": plan_id, "direction": candidate.direction,
+                    "zone": dict(zone),
+                    "expires_at": candidate.extras.get("plan_expires_at"),
+                    "scan": scan["scan_count"]}
+
+        self._clear_conditional_plan()
+        self._record_decision(scan, "CANDIDATE", None, "")
+        self.mission.candidate_count += 1
 
         # LUNA-DAILY-LOSS-BUDGET-GOVERNOR-1 — THE SESSION LOSS BUDGET.
         #
@@ -1044,6 +1245,194 @@ class ProductionLoop:
                     "scan": scan["scan_count"]}
 
         return self._execute(candidate, scan, sized, in_window)
+
+    def _observe_conditional_plan(self, scan: dict) -> dict:
+        """Maintain a live plan without calling the Brain or opening exposure."""
+        plan = self.active_conditional_plan
+        if plan is None:
+            return {"outcome": NO_CANDIDATE, "reason": "conditional_plan_missing"}
+        if self._expire_conditional_plan_if_due(self.clock()):
+            return {"outcome": NO_CANDIDATE, "reason": "conditional_plan_expired",
+                    "conditional_plan_id": plan.get("plan_id")}
+        extras = plan["candidate"].extras or {}
+        zone = extras.get("activation_zone") or {}
+        from broker.topstepx_execution_price import executable_price
+        price_block = (((scan.get("brain_input") or {}).get("market") or {}
+                        ).get("execution_price") or {})
+        price = executable_price(price_block, zone.get("direction"))
+        if price is not None and float(zone["low"]) <= float(price) <= float(zone["high"]):
+            event = {"plan_id": plan.get("plan_id"),
+                     "occurrence_id": zone.get("occurrence_id"),
+                     "reason": "conditional_plan_zone_reached",
+                     "price": price, "observed_at": self.clock().isoformat()}
+            return self._execute_conditional_plan(
+                scan, conditional_event=event,
+                in_window=bool(self._in_window()))
+        return {"outcome": "CONDITIONAL_PLAN_WAITING",
+                "conditional_plan_id": plan.get("plan_id"),
+                "expires_at": extras.get("plan_expires_at")}
+
+    def _execute_conditional_plan(self, scan: dict, *, conditional_event,
+                                  in_window: bool) -> dict:
+        """Revalidate a Brain-authored plan from fresh mechanics, then execute/refuse.
+
+        This path deliberately consumes the already-authored response. It does
+        not invoke narrative_brain, ECU, shadow cognition, or action repair.
+        """
+        from broker.topstepx_execution_price import executable_price
+        from broker.topstepx_candidate_freshness import CandidateStale
+
+        plan = self.active_conditional_plan
+        registry = getattr(self.candles, "wake_registry", None)
+        if plan is None:
+            return {"outcome": NO_CANDIDATE, "reason": "conditional_plan_missing"}
+        self.active_conditional_plan = None  # one shot, including every refusal
+        getattr(registry, "clear_conditional_watch", lambda **_kwargs: None)(
+            plan_id=plan.get("plan_id"))
+        old = plan["candidate"]
+        event = conditional_event or {}
+        extras = old.extras or {}
+        zone = extras.get("activation_zone") or {}
+        now = self.clock()
+        self._record_plan_events(plan.get("plan_id"), [{
+            "event": "entry_zone_reached",
+            "timestamp": event.get("observed_at"),
+            "quote": event.get("price"),
+            "occurrence_id": event.get("occurrence_id"),
+        }])
+        try:
+            expiry = datetime.fromisoformat(
+                str(extras.get("plan_expires_at") or "").replace("Z", "+00:00"))
+            if expiry.tzinfo is None or now >= expiry.astimezone(timezone.utc):
+                raise NoCandidate("conditional_plan_expired", "plan expired before activation")
+            if (event.get("plan_id") != plan.get("plan_id")
+                    or event.get("occurrence_id") != zone.get("occurrence_id")
+                    or event.get("reason") not in {
+                        "conditional_plan_zone_reached",
+                        "conditional_plan_armed_inside"}):
+                raise NoCandidate("conditional_plan_trigger_mismatch",
+                                  "wake does not match the authorized plan identity")
+            parsed = dict(plan.get("parsed") or {})
+            if str(parsed.get("current_action") or "").lower() != "watching":
+                raise NoCandidate("conditional_plan_authority_invalid",
+                                  "stored Brain action is not watching")
+            snap = scan.get("snapshot") or {}
+            brain_input = scan.get("brain_input") or {}
+            px_block = ((brain_input.get("market") or {}).get("execution_price") or {})
+            sided = executable_price(px_block, old.direction)
+            if sided is None or not float(zone["low"]) <= float(sided) <= float(zone["high"]):
+                raise NoCandidate("conditional_plan_trigger_no_longer_true",
+                                  "fresh executable side is no longer inside the authorized zone")
+            old_transfer = extras.get("conditional_plan_transfer_evidence")
+            new_transfer = ((snap.get("active_path_state") or {}).get("transfer_evidence"))
+            if old_transfer != new_transfer:
+                raise NoCandidate("conditional_plan_review_required",
+                                  "active-path transfer evidence changed after plan publication")
+
+            fresh = self.producer.produce(
+                brain_result=plan["brain_result"], brain_input=brain_input,
+                snapshot=snap, qualification=scan.get("qualification") or {},
+                engine_inventory=scan.get("engine_inventory") or {},
+                snapshot_id=scan["snapshot_id"],
+                market_data_timestamp=scan["market_data_timestamp"],
+                latest_closed_bar_timestamp=scan["latest_closed_bar_timestamp"],
+                in_window=in_window, now=now, conditional_trigger=True)
+            fresh_zone = (fresh.extras or {}).get("selected_tool_zone") or {}
+            if (fresh.direction != old.direction
+                    or fresh.extras.get("playbook") != extras.get("playbook")
+                    or fresh.extras.get("tool_family") != extras.get("tool_family")
+                    or fresh.extras.get("selected_tool_occurrence_id") != zone.get("occurrence_id")
+                    or fresh_zone.get("low") != zone.get("low")
+                    or fresh_zone.get("high") != zone.get("high")
+                    or fresh.invalidation_price != old.invalidation_price
+                    or ((fresh.extras.get("structural_invalidation") or {}).get(
+                            "structure_identity") != ((extras.get("structural_invalidation")
+                                                       or {}).get("structure_identity")))
+                    or fresh.objective.identity != old.objective.identity
+                    or fresh.objective.price != old.objective.price):
+                raise NoCandidate("conditional_plan_material_change",
+                                  "selected tool, direction, playbook, invalidation or objective changed")
+            fresh.extras["conditional_plan_id"] = plan["plan_id"]
+            fresh.extras["conditional_plan_trigger"] = dict(event)
+            fresh.extras["conditional_plan_authored_scan_id"] = extras.get(
+                "conditional_plan_snapshot_id")
+            self._attach_evidence(
+                fresh, scan, brain_result_override=plan["brain_result"])
+            self._record_decision(
+                scan, "CANDIDATE", None, "conditional_plan_triggered",
+                brain_output_override=parsed,
+                conditional_plan_id=plan["plan_id"],
+                plan_authored_scan_id=extras.get("conditional_plan_snapshot_id"))
+            self.mission.candidate_count += 1
+            budget = DLB.resolve(
+                session=self.ps.session, contract_id=self.ps.contract.id,
+                missions=self.mission.trade_missions,
+                authorization=self.mission.authorization,
+                max_risk_usd=PRODUCTION_MAX_RISK_USD,
+                window_start=SA.PRODUCTION_WINDOW_START,
+                tz_name=SA.PRODUCTION_WINDOW_TZ)
+            self.last_daily_loss = budget
+            if not budget["entry_permitted"]:
+                raise NoCandidate(budget["state"], budget.get("reason") or "daily loss budget refused")
+            managed_runner = self.ps.runner
+            try:
+                runner = self.ps.build_runner(
+                    fresh, max_risk_usd=budget["allowed_planned_risk"])
+            finally:
+                if self.mission.active_mission is not None:
+                    self.ps.runner = managed_runner
+            sized = {"size": runner.geometry.size,
+                     "stop_points": runner.geometry.stop_points,
+                     "stop_price": runner.geometry.stop_price,
+                     "target_price": runner.geometry.target_price,
+                     "risk_usd": runner.geometry.risk_usd,
+                     "stop_range": self.ps.sizing["stop_range"],
+                     "reward_to_risk": self.ps.sizing["reward_to_risk"]}
+            self._record_plan_events(plan["plan_id"], [{
+                "event": "plan_mechanics_accepted",
+                "timestamp": self.clock().isoformat(),
+                "authoring_scan_id": extras.get("conditional_plan_snapshot_id"),
+                "trigger_scan_id": scan.get("snapshot_id"),
+            }])
+            if not self.armed:
+                return {"outcome": QUALIFIED_CANDIDATE_OBSERVED,
+                        "execution": EXECUTION_DISARMED,
+                        "conditional_plan_id": plan["plan_id"],
+                        "candidate_id": fresh.candidate_id, "sizing": sized}
+            result = self._execute(fresh, scan, sized, in_window)
+            economics = dict(getattr(self.ps.runner, "final_quote_economics", {}) or {})
+            self._record_plan_events(plan["plan_id"], [
+                {"event": "final_quote_captured",
+                 "timestamp": economics.get("final_quote_timestamp"),
+                 "price": economics.get("final_entry_reference")},
+                {"event": "economics_completed",
+                 "timestamp": economics.get("final_economics_completed_timestamp")},
+                {"event": "submission_started",
+                 "timestamp": economics.get("venue_submit_timestamp"),
+                 "elapsed_economics_to_submit_ms": economics.get(
+                     "elapsed_economics_to_submit_ms")},
+                {"event": ("economics_refused" if economics.get("refusal_reason")
+                           else "execution_result"),
+                 "timestamp": economics.get("final_economics_completed_timestamp"),
+                 "reason": economics.get("refusal_reason"),
+                 "outcome": result.get("outcome")},
+            ])
+            return result
+        except (NoCandidate, CandidateStale, RiskRejection) as exc:
+            reason = getattr(exc, "reason", type(exc).__name__)
+            self._record_plan_events(plan.get("plan_id"), [{
+                "event": "plan_mechanics_refused",
+                "timestamp": self.clock().isoformat(),
+                "authoring_scan_id": extras.get("conditional_plan_snapshot_id"),
+                "trigger_scan_id": scan.get("snapshot_id"),
+                "trigger_decision_reason": reason,
+            }, {
+                "event": "plan_refused", "timestamp": self.clock().isoformat(),
+                "reason": reason, "detail": str(exc),
+            }])
+            self._record_decision(scan, "REJECTED", reason, str(exc))
+            return {"outcome": NO_CANDIDATE, "reason": reason,
+                    "detail": str(exc), "conditional_plan_id": plan.get("plan_id")}
 
     # ── armed only ────────────────────────────────────────────────────────────
     def _execute(self, candidate, scan: dict, sized: dict, in_window: bool) -> dict:
@@ -1127,6 +1516,11 @@ class ProductionLoop:
                 authorization_fingerprint=self.mission.authorization.fingerprint(),
                 submitted_at=self.clock().isoformat(),
                 evidence="venue ack at submit")
+            plan_id = (candidate.extras or {}).get("conditional_plan_id")
+            self._record_plan_events(plan_id, [{
+                "event": "venue_acknowledged", "timestamp": self.clock().isoformat(),
+                "venue_order_id": str(order_id),
+            }])
 
         def on_rejected(fact: dict):
             # PROD-20260904 RULING C. The rejection's production writer, and the
@@ -1227,6 +1621,12 @@ class ProductionLoop:
             candidate=candidate, trades=trades, orders=orders, fill_event=fill_event,
             stop_order_id=stop_order_id, target_order_id=target_order_id)
         self.mission.filled_trade_count += 1
+        self._record_plan_events((candidate.extras or {}).get("conditional_plan_id"), [{
+            "event": "fill_received",
+            "timestamp": fill_event.get("timestamp") or fill_event.get("filled_at"),
+            "fill_price": fill_event.get("price") or fill_event.get("fill_price"),
+            "quantity": fill_event.get("quantity") or fill_event.get("size"),
+        }])
         return out
 
     def reconcile_after_exit(self, *, candidate, exit_type: str, trades: list,

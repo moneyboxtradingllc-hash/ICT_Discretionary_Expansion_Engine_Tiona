@@ -592,7 +592,10 @@ def run_production_scans(*, ps, runtime, candles, session, contract, armed: bool
                             **fr})
             break
         scan_started = time.monotonic()
-        out = loop.scan_once()
+        route_plan_wake = getattr(loop, "handle_pending_conditional_wake", None)
+        out = route_plan_wake() if callable(route_plan_wake) else None
+        if out is None:
+            out = loop.scan_once()
         results.append(out)
         i += 1
         extra = ""

@@ -345,7 +345,7 @@ class ProductionScanCycle:
                     # reconstructs from exactly the bars the phase does.
                     deep_1m=window,
                     expansion_stability=self.expansion_stability,
-                    contract_id=self.contract_id)
+                    contract_id=self.contract_id, invoke_brain=False)
                 self._update_structure_flips(snapshot)
                 derived += 1
             self.htf_engine.update(bars)
@@ -394,7 +394,7 @@ class ProductionScanCycle:
 
     # ── one scan ──────────────────────────────────────────────────────────────
     def scan(self, candles_1m: list, *, now: datetime = None,
-             deep_1m: list = None) -> dict:
+             deep_1m: list = None, invoke_brain: bool = True) -> dict:
         from ai_retrieval.retrieval import retrieve_for_snapshot
         from shared_context.council import run_council
         from shared_context.shared_market_context import build_shared_market_context
@@ -453,7 +453,8 @@ class ProductionScanCycle:
             session_po3=self.session_po3, deep_1m=deep_1m,
             expansion_stability=self.expansion_stability,
             capital_report=capital_report, htf_context=htf_context,
-            contract_id=self.contract_id, execution_price=execution_price)
+            contract_id=self.contract_id, execution_price=execution_price,
+            invoke_brain=invoke_brain)
         snapshot["candle_continuity"] = continuity
         # The revision contract, carried to whoever decides whether to trade.
         # A repaired tape with stale trackers is the same lie under a new flag,
@@ -540,7 +541,10 @@ class ProductionScanCycle:
         # authorized catalog for THIS scan already contains them.
         self._update_structure_flips(snapshot)
 
-        if ecu_enabled() and canonical is not None:
+        if not invoke_brain:
+            brain_block = {"source": "preauthorized_plan_trigger",
+                           "output": None, "fallback_reason": None}
+        elif ecu_enabled() and canonical is not None:
             brain_block = canonical
         else:
             brain_block = run_narrative_brain(snapshot, self.symbol, self.stance_memory)
@@ -554,7 +558,7 @@ class ProductionScanCycle:
         # An intentional external-Brain HOLD cannot leak into a second paid
         # adjudication path. Mechanics and position management have already run;
         # only fresh discretionary authorship is absent on this scan.
-        shadow = self._two_brain_after_primary(snapshot, brain_block)
+        shadow = self._two_brain_after_primary(snapshot, brain_block) if invoke_brain else None
 
         return {
             "snapshot": snapshot,

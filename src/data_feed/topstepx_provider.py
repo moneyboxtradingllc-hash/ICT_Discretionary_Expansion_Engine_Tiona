@@ -330,7 +330,8 @@ class TopstepXDataProvider(BaseDataProvider):
             # do nothing but set an event.
             if self.wake_registry is not None:
                 try:
-                    self.wake_registry.on_quote(bid=bid, ask=ask)
+                    self.wake_registry.on_quote(
+                        bid=bid, ask=ask, observed_at=q.get("timestamp"))
                 except Exception:  # noqa: BLE001 — watching may never kill the feed
                     pass
 

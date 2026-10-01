@@ -384,10 +384,12 @@ class TestPumpThreadBoundary:
         """`_on_quote` -> `on_quote`, with the SIDED prices, outside the lock."""
         reg = WakeRegistry()
         seen = []
-        reg.on_quote = lambda bid=None, ask=None: seen.append((bid, ask)) or []
+        reg.on_quote = lambda bid=None, ask=None, observed_at=None: seen.append(
+            (bid, ask, observed_at)) or []
         p = self._provider(reg)
-        p._on_quote([None, {"bestBid": 29249.25, "bestAsk": 29249.50}])
-        assert seen == [(29249.25, 29249.50)], seen
+        p._on_quote([None, {"bestBid": 29249.25, "bestAsk": 29249.50,
+                            "timestamp": "2026-09-30T14:00:00+00:00"}])
+        assert seen == [(29249.25, 29249.50, "2026-09-30T14:00:00+00:00")], seen
 
     def test_a_registry_that_explodes_never_kills_the_feed(self):
         """Watching is an optimisation. It may never cost the market data."""

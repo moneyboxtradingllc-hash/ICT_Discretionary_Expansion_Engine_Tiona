@@ -209,6 +209,19 @@ def _finite_price(value):
     return price if math.isfinite(price) else None
 
 
+def _aware_expiry(value, now):
+    """A conditional plan must carry its own explicit, aware expiry."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        result = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if result.tzinfo is None or result.utcoffset() is None:
+        return None
+    return result.astimezone(timezone.utc)
+
+
 def _volatility_evidence(*, brain_input: dict,
                          invalidation: StructuralInvalidation,
                          snapshot_id: str,
@@ -1191,7 +1204,9 @@ class CandidateProducer:
                 qualification: dict, engine_inventory: dict,
                 snapshot_id: str, market_data_timestamp: str,
                 latest_closed_bar_timestamp: str, in_window: bool = True,
-                ai_state: str = "AI_OK", now: datetime = None) -> CandidateSnapshot:
+                ai_state: str = "AI_OK", now: datetime = None,
+                conditional_plan: bool = False,
+                conditional_trigger: bool = False) -> CandidateSnapshot:
         now = now or datetime.now(timezone.utc)
 
         # EVIDENCE, NOT AUTHORITY. The trace records which stage a proposal
@@ -1200,6 +1215,13 @@ class CandidateProducer:
         trace = _blank_trace()
         self.last_decision_trace = trace
         _p = brain_result.get("parsed") or {}
+        _action = str(_p.get("current_action") or "").strip().lower()
+        if _action == "watching" and not (conditional_plan or conditional_trigger):
+            raise NoCandidate("conditional_plan_mode_required",
+                              "watching is valid only through the conditional-plan path")
+        if conditional_plan and _action != "watching":
+            raise NoCandidate("conditional_plan_action_invalid",
+                              "a conditional plan requires current_action=watching")
         trace["requested_objective_id"] = _p.get("objective_id")
         trace["requested_invalidation_level"] = _p.get("invalidation_level")
         trace["requested_invalidation_id"] = _p.get("invalidation_id")
@@ -1263,7 +1285,7 @@ class CandidateProducer:
             # reach the risk gate to be judged on its size.
             self._assert_candles_continuous(snapshot)
             self._assert_derived_state_current(snapshot)
-            if not in_window:
+            if not in_window and not conditional_plan:
                 raise NoCandidate("window_closed", "outside the decision window")
             if str(snapshot.get("contract_id") or self.contract.id) != self.contract.id:
                 raise NoCandidate("contract_mismatch", "snapshot is for another contract")
@@ -1295,7 +1317,7 @@ class CandidateProducer:
                                                else "WOULD_REJECT"),
                          eligible_only_because_floor_moved=bool(
                              rr >= self.min_r and rr < LEGACY_QUALIFICATION_R))
-            if rr < self.min_r:
+            if rr < self.min_r and not conditional_plan:
                 raise NoCandidate(
                     "reward_below_qualification",
                     f"authentic geometry yields {rr:.2f}R, below the {self.min_r:.2f} floor. "
@@ -1371,6 +1393,43 @@ class CandidateProducer:
                 "engine_inventory_digest": _digest(engine_inventory),
                 "mechanical_evidence_digest": _digest(brain_input),
                 "brain_response_digest": _digest(parsed),
+            })
+
+        # Exact execution-object geometry is carried only while a pre-authorized
+        # plan is being published or revalidated. Ordinary candidates retain the
+        # existing provenance-only occurrence contract; this zone never supplies
+        # entry, stop, target, or risk geometry.
+        if conditional_plan or conditional_trigger:
+            cand.extras["selected_tool_zone"] = {
+                "low": (selected_tool or {}).get("zone_low"),
+                "high": (selected_tool or {}).get("zone_high"),
+            }
+
+        if conditional_plan:
+            expiry = _aware_expiry(parsed.get("plan_expires_at"), now)
+            if expiry is None or expiry <= now:
+                raise NoCandidate("conditional_plan_expiry_invalid",
+                                  "watching requires a future timezone-aware plan_expires_at")
+            zone_low = _finite_price((selected_tool or {}).get("zone_low"))
+            zone_high = _finite_price((selected_tool or {}).get("zone_high"))
+            occurrence_id = (selected_tool or {}).get("occurrence_id")
+            if (not occurrence_id or zone_low is None or zone_high is None
+                    or zone_low > zone_high):
+                raise NoCandidate("conditional_plan_zone_unavailable",
+                                  "selected execution object has no exact identity and finite zone")
+            cand.extras.update({
+                "conditional_plan": True,
+                "plan_expires_at": expiry.isoformat(),
+                "activation_zone": {"occurrence_id": occurrence_id,
+                                    "direction": direction,
+                                    "low": zone_low, "high": zone_high},
+                "conditional_plan_brain_output": dict(parsed),
+                "conditional_plan_brain_result": dict(brain_result),
+                "conditional_plan_created_at": now.isoformat(),
+                "conditional_plan_snapshot_id": snapshot_id,
+                "conditional_plan_transfer_evidence": (
+                    ((snapshot or {}).get("active_path_state") or {}
+                     ).get("transfer_evidence")),
             })
 
         self._supersede(cand)

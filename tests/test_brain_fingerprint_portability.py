@@ -53,7 +53,9 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # producer judge the SERVED model with model_matches(). It rotates again.
     # BRAIN-SOVEREIGNTY-SESSION-PO3-CONTEXT-1 demotes phase permission from
     # execution law to evidence; previous PROD authorization cannot be reused.
-    assert PM.brain_contract_fingerprint() == "brain:0cf842782313d826"
+    # LATENCY-1 binds the conditional-plan contract, its no-Brain trigger path,
+    # and the selected mechanical execution object into the same fingerprint.
+    assert PM.brain_contract_fingerprint() == "brain:0ec4ef07c75dbcef"
 
 
 @pytest.mark.parametrize("addition", [

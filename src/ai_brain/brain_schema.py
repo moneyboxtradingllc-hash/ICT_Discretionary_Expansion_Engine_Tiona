@@ -126,6 +126,9 @@ def empty_brain_output() -> dict:
         # Absent unless an entry is actually proposed.
         "objective_id":              None,
         "invalidation_id":           None,
+        # Optional on archives and required by the producer only for a new
+        # current_action="watching" conditional plan.
+        "plan_expires_at":            None,
     }
 
 

@@ -465,8 +465,10 @@ def test_consumed_registry_event_reaches_final_provider_gate_once(monkeypatch):
         authorization=SimpleNamespace(session_id="SESSION"))
     loop.ps = SimpleNamespace(contract=SimpleNamespace(id="CON.TEST"))
     loop.outcomes = []
+    loop._pending_wake_event = None
+    loop.active_conditional_plan = None
 
-    def brain_scan(*, observed_at=None):
+    def brain_scan(*, observed_at=None, invoke_brain=True):
         current = copy.deepcopy(snapshot)
         current["timestamp"] = (NOW - timedelta(days=2)).isoformat()
         current["execution_price"]["captured_at"] = observed_at.isoformat()

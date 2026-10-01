@@ -341,6 +341,7 @@ def build_snapshot(
     htf_context=None,
     contract_id: str = None,
     execution_price: dict = None,
+    invoke_brain: bool = True,
 ) -> dict:
     timeframes = {}
     all_normalized = {}
@@ -889,7 +890,7 @@ def build_snapshot(
     # consumed thesis is fully-fed. When OFF, skipped entirely and the
     # mechanical-owned pipeline is unchanged (bit-for-bit).
     from ai_brain.ecu import ecu_enabled, produce_thesis
-    if ecu_enabled():
+    if ecu_enabled() and invoke_brain:
         candidate = produce_thesis(snapshot)
         snapshot["candidate_thesis"] = candidate
         snapshot["brain_thesis"] = candidate   # shadow default: pipeline bit-for-bit unchanged

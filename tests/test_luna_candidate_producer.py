@@ -19,6 +19,7 @@ from broker.luna_candidate_producer import (                      # noqa: E402
 )
 from broker.topstepx_candidate_freshness import CandidateSnapshot  # noqa: E402
 from broker.topstepx_client import TopstepXContract                # noqa: E402
+from live_scan.wake_registry import WakeRegistry                    # noqa: E402
 
 CID = "CON.F.US.MNQ.U26"
 FP = "acct:fc84f7a928d9"
@@ -116,6 +117,54 @@ class TestValidCandidates:
         assert c.extras["tool_family"] == ["fvg"]
         assert c.extras["sovereign_conversion"] is True
         assert c.extras["model"] == PRODUCTION_MODEL
+
+    def test_plan_wake_uses_only_the_directional_executable_side_and_exact_id(self):
+        registry = WakeRegistry()
+        out = registry.publish_conditional_watch(
+            plan_id="plan-1", occurrence_id="occ-1", direction="bullish",
+            low=100.0, high=101.0, bid=98.0, ask=99.0)
+        assert out["published"] is True
+        assert registry.on_quote(bid=100.5, ask=102.0) == []  # long pays ask
+        fired = registry.on_quote(bid=99.5, ask=100.25)
+        assert fired[0]["plan_id"] == "plan-1"
+        assert fired[0]["occurrence_id"] == "occ-1"
+        assert fired[0]["price"] == 100.25
+        assert registry.on_quote(bid=99.5, ask=None) == []
+
+    def test_watching_publishes_expiring_plan_without_current_rr_authority(self):
+        p = parsed(current_action="watching",
+                   plan_expires_at="2026-08-05T15:31:00+00:00")
+        res = result(parsed=p)
+        maker = producer()
+        maker.min_r = 100.0  # plan publication is not execution eligibility
+        c = produce(maker, res=res, conditional_plan=True)
+        assert c.extras["conditional_plan"] is True
+        assert c.extras["plan_expires_at"] == "2026-08-05T15:31:00+00:00"
+        assert c.extras["activation_zone"] == {
+            "occurrence_id": "FVG:CON.F.US.MNQ.U26:5m:2026-08-05T15:25:00+00:00",
+            "direction": "bullish", "low": 29860.0, "high": 29866.0}
+
+    def test_plan_can_be_authored_before_entry_window_but_trigger_still_checks_rr(self):
+        p = parsed(current_action="watching",
+                   plan_expires_at="2026-08-05T15:31:00+00:00")
+        maker = producer()
+        maker.min_r = 100.0
+        plan = produce(maker, res=result(parsed=p), in_window=False,
+                       conditional_plan=True)
+        assert plan.extras["conditional_plan"] is True
+        with pytest.raises(NoCandidate, match="reward_below_qualification"):
+            produce(maker, res=result(parsed=p), conditional_trigger=True)
+
+    def test_watching_cannot_fall_through_to_an_immediate_candidate(self):
+        p = parsed(current_action="watching",
+                   plan_expires_at="2026-08-05T15:31:00+00:00")
+        with pytest.raises(NoCandidate, match="conditional_plan_mode_required"):
+            produce(res=result(parsed=p))
+
+    def test_watching_without_explicit_future_expiry_is_refused(self):
+        p = parsed(current_action="watching", plan_expires_at=None)
+        with pytest.raises(NoCandidate, match="conditional_plan_expiry_invalid"):
+            produce(res=result(parsed=p), conditional_plan=True)
 
     def test_a_bearish_candidate_is_produced(self):
         # stop 29885 (5.00 risk), target 29840 (40.00 reward) -> 8.0R

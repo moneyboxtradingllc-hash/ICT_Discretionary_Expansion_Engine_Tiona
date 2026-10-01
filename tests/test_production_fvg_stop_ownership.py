@@ -284,8 +284,13 @@ class TestToolVerificationIsNotStopAuthority:
         assert a.invalidation_price == b.invalidation_price
         assert a.objective.price == b.objective.price
 
-    def test_nothing_downstream_reads_the_occurrence_as_authority(self):
-        """6 — the field is written and never consulted for a decision.
+    def test_downstream_occurrence_read_only_revalidates_conditional_plan_identity(self):
+        """6 — ordinary candidate logic ignores occurrence IDs as authority.
+
+        LATENCY-1 adds one bounded production consumer: at a conditional trigger,
+        the loop compares the re-detected occurrence with the exact authorized
+        occurrence and refuses on mismatch. That read protects plan identity; it
+        does not choose entry, stop, target, or risk geometry.
 
         THIS IS A CLAIM ABOUT SOURCE CONTENTS, so it is answered by reading the
         source. It used `git grep`, which made a statement about the code
@@ -310,4 +315,7 @@ class TestToolVerificationIsNotStopAuthority:
                     if "selected_tool_occurrence_id" in fh.read():
                         found.append(
                             _os.path.relpath(p, repo).replace(_os.sep, "/"))
-        assert sorted(found) == ["src/broker/luna_candidate_producer.py"], found
+        assert sorted(found) == [
+            "src/broker/luna_candidate_producer.py",
+            "src/broker/topstepx_production_loop.py",
+        ], found

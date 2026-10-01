@@ -103,6 +103,7 @@ class WakeRegistry:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._armed: tuple = ()          # published snapshot, main writes
+        self._conditional_watch = None   # one Brain-authored plan, main writes
         self._episode: dict = {}         # pump-owned OUTSIDE/INSIDE per occurrence
         #: Level-triggered. An event set while Luna is mid-flight STAYS set, so
         #: the loop runs one immediate fresh cycle when the call returns rather
@@ -194,9 +195,59 @@ class WakeRegistry:
             if was == OUTSIDE and now == INSIDE:
                 fired.append({"occurrence_id": occurrence_id, "reason": WAKE_ENTERED,
                               "direction": direction, "price": price})
+        with self._lock:
+            watch = dict(self._conditional_watch) if self._conditional_watch else None
+        if watch is not None:
+            price = executable_for(watch["direction"], bid, ask)
+            if price is not None and watch["low"] <= price <= watch["high"]:
+                fired.append({"occurrence_id": watch["occurrence_id"],
+                              "reason": "conditional_plan_zone_reached",
+                              "direction": watch["direction"], "price": price,
+                              "plan_id": watch["plan_id"]})
+                with self._lock:
+                    if self._conditional_watch == watch:
+                        self._conditional_watch = None
         if fired:
             self._raise_interaction(fired, observed_at=observed_at)
         return fired
+
+    def publish_conditional_watch(self, *, plan_id: str, occurrence_id: str,
+                                  direction: str, low: float, high: float,
+                                  bid=None, ask=None) -> dict:
+        """Watch exactly the zone bound to one already-authorized Brain plan."""
+        try:
+            low, high = float(low), float(high)
+        except (TypeError, ValueError):
+            return {"published": False, "reason": "invalid_zone"}
+        if (not plan_id or not occurrence_id or direction not in {"bullish", "bearish"}
+                or low > high):
+            return {"published": False, "reason": "invalid_identity_or_geometry"}
+        watch = {"plan_id": str(plan_id), "occurrence_id": str(occurrence_id),
+                 "direction": direction, "low": low, "high": high}
+        with self._lock:
+            self._conditional_watch = watch
+        price = executable_for(direction, bid, ask)
+        if price is not None and low <= price <= high:
+            with self._lock:
+                if self._conditional_watch == watch:
+                    self._conditional_watch = None
+            self._raise_interaction([{
+                "occurrence_id": str(occurrence_id),
+                "reason": "conditional_plan_armed_inside",
+                "direction": direction, "price": price,
+                "plan_id": str(plan_id),
+            }])
+        return {"published": True, "plan_id": str(plan_id),
+                "occurrence_id": str(occurrence_id)}
+
+    def clear_conditional_watch(self, plan_id: str = None) -> bool:
+        with self._lock:
+            if self._conditional_watch is None:
+                return False
+            if plan_id is not None and self._conditional_watch.get("plan_id") != plan_id:
+                return False
+            self._conditional_watch = None
+            return True
 
     # ── PRODUCTION MAIN THREAD ──────────────────────────────────────────────
     @staticmethod

@@ -21,6 +21,7 @@ import copy
 import json
 import time
 import threading
+from datetime import datetime, timezone
 
 from ai_brain import ai_call_ledger as LEDGER
 import os
@@ -573,6 +574,8 @@ def _call_llm(brain_input: dict, repair: "dict | None" = None) -> dict:
         if json_mode_enabled():
             create_kwargs["response_format"] = {"type": "json_object"}
         _started = time.time()
+        out["provider_call_started_at"] = datetime.fromtimestamp(
+            _started, timezone.utc).isoformat()
         out["provider_request_attempted"] = True
         # `with_raw_response` exposes the HTTP headers, which is the only place
         # OpenAI's `x-request-id` lives. Falls back to the plain call when the
@@ -585,6 +588,8 @@ def _call_llm(brain_input: dict, repair: "dict | None" = None) -> dict:
         except AttributeError:
             resp = client.chat.completions.create(**create_kwargs)
         _latency = time.time() - _started
+        out["provider_call_completed_at"] = datetime.fromtimestamp(
+            time.time(), timezone.utc).isoformat()
         content = resp.choices[0].message.content or ""
         out["raw_response"] = content
         out["request_id"] = LEDGER.server_request_id(_raw, resp)
@@ -649,6 +654,10 @@ def _call_llm(brain_input: dict, repair: "dict | None" = None) -> dict:
         out["parsed"], out["ok"] = parsed, True
         return out
     except Exception as exc:  # noqa: BLE001
+        if out.get("provider_request_attempted") and "provider_call_started_at" in out:
+            out["provider_call_completed_at"] = datetime.now(timezone.utc).isoformat()
+            out["latency_seconds"] = max(
+                0.0, time.time() - _started) if "_started" in locals() else None
         hard_quota = _hard_quota_reason(exc)
         if hard_quota:
             _open_hard_quota_circuit(hard_quota)
@@ -1247,6 +1256,9 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             "llm_user_content": (llm_call or {}).get("user_content"),
             "llm_raw_response": (llm_call or {}).get("raw_response"),
             "llm_usage": (llm_call or {}).get("usage"),
+            "provider_call_started_at": (llm_call or {}).get("provider_call_started_at"),
+            "provider_call_completed_at": (llm_call or {}).get("provider_call_completed_at"),
+            "provider_latency_seconds": (llm_call or {}).get("latency_seconds"),
             "fallback_reason": fallback_reason,
             # AI-BRAIN-H1 hardening audit trail
             "normalization_notes": norm_notes,

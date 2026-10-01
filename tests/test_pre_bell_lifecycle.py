@@ -178,7 +178,10 @@ class TestLunaThinksBeforeTheBell:
         import inspect
         from broker import luna_candidate_producer as CP
         from broker import topstepx_candidate_freshness as FR
-        assert "if not in_window:" in inspect.getsource(CP)
+        # A Brain-authored conditional plan may be published pre-window, but
+        # ordinary proposals still refuse and the trigger re-enters all gates.
+        # The focused producer tests exercise both branches behaviorally.
+        assert "if not in_window and not conditional_plan:" in inspect.getsource(CP)
         assert "if not in_window:" in inspect.getsource(FR)
 
 
