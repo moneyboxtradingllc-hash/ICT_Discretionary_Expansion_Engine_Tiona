@@ -510,3 +510,178 @@ def test_missing_production_observation_time_does_not_fall_back_to_candle(
     assert result["source"] == "llm"
     assert "invalid_observation_time" in result["wake_decision"]["reasons"]
     assert provider.call_count == 1
+
+
+def test_real_brain_timing_reaches_conditional_plan_telemetry(monkeypatch):
+    """Provider timing survives the actual Brain -> scan -> plan path."""
+    import adaptive_learning.capital_intelligence_engine as capital
+    import live_scan.production_scan_cycle as cycle_module
+    import shared_context.council as council
+    import shared_context.shared_market_context as shared
+    import state_transitions.transition_engine as transitions
+    import broker.topstepx_production_loop as loop_module
+    from live_scan.production_scan_cycle import ProductionScanCycle
+
+    monkeypatch.setenv("BRAIN_ECU_MODE", "false")
+    monkeypatch.setenv("BRAIN_WAKE_MODE", W.OFF)
+    snapshot, payload = evidence()
+    parsed = copy.deepcopy(GOOD_LLM)
+    parsed["current_action"] = "watching"
+    provider_timing = {
+        "provider_call_started_at": "2026-09-11T14:00:01.125000+00:00",
+        "provider_call_completed_at": "2026-09-11T14:00:13.470000+00:00",
+        "latency_seconds": 12.345,
+    }
+    provider = Mock(return_value={
+        "parsed": parsed, "ok": True, "model": "gpt-6-luna",
+        "model_requested": "gpt-6-luna", "model_returned": "gpt-6-luna",
+        "fallback_reason": None, "provider_request_attempted": True,
+        **provider_timing,
+    })
+    persisted = Mock(return_value="brain.json")
+    monkeypatch.setattr(NB, "build_brain_input",
+                        lambda *_args: copy.deepcopy(payload))
+    monkeypatch.setattr(NB, "_call_llm", provider)
+    monkeypatch.setattr(NB, "persist_brain_call", persisted)
+    monkeypatch.setattr(cycle_module, "build_timeframes", lambda _bars: {})
+    monkeypatch.setattr(cycle_module.CONT, "summarize", lambda *_a, **_k: {
+        "continuous": True})
+    monkeypatch.setattr(loop_module.CONT, "coherent_window", lambda bars, **_k: {
+        "sufficient": True, "window": bars, "continuous": True})
+    monkeypatch.setattr(cycle_module, "build_snapshot", lambda *_a, **_k:
+                        copy.deepcopy(snapshot))
+    monkeypatch.setattr(capital, "track_capital", lambda *_a, **_k: {})
+    monkeypatch.setattr(shared, "build_shared_market_context", lambda *_a: {})
+    monkeypatch.setattr(council, "run_council", lambda *_a: {})
+    monkeypatch.setattr(transitions, "analyze_transition", lambda *_a: {})
+    import ai_retrieval.retrieval as retrieval
+    monkeypatch.setattr(retrieval, "retrieve_for_snapshot", lambda *_a: {})
+    monkeypatch.setattr(retrieval, "retrieval_startup_state", lambda: {})
+    from ai_brain import ecu
+    monkeypatch.setattr(ecu, "ecu_enabled", lambda: False)
+
+    cycle = ProductionScanCycle.__new__(ProductionScanCycle)
+    cycle.symbol = "MNQ"
+    cycle.account_provider = None
+    cycle.capital_identity = None
+    cycle.contract_id = "CON.TEST"
+    cycle.quote_provider = None
+    cycle.htf_engine = SimpleNamespace(update=lambda _bars: {})
+    cycle.memory = cycle.prev_experience_summary = None
+    cycle.prev_memory_search = cycle.prev_dashboard = None
+    cycle.thesis_engine = cycle.swing_tracker = cycle.po3_stability = None
+    cycle.stance_memory = Stance()
+    cycle.session_po3 = SimpleNamespace()
+    cycle._prior_po3_range = cycle._prior_po3_session_date = None
+    cycle.expansion_stability = None
+    cycle._history = SimpleNamespace(observe=lambda _bars: 1, revision=1)
+    cycle._derived_revision = 1
+    cycle.rebuilds = []
+    cycle.scan_count = 0
+    cycle.previous_snapshot = cycle.previous_qual_state = None
+    cycle.bars_in_state = 0
+    cycle.setup_tracker = SimpleNamespace(update=lambda *_a: {})
+    cycle.retrieval_telemetry = SimpleNamespace(record_scan=lambda **_k: {})
+    cycle._execution_price = lambda: snapshot["execution_price"]
+    cycle._record_sweep_occurrences = lambda _snapshot: []
+    cycle._update_active_path = lambda _snapshot: {}
+    cycle._update_structure_flips = lambda _snapshot: []
+    cycle._brain_input = lambda _snapshot: copy.deepcopy(payload)
+    cycle._two_brain_after_primary = lambda *_a: None
+    actual_scan = cycle.scan
+    scan_results = []
+
+    def capture_actual_scan(*args, **kwargs):
+        result = actual_scan(*args, **kwargs)
+        scan_results.append(result)
+        return result
+
+    cycle.scan = capture_actual_scan
+
+    events = []
+    registry = WakeRegistry()
+    candidate = SimpleNamespace(
+        candidate_id="plan-real-brain", direction="bullish",
+        extras={
+            "conditional_plan": True,
+            "activation_zone": {"occurrence_id": "occ-real-brain",
+                                "direction": "bullish", "low": 99.0,
+                                "high": 99.5},
+            "conditional_plan_brain_output": parsed,
+            "conditional_plan_brain_result": {},
+            "plan_expires_at": "2026-09-11T14:05:00+00:00",
+        })
+
+    class Producer:
+        def produce(self, **kwargs):
+            # Candidate production consumes the real result built by the cycle.
+            assert kwargs["brain_result"]["parsed"]["current_action"] == "watching"
+            candidate.extras["conditional_plan_brain_result"] = kwargs["brain_result"]
+            return candidate
+
+    monkeypatch.setattr(loop_module.LIFECYCLE, "entry_authority_exhausted",
+                        lambda _mission: False)
+    loop = ProductionLoop.__new__(ProductionLoop)
+    loop.clock = lambda: NOW
+    loop.candles = SimpleNamespace(
+        wake_registry=registry,
+        fetch_1m_candles=lambda *_a, **_k: [{"timestamp": "bar"}],
+    )
+    loop.cycle = cycle
+    loop.symbol = "MNQ"
+    loop.ps = SimpleNamespace(
+        contract=SimpleNamespace(id="CON.TEST"),
+        session=object(),
+        quote_provider=SimpleNamespace(capture=lambda: SimpleNamespace(
+            market_data_age_seconds=0.1, best_bid=100.0, best_ask=100.25,
+            captured_at=NOW)),
+    )
+    loop.mission = SimpleNamespace(
+        authorization=SimpleNamespace(session_id="SESSION"), candidate_count=0,
+    )
+    loop.outcomes = []
+    loop._pending_wake_event = None
+    loop.active_conditional_plan = None
+    loop.active_candidate = None
+    loop.producer = Producer()
+    loop.reconcile_missions = lambda: {}
+    loop.manage_open_position = lambda: {"status": "no_live_mission"}
+    loop._repair_history_if_holed = lambda bars: bars
+    loop._volume_profile_evidence = lambda *_a: {}
+    loop._record_volume_profile_evidence = lambda *_a: None
+    loop._in_window = lambda: True
+    loop._attach_evidence = lambda *_a, **_k: None
+    loop._record_decision = lambda *_a, **_k: None
+    loop._record_plan_events = lambda _plan_id, rows: events.extend(rows)
+
+    result = loop.scan_once()
+
+    assert result["outcome"] == "CONDITIONAL_PLAN_PUBLISHED"
+    assert provider.call_count == 1
+    # This is the actual result returned from run_narrative_brain and
+    # propagated through ProductionScanCycle.scan into production publication.
+    brain_block = scan_results[0]["brain_block"]
+    assert brain_block["provider_call_started_at"] == provider_timing[
+        "provider_call_started_at"]
+    assert brain_block["provider_call_completed_at"] == provider_timing[
+        "provider_call_completed_at"]
+    assert brain_block["provider_latency_seconds"] == provider_timing["latency_seconds"]
+    assert persisted.call_count == 1
+    archived = persisted.call_args.args[1]
+    assert archived["provider_call_started_at"] == provider_timing[
+        "provider_call_started_at"]
+    assert archived["provider_call_completed_at"] == provider_timing[
+        "provider_call_completed_at"]
+    assert archived["provider_latency_seconds"] == provider_timing["latency_seconds"]
+    assert next(e for e in events if e["event"] == "brain_call_started")[
+        "timestamp"] == archived["provider_call_started_at"]
+    completed = next(e for e in events if e["event"] == "brain_decision_completed")
+    assert completed["timestamp"] == archived["provider_call_completed_at"]
+    assert completed["latency_seconds"] == archived["provider_latency_seconds"]
+    assert next(e for e in events if e["event"] == "plan_published")
+
+    # The following mechanics-only scan uses the cycle's real trigger branch;
+    # there must be no second provider/Brain invocation.
+    trigger = cycle.scan([{"timestamp": "bar"}], now=NOW, invoke_brain=False)
+    assert trigger["brain_block"]["source"] == "preauthorized_plan_trigger"
+    assert provider.call_count == 1

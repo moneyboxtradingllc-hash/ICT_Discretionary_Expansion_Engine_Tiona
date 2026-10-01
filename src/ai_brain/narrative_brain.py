@@ -1321,6 +1321,16 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             "llm_model_requested": (llm_call or {}).get("model_requested"),
             "llm_model_returned": (llm_call or {}).get("model_returned"),
             "llm_usage": (llm_call or {}).get("usage"),
+            # PROVIDER TIMING is captured once at the provider boundary and
+            # persisted above. Return those same values so production callers
+            # can carry the original Brain timing into plan telemetry without
+            # deriving a second clock.
+            "provider_call_started_at": (llm_call or {}).get(
+                "provider_call_started_at"),
+            "provider_call_completed_at": (llm_call or {}).get(
+                "provider_call_completed_at"),
+            "provider_latency_seconds": (llm_call or {}).get(
+                "latency_seconds"),
             "fallback_reason": fallback_reason,
             # LUNA-DEGRADED-TELEMETRY (2026-08-06): the reason a call was
             # degraded lived only inside output["warnings"], where a caller

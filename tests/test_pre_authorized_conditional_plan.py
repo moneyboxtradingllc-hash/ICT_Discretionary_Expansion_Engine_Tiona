@@ -243,6 +243,10 @@ def test_trigger_uses_stored_brain_plan_and_current_mechanics_without_recalling_
         "current_action": "watching"}
     assert decision_records[0][1]["conditional_plan_id"] == "plan-11"
     assert loop.active_conditional_plan is None
+    assert any(event["event"] == "entry_condition_reached"
+               for event in plan_events)
+    assert not any(event["event"] == "entry_zone_reached"
+                   for event in plan_events)
     accepted = [event for event in plan_events
                 if event["event"] == "plan_mechanics_accepted"]
     assert len(accepted) == 1

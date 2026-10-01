@@ -1295,7 +1295,7 @@ class ProductionLoop:
         zone = extras.get("activation_zone") or {}
         now = self.clock()
         self._record_plan_events(plan.get("plan_id"), [{
-            "event": "entry_zone_reached",
+            "event": "entry_condition_reached",
             "timestamp": event.get("observed_at"),
             "quote": event.get("price"),
             "occurrence_id": event.get("occurrence_id"),
