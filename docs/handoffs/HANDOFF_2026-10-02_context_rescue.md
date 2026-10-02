@@ -31,7 +31,7 @@ Paste this at the start of a new Claude Code chat on branch
   3.14.5; verified here on 3.13. `requirements.txt` is UTF-16LE + CRLF — keep it.
 - Focused tests (production model, model identity, provider identity, NEWS-2
   factual foundation): **136 passed, 1 skipped**.
-- Full-suite result: see `docs/PROJECT_CONTEXT.md` §14 (was still running when this was written).
+- Full suite on this branch: **7,649 passed, 585 skipped, 0 failed** (CPython 3.13; details in `docs/PROJECT_CONTEXT.md` §14).
 
 ## Key rules to carry forward
 

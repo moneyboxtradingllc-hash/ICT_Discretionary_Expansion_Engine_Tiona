@@ -270,7 +270,7 @@ Eras reconstructed from `git log` and `docs/evolution/TIMELINE.md` **[doc]**:
   This doc follows the code. Treat any doctrine number as *code truth, ruling
   unconfirmed* until Maurice re-confirms.
 - Account IDs, credentials, and personal emails are intentionally absent.
-- Test status: see §14.
+- Test status: full suite green on 3.13 (see §14); not run on the certified 3.14.5.
 - `docs/map0_system_wiring.md`, `docs/ai_brain_*`, and the `ab*` docs were not
   re-read; consult them for module-level wiring detail.
 
@@ -282,11 +282,15 @@ Eras reconstructed from `git log` and `docs/evolution/TIMELINE.md` **[doc]**:
 - Focused run: `test_production_brain_model`, `test_model_identity_consistency`,
   `test_provider_model_identity_20260927`, `test_news2_factual_foundation` →
   **136 passed, 1 skipped**.
-- Full-suite run: **in progress when this was written.** The last certified full
-  run (`docs/REPOSITORY_CERTIFICATION_20260910.md`, commit `ce95a26`+) was 7,838
-  collected / 7,255 passed / 0 failed / 583 skipped; later commit bodies report
-  7,537 passed / 584 skipped / 0 failed (`713f1cc`). Re-run before relying on any
-  number here.
+- **Full suite** on `a389193` (source identical to `95170d8`; docs-only difference),
+  2026-10-02, CPython 3.13, `python -m pytest -q -p no:cacheprovider`:
+  **7,649 passed, 585 skipped, 0 failed, 0 errors, 34 subtests passed** in 6 min 35 s
+  (9 warnings: class-scoped fixture deprecations, `websockets.legacy`, `datetime.utcnow()`).
+  The skips need operator evidence or credentials, as in earlier certifications.
+- For comparison: last certified run (`docs/REPOSITORY_CERTIFICATION_20260910.md`,
+  commit `ce95a26`+) was 7,838 collected / 7,255 passed / 0 failed / 583 skipped on
+  CPython 3.14.5; `713f1cc` reported 7,537 passed / 584 skipped / 0 failed.
+  Re-run before relying on any number here.
 
 ## 15. Glossary
 
