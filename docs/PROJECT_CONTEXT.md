@@ -1,9 +1,14 @@
 # Project Context — ICT Discretionary Expansion Engine (Tiona)
 
 *Written 2026-10-02 against commit `95170d8` (2026-09-28, branch
-`claude/optimistic-turing-bxpw5k` history). Purpose: let any new session or person
-rebuild full context from the repository alone, so no single chat is a single
-point of failure.*
+`claude/optimistic-turing-bxpw5k` history). **Updated later on 2026-10-02 for the
+deployed production build `cbfaddb` (LATENCY-1, branch
+`feature/latency-1-preauthorized-plans`) and sessions PROD-20261001/02.** Purpose: let
+any new session or person rebuild full context from the repository alone, so no
+single chat is a single point of failure.*
+
+**[ops]** below means taken from the operator's session reports to Maurice
+(2026-10-01/02), not from the repo. Account IDs and balances are left out on purpose.
 
 **How to read the confidence markers.** Statements marked **[code]** were checked
 against source at this commit. **[doc]** means taken from a repo doc or commit
@@ -26,9 +31,17 @@ establish it from the repo — ask the owner. Section 13 lists what was *not* ch
   durable, signed session authorization. Nothing here authorizes live money.
 - Work is governed by **written rulings from Maurice** (architect). Tiona/Nas is
   the operator who runs sessions and relays results.
-- The most recent work (Sep 2026): LLM-call cost control (wake controller), model
-  identity enforcement, stair-step profit protection, TopstepX-resolved contract
-  month, volume-at-price evidence, and an observe-only factual news layer.
+- September work: LLM-call cost control (wake controller), model identity
+  enforcement, stair-step profit protection, TopstepX-resolved contract month,
+  volume-at-price evidence, and an observe-only factual news layer (NEWS-2).
+- **Production now runs LATENCY-1** (`cbfaddb`, `brain:0ec4ef07c75dbcef`). The Brain
+  can publish a *pre-authorized conditional plan* (an exact zone + expiry); when price
+  reaches the zone, mechanics execute it without calling the Brain again. Session
+  PO3 is now context, not an entry veto. Size and risk are recomputed from the final
+  executable quote. Two live sessions on this build (10/01 +$1,452.08, 10/02 −$42.20);
+  **four defects are waiting on Maurice's rulings** (§12). **[code/ops]**
+- **Branch split:** production and the NEWS-2/docs branch diverge at `49550b5`.
+  NEWS-2 is **not** in the production build. See `CLAUDE.md` → "Which code is live".
 
 ## 2. People and working model
 
@@ -50,7 +63,7 @@ operators' instances were separated. **[doc]**
 | Direction author | External Brain (`gpt-6-luna`), validated by deterministic contracts | `deterministic_sim_author` (no LLM; `OPENAI_DISABLED_FOR_INTEGRATION=1`) |
 | Risk constants | `topstepx_combine_risk.py`: preferred stop 35 pt, absolute 50 pt, max 15 contracts, max $350 risk. `topstepx_session_authorization.py`: daily loss budget $725, 2 trades/session, 1 attempt/mission, window 09:00–14:00 ET **[code]** | `deterministic/__init__.py`: target 35 pt, max stop 25 pt, $500/trade, max 30 contracts, 2 trades/day, daily loss ceiling $1,000, window 09:30–14:00 ET **[code]** |
 | Arming | Durable session authorization + `--arm` | `TOPSTEPX_ARM_ORDERS`, pinned `false` by the launcher |
-| Status | The active line of development (Aug–Sep 2026) | Stable reference lane; proved the pipeline end to end in July (see §10) |
+| Status | The active line. Deployed build: `cbfaddb` (LATENCY-1) on `feature/latency-1-preauthorized-plans` | Stable reference lane; proved the pipeline end to end in July (see §10) |
 
 **Do not mix the constants.** They are different lanes with different owners.
 The numbers in an older chat handoff (45 pt stop, $250, 09:30–16:07 ET) match
@@ -88,6 +101,20 @@ structural invalidation**; target authority is the Brain-selected liquidity
 objective; bracket authority is bot-authored geometry, **not** Topstep Position
 Brackets (which must be disabled on the account) **[code: `topstepx_production_doctrine.py`]**.
 
+### 4a. Changes in the production lineage after `49550b5` (all **[code]** at `cbfaddb`)
+
+These commits have no message bodies; the descriptions come from their diffs.
+
+| Commit | Mission | What it does |
+|---|---|---|
+| `a8ba9d5` (09-28) | BRAIN-SOVEREIGNTY-SESSION-PO3-CONTEXT-1 | Session PO3 becomes `AUTHORITY_CLASS = "CONTEXT_ONLY"`. Its phase is passed to the Brain as `session_phase_context` (a "permissive"/"caution" posture with a reason) and is no longer part of the hard authorization conjunction or the gate's blocking factors. The Brain may disagree with it and must explain why. Fingerprint → `brain:0cf842782313d826`. |
+| `5387300`, `45f9e97` (09-29) | FINAL-QUOTE-ECONOMICS-1 | Just before submit the runner captures the **final executable quote** and reprices economics from it with the thesis levels held fixed (`_capture_final_executable_entry`, `_reprice_production_economics`). A missing or unusable quote, a wrong-side stop or target, or R:R below the gate → refuse; there is no fallback to the planned price. The quantity may be resized **down** at the final quote (`45f9e97`). Results are recorded as `final_quote_economics`. |
+| `3f90e2d` (09-30) | LATENCY-1 | **Pre-authorized conditional plans.** A Brain answer of `current_action = "watching"` with an explicit future `plan_expires_at` and an exact execution-object zone publishes one plan. While it is armed, no new blocking Brain call starts. When the quote reaches the zone, `handle_pending_conditional_wake` rebuilds the mechanical scan and executes or refuses **without calling the Brain**. Mechanics may only execute or refuse; they cannot change direction, playbook, object or levels. Expiry or invalid evidence clears the plan. Timing is logged to `conditional_plan_events.jsonl`. Fingerprint → `brain:0ec4ef07c75dbcef`. |
+| `cbfaddb` (09-30) | LATENCY-1 telemetry repair | Fixes provider-timing telemetry for plan events. Fingerprint unchanged. |
+
+In practice only **FVG** plans can publish: `ote_after_reclaim` and `rejection_block`
+choices carry no exact zone and are refused with `conditional_plan_zone_unavailable`. **[ops]**
+
 ## 5. Brain and model governance
 
 - **Single authority**: `src/ai_brain/production_model.py`. `PRODUCTION_MODEL =
@@ -104,9 +131,11 @@ Brackets (which must be disabled on the account) **[code: `topstepx_production_d
   `provider_model_mismatch`, no repair, no retry on another model. **[doc]**
 - **Brain contract fingerprint**: hash over 30 ordered source files + the retrieval
   policy fingerprint (rule and list in `docs/REPOSITORY_CERTIFICATION_20260910.md`).
-  Authorizations bind to it. Recorded value after `49550b5`: `brain:3a09895222765f22`
-  (`95170d8` states it is unchanged). Authorizations issued earlier, including
-  `PROD-20260928`, "must be reissued". **[doc]**
+  Authorizations bind to it. **Production (`cbfaddb`): `brain:0ec4ef07c75dbcef`**,
+  recomputed here with pinned dependencies and matching the pin in
+  `tests/test_brain_fingerprint_portability.py`. The NEWS-2/docs branch is
+  `brain:3a09895222765f22` (same as `49550b5`). The fingerprint is only correct when
+  computed with dependencies installed (see `CLAUDE.md`). **[code]**
 - **Model selection doctrine** (`docs/model_selection_doctrine.md`, 2026-08-04):
   replay proves *compatibility*, live proves *value*. Paid replay bake-offs are
   cancelled. Only the frozen live **ADAPTIVE-8** campaign (10+ sessions and 20–30
@@ -171,6 +200,9 @@ All **[doc]** from commit subjects/bodies unless noted:
   no model calls. Owner ruling 2026-09-27: *facts and provenance in code; no model
   pre-interprets the world.* Tools: `tools/news2_refresh.py`,
   `tools/news2_event_window_audit.py`. **[doc]**
+- **NEWS-2 is not in the production build.** It lives on the
+  `claude/optimistic-turing-bxpw5k` / docs lineage only. Maurice's 10/01
+  authorization lists NEWS-2 among the changes that are not to be made. **[code/ops]**
 
 ## 8. TopstepX venue facts
 
@@ -213,6 +245,32 @@ All **[doc]** from commit subjects/bodies unless noted:
 - Launchers: `.sh` for macOS/Linux and `.ps1` for Windows. The TopstepX lane got its
   macOS launcher on 2026-08-26 so a second operator could run it.
 
+### 9a. Session-day sequence (as run for PROD-20261001) **[ops]**
+
+1. Maurice issues a written authorization bound to the exact branch, SHA, model,
+   fingerprint and session date. That authorizes *readiness*, not arming.
+2. The operator checks venue settings in the TopstepX UI and records the dated
+   **protection attestation** (Position Brackets OFF, bot-attached brackets).
+3. Issue and verify the session authorization (`PROD-YYYYMMDD`, state UNSPENT).
+4. Run `--final` production preflight. **24 gates** must pass: clean tracked source,
+   known fingerprint, PRAC/simulated account pin, contract resolved, flat, no bot
+   orders, protection attested, risk constants, brain enabled, production model,
+   zero provider calls during preflight, and a valid session authorization.
+5. Stop and report. Arm only on Maurice's separate explicit ARM / GO.
+6. After the close: a session report labelled VERIFIED / INFERRED / UNKNOWN, a
+   build-aware scorecard, and an explicit "no code/config/.env change" statement.
+
+### 9b. Live sessions on the current build (`cbfaddb`) **[ops]**
+
+| Session | Net | What happened |
+|---|---|---|
+| **PROD-20261001** | **+$1,452.08** (2 trades, 2 wins) | T1 long 4 (ordinary `enter`, final quote resized 6→4): target hit, +2.67R. T2 short 7: +1.99R, the first live proof of the 2.5R stair locking profit. **T2 came through Defect 1** (a verbose "watching:" answer treated as an immediate entry, outside the zone the Brain authorized). 9 plans published, 7 triggered, trigger→mechanics decision about 3 s; 0 plan executions. Brain timeouts 91/284 (32%), about 64% failed 09:30–11:30. |
+| **PROD-20261002** | **−$42.20** (1 fill) | T1 refused before submit (RISK_DRIFTED; the refusal likely avoided a loss). T2 was the **first trade executed from a LATENCY-1 plan**, 2.3 s from trigger to submit. A 1-tick fill pushed all-in risk to $352.20 against the $350 cap → POST_FILL_REFUSED → flatten. The flatten returned no order ID → session **CONTAMINATED** for the remaining 3 h 17 min (Defect A). Timeouts 28/358 (7.8%). |
+
+Scorecard (a ledger, not a grade): current build 2 sessions, +$1,409.88; all builds
+14 sessions, 14 trades, −$362.46. Management is the **2.5R stair**, confirmed by
+Maurice for 10/02.
+
 ## 10. History (condensed)
 
 Eras reconstructed from `git log` and `docs/evolution/TIMELINE.md` **[doc]**:
@@ -228,7 +286,9 @@ Eras reconstructed from `git log` and `docs/evolution/TIMELINE.md` **[doc]**:
 | Aug 31–Sep 3 | Owner-law daily loss budget; `LUNA-*` lineage missions (venue-minted close lineage, protective child lineage, daily-governor attribution); Brain switches + instrument template |
 | Sep 4–10 | `PROD-20260904` venue-rejection-with-no-order-id incident and review; a run of `PROD-20260908/09` forensic/accounting repairs; repository recertification (LF fingerprint, PyYAML pin) |
 | Sep 10–15 | Pre-Brain wake shadow audit, wake controller, stair-step protection, fill-latency observability, structural-risk evidence, VAP evidence |
-| Sep 20–28 | TopstepX contract-month authority; wake evidence-shape fix; decision accounting for held scans; protection 2.5R-first; swing invalidation truth; freshness refusals; **GPT-6 Luna** (Sep 25); provider-identity enforcement (Sep 27); **NEWS-2** (Sep 28) |
+| Sep 20–28 | TopstepX contract-month authority; wake evidence-shape fix; decision accounting for held scans; protection 2.5R-first; swing invalidation truth; freshness refusals; **GPT-6 Luna** (Sep 25); provider-identity enforcement (Sep 27); **NEWS-2** (Sep 28, off the production line) |
+| Sep 28–30 | Production line: Session PO3 demoted to context (`a8ba9d5`); final-quote economics (`5387300`, `45f9e97`); **LATENCY-1** pre-authorized conditional plans (`3f90e2d`) and telemetry repair (`cbfaddb`). 9/29: a flatten close contaminated the session (first Defect A). 9/30: 23% Brain timeouts |
+| Oct 1–2 | First two live sessions on LATENCY-1 (§9b). Maurice is reviewing the evidence before issuing the next mission |
 
 ## 11. Architectural laws (recurring lessons)
 
@@ -246,29 +306,80 @@ Eras reconstructed from `git log` and `docs/evolution/TIMELINE.md` **[doc]**:
 
 ## 12. Open items and known gaps
 
+### Waiting on Maurice's rulings (reported 2026-10-01/02; no fix made yet)
+
+Code references were checked at `cbfaddb`. Status: as of 2026-10-02, Maurice said he is
+reviewing the evidence before issuing any next mission. No code was changed.
+
+1. **Defect A (high): a flatten close with no order ID contaminates the session.**
+   The emergency `POSITION_CLOSE` returns success with no venue order ID
+   (SUBMISSION_UNKNOWN). The daily-loss governor then sees an in-session trade it
+   cannot attribute → `CONTAMINATED` / `unattributable_in_session_trade`
+   (`daily_loss_budget.py:65,267`) → `GOVERNOR_UNPROVEN` → every later entry is refused.
+   This cost 9/29 (30 candidates blocked) and 10/02 (3 h 17 min, 60 refusals).
+2. **Defect B (medium; touches risk/sizing, which are frozen): entry slippage counted twice
+   after the fill.** The post-fill check (`topstepx_execution_runner.py` around
+   1478–1517, `all_in_risk_for`) measures gross risk from the actual fill and *also*
+   charges the full provisional slippage reserve (2 ticks in + 2 out). Combined with
+   sizing to within $2.80 of the $350 cap, any 1-tick slip on a 10-lot forces a flatten,
+   which then triggers Defect A.
+3. **Defect 1 (high): verbose "watching:" answers become immediate entries.** Plans are
+   recognised only when `current_action` is exactly `"watching"`
+   (`luna_candidate_producer.py:1219`, `topstepx_production_loop.py:1088-1090`), and
+   `NON_ENTRY_ACTIONS` (`luna_candidate_producer.py:1441`) does not include it.
+   `"watching: … do not enter at the current price"` therefore takes the ordinary entry
+   path. This produced 10/01 T2 outside the authorized zone. It did not recur on 10/02
+   (all answers were the bare token), but it is still unfixed. Suggested fail-closed
+   rule: anything starting with "watching" is either a plan or refused, never an entry.
+4. **LATENCY-1 telemetry/accounting.** (a) Refused plans record stale economics and a
+   `submission_started` event copied from an earlier trade (`_execute_conditional_plan`
+   reads `runner.final_quote_economics` regardless of outcome). (b) New `conditional_plan_*`
+   reasons and `tool_not_detected` are UNCLASSIFIED → `CANDIDATE_DECISION_ACCOUNTING_FAILURE`
+   (18 on 10/01, 22 on 10/02). (c) The mission exit is recorded as "unattributed".
+
+### Other live observations **[ops]**
+
+- **Brain provider timeouts** (`APITimeoutError`): 9/30 23%, 10/01 32% (clustered at the
+  open), 10/02 7.8%. Completed calls take p50 about 30 s, max about 46 s. Cause unknown.
+  Timeout tuning is frozen. A read-only timeout autopsy request from Maurice was
+  withdrawn the same day. Degraded scans fail closed (no candidate, no plan).
+- **Plan coverage:** 12 (10/01) and 20 (10/02) "watching" answers could not publish,
+  because only FVG objects carry an exact zone. While a plan is armed the Brain is
+  mostly silent; this is by design but was raised as an observation.
+- **Window-end exit leaves a mission unreconciled:** after 14:00 ET,
+  `should_continue()` ends the loop on a flat venue read without a final reconcile, so
+  10/01 T2's mission file stayed `POSITION_OPEN`. Minor; the venue facts are recoverable.
+
+### Carried from earlier
+
 - **Wake ENFORCE historical acceptance** was not proven when written (replay bundles
   absent). Decide whether ENFORCE is acceptable for the Combine phase. **[doc]**
 - **ADAPTIVE-8 live campaign**: model comparison is not yet sayable; Terra is held
   for the Combine phase. **[doc]**
-- **Reissue authorizations** after any Brain-contract change (a reissue for the next
-  session is required after `49550b5`). **[doc]**
+- **Reissue authorizations** after any Brain-contract change. This is routine now:
+  every session gets a fresh, SHA-bound authorization (§9a).
 - **Slippage reserve is unmeasured**; automatic reserve updates are disabled. **[code]**
+  Live fills so far: 11 ticks (10/01 T1) and 1 tick (10/02 T2). See also Defect B.
 - **Account protection attestation** (Position Brackets disabled) is operator-supplied,
-  never measured. **[doc]**
-- **NEWS-2** is a foundation only: observe-only, nothing consumes it yet. **[doc]**
+  never measured. It is recorded fresh each session date (§9a). **[doc/ops]**
+- **NEWS-2** is a foundation only: observe-only, nothing consumes it yet, and it is not
+  in the production build. **[doc/code]**
 - Older notes that may be stale (from 2026-07-23): 5m zone-width anomaly, the 25 pt cap
   trimming 51% of 15m stops, ATR-relative survivability bands. Re-check before acting.
 
 ## 13. Provenance and what was NOT verified
 
-- Built **from the repository only** (code, docs, `git log`) on 2026-10-02 by Claude.
+- First built **from the repository only** (code, docs, `git log`) on 2026-10-02 by Claude.
+  Later the same day it was updated from the production branch's code and diffs plus the
+  operator's 10/01–10/02 session reports to Maurice (marked **[ops]**).
   The long-running Claude Code session that produced most commits was
   **not** read; its reasoning is only as visible as the commit bodies make it.
-- **Constants mismatch to confirm with Maurice.** An older chat's handoff described a
+- **Constants mismatch: settled in practice.** An older chat's handoff described a
   "frozen doctrine" of 40 threshold, 45 pt stop allowance, $250, 15 contracts,
-  2 trades, 09:30–16:07 ET. The code at `95170d8` says otherwise (tables in §3).
-  This doc follows the code. Treat any doctrine number as *code truth, ruling
-  unconfirmed* until Maurice re-confirms.
+  2 trades, 09:30–16:07 ET. Maurice's PROD-20261001 authorization and the 24/24
+  preflight used the **code** values: $350 max all-in risk, 15 contracts, 35 pt
+  preferred / 50 pt absolute stop, R:R ≥ 1.0, 2 trades, 1 attempt, 09:00–14:00 ET.
+  The old handoff numbers are superseded. **[ops]**
 - Account IDs, credentials, and personal emails are intentionally absent.
 - Test status: full suite green on 3.13 (see §14); not run on the certified 3.14.5.
 - `docs/map0_system_wiring.md`, `docs/ai_brain_*`, and the `ab*` docs were not
@@ -307,10 +418,20 @@ Eras reconstructed from `git log` and `docs/evolution/TIMELINE.md` **[doc]**:
 - **VAP** — volume at price evidence. **BE** — break-even. **OCO** — one-cancels-other.
 - **Mission** — one trade's lifecycle under a session authorization (1 attempt).
 - **Organism** — the repo's name for the whole mechanical system.
+- **LATENCY-1** — pre-authorized conditional plans: the Brain authorizes one exact zone
+  in advance, and the trigger is executed mechanically with no Brain call.
+- **Conditional plan / "watching"** — the Brain action that publishes such a plan;
+  requires `plan_expires_at` and an exact execution-object zone.
+- **Final-quote economics** — size and risk recomputed from the last executable quote
+  just before submit; can only resize down or refuse.
+- **CONTAMINATED** — daily-loss governor state when an in-session trade cannot be
+  attributed; blocks new entries (`GOVERNOR_UNPROVEN`).
+- **2.5R stair** — current profit-protection management (no trailing until 2.5R,
+  then stepwise stop amendments).
 
 ## 16. Doc index (by purpose)
 
-- *Start here*: `CLAUDE.md`, this file.
+- *Start here*: `CLAUDE.md`, this file. Session handoffs: `docs/handoffs/`.
 - *Doctrine/governance*: `model_selection_doctrine.md`, `REPOSITORY_CERTIFICATION_20260910.md`,
   `production/GPT_5_6_TERRA_MIGRATION.md`, `fc3_fable5_authority_path.md`.
 - *Brain/cognition*: `EVENT_DRIVEN_BRAIN_WAKE_20260911.md`, `PRE_BRAIN_WAKE_SHADOW_AUDIT_20260910.md`,

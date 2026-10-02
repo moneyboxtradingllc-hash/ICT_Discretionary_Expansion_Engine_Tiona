@@ -19,24 +19,50 @@ Roles: **Tiona (Nas)** is the operator who runs sessions. **Maurice** is the
 architect who issues written rulings that govern doctrine and risk. Do not
 invent doctrine; if a rule is unclear, say so and ask.
 
+## Which code is live — check before touching code
+
+*As of 2026-10-02 (after PROD-20261002).*
+
+| | Branch | Commit | Brain fingerprint |
+|---|---|---|---|
+| **Production (deployed, authorized)** | `feature/latency-1-preauthorized-plans` | `cbfaddb` (LATENCY-1) | `brain:0ec4ef07c75dbcef` |
+| This docs branch | `claude/admiring-darwin-9ninpx` | NEWS-2 `95170d8` + docs | `brain:3a09895222765f22` |
+| `main` | `main` | `a1614ae` (2026-09-03) | stale; not used for production |
+
+- Production and this branch **split at `49550b5`**. Production has Session-PO3
+  demotion, final-quote economics and LATENCY-1. It does **not** have NEWS-2
+  (`95170d8`). This branch has NEWS-2 and these docs, but not the production code.
+- **Code work starts from the production branch**, not from this docs branch.
+- Maurice authorizes an **exact SHA + model + fingerprint + session date**. Any
+  code, config, model, fingerprint, account or contract change voids that and
+  needs fresh review. Open defects waiting on his rulings: `docs/PROJECT_CONTEXT.md` §12.
+
 ## Non-negotiables
 
 1. **Orders stay disarmed unless explicitly authorized.** `TOPSTEPX_ARM_ORDERS`
    defaults to false and the launcher pins it false. Arming requires a durable,
    account-bound session authorization (`src/broker/topstepx_session_authorization.py`),
    not a flag. Never weaken this, never auto-arm, never add a "just this once" path.
+   A 24/24 `--final` preflight makes a session *eligible* to arm; arming itself is a
+   separate, explicit ARM / GO from Maurice.
 2. **Risk constants have one owner each; change them only on a written ruling.**
    Production lane: `src/broker/topstepx_combine_risk.py` (preferred stop 35 pt,
    absolute stop 50 pt, max 15 contracts, max $350 risk) and
    `src/broker/topstepx_session_authorization.py` (daily loss budget $725,
    2 trades/session, 1 attempt per trade mission, window 09:00–14:00 ET).
    Guards compare against the owner module — never copy a literal.
-3. **Brain contract fingerprint.** 30 source files are hashed into
-   `brain:<16 hex>` (`_CONTRACT_SOURCES`, `src/ai_brain/production_model.py:164`).
-   Editing any of them changes the fingerprint and **invalidates existing session
-   authorizations** (they fail closed and must be re-issued by the operator).
-   If you touch one, say so in the commit message with the old and new value.
-   Last recorded value: `brain:3a09895222765f22` (commit `49550b5`).
+3. **Brain contract fingerprint.** 30 source files (`_CONTRACT_SOURCES` at
+   `src/ai_brain/production_model.py:164`, plus `_CONTRACT_SOURCES_REPO` for
+   `tools/topstepx_production_session.py`) and the resolved retrieval policy are
+   hashed into `brain:<16 hex>`. Editing any of them changes the fingerprint and
+   **invalidates existing session authorizations** (they fail closed and must be
+   re-issued). If you touch one, say so in the commit message with the old and new value.
+   Production value: `brain:0ec4ef07c75dbcef` (`cbfaddb`). Chain since the
+   NEWS-2 split: `3a09895222765f22` (`49550b5`) → `0cf842782313d826` (`a8ba9d5`) →
+   `0ec4ef07c75dbcef` (`3f90e2d`; `cbfaddb` unchanged).
+   **Only compute it with the pinned dependencies installed.** Without them the
+   retrieval-contract import fails, gets hashed as `retrieval<missing>`, and you
+   get a wrong value with no error.
 4. **Production model is single-authority**: `src/ai_brain/production_model.py`.
    No aliases, no silent fallback model. A response served by a different model
    fails closed (`provider_model_mismatch`).
@@ -55,7 +81,11 @@ invent doctrine; if a rule is unclear, say so and ask.
   3.11 fails at import (`luna_candidate_producer.py`, `SyntaxError`). The repo was
   certified on CPython 3.14.5 and verified here on 3.13.
 - `requirements.txt` is **UTF-16LE with CRLF** (exact pins). Preserve that encoding
-  when editing it; don't "fix" it to UTF-8.
+  when editing it; don't "fix" it to UTF-8. To build a venv, convert a scratch copy:
+  `iconv -f UTF-16LE -t UTF-8 requirements.txt | sed 's/\r$//; 1s/^\xEF\xBB\xBF//' > /tmp/req.txt`
+  then `pip install -r /tmp/req.txt pytest==9.1.1`.
+- Fingerprint check (with that venv):
+  `python -c "import sys; sys.path.insert(0,'src'); from ai_brain import production_model as PM; print(PM.brain_contract_fingerprint())"`
 - Tests (from repo root, no `PYTHONPATH` needed):
   `python -m pytest -q -p no:cacheprovider`
   Focused example: `python -m pytest -q tests/test_production_brain_model.py`.

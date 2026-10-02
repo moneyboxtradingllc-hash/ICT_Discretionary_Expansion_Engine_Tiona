@@ -3,6 +3,15 @@
 Paste this at the start of a new Claude Code chat on branch
 `claude/admiring-darwin-9ninpx`. It is a status note, not a transcript.
 
+> **Update (later 2026-10-02): partly superseded.** This note was written from the
+> NEWS-2 branch (`95170d8`). Production actually runs **`cbfaddb` (LATENCY-1) on
+> `feature/latency-1-preauthorized-plans`**, fingerprint **`brain:0ec4ef07c75dbcef`**,
+> with two live sessions since (PROD-20261001/02). Open questions 1 (constants) and
+> 4 (reissue authorization) are settled: the authorizations use the code values, and
+> every session is freshly authorized. The current open items are the four defects
+> waiting on Maurice's rulings. `CLAUDE.md` and `docs/PROJECT_CONTEXT.md` (§4a, §9a–b,
+> §12) are current; trust them over this note.
+
 ## Situation
 
 - The long-running session **"Maurice Phillips trading bot email"** (branch
