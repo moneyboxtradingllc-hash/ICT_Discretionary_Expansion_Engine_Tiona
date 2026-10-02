@@ -92,9 +92,36 @@ def producer():
                                       account_fingerprint=FP, contract=MNQ)
 
 
+def _established_narrative(direction):
+    from ai_brain.narrative_continuity import build_narrative_continuity
+    stamp = "2026-08-05T15:29:00+00:00"
+    path = {"state_available": True, "owner": direction, "status": "active",
+            "origin": {"event": "sell_side_raid_rejected" if direction == "bullish"
+                       else "buy_side_raid_rejected", "at": stamp},
+            "load_bearing_structure": {"level": 29875.0 if direction == "bullish"
+                                       else 29915.0,
+                                       "side": "low" if direction == "bullish" else "high",
+                                       "timeframe": "5m", "at": stamp, "intact": True},
+            "progression": {"supporting_timeframes": ["5m"]},
+            "transfer_evidence": {}, "session": "20260805"}
+    continuity = build_narrative_continuity(
+        {"timestamp": stamp, "active_path_state": path}, {"available": False})
+    return path, continuity
+
+
 def produce(p=None, *, res=None, bi=None, qual=None, **over):
-    kw = dict(brain_result=res or result(), brain_input=bi or brain_input(),
-              snapshot=_detected("ifvg", "fvg"),
+    res = res or result()
+    bi = bi or brain_input()
+    snap = _detected("ifvg", "fvg")
+    # Conditional plans persist a future exposure proposal, so their fixtures
+    # carry the same established campaign continuity required at publication.
+    if over.get("conditional_plan") or over.get("conditional_trigger"):
+        direction = ((res.get("parsed") or {}).get("narrative_direction") or "bullish")
+        active_path, continuity = _established_narrative(direction)
+        snap["active_path_state"] = active_path
+        res.setdefault("narrative_continuity", continuity)
+        bi.setdefault("narrative_continuity", continuity)
+    kw = dict(brain_result=res, brain_input=bi, snapshot=snap,
               qualification=qual if qual is not None else {"qualified": True},
               engine_inventory={"liquidity": "PRESENT_AND_POPULATED"},
               snapshot_id="snap-1", market_data_timestamp="2026-08-05T15:29:30+00:00",

@@ -55,7 +55,9 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # execution law to evidence; previous PROD authorization cannot be reused.
     # LATENCY-1 binds the conditional-plan contract, its no-Brain trigger path,
     # and the selected mechanical execution object into the same fingerprint.
-    assert PM.brain_contract_fingerprint() == "brain:0ec4ef07c75dbcef"
+    # NARRATIVE-AUTHORITY-1 separates the transfer state from its typed proof
+    # family; the current authorization cannot be reused after this prompt change.
+    assert PM.brain_contract_fingerprint() == "brain:da4d5c37a58a1ae4"
 
 
 @pytest.mark.parametrize("addition", [

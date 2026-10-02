@@ -576,8 +576,10 @@ class TestStrategyUntouched:
         # PROVIDER-MODEL-IDENTITY-1 (2026-09-27) makes the closure-bound
         # candidate producer judge the SERVED model with model_matches(), so
         # the fingerprint moves again and PROD-20260928 must be reissued.
+        # NARRATIVE-AUTHORITY-1 separates confirmed transfer state from its
+        # deterministic typed proof family; prior authorization is invalid.
         from ai_brain.production_model import brain_contract_fingerprint
-        assert brain_contract_fingerprint() == "brain:0ec4ef07c75dbcef"
+        assert brain_contract_fingerprint() == "brain:da4d5c37a58a1ae4"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.

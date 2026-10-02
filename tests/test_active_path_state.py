@@ -142,6 +142,8 @@ class TestOwnershipRequiresConfirmation:
         assert s["owner"] == "none"
         assert s["forming_direction"] == "bullish"
         assert s["status"] == "forming"
+        assert s["origin"]["proof_family"] == "rejected_raid_reclaim"
+        assert s["origin"]["direction"] == "bullish"
 
     def test_confirmation_establishes_ownership(self):
         ap = ActivePath(); ap.ingest([sweep(), brk("bullish")])
@@ -325,29 +327,48 @@ class TestNoVotingShortcut:
 
 
 class TestOwnerIsNotAuthorisation:
-    """THE INVARIANT. Path memory must never become a counter-path veto."""
+    """Campaign direction is the entry-side boundary; tools cannot flip it."""
 
     def test_a_bearish_reaction_stays_lawful_under_a_bullish_path(self):
-        from broker.luna_candidate_producer import CandidateProducer as P
-        luna = {"narrative_direction": "bearish",
-                "current_action": "propose bearish reaction entry",
-                "recommended_tool_family": ["fvg"]}
-        P._assert_action_permits_entry(luna)
-        assert P._direction(luna, {}) == "bearish"
+        from ai_brain.narrative_continuity import candidate_direction_authorized
+        snapshot, continuity = self._campaign("bullish")
+        allowed, reason = candidate_direction_authorized("bearish", snapshot, continuity)
+        assert allowed is False
+        assert reason == "narrative_counterflow_not_authorized"
 
     def test_a_bullish_reaction_stays_lawful_under_a_bearish_path(self):
-        from broker.luna_candidate_producer import CandidateProducer as P
-        luna = {"narrative_direction": "bullish",
-                "current_action": "propose bullish reaction entry",
-                "recommended_tool_family": ["fvg"]}
-        P._assert_action_permits_entry(luna)
-        assert P._direction(luna, {}) == "bullish"
+        from ai_brain.narrative_continuity import candidate_direction_authorized
+        snapshot, continuity = self._campaign("bearish")
+        allowed, reason = candidate_direction_authorized("bullish", snapshot, continuity)
+        assert allowed is False
+        assert reason == "narrative_counterflow_not_authorized"
 
     def test_no_execution_surface_reads_active_path_state(self):
         from broker import luna_candidate_producer as CP
         from execution_gate import execution_gate as EG
-        for mod in (CP, EG):
-            assert "active_path_state" not in _code_only(mod), mod.__name__
+        assert "candidate_direction_authorized" in _code_only(CP)
+        assert "active_path_state" not in _code_only(EG)
+
+    @staticmethod
+    def _campaign(direction):
+        from ai_brain.narrative_continuity import build_narrative_continuity
+        stamp = "2026-08-24T15:00:00+00:00"
+        path = {"state_available": True, "owner": direction, "status": "active",
+                "origin": {"event": ("sell_side_raid_rejected" if direction == "bullish"
+                                       else "buy_side_raid_rejected"), "at": stamp},
+                "load_bearing_structure": {"level": 100.0,
+                    "side": "low" if direction == "bullish" else "high",
+                    "timeframe": "5m", "at": stamp, "intact": True},
+                "progression": {"supporting_timeframes": ["5m"]},
+                "transfer_evidence": {}, "session": "2026-08-24"}
+        snapshot = {"timestamp": "2026-08-24T15:01:00+00:00",
+                    "active_path_state": path}
+        history = {"available": True, "last": {
+            "timestamp": stamp, "direction": direction,
+            "narrative_state_version": 1, "campaign_established": True,
+            "market_story": f"{direction} campaign", "dominant_reasoning": "causal delivery",
+            "invalidation_level": 101.0}}
+        return snapshot, build_narrative_continuity(snapshot, history)
 
 
 class TestNarrativeFeedbackQuarantined:
@@ -491,8 +512,9 @@ class TestBrainPayload:
     def test_the_prompt_explains_the_fields_without_prescribing_a_decision(self):
         from ai_brain.brain_prompt import BRAIN_SYSTEM_PROMPT as P
         assert "`active_path_state`" in P
-        assert "IT IS EVIDENCE, NOT PERMISSION" in P
-        assert "narrative_direction does NOT have to equal it" in P
+        assert "AUTHORITY BOUNDARY" in P
+        assert "hard direction-change rule" in P
+        assert "narrative_direction" in P and "confirmed transfer" in P
 
 
 # ══════════════════════════════════════════════════════════════════════════════

@@ -18,7 +18,8 @@ No authority. No execution. Pure text/dict reasoning.
 import re
 
 VALID_PHASES = {"accumulation", "manipulation", "distribution", "reversal",
-                "continuation", "exhaustion", "transition", "neutral", "conflicted"}
+                "continuation", "retracement", "exhaustion", "transition",
+                "neutral", "conflicted"}
 VALID_DIRECTIONS = {"bullish", "bearish", "conflicted", "neutral"}
 NEUTRAL_TOOL_FAMILIES = {"none", "wait", "two_sided_watch", "confirmation_required"}
 

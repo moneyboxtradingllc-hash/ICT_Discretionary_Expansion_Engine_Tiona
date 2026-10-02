@@ -69,9 +69,16 @@ def evidence(when=NOW, relation="above_zone"):
         "manipulation": {"classification": "none", "direction": None,
                          "conflicted": False},
     }
-    path = {"state_available": True, "owner": "none",
-            "forming_direction": None, "status": "none",
-            "session": "2026-09-11", "transfer_evidence": {}}
+    path_at = (when - timedelta(minutes=5)).isoformat()
+    path = {"state_available": True, "owner": "bullish",
+            "forming_direction": None, "status": "active",
+            "session": "2026-09-11",
+            "origin": {"event": "sell_side_raid_rejected", "at": path_at},
+            "load_bearing_structure": {"level": 99.0, "side": "low",
+                                        "timeframe": "5m", "at": path_at,
+                                        "intact": True},
+            "progression": {"supporting_timeframes": ["5m"]},
+            "transfer_evidence": {}}
     mtf = {
         "schema_version": "mtf_market_state.v1", "timeframes": {},
         "synthesis": {"context_state": None, "active_leg_state": None,
@@ -105,6 +112,8 @@ def evidence(when=NOW, relation="above_zone"):
         "adaptive_policy": {}, "adaptive_mutation": {},
         "adaptive_live_authority": {},
     }
+    from ai_brain.narrative_continuity import build_narrative_continuity
+    continuity = build_narrative_continuity(snapshot, {"available": False})
     payload = {
         "timestamp": when.isoformat(), "session": "new_york", "degraded": [],
         "market": {"current_price": 100.0, "execution_price": quote,
@@ -117,7 +126,8 @@ def evidence(when=NOW, relation="above_zone"):
                              "protected_high_status": "none",
                              "protected_low": None,
                              "protected_low_status": "none"},
-        "active_path_state": path, "structure_flips": [],
+        "active_path_state": path, "narrative_continuity": continuity,
+        "structure_flips": [],
         "MTF_MARKET_STATE": mtf,
         "authorized_tool_catalog": [tool],
         "authorized_objectives": [], "authorized_invalidations": [],
@@ -140,7 +150,7 @@ class Stance:
     def history_summary(self):
         return {"available": False}
 
-    def record(self, timestamp, output):
+    def record(self, timestamp, output, narrative_continuity=None):
         self.records.append((timestamp, output))
 
 

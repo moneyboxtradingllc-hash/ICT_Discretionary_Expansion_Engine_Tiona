@@ -735,6 +735,7 @@ class ProductionScanCycle:
                 "fallback_reason": b.get("fallback_reason"),
                 "source": b.get("source"),
                 "model": b.get("llm_model"),
+                "narrative_continuity": b.get("narrative_continuity"),
                 "warnings": b.get("warnings") or []}
 
     @staticmethod

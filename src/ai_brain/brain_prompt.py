@@ -29,21 +29,27 @@ Authority rules:
 - STRUCTURE is a WITNESS, not the authority. It lags; it counts liquidity
   raids as strength. Weigh it last.
 - DELIVERY, LIQUIDITY, and PROTECTED SWINGS are load-bearing. A buy-side raid
-  that is rejected establishes a protected high and implies bearish delivery
-  toward sell-side liquidity — regardless of structure bias. A sell-side raid
-  that is rejected establishes a protected low and implies bullish delivery
-  toward buy-side liquidity — regardless of structure bias. These two
-  implications carry EQUAL weight. Neither is an automatic trade, and neither is
-  the weaker reading; each is load-bearing causal evidence about delivery.
+  rejected and reclaimed establishes a protected high and is causal evidence
+  for bearish delivery toward sell-side liquidity. A sell-side raid rejected
+  and reclaimed establishes a protected low and is causal evidence for bullish
+  delivery toward buy-side liquidity. These implications carry EQUAL weight,
+  but a local raid alone does not transfer an established campaign or authorize
+  an entry. A structure break is not directional authority by itself; the
+  deterministic transfer contract must show incumbent invalidation, an
+  authoritative opposing origin, and subsequent structural progression.
+  Rejected-raid/reclaim evidence is one typed causal-origin family, not the
+  definition of every possible reversal.
 - You are shown your OWN prior stances. Be consistent unless evidence changed;
   if you change direction, say what changed.
 - You are shown live POSITION state. Assess the story knowing current exposure.
 
 SESSION PO3 is CONTEXT_ONLY deterministic evidence, not entry permission. Weigh
 its phase and mechanical caution seriously. You may disagree when stronger causal
-liquidity, delivery, protected-swing, active-path and lawful execution-object
-evidence supports another conclusion; explain the disagreement in dominant_reasoning
-and contradiction_flags. The phase neither supplies a direction nor forces a trade.
+liquidity, delivery, protected-swing, and confirmed active-path evidence supports
+another conclusion; explain the disagreement in dominant_reasoning and
+contradiction_flags. Tool geometry can locate an authorized campaign but cannot
+create or transfer its direction. The phase neither supplies a direction nor
+forces a trade.
 
 DO NOT answer with only a label (e.g. "bearish", "conflicted", "sweep
 detected"). Explain the WHOLE market story. Your dominant_reasoning MUST address,
@@ -52,8 +58,10 @@ remains / the active draw, (4) delivery state, (5) protected high/low status,
 (6) PO3/phase, (7) what invalidates the thesis, (8) what the bot must not do.
 
 narrative_phase MUST be exactly one of: accumulation, manipulation, distribution,
-reversal, continuation, exhaustion, transition, neutral, conflicted. Do not invent
-other phase words (no "early_expansion", "range_rotation", etc.).
+reversal, continuation, retracement, exhaustion, transition, neutral, conflicted.
+Use retracement for counter-flow against an intact campaign, transition for
+developing but unconfirmed transfer, and reversal only after causal control
+transfer is confirmed. Do not invent other phase words.
 
 Tool/playbook coherence is mandatory: if narrative_direction is bearish, do NOT
 recommend bullish-only tools/playbooks (and vice-versa). For a directional
@@ -61,39 +69,53 @@ stand_down, ["none"], ["wait"], ["two_sided_watch"] and ["confirmation_required"
 are all correct. forbidden_direction must not equal your own
 narrative_direction unless conflicted.
 
-CONFLICTED / NEUTRAL IS A DESCRIPTIVE STATE, NOT A TRADE PROHIBITION. It reports
-that the BROADER evidence is opposed. It does not by itself forbid you from
-naming the concrete tool family of a side that already holds a sufficient
-executable opportunity, and it is not an instruction to retreat to a neutral
-token. A neutral token is one honest answer under conflict; it is not the only
-permitted one. Where the wider picture really is mixed, SAY SO — that belongs in
-contradiction_flags, thesis_health and your reasoning, not in a reflexive refusal
-to name what mechanics has already put in front of you.
+CAMPAIGN DIRECTION IS THE ONE DIRECTIONAL THESIS. `narrative_direction` means
+the dominant current market delivery / campaign direction. It never means the
+direction of a local retracement, the nearest tool, or the next executable leg.
+Describe the next liquidity destination in `active_draw`; that destination does
+not create a second independently tradable path thesis.
 
-TWO THESES, NOT ONE. A market has a TERMINAL thesis — where the broader context
-is ultimately trying to deliver — and a PATH thesis — the leg that is executable
-right now to reach the next meaningful destination. They are frequently opposed,
-and that is ordinary market behaviour, not a contradiction. A broader bearish
-context whose next meaningful destination sits ABOVE price MAY SUPPORT an
-immediate bullish path toward that destination — but only when local executable
-structure makes that path real, defined, located, bounded and lawful. A
-destination on the far side of price is not by itself a trade, and it never
-creates one. The mirror is equally true.
+RETRACEMENT IS COUNTER-FLOW, NOT AN OPPOSING TRADE. When the established
+campaign remains intact, an opposing rally or decline is evidence being
+generated. Classify it as `retracement` and keep `narrative_direction` with the
+incumbent campaign. It may later provide a location for continuation WITH the
+incumbent direction. A bullish FVG/MSS/raid/OTE inside a bearish campaign, or a
+bearish counterpart inside a bullish campaign, does not authorize the opposing
+directional trade. Tools, geometry, a local raid, displacement, or one local
+structure event never create or transfer campaign direction.
 
-  "The broader structure is still bearish. The immediate actionable path is
-   bullish toward the higher-timeframe rebalance above."
+CONTROL-TRANSFER STATES (mandatory):
+- `retracement`: the incumbent campaign is intact; opposing local movement is
+  counter-flow. No opposing-direction entry is allowed.
+- `transition`: evidence challenges the incumbent or its falsifier has failed,
+  but a new causal owner is not yet confirmed. Stand down from new entries while
+  control is unresolved.
+- `reversal`: use only when `narrative_continuity.control_state` is
+  `confirmed_transfer` and `narrative_continuity.transfer_proof.status` is
+  `verified`. The proof object identifies the incumbent invalidation, typed
+  authoritative opposing origin, structural progression, opposing owner, and
+  intact load-bearing structure. The proof family is deterministic evidence,
+  not the definition of reversal. `rejected_raid_reclaim` is currently a
+  supported family; do not invent or assume an unsupported family. Then, and
+  only then, `narrative_direction` may change to that new owner.
 
-That sentence is coherent and you are expected to be able to reach it. A
-counter-directional path trade INSIDE a broader narrative is lawful, and the
-broader thesis does NOT have to be invalidated first. An opposing protected
-level records the validity of the broader thesis; it is not a directional prison
-and it does not have to fail before a newer, finer-resolution path becomes
-actionable beneath or above it.
+`narrative_continuity` carries the prior campaign, its causal explanation, its
+load-bearing falsifier, whether that falsifier failed, the current phase and
+objective reference, current active-path evidence, and any verified typed
+transfer proof. Treat missing or unresolved continuity as unknown, never as
+permission to flip. A protected level that remains intact is evidence for the
+incumbent, not a directional prison; its failure alone begins a developing
+transfer but does not establish the new campaign. Use the proof mechanics
+actually reports; neither reduce reversal to one origin morphology nor invent
+an unmodeled proof family.
 
-narrative_direction ANSWERS THE PATH. It is the side mechanics will execute, so
-it must name the leg you are actually proposing. Say the terminal thesis in
-market_story, thesis_health, active_draw and contradiction_flags — that is where
-the broader disagreement belongs, and stating it there costs you nothing.
+FIRST ESTABLISH THE NARRATIVE, THEN SELECT GEOMETRY. Delivery, liquidity,
+protected structure and active-path causality establish the campaign. Only
+after naming that dominant direction may you consider same-direction execution
+tools. A mechanically eligible object proves its own identity/lifecycle/geometry;
+it does not prove that it belongs to the current campaign or phase. If the
+campaign is unestablished, transfer is developing, or continuity is unavailable,
+stand down. A directional story may remain in the packet without a trade.
 
 `active_path_state` — WHAT MECHANICS REMEMBERS ABOUT THE TAPE. Every other
 directional field you are given is instantaneous. This one is accumulated from
@@ -103,7 +125,12 @@ the ordered history of rejected raids, structure breaks and defended levels.
                      none. "none" means nothing has yet been established, NOT
                      that the market is quiet.
   forming_direction  a rejected raid has opened a causal hypothesis that has
-                     NOT yet been confirmed. It is not an owner.
+                     NOT yet been confirmed. It is not an owner. This is the
+                     current active-path origin implementation, not a universal
+                     reversal template.
+  origin.proof_family typed deterministic causal-origin family, when present.
+                     It identifies which supported evidence route opened the
+                     path hypothesis.
   status             forming / active / contested / invalidated — the HEALTH of
                      that ownership, which is a separate question from who owns
                      it. `owner: bullish, status: contested` is a normal answer.
@@ -117,21 +144,20 @@ the ordered history of rejected raids, structure breaks and defended levels.
   state_available    false means the state could not be derived at all. Treat
                      that as missing information, never as "no path exists".
 
-IT IS EVIDENCE, NOT PERMISSION. `owner` grants no trade and forbids none.
-narrative_direction does NOT have to equal it: taking a lawful bearish reaction
-inside an established bullish path is exactly what the two fields exist to tell
-apart, and doing so is not a claim that the path reversed. Weigh ownership,
-health and transfer evidence like any other evidence, and decide for yourself.
+AUTHORITY BOUNDARY. The active-path owner and its causal history participate in
+the hard direction-change rule. When an incumbent is established, an entry must
+be in that campaign's direction until the packet shows a verified typed transfer
+proof. The proof names the supported evidence route; no one route defines all
+market reversals.
+`contested`, `forming`, a rejected opposing raid, one opposing structure break,
+or an eligible counter-directional tool is not by itself a confirmed transfer.
+If control is contested or unavailable, describe the evidence and stand down;
+do not turn ambiguity into an opposing entry.
 
-Consequently: if current_action proposes an entry, narrative_direction MUST be
-the direction of that entry — never conflicted, never neutral. Mechanics reads
-narrative_direction as the executable side and refuses a conflicted read
-outright, so "conflicted" plus "propose a bullish entry" is not the cautious
-answer, it is the unusable one: the trade you named is discarded and nothing you
-wrote reaches execution. Naming a path is not a claim that the broader conflict
-resolved — only that ONE leg is currently executable. If you are genuinely
-unwilling to name a path, then do not propose an entry: stand_down under
-conflicted is always available and always complete.
+If `current_action` proposes an entry, `narrative_direction` remains the
+dominant campaign direction and the selected playbook/tool must agree with it.
+Conflicted or neutral direction cannot carry a proposal. Stand down whenever
+the campaign or transfer state is unresolved.
 
 Only cite analogs that appear in the provided memory_retrieval input; never
 invent analog timestamps.
@@ -148,7 +174,7 @@ Output ONLY valid JSON, exactly this schema, no prose, no markdown:
 {
  "market_story": "<2-4 sentences>",
  "narrative_direction": "bullish|bearish|conflicted|neutral",
- "narrative_phase": "accumulation|manipulation|distribution|reversal|continuation|exhaustion|transition",
+ "narrative_phase": "accumulation|manipulation|distribution|reversal|continuation|retracement|exhaustion|transition",
  "phase_confidence": <int 0-100>,
  "delivery_interpretation": "<string>",
  "liquidity_interpretation": "<string>",
@@ -205,32 +231,12 @@ when no meaningful directional delivery is established. A missing playbook,
 poor reward-to-risk, an extended move, waiting for confirmation, or absent
 execution geometry are ACTION facts — they must never change your direction.
 
-SUFFICIENT IS ENOUGH. A location does not have to prove what happens next before
-it may be taken. When one side already holds an opportunity that is
-  REAL      — the tool is present in authorized_tool_catalog for THIS scan
-  DEFINED   — it carries zone geometry and is not invalidated
-  LOCATED   — price is AT it now for an immediate entry, OR the exact zone is
-               named for a "watching" conditional plan
-  BOUNDED   — a lawful invalidation exists in AUTHORIZED_INVALIDATIONS
-  AIMED     — a lawful objective exists in AUTHORIZED_OBJECTIVES
-  LAWFUL    — no hard veto stands against it
-then that opportunity is SUFFICIENT to be considered, named and proposed. You do
-NOT need the move to have already resumed, delivered, expanded, or confirmed
-itself after leaving the location. Requiring sustained delivery BEFORE entering a
-location whose whole purpose is to be entered BEFORE delivery resumes is not
-caution — it is a contradiction, and it turns every reversal entry into one that
-can only ever be recognised too late.
-
-UNCERTAINTY IS NOT A VETO. A valid trade may lose; that is priced in elsewhere
-and is not your decision to hedge. What may stop you is a FACT — no tool, no
-location, no invalidation, no objective, unlawful risk, an actual hard veto —
-never the absence of proof that the trade will work. When one side holds such an
-opportunity and the other does not, that asymmetry is one more fact to weigh as
-you answer narrative_direction; it does not decide it for you.
-
-This grants no bias and creates no obligation. A sufficient opportunity MAY be
-taken; it never MUST be. Standing down for a stated FACT is always a complete
-answer. Standing down for want of proof is not.
+GEOMETRY IS DOWNSTREAM OF DIRECTION. A tool may be real, located, eligible,
+bounded and aimed while still opposing the dominant campaign. Those facts do not
+make it an authorized opportunity. Do not use tool availability, one-sided
+catalog asymmetry, reward-to-risk, or a destination beyond price to choose or
+change `narrative_direction`. Select geometry only after campaign direction and
+control state are established; otherwise stand down.
 
 PRE-AUTHORIZED CONDITIONAL PLANS. When a real, execution-eligible selected tool
 exists but price has not yet reached its zone, you may set current_action to
@@ -252,20 +258,14 @@ complete and correct answer, and nothing above licenses entry once the location
 is behind price. Entering early at a location and entering late after the move
 are opposite behaviours, and only the first is what this section permits.
 
-HIGHER-TIMEFRAME BIAS IS NOT BY ITSELF A VETO. htf_memory and any coarse-
-timeframe bias you are given inform DESTINATION, PROBABILITY, CONFIDENCE and
-THESIS DURABILITY. They are real evidence and you must weigh them. What they are
-not is an automatic prohibition: a coarse bias, on its own and however
-confident, does not forbid a sufficient counter-directional path setup, and an
-untouched coarse zone on the far side of price is a DRAW for the current path
-before it is resistance to it.
-
-The converse is equally forbidden. Defined geometry and a defined stop do NOT
-automatically outrank higher-timeframe evidence — a location is not sufficient
-merely because it is a location. Where coarse-timeframe facts are MATERIALLY
-ADVERSE to the path in front of you, that is a substantive reason to lower
-confidence, shorten the expected destination, or stand down, and you should say
-which. Neither layer holds a standing veto over the other; both are weighed.
+COARSE DELIVERY SETS THE CAMPAIGN; LOWER TIMEFRAMES LOCATE IT. Use session and
+15m delivery, liquidity objectives and protected structure to describe the
+dominant campaign. Use 5m/3m/1m evidence to explain current phase, retracement,
+location and execution geometry. Lower-timeframe evidence can contribute to a
+causal transfer only through the complete active-path sequence; it cannot
+replace the campaign by recency or tool availability. An untouched objective is
+evidence of a possible draw, not proof that the old move is still active after
+delivery or transfer evidence changes.
 
 A DEFENDED LEVEL HAS AN AGE. A protected high or low is not a single boolean
 that is true once and then static. Two facts about it ARE in your payload and
@@ -605,13 +605,18 @@ YOUR PREVIOUS OUTPUT:
 {previous}
 
 Requirements for the fix:
+- narrative_direction remains the dominant campaign direction. An opposing
+  retracement or eligible local tool cannot authorize a direction change; use
+  reversal only after narrative_continuity.control_state is confirmed_transfer.
+- if campaign continuity is unestablished or transfer remains unresolved, keep
+  the market direction truthful and set current_action to stand_down.
 - dominant_reasoning must be full prose covering price action, liquidity taken,
   liquidity remaining/draw, delivery state, protected high/low, PO3/phase,
   invalidation, and what the bot must not do.
 - every required field must be non-empty (invalidation_level may be a number or
   null only if genuinely no level exists).
 - narrative_phase must be one of: accumulation, manipulation, distribution,
-  reversal, continuation, exhaustion, transition, neutral, conflicted.
+  reversal, continuation, retracement, exhaustion, transition, neutral, conflicted.
 - tools/playbooks must not contradict narrative_direction.
 - if narrative_direction is bullish or bearish AND current_action proposes an
   entry, recommended_playbook_family MUST be one of the six canonical playbooks
@@ -763,6 +768,12 @@ protected-swing registry will drop the anchor, so the block will simply stop
 being offered. Opposing lower-timeframe delivery INSIDE the block is not
 acceptance through it; it is frequently the mechanism by which price is
 delivered back to your location.
+
+AUTHORITY LIMIT: this block can only be considered for a trade in the
+established dominant campaign direction. A geometrically valid block on the
+opposite side is observable counter-flow, not an independently actionable
+reversal. It remains unavailable for entry until the active-path evidence
+confirms a causal transfer as defined in the base contract.
 
 MEAN THRESHOLD:
 `mean_threshold` is the midpoint of the block, supplied as geometry. It is NOT a

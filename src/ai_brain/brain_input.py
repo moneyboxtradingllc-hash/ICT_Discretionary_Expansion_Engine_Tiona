@@ -993,6 +993,8 @@ def build_brain_input(snapshot: dict, stance_history: dict) -> dict:
         degraded.extend(_continuity_markers(snapshot))
 
         _liq_evaluation, _liq_sensors = _liquidity_evaluation(liq)
+        from ai_brain.narrative_continuity import build_narrative_continuity
+        narrative_continuity = build_narrative_continuity(snapshot, stance_history)
 
         return {
             "timestamp": snapshot.get("timestamp"),
@@ -1125,10 +1127,11 @@ def build_brain_input(snapshot: dict, stance_history: dict) -> dict:
             # defended lows -- because ownership could only be read off the
             # bearish gap sitting at price. This is the accumulated answer.
             #
-            # EVIDENCE, NOT AUTHORISATION. It forbids no direction; a lawful
-            # counter-path reaction stays executable. Absent when the scan
-            # cycle could not derive it, which is a different fact from
-            # "no path is established" and is published as such.
+            # NARRATIVE-AUTHORITY-1. This accumulated causal owner is the
+            # cross-scan witness used by `narrative_continuity`; a local tool
+            # cannot replace it. The candidate producer permits only the
+            # established owner, or a new owner after the active-path transfer
+            # sequence is confirmed. Absent means unavailable, not "no path".
             "active_path_state": (snapshot or {}).get("active_path_state"),
             # STRUCTURE-FLIP (2026-08-11) — the SECOND invalidation family,
             # kept beside protected swings rather than merged into them. A
@@ -1158,6 +1161,10 @@ def build_brain_input(snapshot: dict, stance_history: dict) -> dict:
             "playbook_toolbox": _two_sided_inventory(snapshot),
             "position": _position(snapshot),
             "stance_history": stance_history,
+            # NARRATIVE-AUTHORITY-1: prior campaign, causal falsifier, and
+            # current active-path transfer status. This is current-snapshot
+            # context; it does not derive direction from an execution tool.
+            "narrative_continuity": narrative_continuity,
             # AI-BRAIN-H2 — environmental only. The directional NA/council
             # "suggested side" fields are isolated OUT of the LLM payload so the
             # Brain derives direction independently from clean evidence.

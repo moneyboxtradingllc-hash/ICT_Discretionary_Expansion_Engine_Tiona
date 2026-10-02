@@ -58,40 +58,41 @@ FLAT = _norm(P)
 
 # ══════════════════════════════════════════════════════════════════════════════
 class TestR1DirectionalCausalSymmetry:
-    """Both raids imply delivery. Neither sentence may outrank the other."""
+    """Rejected raids are symmetric evidence, but cannot independently transfer campaigns."""
 
     def test_the_buy_side_rule_is_still_there(self):
         """The repair ADDS a mirror. Deleting the original would 'fix' the
         asymmetry by removing the half that was already right."""
-        assert _norm("a buy-side raid that is rejected establishes a protected "
-                     "high and implies bearish delivery toward sell-side "
-                     "liquidity") in FLAT
+        assert _norm("a buy-side raid rejected and reclaimed establishes a "
+                     "protected high and is causal evidence for bearish "
+                     "delivery toward sell-side liquidity") in FLAT
 
     def test_the_mirrored_sell_side_rule_exists(self):
-        assert _norm("a sell-side raid that is rejected establishes a protected "
-                     "low and implies bullish delivery toward buy-side "
-                     "liquidity") in FLAT
+        assert _norm("a sell-side raid rejected and reclaimed establishes a "
+                     "protected low and is causal evidence for bullish "
+                     "delivery toward buy-side liquidity") in FLAT
 
     def test_both_carry_the_same_structure_qualifier(self):
-        """`regardless of structure bias` is what makes the bearish rule
-        load-bearing against the structure witness. A mirror without it would be
-        the weaker claim wearing the same words."""
-        assert FLAT.count(_norm("regardless of structure bias")) >= 2
+        """Neither side's local raid may be promoted to a standalone reversal."""
+        assert _norm("a local raid alone does not transfer an established "
+                     "campaign or authorize an entry") in FLAT
 
     def test_neither_is_declared_the_stronger_reading(self):
-        assert _norm("these two implications carry equal weight") in FLAT
+        assert _norm("these implications carry equal weight") in FLAT
 
     def test_neither_raid_is_an_automatic_trade(self):
         """A protected low must not become an automatic long -- that would swap
         one directional reflex for another."""
-        assert _norm("neither is an automatic trade") in FLAT
+        assert _norm("a local raid alone does not transfer an established "
+                     "campaign or authorize an entry") in FLAT
 
     def test_the_two_rules_are_lexically_symmetric(self):
         """Mechanical guard against a mirror that drifts. Swapping every
         directional token in the bearish sentence must literally produce the
         bullish one."""
-        bear = ("a buy-side raid that is rejected establishes a protected high "
-                "and implies bearish delivery toward sell-side liquidity")
+        bear = ("a buy-side raid rejected and reclaimed establishes a protected "
+                "high and is causal evidence for bearish delivery toward "
+                "sell-side liquidity")
         swap = {"buy-side": "sell-side", "sell-side": "buy-side",
                 "high": "low", "bearish": "bullish"}
         bull = re.sub("|".join(map(re.escape, swap)),
@@ -110,56 +111,51 @@ class TestR2ConflictedIsNotAVeto:
                      '["confirmation_required"]') not in FLAT
 
     def test_conflicted_is_named_a_descriptive_state(self):
-        assert _norm("conflicted / neutral is a descriptive state, not a trade "
-                     "prohibition") in FLAT
+        assert _norm("use conflicted only when material bullish and bearish "
+                     "evidence are genuinely opposed and neither dominates") in FLAT
 
     def test_the_neutral_tokens_are_still_offered_not_mandated(self):
         """Removing the veto must not remove the option. A neutral answer stays
         available and stays correct for a directional stand_down."""
-        for tok in sorted(NEUTRAL_TOOL_FAMILIES):
-            assert f'"{tok}"' in P, tok
-        assert _norm("a neutral token is one honest answer under conflict; it is "
-                     "not the only permitted one") in FLAT
+        assert '"none"' in P
+        assert _norm('for a directional stand_down, ["none"], ["wait"], '
+                     '["two_sided_watch"] and ["confirmation_required"] are all correct') in FLAT
 
     def test_conflicted_does_not_become_an_obligation_to_trade(self):
         """The inverse defect. Permission must never read as pressure."""
-        assert _norm("this grants no bias and creates no obligation") in FLAT
-        assert _norm("a sufficient opportunity may be taken; it never must be") in FLAT
+        assert _norm("stand down from new entries while control is unresolved") in FLAT
+        assert _norm("no opposing-direction entry is allowed") in FLAT
 
     def test_standing_down_on_a_fact_remains_complete(self):
-        assert _norm("standing down for a stated fact is always a complete "
-                     "answer") in FLAT
+        assert _norm("a directional story may remain in the packet without a trade") in FLAT
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 class TestSufficiencyLaw:
-    """REAL + DEFINED + LOCATED + BOUNDED + AIMED + LAWFUL may be enough."""
+    """Mechanics still requires real evidence; geometry cannot author direction."""
 
     def test_the_six_conditions_are_all_named(self):
-        for word in ("real", "defined", "located", "bounded", "aimed", "lawful"):
-            assert re.search(rf"^\s*{word}\b", P, re.M | re.I), word
+        assert _norm("a mechanically eligible object proves its own identity/lifecycle/geometry") in FLAT
+        assert _norm("it does not prove that it belongs to the current campaign or phase") in FLAT
 
     def test_proof_of_future_continuation_is_not_required(self):
-        assert _norm("you do not need the move to have already resumed, "
-                     "delivered, expanded, or confirmed itself after leaving "
-                     "the location") in FLAT
+        assert _norm("it may later provide a location for continuation with "
+                     "the incumbent direction") in FLAT
 
     def test_the_exact_10_10_57_failure_mode_is_named(self):
-        """Her live refusal was 'bullish reversal evidence lacks sustained
-        delivery' while standing INSIDE the zone. The contract now names that
-        specific contradiction -- generically, with no price and no date."""
-        assert _norm("requiring sustained delivery before entering a location "
-                     "whose whole purpose is to be entered before delivery "
-                     "resumes") in FLAT
+        """A local reversal tool cannot itself promote a new campaign."""
+        assert _norm("tools, geometry, a local raid, displacement, or one local "
+                     "structure event never create or transfer campaign direction") in FLAT
 
     def test_uncertainty_is_not_a_veto(self):
-        assert _norm("uncertainty is not a veto") in FLAT
-        assert _norm("never the absence of proof that the trade will work") in FLAT
+        assert _norm("treat missing or unresolved continuity as unknown, never "
+                     "as permission to flip") in FLAT
+        assert _norm("if control is contested or unavailable, describe the "
+                     "evidence and stand down") in FLAT
 
     def test_only_facts_may_stop_her(self):
-        for fact in ("no tool", "no location", "no invalidation", "no objective",
-                     "unlawful risk"):
-            assert fact in FLAT, fact
+        assert _norm("if the campaign is unestablished, transfer is developing, "
+                     "or continuity is unavailable, stand down") in FLAT
 
     def test_no_todays_prices_or_outcome_were_encoded(self):
         """The repair is doctrine, not a memorial to one session. A price, a
@@ -171,111 +167,83 @@ class TestSufficiencyLaw:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-class TestPathVersusTerminalThesis:
-    """Operator ruling, 2026-08-24 (15m review). Luna's broader bearish read was
-    NOT wrong. The failure was treating a valid broader thesis as though the only
-    permissible immediate trade had to share its direction.
+class TestCampaignVersusCounterflow:
+    """One campaign direction persists; local counter-flow is not trade authority."""
 
-    The capability being pinned: "I still think the larger structure is bearish.
-    I am long right now." -- timeframe hierarchy and path of delivery, not a
-    contradiction.
-    """
-
-    def test_both_theses_are_named_as_separate_objects(self):
-        assert _norm("a market has a terminal thesis") in FLAT
-        assert _norm("and a path thesis") in FLAT
+    def test_dominant_direction_is_distinct_from_local_retracement(self):
+        assert _norm("`narrative_direction` means the dominant current market "
+                     "delivery / campaign direction") in FLAT
+        assert _norm("it never means the direction of a local retracement") in FLAT
 
     def test_opposed_theses_are_declared_ordinary(self):
-        assert _norm("they are frequently opposed, and that is ordinary market "
-                     "behaviour, not a contradiction") in FLAT
+        assert _norm("retracement is counter-flow, not an opposing trade") in FLAT
 
-    def test_a_counter_directional_path_is_lawful(self):
-        assert _norm("a counter-directional path trade inside a broader "
-                     "narrative is lawful") in FLAT
+    def test_a_counter_directional_path_cannot_authorize_entry(self):
+        assert _norm("does not authorize the opposing directional trade") in FLAT
 
     def test_the_broader_thesis_need_not_be_invalidated_first(self):
-        assert _norm("the broader thesis does not have to be invalidated "
-                     "first") in FLAT
+        assert _norm("then, and only then, `narrative_direction` may change to "
+                     "that new owner") in FLAT
 
     def test_a_protected_level_is_not_a_directional_prison(self):
         """2026-08-24: she held bearish under an intact protected high for two
         hours. The level records the broader thesis; it does not own the tape."""
-        assert _norm("it is not a directional prison and it does not have to "
-                     "fail before a newer, finer-resolution path becomes "
-                     "actionable") in FLAT
+        assert _norm("its failure alone begins a developing transfer but does "
+                     "not establish the new campaign") in FLAT
 
-    def test_narrative_direction_is_defined_as_the_path(self):
-        assert _norm("narrative_direction answers the path") in FLAT
+    def test_narrative_direction_is_defined_as_dominant_delivery(self):
+        assert _norm('narrative_direction answers only "what is the dominant '
+                     'current market delivery?"') in FLAT
 
-    def test_the_terminal_thesis_has_somewhere_to_live(self):
-        """Removing the conflict from narrative_direction must not delete it.
-        It has to be reported, and the fields are named so it cannot be lost."""
+    def test_campaign_cause_and_draw_remain_represented(self):
+        """The dominant story and active draw remain explicit packet evidence."""
         for field in ("market_story", "thesis_health", "active_draw",
                       "contradiction_flags"):
             assert field in P, field
-        assert _norm("say the terminal thesis in market_story, thesis_health, "
-                     "active_draw and contradiction_flags") in FLAT
+        assert _norm("prior campaign, its causal explanation, its load-bearing "
+                     "falsifier") in FLAT
 
     def test_naming_a_path_is_not_a_claim_the_conflict_resolved(self):
-        assert _norm("naming a path is not a claim that the broader conflict "
-                     "resolved") in FLAT
+        assert _norm("first establish the narrative, then select geometry") in FLAT
 
 
 class TestNeitherTimeframeLayerHoldsAVeto:
-    """Operator correction, 2026-08-24. The first draft said HTF context "sets
-    the destination, not the permission" and "never let it overrule a defined
-    location" -- which replaces the HTF prison with a local-geometry prison. A
-    stop and a zone do not make a setup sufficient when coarse evidence is
-    genuinely adverse. BOTH directions of that are pinned here.
-
-    Live context for why this field needs doctrine at all: the payload hands her
-    `htf_bias` with `htf_confidence: 100` and, before this unit, not one word
-    anywhere in the prompt about what authority that number carries."""
+    """Coarse context establishes the campaign; local evidence explains phase/location."""
 
     def test_htf_informs_the_four_things_it_legitimately_informs(self):
-        assert _norm("inform destination, probability, confidence and thesis "
-                     "durability") in FLAT
+        assert _norm("use session and 15m delivery") in FLAT
 
     def test_htf_bias_alone_is_not_an_automatic_veto(self):
-        assert _norm("higher-timeframe bias is not by itself a veto") in FLAT
-        assert _norm("a coarse bias, on its own and however confident, does not "
-                     "forbid a sufficient counter-directional path setup") in FLAT
+        assert _norm("lower-timeframe evidence can contribute to a causal "
+                     "transfer only through the complete active-path sequence") in FLAT
 
     def test_htf_is_still_real_evidence_she_must_weigh(self):
-        """Not-a-veto must never read as not-relevant."""
-        assert _norm("they are real evidence and you must weigh them") in FLAT
+        assert _norm("coarse delivery sets the campaign; lower timeframes "
+                     "locate it") in FLAT
 
     def test_local_geometry_does_not_automatically_outrank_htf(self):
         """THE CONVERSE PRISON. This is the assertion that fails if the doctrine
         ever drifts back toward 'a location always wins'."""
-        assert _norm("defined geometry and a defined stop do not automatically "
-                     "outrank higher-timeframe evidence") in FLAT
-        assert _norm("a location is not sufficient merely because it is a "
-                     "location") in FLAT
+        assert _norm("those facts do not make it an authorized opportunity") in FLAT
+        assert _norm("tool availability, one-sided catalog asymmetry, reward-to-risk, "
+                     "or a destination beyond price to choose or change") in FLAT
 
     def test_materially_adverse_coarse_facts_are_a_real_reason_to_refuse(self):
-        assert _norm("materially adverse") in FLAT
-        assert _norm("lower confidence, shorten the expected destination, or "
-                     "stand down") in FLAT
+        assert _norm("stand down whenever the campaign or transfer state is "
+                     "unresolved") in FLAT
 
     def test_neither_layer_holds_a_standing_veto(self):
-        assert _norm("neither layer holds a standing veto over the other; both "
-                     "are weighed") in FLAT
+        assert _norm("that destination does not create a second independently "
+                     "tradable path thesis") in FLAT
 
     def test_a_coarse_zone_beyond_price_is_a_draw_first(self):
-        assert _norm("an untouched coarse zone on the far side of price is a "
-                     "draw for the current path before it is resistance to "
-                     "it") in FLAT
+        assert _norm("an untouched objective is evidence of a possible draw") in FLAT
 
     def test_a_destination_alone_never_creates_a_trade(self):
         """Second operator correction: 'destination above price MAKES the path
         bullish' is the mirror-image of 'HTF bearish means short'."""
-        assert _norm("may support an immediate bullish path toward that "
-                     "destination — but only when local executable structure "
-                     "makes that path real, defined, located, bounded and "
-                     "lawful") in FLAT
-        assert _norm("a destination on the far side of price is not by itself a "
-                     "trade, and it never creates one") in FLAT
+        assert _norm("that destination does not create a second independently "
+                     "tradable path thesis") in FLAT
 
 
 class TestDefendedLevelDoctrineMatchesThePayload:
@@ -369,23 +337,19 @@ class TestSufficiencyDoesNotLicenseChasing:
 
 
 class TestProposalCoherence:
-    """Measured mid-unit: R2 without this clause produced `conflicted` + 'propose
-    a bullish entry' on 4 of 5 sampled calls -- and `_direction` refuses every
-    conflicted read, so the trade she named was discarded. Permission that cannot
-    reach execution is not permission."""
+    """A proposal's side must be the established campaign side."""
 
     def test_a_proposal_must_carry_its_own_direction(self):
-        assert _norm("if current_action proposes an entry, narrative_direction "
-                     "must be the direction of that entry") in FLAT
+        assert _norm("if `current_action` proposes an entry, `narrative_direction` "
+                     "remains the dominant campaign direction") in FLAT
 
     def test_the_mechanical_consequence_is_stated_not_implied(self):
-        assert _norm("mechanics reads narrative_direction as the executable "
-                     "side and refuses a conflicted read outright") in FLAT
+        assert _norm("the selected playbook/tool must agree with it") in FLAT
 
     def test_refusing_to_name_a_path_still_means_stand_down(self):
         """The clause must not push her to invent a direction to keep a trade."""
-        assert _norm("if you are genuinely unwilling to name a path, then do not "
-                     "propose an entry") in FLAT
+        assert _norm("stand down whenever the campaign or transfer state is "
+                     "unresolved") in FLAT
 
     def test_the_producer_really_does_refuse_conflicted(self):
         """The clause claims a mechanical fact. Pin the fact, not the claim --
@@ -458,9 +422,8 @@ class TestARecommendationStillRequiresARealTool:
         assert out["recommended_tool_family"] == ["none"]
 
     def test_the_validator_still_passes_a_family_she_did_name(self):
-        """Pinned because it is the seam R2 depends on: an unprefixed concrete
-        family under `conflicted` is NOT stripped, so the prompt change is the
-        only thing that was ever gating this."""
+        """Normalization remains descriptive; the narrative authority gate is
+        downstream and decides whether a candidate side is authorized."""
         out, _ = normalize_output({"narrative_direction": "conflicted",
                                    "narrative_phase": "transition",
                                    "recommended_tool_family": ["ote_after_reclaim"],

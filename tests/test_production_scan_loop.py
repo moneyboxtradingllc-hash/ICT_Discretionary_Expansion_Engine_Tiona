@@ -184,14 +184,35 @@ class Cycle:
         # about context -- but it must keep the real callable's shape, or the
         # double drifts from the seam it stands in for while staying green.
         self.scans += 1
+        direction = str(self.output.get("narrative_direction") or "bullish").lower()
+        if direction not in ("bullish", "bearish"):
+            direction = "bullish"
+        path_at = "2026-08-06T14:00:00+00:00"
+        active_path = {
+            "state_available": True, "owner": direction, "status": "active",
+            "origin": {"event": ("sell_side_raid_rejected" if direction == "bullish"
+                                   else "buy_side_raid_rejected"), "at": path_at},
+            "load_bearing_structure": {
+                "level": 29875.0 if direction == "bullish" else 29915.0,
+                "side": "low" if direction == "bullish" else "high",
+                "timeframe": "5m", "at": path_at, "intact": True},
+            "progression": {"supporting_timeframes": ["5m"]},
+            "transfer_evidence": {}, "session": "20260806"}
+        snapshot = {"timestamp": "2026-08-06T14:59:00+00:00",
+                    "active_path_state": active_path,
+                    "market": {"high_since": 29882.0, "low_since": 29878.0},
+                    "qualification": {"qualified": True},
+                    **_detected("ifvg", "fvg")}
+        from ai_brain.narrative_continuity import build_narrative_continuity
+        continuity = build_narrative_continuity(snapshot, {"available": False})
         block = {"source": self.source, "output": self.output,
                  "fallback_reason": self.fallback, "llm_model": PRODUCTION_MODEL,
-                 "warnings": []}
-        return {"snapshot": {"market": {"high_since": 29882.0, "low_since": 29878.0},
-                             "qualification": {"qualified": True},
-                             **_detected("ifvg", "fvg")},
+                 "narrative_continuity": continuity, "warnings": []}
+        brain_input = dict(self.bi)
+        brain_input["narrative_continuity"] = continuity
+        return {"snapshot": snapshot,
                 "brain_block": block,
-                "brain_input": self.bi,
+                "brain_input": brain_input,
                 "brain_result": ProductionScanCycle.to_brain_result(block),
                 "qualification": {"qualified": True},
                 "engine_inventory": {"liquidity": "PRESENT_AND_POPULATED"},

@@ -585,6 +585,14 @@ class ActivePath:
             "origin": None if not self.origin else {
                 "event": ("sell_side_raid_rejected" if d == "bullish"
                           else "buy_side_raid_rejected"),
+                # The transfer state is a market-state conclusion; this is the
+                # typed causal proof family that currently supports this origin.
+                # Keep the family explicit so consumers do not mistake one
+                # origin morphology for the definition of every reversal.
+                "proof_family": ("rejected_raid_reclaim"
+                                 if self.origin.get("event_type") == LIQUIDITY_SWEEP
+                                 and self.origin.get("reclaimed") is True else None),
+                "direction": d,
                 "at": self.origin.get("event_time"),
                 "source_tf": self.origin.get("source_tf"),
                 "occurrence_id": self.origin.get("occurrence_id")},

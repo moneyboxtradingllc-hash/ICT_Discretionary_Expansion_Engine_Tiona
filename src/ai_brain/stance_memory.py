@@ -50,14 +50,53 @@ class StanceMemory:
         except Exception:  # noqa: BLE001
             pass
 
-    def record(self, ts: str, stance: dict) -> None:
+    def record(self, ts: str, stance: dict, narrative_continuity: dict = None) -> None:
         try:
+            continuity = (narrative_continuity
+                          if isinstance(narrative_continuity, dict) else {})
+            path = continuity.get("active_path") or {}
+            direction = str(stance.get("narrative_direction", "neutral")).lower()
+            prior = continuity.get("prior_thesis") or {}
+            campaign_direction = (continuity.get("dominant_direction")
+                                  or prior.get("direction") or direction)
+            has_load_bearing = (isinstance(path.get("load_bearing_structure"), dict)
+                                and path["load_bearing_structure"].get("level") is not None)
+            falsifier_status = continuity.get("thesis_falsifier_status")
+            if continuity.get("control_state") == "confirmed_transfer":
+                # The continuity status above describes the PREVIOUS campaign's
+                # falsifier. A newly confirmed owner starts with its own active
+                # load-bearing structure and its own falsifier not yet failed.
+                falsifier_status = "not_occurred"
+            campaign_established = bool(
+                path.get("available") is True
+                and path.get("owner") == campaign_direction
+                and path.get("status") in ("active", "contested")
+                and has_load_bearing)
+            if (not campaign_established and prior.get("campaign_established") is True
+                    and continuity.get("thesis_falsifier_status") != "occurred"):
+                campaign_established = True
             entry = {
                 "timestamp":  ts,
-                "direction":  stance.get("narrative_direction", "neutral"),
+                "direction":  direction,
                 "phase":      stance.get("narrative_phase", "transition"),
                 "confidence": stance.get("phase_confidence", 0),
                 "action":     stance.get("current_action", "stand_down"),
+                # NARRATIVE-AUTHORITY-1: persist the causal campaign state the
+                # Brain actually received. Old records remain readable but are
+                # not treated as authoritative campaign anchors.
+                "narrative_state_version": 1,
+                "campaign_direction": campaign_direction,
+                "campaign_established": campaign_established,
+                "market_story": str(stance.get("market_story") or "")[:1200],
+                "dominant_reasoning": str(stance.get("dominant_reasoning") or "")[:1200],
+                "invalidation_level": stance.get("invalidation_level"),
+                "thesis_falsifier": (continuity.get("current_thesis_falsifier")
+                                     or prior.get("thesis_falsifier")
+                                     or path.get("load_bearing_structure")),
+                "thesis_falsifier_status": falsifier_status,
+                "active_draw": str(stance.get("active_draw") or "")[:300],
+                "objective_id": stance.get("objective_id"),
+                "control_state": continuity.get("control_state"),
             }
             prev_dir = self._buf[-1]["direction"] if self._buf else None
             if entry["direction"] != prev_dir:

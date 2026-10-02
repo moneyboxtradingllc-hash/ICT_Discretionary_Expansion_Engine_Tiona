@@ -1201,6 +1201,21 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             output["warnings"] = [f"schema fallback: {vreason}"]
             source = "degraded"
 
+        # NARRATIVE-AUTHORITY-1: a local opposing read cannot replace the
+        # persisted campaign unless the current active-path ledger proves the
+        # complete causal transfer. This carries the incumbent and stands down;
+        # it never manufactures a new direction.
+        from ai_brain.narrative_continuity import output_direction_hold
+        output, narrative_authority_guard = output_direction_hold(
+            output, brain_input.get("narrative_continuity") or {})
+        ok, vreason = validate_brain_output(output)
+        if not ok:
+            output = empty_brain_output()
+            output["warnings"] = [f"narrative_authority_schema_fallback:{vreason}"]
+            source = "degraded"
+            narrative_authority_guard = {
+                "status": "schema_fallback", "reason": vreason}
+
         if wake_decision is not None and wake_api is not None:
             primary_provider_request = bool(
                 (llm_call or {}).get("provider_request_attempted"))
@@ -1231,7 +1246,9 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
                                   "error": f"wake telemetry exception: {exc}"}
 
         if stance_memory:
-            stance_memory.record(snapshot.get("timestamp", ""), output)
+            stance_memory.record(
+                snapshot.get("timestamp", ""), output,
+                narrative_continuity=brain_input.get("narrative_continuity"))
 
         # ADAPTIVE-1C — telemetry: RECOMMENDED vs APPLIED kept separate; applied is
         # hard-locked 0, final_confidence == base_confidence (no behavioural change).
@@ -1280,6 +1297,7 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             "shallow_reasoning_kept": shallow_kept,
             "input_degraded": brain_input.get("degraded", []),
             "input_payload": brain_input,
+            "narrative_authority_guard": narrative_authority_guard,
             # RAW-SNAPSHOT-ARCHIVE (2026-08-07) — OBSERVATIONAL ONLY.
             #
             # `input_payload` is what the external Brain saw. The DETERMINISTIC
@@ -1353,6 +1371,8 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             # BRAIN-RELIABILITY-1 — shallow prose kept instead of nuking the read
             "shallow_reasoning_kept": shallow_kept,
             "input_degraded": brain_input.get("degraded", []),
+            "narrative_authority_guard": narrative_authority_guard,
+            "narrative_continuity": brain_input.get("narrative_continuity"),
             "output": output,
             "adaptive_telemetry": adaptive_telemetry,   # ADAPTIVE-1C (observe_only)
             "ai_market_commander": ai_market_commander, # MARKET COMMANDER B2 (observe_only)

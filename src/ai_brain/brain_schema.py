@@ -14,7 +14,8 @@ defined in the AB phase plan; until a consumer is wired, a field is persisted
 _DIRECTIONS = {"bullish", "bearish", "conflicted", "neutral"}
 # AB-5A-L hardening: phase enum now explicitly includes neutral + conflicted.
 _PHASES = {"accumulation", "manipulation", "distribution", "reversal",
-           "continuation", "exhaustion", "transition", "neutral", "conflicted"}
+           "continuation", "retracement", "exhaustion", "transition",
+           "neutral", "conflicted"}
 
 _REQUIRED = {
     "market_story":              str,

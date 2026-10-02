@@ -1250,6 +1250,40 @@ class CandidateProducer:
             parsed = brain_result.get("parsed") or {}
             self._assert_action_permits_entry(parsed)
             direction = self._direction(parsed, qualification, trace)
+            # NARRATIVE-AUTHORITY-1: execution geometry is downstream of an
+            # established campaign. A counter-flow tool cannot authorize a
+            # direction change; only the active-path ledger's complete causal
+            # transfer can replace an incumbent. Rechecked on conditional-plan
+            # triggers against the current snapshot as well as at authorship.
+            from ai_brain.narrative_continuity import (
+                candidate_direction_authorized, recheck_narrative_continuity)
+            continuity = (brain_result.get("narrative_continuity")
+                          or brain_input.get("narrative_continuity"))
+            production_authorship = (brain_result.get("source") == "llm"
+                                     or conditional_plan or conditional_trigger)
+            if not isinstance(continuity, dict):
+                authorized = not production_authorship
+                authority_reason = ("narrative_continuity_unavailable"
+                                    if production_authorship
+                                    else "legacy_nonproduction_fixture")
+                current_continuity = None
+            else:
+                current_continuity = recheck_narrative_continuity(snapshot, continuity)
+                authorized, authority_reason = candidate_direction_authorized(
+                    direction, snapshot, continuity, current_continuity)
+            trace["narrative_control_state"] = (
+                current_continuity.get("control_state")
+                if isinstance(current_continuity, dict) else None)
+            trace["narrative_dominant_direction"] = (
+                current_continuity.get("dominant_direction")
+                if isinstance(current_continuity, dict) else None)
+            trace["narrative_direction_authorized"] = bool(authorized)
+            trace["narrative_direction_authority_reason"] = authority_reason
+            if not authorized:
+                raise NoCandidate(
+                    authority_reason,
+                    "candidate direction is not supported by an established "
+                    "dominant campaign or confirmed active-path transfer")
             # PHASE 3: `qualification_result` is now an OBSERVATION of what the
             # deterministic qualifier thought, not a gate Terra had to pass.
             trace["qualification_result"] = "OBSERVED"
