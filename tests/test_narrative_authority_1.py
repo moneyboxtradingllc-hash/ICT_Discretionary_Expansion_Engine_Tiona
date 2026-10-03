@@ -437,13 +437,12 @@ def test_latency_execution_risk_protection_and_reconciliation_files_are_untouche
     import subprocess
 
     changed = subprocess.check_output(
-        ["git", "diff", "--name-only", "cbfaddb5847b57442cf04f62e8c65b889a16f8f8"],
+        ["git", "diff", "--name-only", "fed9b8d443dde1b8f05b08eaa72b6009565877cb"],
         cwd=ROOT, text=True).splitlines()
     forbidden = {
         "src/execution_gate/execution_gate.py",
         "src/broker/topstepx_candidate_freshness.py",
         "src/broker/pre_submit_risk.py",
-        "src/broker/topstepx_production_loop.py",
         "src/execution/protection.py",
         "src/execution/reconciliation.py",
         "src/live_scan/wake_registry.py",

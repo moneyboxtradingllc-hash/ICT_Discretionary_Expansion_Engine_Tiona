@@ -968,7 +968,9 @@ class ExecutionRunner:
             symbol=getattr(self.contract, "name", "") or "",
             geometry=geometry)
 
-    def _open_close_submission(self, *, round_index: int):
+    def _open_close_submission(self, *, round_index: int,
+                               signed_position=None, close_size=None,
+                               close_side=None, reason: str = ""):
         """Persist EMERGENCY-CLOSE INTENT before the socket opens. Own record.
 
         LUNA-VENUE-MINTED-CLOSE-LINEAGE-1 phase 1 (2026-09-02). `close_position`
@@ -997,6 +999,17 @@ class ExecutionRunner:
         # order. `operation` is what stops that absence reading as a malformed
         # place-order.
         payload = {"contractId": self.contract.id}
+        geometry = {"emergency_close_round": round_index}
+        if signed_position is not None:
+            geometry["emergency_close"] = {
+                "schema": "emergency_close_intent.v1",
+                "entry_order_id": getattr(self, "order_id", None),
+                "pre_close_signed_position": int(signed_position),
+                "requested_quantity": (None if close_size is None
+                                       else int(close_size)),
+                "requested_side": str(close_side or "").lower() or None,
+                "reason": str(reason or "")[:240],
+            }
         return SUBREC.open_submission(
             store_dir=self.submission_store_dir,
             session_id=self.submission_session_id,
@@ -1008,7 +1021,7 @@ class ExecutionRunner:
             account_fingerprint=getattr(self, "account_fingerprint", "") or "",
             contract_id=self.contract.id,
             symbol=getattr(self.contract, "name", "") or "",
-            geometry={"emergency_close_round": round_index},
+            geometry=geometry,
             operation=SUBREC.OPERATION_POSITION_CLOSE)
 
     def _record_close_outcome(self, record, *, raw_response=None,
@@ -2452,7 +2465,10 @@ class ExecutionRunner:
                 # placement still refuses to transmit what it cannot record.
                 close_record = None
                 try:
-                    close_record = self._open_close_submission(round_index=rounds)
+                    close_record = self._open_close_submission(
+                        round_index=rounds, signed_position=size,
+                        close_size=decision.get("close_size"),
+                        close_side=decision.get("close_side"), reason=reason)
                 except Exception as exc:  # noqa: BLE001
                     # OBSERVABLE, never swallowed -- and never converted into a
                     # fabricated durable record claiming a pre-transport write
@@ -2523,6 +2539,57 @@ class ExecutionRunner:
 
         safe = EL.is_safe_terminal(decision)
         confirmed = self.confirm_flat_and_clear(reason=reason)
+        # A successful closeContract response can omit the venue-minted order
+        # id. Persist the independent, complete venue-flat observation against
+        # that exact close submission; later reconciliation still has to match
+        # a unique trade fill before it may attribute an order id or P&L.
+        if confirmed.get("verified") and closes:
+            for close in closes:
+                submission_id = close.get("submission_id")
+                if not submission_id or not close.get("durably_recorded"):
+                    continue
+                try:
+                    row = SUBREC.find_submission(
+                        self.submission_store_dir, self.submission_session_id,
+                        submission_id)
+                    if row is None:
+                        continue
+                    observed_at = self.clock()
+                    observed_at_utc = (
+                        observed_at.astimezone(timezone.utc).isoformat()
+                        if getattr(observed_at, "tzinfo", None) is not None
+                        else None)
+                    flat_evidence = {
+                        "schema": "emergency_close_flat_confirmation.v1",
+                        "close_submission_id": submission_id,
+                        "session_id": self.submission_session_id,
+                        "mission_id": self.submission_mission_id,
+                        "account_fingerprint": self.account_fingerprint,
+                        "contract_id": self.contract.id,
+                        "flat_confirmed": bool(confirmed.get("clean")),
+                        "safe_terminal": bool(safe),
+                        "orders_complete": bool(confirmed.get("orders_complete")),
+                        "all_positions_flat": confirmed.get("open_positions") == 0,
+                        "contract_position_size": confirmed.get(
+                            "contract_position_size"),
+                        "mission_working_orders": list(confirmed.get(
+                            "mission_working_orders") or []),
+                        "unaccounted_same_contract": list(confirmed.get(
+                            "unaccounted_same_contract") or []),
+                        "observed_at_utc": observed_at_utc,
+                    }
+                    SUBREC.record_reconciliation(
+                        store_dir=self.submission_store_dir,
+                        session_id=self.submission_session_id,
+                        submission=row, state=row.get("state"),
+                        reconciliation={"close_flat_confirmation": flat_evidence})
+                except Exception as exc:  # noqa: BLE001 -- preserve venue truth
+                    self.close_durability_failures.append({
+                        "round": close.get("round"),
+                        "contract_id": self.contract.id,
+                        "stage": "flat_confirmation_not_durably_recorded",
+                        "error": f"{type(exc).__name__}: {exc}",
+                        "close_transported_anyway": True})
         if not safe:
             detail = (decision or {}).get("detail") or "; ".join(halts) or "unresolved"
             self._to(RESIDUAL_ORDERS, f"emergency liquidation unresolved: {detail}")
@@ -2585,6 +2652,8 @@ class ExecutionRunner:
         clean = not positions and not ours
         detail = {"clean": clean, "verified": True,
                   "open_positions": len(positions),
+                  "contract_position_size": self._signed_position(positions),
+                  "orders_complete": bool(found["complete"]),
                   "mission_working_orders": [o.get("id") for o in split["ours"]],
                   "unaccounted_same_contract": [o.get("id") for o in split["unproven"]],
                   "foreign_working_orders": [o.get("id") for o in split["foreign"]]}

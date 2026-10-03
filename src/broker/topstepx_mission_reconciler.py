@@ -70,8 +70,13 @@ TWO LAWS FALL OUT, and they are separate epistemic claims:
 """
 from __future__ import annotations
 
+import os
+from datetime import datetime, timezone
+
+from broker import topstepx_close_attribution as CLOSEATTR
 from broker import topstepx_mission_state as MS
 from broker import topstepx_order_discovery as DISC
+from broker import topstepx_submission_record as SUBREC
 
 
 def _fill_vwap(fills: list):
@@ -369,6 +374,74 @@ class MissionReconciler:
                                contract_id=self.contract_id,
                                entry_order_id=mission.order_id,
                                custom_tag=custom_tag)
+        close_submissions = CLOSEATTR.mission_close_submissions(mission)
+        same_contract_working = [
+            order for order in orders
+            if _same(_contract_of(order), self.contract_id)]
+        current_flat_observation = None
+        if len(close_submissions) == 1:
+            observed_at = (self.clock() if callable(self.clock)
+                           else datetime.now(timezone.utc))
+            observed_at_utc = (
+                observed_at.astimezone(timezone.utc).isoformat()
+                if getattr(observed_at, "tzinfo", None) is not None else None)
+            current_flat_observation = {
+                "schema": CLOSEATTR.SCHEMA,
+                "close_submission_id": close_submissions[0].get("submission_id"),
+                "session_id": mission.session_id,
+                "mission_id": mission.mission_id,
+                "account_fingerprint": mission.account_fingerprint,
+                "contract_id": self.contract_id,
+                "flat_confirmed": bool(seen["positions_answered"] and not positions),
+                "safe_terminal": bool(seen.get("orders_complete") and not positions
+                                       and not same_contract_working),
+                "orders_complete": bool(seen.get("orders_complete")),
+                "all_positions_flat": not positions,
+                "contract_position_size": size,
+                "mission_working_orders": [
+                    order.get("id") for order in same_contract_working
+                    if any(_same(order.get("id"), owned.get("id"))
+                           for owned in ours)],
+                "unaccounted_same_contract": [
+                    order.get("id") for order in same_contract_working
+                    if not any(_same(order.get("id"), owned.get("id"))
+                               for owned in ours)],
+                "observed_at_utc": observed_at_utc,
+            }
+        close_attribution = CLOSEATTR.prove_emergency_close_attribution(
+            submissions=close_submissions, trades=trades, mission=mission,
+            contract_id=self.contract_id, orders=seen.get("all_orders") or [],
+            current_flat_observation=current_flat_observation)
+        if close_attribution.get("status") == CLOSEATTR.PROVEN:
+            # The submission ledger remains the close-intent authority; append
+            # the uniquely joined venue fill as an additional fact. Never
+            # overwrite the original response or invent an order id.
+            for row in close_submissions:
+                if row.get("submission_id") != close_attribution.get(
+                        "close_submission_id"):
+                    continue
+                reconciliation = dict(row.get("reconciliation") or {})
+                attribution = {
+                    "schema": "emergency_close_attribution.v1",
+                    "status": CLOSEATTR.PROVEN,
+                    "venue_order_id": close_attribution.get("order_id"),
+                    "exit_price": close_attribution.get("exit_price"),
+                    "quantity": close_attribution.get("quantity"),
+                    "proof": close_attribution.get("proof"),
+                    "trade_fill_count": close_attribution.get("trade_fill_count"),
+                }
+                if reconciliation.get("close_attribution") != attribution:
+                    reconciliation["close_attribution"] = attribution
+                    try:
+                        SUBREC.record_reconciliation(
+                            store_dir=os.path.dirname(mission.path),
+                            session_id=mission.session_id, submission=row,
+                            state=row.get("state"),
+                            reconciliation=reconciliation)
+                    except Exception as exc:  # noqa: BLE001 -- don't claim a lost write
+                        refused.append("close attribution persistence: "
+                                       f"{type(exc).__name__}: {exc}")
+                break
         # Carried for `classify_exit`; ONE owner of the stop/target split.
         # ONLY WHEN OBSERVED. The tick that sees the exit usually sees the
         # working orders already gone, so overwriting unconditionally would
@@ -413,6 +486,7 @@ class MissionReconciler:
         # `positions_answered` is required: "no position" may only be read off a
         # venue answer we actually received.
         acknowledged = mission.order_id is not None
+        close_attribution_pending = False
         if acknowledged and seen["positions_answered"] and not size \
                 and MS.lifecycle_rank(mission.state) >= \
                 MS.lifecycle_rank(MS.VENUE_ACKNOWLEDGED):
@@ -441,13 +515,47 @@ class MissionReconciler:
                                  every, entry_order_id=mission.order_id),
                              evidence="venue trade history (fill seen only after close)")
                 if MS.lifecycle_rank(mission.state) >= MS.lifecycle_rank(MS.POSITION_OPEN):
-                    kind, price, oid = classify_exit(trades, mission)
+                    if close_attribution.get("status") == CLOSEATTR.PROVEN:
+                        kind, price, oid = (EXIT_UNCLASSIFIED,
+                                            close_attribution.get("exit_price"),
+                                            close_attribution.get("order_id"))
+                        exit_evidence = (
+                            "venue close fill uniquely joined to bot-authored "
+                            f"position close {close_attribution.get('close_submission_id')}")
+                    else:
+                        kind, price, oid = classify_exit(trades, mission)
+                        exit_evidence = (
+                            "venue reports no open position"
+                            if kind != EXIT_UNATTRIBUTED else
+                            "venue reports no open position; no trade bound to "
+                            "this mission (exit unattributed)")
+                    close_attribution_pending = (
+                        kind == EXIT_UNATTRIBUTED
+                        and CLOSEATTR.has_unresolved_bot_close(
+                            submissions=close_submissions, mission=mission,
+                            contract_id=self.contract_id))
                     step(mission.observe_exit, MS.EXIT_PENDING_RECONCILIATION,
                          exit_type=kind, exit_price=price, exit_order_id=oid,
-                         evidence=("venue reports no open position"
-                                   if kind != EXIT_UNATTRIBUTED else
-                                   "venue reports no open position; no trade "
-                                   "bound to this mission (exit unattributed)"))
+                         evidence=exit_evidence)
+
+        if (mission.state == MS.EXIT_PENDING_RECONCILIATION
+                and close_attribution.get("status") != CLOSEATTR.PROVEN
+                and CLOSEATTR.has_unresolved_bot_close(
+                    submissions=close_submissions, mission=mission,
+                    contract_id=self.contract_id)
+                and mission.exit_type == EXIT_UNATTRIBUTED):
+            close_attribution_pending = True
+
+        if (mission.state == MS.EXIT_PENDING_RECONCILIATION
+                and close_attribution.get("status") == CLOSEATTR.PROVEN
+                and mission.exit_type == EXIT_UNATTRIBUTED):
+            step(mission.bind_exit_attribution, "emergency close attribution",
+                 exit_type=EXIT_UNCLASSIFIED,
+                 exit_price=close_attribution.get("exit_price"),
+                 exit_order_id=close_attribution.get("order_id"),
+                 evidence=("bot close intent, response, fill and flat "
+                           f"reconciled via {close_attribution.get('close_submission_id')}"))
+            close_attribution_pending = False
 
         # ── rung: terminal ───────────────────────────────────────────────────
         # POSITIVE PROOF ONLY. Both reads must have been answered; a selector
@@ -460,7 +568,8 @@ class MissionReconciler:
                 # still resting at the venue, and closing the mission on that
                 # basis is how a live order becomes an orphan nobody owns.
                 and seen.get("orders_complete")
-                and not size and not ours):
+                and not size and not ours
+                and not close_attribution_pending):
             step(mission.reconcile_flat, MS.COMPLETE,
                  positions=len([p for p in positions
                                 if _same(_contract_of(p), self.contract_id)]),

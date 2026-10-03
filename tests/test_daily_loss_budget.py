@@ -570,12 +570,13 @@ class TestTheClaim:
 
     def test_management_runs_before_the_entry_governor(self):
         """Ordering is the guarantee, not a promise: `manage_open_position()` is
-        called at the top of the tick, the budget is resolved much later."""
-        src = open(os.path.join(ROOT, "src", "broker",
-                                "topstepx_production_loop.py"),
-                   encoding="utf-8").read()
-        assert src.index("self.last_management = self.manage_open_position()") < \
-            src.index("budget = DLB.resolve(")
+        called at the top of the tick, before the pre-cognition governor check."""
+        import inspect
+        from broker.topstepx_production_loop import ProductionLoop
+
+        tick = inspect.getsource(ProductionLoop._scan_once)
+        assert tick.index("self.last_management = self.manage_open_position()") < \
+            tick.index("self._terminal_contamination_before_cognition()")
 
     def test_the_governor_resolves_before_an_attempt_is_spent(self):
         src = open(os.path.join(ROOT, "src", "broker",

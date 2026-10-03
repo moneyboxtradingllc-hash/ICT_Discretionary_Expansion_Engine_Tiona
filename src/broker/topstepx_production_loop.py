@@ -18,6 +18,7 @@ import os
 from broker import topstepx_mission_reconciler as RECON
 from broker import daily_loss_budget as DLB
 from broker import topstepx_order_discovery as DISC
+from broker import topstepx_session_cognition_lock as COGNITION_LOCK
 from broker import topstepx_session_authorization as SA
 from broker.topstepx_combine_risk import PRODUCTION_MAX_RISK_USD
 from market_data.session_context import DEEP_HISTORY_BARS as SESSION_CONTEXT_DEEP_BARS
@@ -45,6 +46,7 @@ SUBMITTED = "SUBMITTED"
 SUBMIT_FAILED = "SUBMIT_FAILED"
 WINDOW_CLOSED = "WINDOW_CLOSED"
 SESSION_COMPLETE = "SESSION_COMPLETE"
+TRADING_COGNITION_OFF = "TRADING_COGNITION_OFF"
 
 
 
@@ -131,6 +133,7 @@ class ProductionLoop:
         self.last_repair = None
         self.last_window = None
         self.last_daily_loss = None
+        self._terminal_cognition = None
         # V1 is an observational subscriber of the already-running runtime.
         # This loop is outside the cognition closure; it owns neither socket,
         # pump, reconnect, Brain input, nor candidate construction.
@@ -219,6 +222,77 @@ class ProductionLoop:
         clear = getattr(registry, "clear_conditional_watch", None)
         if callable(clear):
             clear(plan_id=(plan or {}).get("plan_id"))
+
+    def _session_cognition_lock(self):
+        auth = self.mission.authorization
+        return COGNITION_LOCK.load(
+            store_dir=self.mission.store_dir,
+            session_id=auth.session_id,
+            account_fingerprint=self.ps.account_fingerprint,
+            contract_id=self.ps.contract.id)
+
+    def _latch_terminal_contamination(self, budget: dict) -> dict:
+        """Persist a same-session stop after the governor proves contamination."""
+        reason = str(budget.get("reason") or DLB.UNOWNED_TRADE)
+        auth = self.mission.authorization
+        try:
+            lock = COGNITION_LOCK.record_contaminated(
+                store_dir=self.mission.store_dir,
+                session_id=auth.session_id,
+                account_fingerprint=self.ps.account_fingerprint,
+                contract_id=self.ps.contract.id,
+                reason=reason,
+                observed_at=self.clock().astimezone(timezone.utc).isoformat())
+            persistence_error = None
+        except Exception as exc:  # noqa: BLE001 -- memory latch still stops this process
+            lock = {"schema": COGNITION_LOCK.SCHEMA, "terminal": True,
+                    "state": COGNITION_LOCK.CONTAMINATED,
+                    "session_id": auth.session_id,
+                    "reason": reason,
+                    "recorded_at_utc": self.clock().astimezone(
+                        timezone.utc).isoformat()}
+            persistence_error = f"{type(exc).__name__}: {exc}"
+        self._terminal_cognition = lock
+        self.active_candidate = None
+        if self.active_conditional_plan is not None:
+            self._clear_conditional_plan()
+        return self._terminal_cognition_result(lock, persistence_error)
+
+    @staticmethod
+    def _terminal_cognition_result(lock: dict, persistence_error=None) -> dict:
+        return {
+            "outcome": TRADING_COGNITION_OFF,
+            "reason": lock.get("reason") or "terminal_session_cognition_lock",
+            "session_cognition": dict(lock),
+            "provider_call_suppressed": True,
+            "candidate_production_suppressed": True,
+            "conditional_plan_publication_suppressed": True,
+            "safety_reconciliation_continues": True,
+            "terminal_lock_persistence_error": persistence_error,
+        }
+
+    def _terminal_contamination_before_cognition(self):
+        """Check a persisted latch, then the live governor before paid cognition."""
+        if self._terminal_cognition is not None:
+            return self._terminal_cognition_result(self._terminal_cognition)
+        existing = self._session_cognition_lock()
+        if existing is not None:
+            self._terminal_cognition = existing
+            if self.active_conditional_plan is not None:
+                self._clear_conditional_plan()
+            self.active_candidate = None
+            return self._terminal_cognition_result(existing)
+        budget = DLB.resolve(
+            session=self.ps.session, contract_id=self.ps.contract.id,
+            missions=self.mission.trade_missions,
+            authorization=self.mission.authorization,
+            max_risk_usd=PRODUCTION_MAX_RISK_USD,
+            window_start=SA.PRODUCTION_WINDOW_START,
+            tz_name=SA.PRODUCTION_WINDOW_TZ)
+        self.last_daily_loss = budget
+        if budget.get("state") == DLB.CONTAMINATED:
+            return self._latch_terminal_contamination(budget)
+        return None
 
     def _expire_conditional_plan_if_due(self, now=None) -> bool:
         """Retire an expired/invalid plan before choosing whether to reason."""
@@ -947,6 +1021,12 @@ class ProductionLoop:
         # mode. Placed BEFORE the entry-authority gate so it keeps
         # running once the cap is spent and cognition is off.
         self.last_management = self.manage_open_position()
+        # Check a durable terminal contamination latch before any early-return
+        # authority accounting, so restart/resume reports the terminal reason
+        # while reconciliation and protection still receive this tick.
+        terminal = self._terminal_contamination_before_cognition()
+        if terminal is not None:
+            return terminal
         # SESSION-CAP-GRACEFUL-SHUTDOWN-1. ENTRY AUTHORITY AND RESPONSIBILITY
         # ARE SEPARATE. This gate used to require `active_mission is None`, so a
         # session whose allowance was spent but whose trade was still live fell
@@ -1201,6 +1281,11 @@ class ProductionLoop:
         if not budget["entry_permitted"]:
             self._record_decision(scan, "REJECTED", budget["state"],
                                   budget.get("reason") or "")
+            if budget.get("state") == DLB.CONTAMINATED:
+                terminal = self._latch_terminal_contamination(budget)
+                terminal["trigger_scan_id"] = scan.get("snapshot_id")
+                terminal["candidate_refused_before_mission"] = True
+                return terminal
             return {"outcome": NO_CANDIDATE, "reason": budget["state"],
                     "detail": (f"daily loss budget {budget['state']}: "
                                f"{budget.get('reason')}"),
@@ -1373,6 +1458,8 @@ class ProductionLoop:
                 tz_name=SA.PRODUCTION_WINDOW_TZ)
             self.last_daily_loss = budget
             if not budget["entry_permitted"]:
+                if budget.get("state") == DLB.CONTAMINATED:
+                    self._latch_terminal_contamination(budget)
                 raise NoCandidate(budget["state"], budget.get("reason") or "daily loss budget refused")
             managed_runner = self.ps.runner
             try:
@@ -1431,6 +1518,14 @@ class ProductionLoop:
                 "reason": reason, "detail": str(exc),
             }])
             self._record_decision(scan, "REJECTED", reason, str(exc))
+            if reason == DLB.CONTAMINATED:
+                terminal = self._terminal_cognition_result(
+                    self._terminal_cognition or {
+                        "state": DLB.CONTAMINATED,
+                        "reason": DLB.UNOWNED_TRADE,
+                        "session_id": self.mission.authorization.session_id})
+                terminal["trigger_scan_id"] = scan.get("snapshot_id")
+                return terminal
             return {"outcome": NO_CANDIDATE, "reason": reason,
                     "detail": str(exc), "conditional_plan_id": plan.get("plan_id")}
 

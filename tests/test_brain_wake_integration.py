@@ -522,7 +522,7 @@ def test_missing_production_observation_time_does_not_fall_back_to_candle(
     assert provider.call_count == 1
 
 
-def test_real_brain_timing_reaches_conditional_plan_telemetry(monkeypatch):
+def test_real_brain_timing_reaches_conditional_plan_telemetry(monkeypatch, tmp_path):
     """Provider timing survives the actual Brain -> scan -> plan path."""
     import adaptive_learning.capital_intelligence_engine as capital
     import live_scan.production_scan_cycle as cycle_module
@@ -640,6 +640,7 @@ def test_real_brain_timing_reaches_conditional_plan_telemetry(monkeypatch):
     loop.cycle = cycle
     loop.symbol = "MNQ"
     loop.ps = SimpleNamespace(
+        account_fingerprint="acct:brain-timing-test",
         contract=SimpleNamespace(id="CON.TEST"),
         session=object(),
         quote_provider=SimpleNamespace(capture=lambda: SimpleNamespace(
@@ -647,8 +648,11 @@ def test_real_brain_timing_reaches_conditional_plan_telemetry(monkeypatch):
             captured_at=NOW)),
     )
     loop.mission = SimpleNamespace(
+        store_dir=str(tmp_path),
+        trade_missions=[],
         authorization=SimpleNamespace(session_id="SESSION"), candidate_count=0,
     )
+    loop._terminal_cognition = None
     loop.outcomes = []
     loop._pending_wake_event = None
     loop.active_conditional_plan = None

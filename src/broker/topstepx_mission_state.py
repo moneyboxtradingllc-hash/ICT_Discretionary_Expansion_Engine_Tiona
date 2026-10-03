@@ -380,6 +380,32 @@ class MissionState:
         self._verify(EXIT_PENDING_RECONCILIATION, "EXIT_PENDING_RECONCILIATION")
         return {"state": self.state, "exit_type": self.exit_type}
 
+    def bind_exit_attribution(self, *, exit_type: str, exit_price=None,
+                              exit_order_id, evidence: str) -> dict:
+        """Upgrade an unattributed exit only from a newly proven venue identity."""
+        if self.state != EXIT_PENDING_RECONCILIATION:
+            raise MissionStateError(
+                "exit attribution may only be bound while reconciliation is pending")
+        if exit_order_id is None:
+            raise MissionStateError("exit attribution requires a venue order id")
+        if self.exit_order_id is not None and str(self.exit_order_id) != str(exit_order_id):
+            raise MissionStateError(
+                f"exit identity already bound to {self.exit_order_id}; refusing {exit_order_id}")
+        if self.exit_type not in ("", "unattributed", exit_type):
+            raise MissionStateError(
+                f"exit type already bound to {self.exit_type}; refusing {exit_type}")
+        self.exit_type = exit_type
+        self.exit_price = exit_price
+        self.exit_order_id = exit_order_id
+        self.transition(EXIT_PENDING_RECONCILIATION,
+                        f"exit attribution proven [{evidence}]")
+        verify = load(self.path)
+        if (verify is None or verify.state != EXIT_PENDING_RECONCILIATION
+                or str(verify.exit_order_id) != str(exit_order_id)):
+            raise MissionStateError("could not verify bound exit attribution")
+        return {"state": self.state, "exit_type": self.exit_type,
+                "exit_order_id": self.exit_order_id, "verified": True}
+
     def reconcile_flat(self, *, positions: int = None, working_orders: int = None,
                        completion_state: str = "",
                        evidence: str = "venue flat") -> dict:
