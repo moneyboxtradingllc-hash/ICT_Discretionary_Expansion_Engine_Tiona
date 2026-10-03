@@ -172,17 +172,18 @@ def cost_adjusted_break_even(*, direction, entry_fill_price, contract=None,
 def _friction_points_from_canonical_model(contract, quantity):
     """Round-trip friction per contract, expressed in POINTS.
 
-    Delegates to `topstepx_combine_risk` -- the same measured fees/commissions
-    and declared slippage reserve that sizing already uses. Never invents a
-    cost: an unavailable model returns None and the caller refuses.
+    Delegates to `topstepx_combine_risk`'s preserved break-even cost estimate.
+    This does not participate in production sizing or strategy-risk
+    authorization. Never invents a cost: an unavailable model returns None and
+    the caller refuses.
     """
     try:
         if contract is None:
             return None
         from broker.topstepx_combine_risk import friction_per_contract
-        # `total` = measured fixed round trip + the DECLARED slippage reserve.
-        # Both halves are taken exactly as sizing takes them; splitting them
-        # here would let management and sizing disagree about what a trade costs.
+        # `total` = measured fixed round trip + the legacy per-contract
+        # break-even estimate. The $30 execution reserve is accounted for
+        # independently by pre/post-fill execution economics.
         dollars = _num((friction_per_contract(contract) or {}).get("total"))
         if dollars is None:
             return None

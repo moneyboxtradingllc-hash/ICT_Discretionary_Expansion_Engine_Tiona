@@ -20,7 +20,7 @@ from broker.topstepx_combine_risk import (
     FIXED_ROUND_TRIP_COMMISSIONS_PER_CONTRACT, FIXED_ROUND_TRIP_FEES_PER_CONTRACT,
     MEASURED_FIXED_ROUND_TRIP_TOTAL, PREFERRED_MAX_STOP_POINTS,
     PRODUCTION_MAX_CONTRACTS, PRODUCTION_MAX_RISK_USD, SLIPPAGE_RESERVE_TICKS_PER_SIDE,
-    SLIPPAGE_SOURCE,
+    SLIPPAGE_RESERVE_USD, SLIPPAGE_SOURCE, STRATEGY_RISK_CAP_USD,
 )
 
 
@@ -35,6 +35,9 @@ def resolve(slippage_ledger=None) -> dict:
     return {
         "slippage_sample": sample,
         "production_max_risk_usd": PRODUCTION_MAX_RISK_USD,
+        "strategy_risk_cap_usd": STRATEGY_RISK_CAP_USD,
+        "execution_slippage_reserve_usd": SLIPPAGE_RESERVE_USD,
+        "risk_authorization_basis": "structural_strategy_risk_only",
         "preferred_max_stop_points": PREFERRED_MAX_STOP_POINTS,
         "absolute_max_stop_points": ABSOLUTE_MAX_STOP_POINTS,
         "extended_volatility_range": (PREFERRED_MAX_STOP_POINTS, ABSOLUTE_MAX_STOP_POINTS),
@@ -56,7 +59,8 @@ def resolve(slippage_ledger=None) -> dict:
                         "total_round_trip": MEASURED_FIXED_ROUND_TRIP_TOTAL,
                         "source": FIXED_COST_SOURCE},
         "slippage": {"reserve_ticks_per_side": SLIPPAGE_RESERVE_TICKS_PER_SIDE,
-                     "measured": False, "source": SLIPPAGE_SOURCE},
+                     "measured": False, "source": SLIPPAGE_SOURCE,
+                     "scope": "legacy_break_even_cost_estimate_only"},
     }
 
 
@@ -129,7 +133,9 @@ def render(d: dict = None) -> str:
         "=" * 70,
         "PRODUCTION DOCTRINE (resolved, authoritative)",
         "=" * 70,
-        f"  PRODUCTION MAX RISK          : ${d['production_max_risk_usd']:,.2f} all-in",
+        f"  STRATEGY RISK CAP            : ${d['strategy_risk_cap_usd']:,.2f}",
+        f"  EXECUTION SLIPPAGE RESERVE   : ${d['execution_slippage_reserve_usd']:,.2f} per trade",
+        f"  RISK AUTHORIZATION BASIS    : {d['risk_authorization_basis']}",
         f"  PREFERRED MAX STRUCTURAL STOP: {d['preferred_max_stop_points']:.2f} points",
         f"  ABSOLUTE MAX STRUCTURAL STOP : {d['absolute_max_stop_points']:.2f} points",
         f"  EXTENDED VOLATILITY RANGE    : >{lo:.2f} through {hi:.2f} points",
@@ -143,10 +149,11 @@ def render(d: dict = None) -> str:
         f"  FIXED ROUND-TRIP / CONTRACT  : ${fx['total_round_trip']:.2f} "
         f"(fees ${fx['fees_round_trip']:.2f} + commissions ${fx['commissions_round_trip']:.2f})",
         f"    source                     : {fx['source']}",
-        f"  ACTIVE SLIPPAGE RESERVE      : {sl['reserve_ticks_per_side']:g} tick(s) entry + "
+        f"  LEGACY BREAK-EVEN ESTIMATE  : {sl['reserve_ticks_per_side']:g} tick(s) entry + "
         f"{sl['reserve_ticks_per_side']:g} tick(s) exit "
         f"= ${2 * sl['reserve_ticks_per_side'] * 0.5:.2f} per MNQ round trip",
         f"    measured                   : {sl['measured']}",
+        f"    scope                      : {sl['scope']}",
         f"    source                     : {sl['source']}",
         f"  SLIPPAGE CAPTURE             : {d.get('slippage_capture', 'NOT WIRED')}",
         f"  AUTOMATIC RESERVE UPDATES    : {d.get('automatic_reserve_updates', 'disabled')}",

@@ -41,9 +41,10 @@ from broker import topstepx_submission_record as SUBREC
 from broker.topstepx_client import TopstepXError
 from broker.topstepx_combine_risk import (
     ABSOLUTE_MAX_STOP_POINTS, MAX_RISK_PER_TRADE_USD, MIN_REWARD_TO_RISK,
-    PRODUCTION_MAX_CONTRACTS, PRODUCTION_MAX_RISK_USD, SMOKE_MAX_CONTRACTS,
-    BracketGeometry, RiskRejection, all_in_risk_for, build_bracket, risk_for,
-    ticks_between,
+    PRODUCTION_MAX_CONTRACTS, PRODUCTION_MAX_RISK_USD, SLIPPAGE_RESERVE_USD,
+    SMOKE_MAX_CONTRACTS,
+    BracketGeometry, RiskRejection, build_bracket, fixed_round_trip_costs,
+    risk_for, ticks_between,
 )
 from broker.topstepx_redaction import assert_clean
 
@@ -604,9 +605,23 @@ class ExecutionRunner:
                                 if geo.risk_usd else None,
             "quantity": geo.size,
             "gross_risk_usd": geo.risk_usd,
-            "all_in_risk_usd": sized["sizing"]["all_in_planned_risk"],
-            "all_in_risk_per_contract": sized["sizing"]["all_in_risk_per_contract"],
-            "friction": sized["sizing"]["friction_detail"],
+            "strategy_risk_usd": geo.risk_usd,
+            "strategy_risk_cap_usd": float(self.max_risk_usd),
+            "authorized_strategy_risk_usd": geo.risk_usd,
+            "slippage_reserve_usd": SLIPPAGE_RESERVE_USD,
+            "fees_usd": sized["sizing"]["fees_usd"],
+            "commissions_usd": sized["sizing"]["commissions_usd"],
+            "projected_all_in_risk_usd": sized["sizing"][
+                "projected_all_in_risk_usd"],
+            # Compatibility label only. This projection is not the strategy
+            # risk authorization basis.
+            "all_in_risk_usd": sized["sizing"]["projected_all_in_risk_usd"],
+            "friction": {
+                "fees_usd": sized["sizing"]["fees_usd"],
+                "commissions_usd": sized["sizing"]["commissions_usd"],
+                "slippage_reserve_usd": SLIPPAGE_RESERVE_USD,
+                "authorization_basis": "strategy_risk_only",
+            },
             "risk_cap_usd": float(self.max_risk_usd),
             "max_contracts": ceiling,
             "quantity_ceiling_from_prior_approval": int(old.size),
@@ -1409,7 +1424,8 @@ class ExecutionRunner:
         The certified conservative convention is preserved in the snap direction:
         the stop moves AWAY from the fill (never comes to rest inside the
         structural level) and the target moves TOWARD it (reward never
-        overstated). Economics are still measured in whole ticks from the fill.
+        overstated). The R:R gate retains conservative whole-tick economics;
+        post-fill structural exposure uses the exact fill VWAP-to-level distance.
         """
         import math
         geo, tick = self.geometry, self.contract.tick_size
@@ -1461,6 +1477,37 @@ class ExecutionRunner:
         if size > int(self.max_contracts):
             return {"authorized": False, "reason": "quantity_above_cap",
                     "detail": f"filled {size} exceeds the {self.max_contracts}-contract cap"}
+        if size > int(geo.size):
+            return {"authorized": False, "reason": "quantity_above_authorized",
+                    "detail": f"filled {size} exceeds final-quote authorized quantity {geo.size}"}
+
+        final_econ = self.final_quote_economics or {}
+        authorized_strategy_risk = float(geo.risk_usd)
+        strategy_risk_cap = float(self.max_risk_usd)
+        if authorized_strategy_risk > strategy_risk_cap + 0.005:
+            return {"authorized": False, "reason": "strategy_risk_above_cap",
+                    "detail": (f"final-quote strategy risk ${authorized_strategy_risk:,.2f} "
+                               f"exceeds ${strategy_risk_cap:,.2f}")}
+        if final_econ.get("decision") == "EXECUTE_AS_AUTHORIZED":
+            same_geometry = (
+                final_econ.get("direction") == geo.direction
+                and final_econ.get("quantity") == geo.size
+                and final_econ.get("structural_stop") is not None
+                and math.isclose(float(final_econ["structural_stop"]),
+                                 float(geo.stop_price), rel_tol=0.0, abs_tol=1e-9)
+                and final_econ.get("authorized_target") is not None
+                and math.isclose(float(final_econ["authorized_target"]),
+                                 float(geo.target_price), rel_tol=0.0, abs_tol=1e-9)
+                and final_econ.get("final_entry_reference") is not None
+                and math.isclose(float(final_econ["final_entry_reference"]),
+                                 float(geo.entry_price), rel_tol=0.0, abs_tol=1e-9)
+                and final_econ.get("authorized_strategy_risk_usd") is not None
+                and math.isclose(float(final_econ["authorized_strategy_risk_usd"]),
+                                 authorized_strategy_risk,
+                                 rel_tol=0.0, abs_tol=0.01))
+            if not same_geometry:
+                return {"authorized": False, "reason": "authorized_geometry_changed",
+                        "detail": "direction, quantity, structural stop or target changed after final quote"}
 
         bullish = geo.direction == "bullish"
         # Side is judged against the ACTUAL fill, never `candidate.entry_price`.
@@ -1488,52 +1535,155 @@ class ExecutionRunner:
                     "detail": "the authorized invalidation is less than one tick from the fill",
                     "fill_price": fill_price}
 
-        risk = risk_for(stop_ticks, size, self.contract)
-        economics = all_in_risk_for(
-            stop_points=stop_ticks * self.contract.tick_size,
-            size=size, contract=self.contract)
-        all_in_risk = economics["all_in_risk"]
+        # A venue may report a multi-fill VWAP between legal price ticks.
+        # Measure structural exposure from that exact VWAP to the unchanged
+        # structural stop; rounding the distance away would add a fictitious
+        # risk increment that cannot be attributed to the measured execution
+        # slippage. Keep the existing conservative whole-tick stop distance
+        # separately for the R:R gate.
+        stop_points = abs(fill_price - geo.stop_price)
+        risk = round((stop_points / self.contract.tick_size)
+                     * self.contract.tick_value * size, 2)
+        conservative_stop_points = stop_ticks * self.contract.tick_size
+        conservative_stop_risk = risk_for(stop_ticks, size, self.contract)
         reward = risk_for(target_ticks, size, self.contract)
-        stop_points = stop_ticks * self.contract.tick_size
+        quote_reference = None
+        signed_entry_slippage_points = None
+        signed_entry_slippage_ticks = None
+        actual_entry_slippage_usd = None
+        entry_slippage_provenance = "UNKNOWN"
+        capture = self.entry_capture
+        if capture is not None and self.order_id is not None:
+            try:
+                reference = float(capture.executable_reference(
+                    "buy" if bullish else "sell"))
+                capture_time = getattr(capture, "captured_at", None)
+                expected_reference = final_econ.get("final_entry_reference")
+                expected_timestamp = final_econ.get("final_quote_timestamp")
+                same_final_quote = (
+                    final_econ.get("decision") == "EXECUTE_AS_AUTHORIZED"
+                    and expected_reference is not None
+                    and math.isclose(reference, float(expected_reference),
+                                     rel_tol=0.0, abs_tol=1e-9)
+                    and capture_time is not None
+                    and expected_timestamp == capture_time.isoformat()
+                    and str(getattr(capture, "contract_id", ""))
+                        == str(self.contract.id))
+                if same_final_quote and math.isfinite(reference) and reference > 0:
+                    quote_reference = reference
+                    signed_entry_slippage_points = round(
+                        (fill_price - reference) if bullish else (reference - fill_price), 6)
+                    signed_entry_slippage_ticks = round(
+                        signed_entry_slippage_points / self.contract.tick_size, 6)
+                    actual_entry_slippage_usd = round(
+                        max(0.0, signed_entry_slippage_ticks)
+                        * self.contract.tick_value * size, 2)
+                    entry_slippage_provenance = "FINAL_QUOTE_TO_AUTHORIZED_FILL"
+            except (TypeError, ValueError, AttributeError, ZeroDivisionError):
+                pass
+
+        reserve_remaining = (round(max(0.0, SLIPPAGE_RESERVE_USD
+                                        - actual_entry_slippage_usd), 2)
+                             if actual_entry_slippage_usd is not None else None)
+        reserve_exceeded = (actual_entry_slippage_usd > SLIPPAGE_RESERVE_USD + 0.005
+                            if actual_entry_slippage_usd is not None else None)
+        fixed_costs = fixed_round_trip_costs(size)
+        # Actual fill-to-stop risk already contains the entry-price movement.
+        # Only unconsumed reserve remains as forward execution uncertainty.
+        all_in_risk = (round(risk + fixed_costs["known_costs_usd"]
+                             + reserve_remaining, 2)
+                       if reserve_remaining is not None else None)
+        risk_excess = round(risk - authorized_strategy_risk, 2)
         out = {
             "fill_price": fill_price, "size": size,
             "actual_full_fill_vwap": fill_price,
             "actual_attributed_quantity": size,
+            "final_quote": (capture.evidence(self.contract.tick_size)
+                            if capture is not None and hasattr(capture, "evidence") else None),
+            "final_quote_reference": quote_reference,
+            "final_quote_timestamp": final_econ.get("final_quote_timestamp"),
             "authorized_stop_price": geo.stop_price,
             "authorized_target_price": geo.target_price,
             "aligned_stop_price": aligned["stop_price"],
             "aligned_target_price": aligned["target_price"],
             "stop_points": round(stop_points, 6),
+            "conservative_stop_points": round(conservative_stop_points, 6),
             "reward_points": round(target_ticks * self.contract.tick_size, 6),
-            # `risk_usd` remains the historical gross field for evidence
-            # compatibility. Authorization is governed by `all_in_risk_usd`.
             "risk_usd": risk, "gross_risk_usd": risk,
+            "conservative_stop_risk_usd": conservative_stop_risk,
+            "strategy_risk_usd": authorized_strategy_risk,
+            "strategy_risk_cap_usd": strategy_risk_cap,
+            "authorized_strategy_risk_usd": authorized_strategy_risk,
+            "post_fill_structural_risk_usd": risk,
+            "entry_slippage_points": (max(0.0, signed_entry_slippage_points)
+                                      if signed_entry_slippage_points is not None else None),
+            "entry_slippage_ticks": (max(0.0, signed_entry_slippage_ticks)
+                                     if signed_entry_slippage_ticks is not None else None),
+            "signed_entry_slippage_points": signed_entry_slippage_points,
+            "signed_entry_slippage_ticks": signed_entry_slippage_ticks,
+            "actual_entry_slippage_usd": actual_entry_slippage_usd,
+            "entry_slippage_provenance": entry_slippage_provenance,
+            "authorized_slippage_reserve_usd": SLIPPAGE_RESERVE_USD,
+            "slippage_reserve_usd": SLIPPAGE_RESERVE_USD,
+            "remaining_slippage_reserve_usd": reserve_remaining,
+            "slippage_reserve_exceeded": reserve_exceeded,
+            "total_slippage_consumed_usd": actual_entry_slippage_usd,
+            "eventual_exit_slippage_usd": None,
+            "fees_usd": fixed_costs["fees_usd"],
+            "commissions_usd": fixed_costs["commissions_usd"],
+            "fees_source": fixed_costs["fees_source"],
             "all_in_risk_usd": all_in_risk,
-            "friction_risk_usd": economics["friction_total"],
-            "friction_per_contract": economics["friction_per_contract"],
-            "friction_detail": economics["friction_detail"],
+            "projected_all_in_risk_usd": all_in_risk,
+            "friction_risk_usd": (round(fixed_costs["known_costs_usd"]
+                                          + reserve_remaining, 2)
+                                   if reserve_remaining is not None else None),
+            "friction_per_contract": round(fixed_costs["known_costs_usd"] / size, 4),
+            "friction_detail": {**fixed_costs,
+                                "slippage_reserve_usd": SLIPPAGE_RESERVE_USD,
+                                "remaining_slippage_reserve_usd": reserve_remaining},
             "reward_usd": reward,
-            "reward_to_risk": round(reward / risk, 3) if risk else None,
+            "reward_to_risk": (round(reward / conservative_stop_risk, 3)
+                                if conservative_stop_risk else None),
             "max_stop_points": float(self.max_stop_points),
             "max_risk_usd": float(self.max_risk_usd),
             "min_reward_to_risk": float(self.min_reward_to_risk),
         }
-        if stop_points > float(self.max_stop_points):
+        if conservative_stop_points > float(self.max_stop_points):
             return {**out, "authorized": False, "reason": "stop_distance_above_cap",
-                    "detail": (f"actual-fill stop distance {stop_points:g} points exceeds the "
+                    "detail": (f"conservative whole-tick actual-fill stop distance "
+                               f"{conservative_stop_points:g} points exceeds the "
                                f"{float(self.max_stop_points):g}-point ceiling. The invalidation "
                                f"is the Brain's and is not adjustable.")}
-        if all_in_risk > float(self.max_risk_usd):
+        if reserve_exceeded is True:
+            return {**out, "authorized": False,
+                    "reason": "slippage_reserve_exceeded",
+                    "detail": (f"measured adverse entry slippage "
+                               f"${actual_entry_slippage_usd:,.2f} exceeds the "
+                               f"${SLIPPAGE_RESERVE_USD:,.2f} per-trade reserve")}
+        if risk_excess > 0.005 and actual_entry_slippage_usd is None:
+            return {**out, "authorized": False,
+                    "reason": "entry_slippage_unproven",
+                    "detail": "fill-to-stop exposure exceeds authorized strategy risk, but final-quote fill slippage is unproven"}
+        if (actual_entry_slippage_usd is not None
+                and risk_excess > actual_entry_slippage_usd + 0.01):
+            return {**out, "authorized": False,
+                    "reason": "post_fill_risk_not_explained_by_slippage",
+                    "detail": (f"structural risk excess ${risk_excess:,.2f} is not "
+                               f"explained by measured entry slippage "
+                               f"${actual_entry_slippage_usd:,.2f}")}
+        if risk > strategy_risk_cap + 0.005 and actual_entry_slippage_usd is None:
             return {**out, "authorized": False, "reason": "risk_above_cap",
-                    "detail": (f"actual-fill all-in risk ${all_in_risk:,.2f} "
-                               f"(gross ${risk:,.2f} + friction "
-                               f"${economics['friction_total']:,.2f}) exceeds the "
-                               f"${float(self.max_risk_usd):,.2f} cap")}
-        if risk > 0 and (reward / risk) < float(self.min_reward_to_risk):
+                    "detail": (f"post-fill structural risk ${risk:,.2f} exceeds the "
+                               f"${strategy_risk_cap:,.2f} strategy cap without proven slippage")}
+        if (conservative_stop_risk > 0
+                and (reward / conservative_stop_risk)
+                    < float(self.min_reward_to_risk)):
             return {**out, "authorized": False, "reason": "reward_below_gate",
-                    "detail": (f"actual-fill reward-to-risk {reward / risk:.2f} is below the "
+                    "detail": (f"actual-fill reward-to-risk "
+                               f"{reward / conservative_stop_risk:.2f} is below the "
                                f"{float(self.min_reward_to_risk):.2f} gate")}
-        return {**out, "authorized": True, "reason": None, "detail": ""}
+        return {**out, "authorized": True, "reason": None, "detail": "",
+                "post_fill_authorization_result": "AUTHORIZED"}
 
     def protective_children(self, working_orders: list) -> dict:
         """The exact stop and target children of THIS entry, or ambiguity.
@@ -1731,6 +1881,8 @@ class ExecutionRunner:
                                f"{ctx.active_protective_stop}; re-anchoring to "
                                f"{ctx.original_thesis_invalidation} would restore risk")
         auth = self.authorize_actual_fill(fill_event)
+        auth.setdefault("post_fill_authorization_result",
+                        "AUTHORIZED" if auth.get("authorized") else "REFUSED")
         auth_evidence = {
             **auth,
             "mission_id": self.submission_mission_id,

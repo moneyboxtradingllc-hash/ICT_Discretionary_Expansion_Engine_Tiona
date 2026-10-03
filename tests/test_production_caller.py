@@ -324,12 +324,19 @@ class TestSubmitPath:
         assert proof["stop_distance_points"] == 30.25
         assert proof["reward_distance_points"] == 149.75
         assert proof["reward_to_risk"] == pytest.approx(149.75 / 30.25, abs=0.001)
-        assert planned_size == 10
+        # The $350 cap applies to structural strategy risk alone; the sealed
+        # $30 reserve and known costs do not reduce or enlarge this ceiling.
+        assert planned_size == 11
         assert proof["quantity"] == calls[0]["size"] == runner.geometry.size == 5
-        assert proof["quantity_ceiling_from_prior_approval"] == 10
+        assert proof["quantity_ceiling_from_prior_approval"] == 11
         assert proof["quantity_adjusted_downward"] is True
         assert proof["gross_risk_usd"] == pytest.approx(302.5)
-        assert proof["all_in_risk_usd"] == pytest.approx(318.6)
+        assert proof["strategy_risk_cap_usd"] == pytest.approx(350.0)
+        assert proof["authorized_strategy_risk_usd"] == pytest.approx(302.5)
+        assert proof["slippage_reserve_usd"] == pytest.approx(30.0)
+        assert proof["fees_usd"] == pytest.approx(3.6)
+        assert proof["commissions_usd"] == pytest.approx(2.5)
+        assert proof["projected_all_in_risk_usd"] == pytest.approx(338.6)
         assert runner.geometry.stop_price == cs.invalidation_price
         assert runner.geometry.target_price == cs.objective.price
 
@@ -370,6 +377,11 @@ class TestSubmitPath:
         assert durable["quantity"] == calls[0]["size"]
         assert durable["structural_stop"] == cs.invalidation_price
         assert durable["authorized_target"] == cs.objective.price
+        assert durable["authorized_strategy_risk_usd"] == pytest.approx(
+            proof["authorized_strategy_risk_usd"])
+        assert durable["slippage_reserve_usd"] == pytest.approx(30.0)
+        assert durable["fees_usd"] == pytest.approx(0.72 * proof["quantity"])
+        assert durable["commissions_usd"] == pytest.approx(0.50 * proof["quantity"])
         assert durable["venue_submit_timestamp"] == submitted["venue_submit_timestamp"]
         assert durable["elapsed_quote_to_economics_ms"] >= 0
         assert durable["elapsed_economics_to_submit_ms"] >= 0

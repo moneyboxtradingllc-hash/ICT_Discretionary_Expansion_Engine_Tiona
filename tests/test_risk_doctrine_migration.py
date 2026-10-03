@@ -163,8 +163,8 @@ class TestTheCeilingBoundary:
 
 
 class TestSizingBuysContractsNotWiderStops:
-    #: stop -> (contracts under $350, contracts under the retired $250)
-    TABLE = {31.00: (5, 3), 35.00: (4, 3), THE_11_03_STOP: (4, 2),
+    #: stop -> (contracts under $350 strategy risk, contracts under $250)
+    TABLE = {31.00: (5, 4), 35.00: (5, 3), THE_11_03_STOP: (4, 3),
              47.00: (3, 2), 49.75: (3, 2), 50.00: (3, 2)}
 
     @pytest.mark.parametrize("pts", sorted(TABLE))
@@ -176,15 +176,16 @@ class TestSizingBuysContractsNotWiderStops:
     @pytest.mark.parametrize("pts", sorted(TABLE))
     def test_planned_risk_never_exceeds_the_cap(self, pts):
         s = R.size_for_risk(pts, MNQ)
-        assert s["all_in_planned_risk"] <= R.PRODUCTION_MAX_RISK_USD
+        assert s["authorized_strategy_risk_usd"] <= R.PRODUCTION_MAX_RISK_USD
         # and one more contract would break it -- the cap binds, nothing rounds up
-        assert ((s["contracts"] + 1) * s["all_in_risk_per_contract"]
+        assert ((s["contracts"] + 1) * s["strategy_risk_per_contract"]
                 > R.PRODUCTION_MAX_RISK_USD)
 
     def test_a_tight_stop_does_not_become_a_three_fifty_risk(self):
         """$350 is a ceiling, not an allocation."""
         s = R.size_for_risk(31.00, MNQ)
-        assert s["all_in_planned_risk"] < R.PRODUCTION_MAX_RISK_USD
+        assert s["authorized_strategy_risk_usd"] < R.PRODUCTION_MAX_RISK_USD
+        assert s["slippage_reserve_usd"] == 30.0
 
     def test_the_contract_cap_still_binds_above_the_dollar_cap(self):
         huge = R.size_for_risk(1.0, MNQ, max_risk_usd=1_000_000.0)
@@ -294,14 +295,12 @@ class TestTheRecordOfTheDayIsExact:
         assert stop <= 40.0                                       # the OLD ceiling
         assert R.size_for_risk(stop, MNQ, max_risk_usd=250.0)["contracts"] >= 1
 
-    def test_the_eleven_oh_four_setup_sized_three_contracts_under_the_old_cap(self):
-        """All-in sizing, not raw point risk: 31 pts is $65.22/contract once
-        measured fixed cost and slippage reserve are billed, so $250 bought
-        THREE -- not the four that 31 x $2 x 4 = $248 suggests."""
+    def test_the_eleven_oh_four_setup_sizing_uses_structural_risk_only(self):
+        """Costs and reserve do not reduce the separately configured $250 cap."""
         old = R.size_for_risk(THE_11_04_STOP, MNQ, max_risk_usd=250.0)
-        assert old["contracts"] == 3
-        assert old["all_in_risk_per_contract"] == pytest.approx(65.22, abs=0.01)
-        assert 31.00 * 2.0 == 62.00 < old["all_in_risk_per_contract"]
+        assert old["contracts"] == 4
+        assert old["strategy_risk_per_contract"] == pytest.approx(62.0)
+        assert old["authorized_strategy_risk_usd"] == pytest.approx(248.0)
 
     def test_only_the_eleven_oh_three_setup_required_the_new_ceiling(self):
         assert THE_11_03_STOP > 40.0                              # refused before

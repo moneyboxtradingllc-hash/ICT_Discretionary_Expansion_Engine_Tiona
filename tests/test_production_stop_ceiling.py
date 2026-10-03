@@ -149,28 +149,33 @@ class TestAdaptiveSizing:
         q = [size_for_risk(p, MNQ)["contracts"] for p in (10, 20, 35, 40)]
         assert q == sorted(q, reverse=True) and q[0] > q[-1]
 
-    def test_friction_reduces_the_frictionless_quantity(self):
-        """10-pt stop: 12 contracts ignoring friction, fewer once it is counted."""
-        frictionless = int(PRODUCTION_MAX_RISK_USD // (10.0 * 2.0))
-        actual = size_for_risk(10.0, MNQ)["contracts"]
-        assert actual < frictionless
+    def test_known_costs_and_execution_reserve_do_not_reduce_strategy_quantity(self):
+        """The strategy cap buys structure; costs/reserve are separately reported."""
+        s = size_for_risk(10.0, MNQ)
+        assert s["contracts"] == 15  # 17 risk-sized contracts, existing max binds
+        assert s["authorized_strategy_risk_usd"] == pytest.approx(300.0)
+        assert s["slippage_reserve_usd"] == pytest.approx(30.0)
+        assert s["projected_all_in_risk_usd"] == pytest.approx(348.3)
 
     @pytest.mark.parametrize("pts", [5, 10, 17.25, 24.5, 35, 39.75, 40])
-    def test_all_in_risk_never_exceeds_the_cap(self, pts):
-        assert size_for_risk(pts, MNQ)["all_in_planned_risk"] <= PRODUCTION_MAX_RISK_USD
+    def test_strategy_risk_never_exceeds_the_cap(self, pts):
+        assert size_for_risk(pts, MNQ)["authorized_strategy_risk_usd"] <= PRODUCTION_MAX_RISK_USD
 
     def test_the_forty_point_quantity_is_computed_not_assumed(self):
         """Whatever fits, fits — the count is arithmetic, not a constant."""
         s = size_for_risk(40.0, MNQ)
-        per = 40.0 * 2.0 + friction_per_contract(MNQ)["total"]
-        assert s["all_in_risk_per_contract"] == pytest.approx(per)
+        per = 40.0 * 2.0
+        assert s["strategy_risk_per_contract"] == pytest.approx(per)
         assert s["contracts"] == int(PRODUCTION_MAX_RISK_USD // per)
-        assert (s["contracts"] + 1) * per > PRODUCTION_MAX_RISK_USD   # one more would breach
+        assert (s["contracts"] + 1) * per > PRODUCTION_MAX_RISK_USD
+        assert s["projected_all_in_risk_usd"] > PRODUCTION_MAX_RISK_USD
 
-    def test_a_larger_slippage_reserve_can_size_down(self):
-        base = size_for_risk(40.0, MNQ)["contracts"]
-        conservative = size_for_risk(40.0, MNQ, slippage_reserve_ticks_per_side=8.0)["contracts"]
-        assert conservative <= base
+    def test_per_trade_reserve_is_not_an_input_to_the_sizer(self):
+        import inspect
+        assert "slippage_reserve" not in inspect.signature(size_for_risk).parameters
+        s = size_for_risk(17.25, MNQ)
+        assert s["contracts"] == 10
+        assert s["authorized_strategy_risk_usd"] == pytest.approx(345.0)
 
     def test_quantity_never_exceeds_fifteen(self):
         assert size_for_risk(0.25, MNQ)["contracts"] <= 15
@@ -188,17 +193,13 @@ class TestAdaptiveSizing:
         with pytest.raises(RiskRejection) as exc:
             long_bracket(40.0, max_risk_usd=50.0)
         assert exc.value.reason == "risk_above_cap"
-        assert "not adjustable" in str(exc.value) or "not removed" in str(exc.value)
 
-    def test_the_sizing_guard_names_friction_when_it_is_the_one_that_fires(self):
-        """A cap between gross and all-in isolates the friction guard."""
-        per_gross = 40.0 * 2.0                       # $80.00
-        per_all_in = per_gross + friction_per_contract(MNQ)["total"]   # $82.22
-        cap = (per_gross + per_all_in) / 2           # between the two
-        with pytest.raises(RiskRejection) as exc:
-            long_bracket(40.0, max_risk_usd=cap)
-        assert exc.value.reason == "risk_above_cap"
-        assert "not removed to make it fit" in str(exc.value)
+    def test_costs_are_telemetry_not_a_strategy_risk_veto(self):
+        s = size_for_risk(40.0, MNQ)
+        assert s["authorized_strategy_risk_usd"] == pytest.approx(320.0)
+        assert s["fees_usd"] == pytest.approx(2.88)
+        assert s["commissions_usd"] == pytest.approx(2.0)
+        assert s["slippage_reserve_usd"] == pytest.approx(30.0)
 
 
 class TestTargetIntegrity:
@@ -281,7 +282,9 @@ class TestStartupTelemetry:
         text = self._mod().render()
         assert "$1.22" in text and "measured:" in text
         assert "measured                   : False" in text
-        assert "provisional conservative reserve" in text
+        assert "legacy break-even friction estimate" in text
+        assert "STRATEGY RISK CAP            : $350.00" in text
+        assert "EXECUTION SLIPPAGE RESERVE   : $30.00 per trade" in text
         assert "$2.00 per MNQ round trip" in text
 
     def test_telemetry_reports_the_slippage_sample(self):

@@ -309,26 +309,32 @@ class TestStatistics:
 
 class TestRiskIntegration:
 
-    def test_sizing_includes_the_active_reserve(self):
-        with_reserve = size_for_risk(40.0, MNQ)["all_in_risk_per_contract"]
-        assert with_reserve == pytest.approx(40.0 * 2.0 + 1.22 + 2.00)
+    def test_sizing_uses_strategy_risk_and_reports_reserve_separately(self):
+        sizing = size_for_risk(40.0, MNQ)
+        assert sizing["strategy_risk_per_contract"] == pytest.approx(80.0)
+        assert sizing["slippage_reserve_usd"] == pytest.approx(30.0)
+        assert sizing["fees_usd"] == pytest.approx(2.88)
+        assert sizing["commissions_usd"] == pytest.approx(2.0)
 
     def test_the_forty_point_quantity_is_calculated_not_assumed(self):
         s = size_for_risk(40.0, MNQ)
-        per = 83.22
-        assert s["all_in_risk_per_contract"] == pytest.approx(per)
+        per = 80.0
+        assert s["strategy_risk_per_contract"] == pytest.approx(per)
         assert s["contracts"] == int(PRODUCTION_MAX_RISK_USD // per)
-        assert s["all_in_planned_risk"] == pytest.approx(332.88, abs=0.01)
+        assert s["authorized_strategy_risk_usd"] == pytest.approx(320.0)
+        assert s["projected_all_in_risk_usd"] == pytest.approx(354.88, abs=0.01)
         assert (s["contracts"] + 1) * per > PRODUCTION_MAX_RISK_USD
 
     @pytest.mark.parametrize("pts", [5, 10, 20, 35, 39.75, 40])
-    def test_all_in_risk_never_exceeds_the_cap(self, pts):
-        assert size_for_risk(pts, MNQ)["all_in_planned_risk"] <= PRODUCTION_MAX_RISK_USD
+    def test_strategy_risk_never_exceeds_the_cap(self, pts):
+        assert size_for_risk(pts, MNQ)["authorized_strategy_risk_usd"] <= PRODUCTION_MAX_RISK_USD
 
-    def test_a_bigger_reserve_sizes_down_not_up(self):
-        base = size_for_risk(20.0, MNQ)["contracts"]
-        bigger = size_for_risk(20.0, MNQ, slippage_reserve_ticks_per_side=10.0)["contracts"]
-        assert bigger <= base
+    def test_reserve_cannot_make_an_eleventh_contract_lawful(self):
+        sizing = size_for_risk(17.25, MNQ)
+        assert sizing["contracts"] == 10
+        assert 11 * 17.25 * 2.0 == pytest.approx(379.5)
+        assert 11 * 17.25 * 2.0 > PRODUCTION_MAX_RISK_USD
+        assert sizing["slippage_reserve_usd"] == pytest.approx(30.0)
 
     def test_measurement_cannot_alter_thesis_geometry(self):
         """Slippage evidence touches sizing only — never the levels."""

@@ -579,7 +579,7 @@ class TestStrategyUntouched:
         # NARRATIVE-AUTHORITY-1 separates confirmed transfer state from its
         # deterministic typed proof family; prior authorization is invalid.
         from ai_brain.production_model import brain_contract_fingerprint
-        assert brain_contract_fingerprint() == "brain:da4d5c37a58a1ae4"
+        assert brain_contract_fingerprint() == "brain:d1110cd260335601"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.

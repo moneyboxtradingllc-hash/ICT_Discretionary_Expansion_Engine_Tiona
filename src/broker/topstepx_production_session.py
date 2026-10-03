@@ -492,6 +492,38 @@ class ProductionSession:
             runner.min_reward_to_risk = MIN_REWARD_TO_RISK
             runner.prompt_fill_authority = True
             runner.order_id = mission.order_id
+            # Rehydrate the exact final-quote economic authority persisted on
+            # the acknowledged submission. Recovery must not replace that
+            # quote with a later quote or silently lose entry-slip provenance.
+            final_econ = row.get("final_quote_economics")
+            if isinstance(final_econ, dict):
+                runner.final_quote_economics = dict(final_econ)
+                quote = final_econ.get("final_quote")
+                if isinstance(quote, dict):
+                    try:
+                        captured_at = datetime.fromisoformat(
+                            str(quote["captured_at"]).replace("Z", "+00:00"))
+                        if captured_at.tzinfo is None:
+                            raise ValueError("final quote timestamp has no timezone")
+                        if str(quote.get("contract_id")) != str(self.contract.id):
+                            raise ValueError("final quote contract does not match recovered contract")
+                        runner.entry_capture = SL.QuoteCapture(
+                            captured_at=captured_at,
+                            best_bid=(float(quote["best_bid"])
+                                      if quote.get("best_bid") is not None else None),
+                            best_ask=(float(quote["best_ask"])
+                                      if quote.get("best_ask") is not None else None),
+                            last_trade=(float(quote["last_trade"])
+                                        if quote.get("last_trade") is not None else None),
+                            contract_id=str(quote["contract_id"]),
+                            market_data_age_seconds=float(
+                                quote["market_data_age_seconds"]),
+                            volatility_state=str(quote.get("volatility_state") or ""))
+                    except (KeyError, TypeError, ValueError):
+                        # An unusable archived quote remains UNKNOWN. The
+                        # post-fill guard will not attribute over-cap exposure
+                        # to execution slippage without this exact evidence.
+                        runner.entry_capture = None
             runner._entry_attempted = True
             runner.submission_store_dir = self.store_dir
             runner.submission_session_id = self.session_id
@@ -709,9 +741,72 @@ class ProductionSession:
         observation = self.runner.measure_exit_slippage(
             exit_type=exit_type, fill_price=fill_price, quantity=quantity,
             quote_capture=quote, requested_price=requested,
-            candidate_snapshot=candidate, ledger=self.slippage,
+            candidate_snapshot=candidate, ledger=None,
             attribution=attribution, order_id=exit_order_id,
             fills=fills or None)
+        # Close-time reserve telemetry is paired only by the candidate,
+        # contract and direction already threaded through both observations.
+        # Missing, duplicate or unreliable measurements remain UNKNOWN.
+        try:
+            from broker.topstepx_combine_risk import (
+                SLIPPAGE_RESERVE_USD, fixed_round_trip_costs,
+            )
+            identity = (str(candidate.candidate_id), str(self.contract.id),
+                        str(self.runner.geometry.direction))
+            entry_rows = [o for o in self.slippage.observations
+                          if o.get("kind") == "ENTRY"
+                          and (str(o.get("candidate_id")),
+                               str(o.get("contract_id")),
+                               str(o.get("direction"))) == identity]
+            entry = entry_rows[0] if len(entry_rows) == 1 else None
+            entry_total = (entry.get("slippage_dollars_total")
+                           if entry and entry.get("reliable") is True else None)
+            exit_total = (observation.get("slippage_dollars_total")
+                          if observation.get("reliable") is True else None)
+            entry_slip = (round(max(0.0, float(entry_total)), 2)
+                          if entry_total is not None else None)
+            exit_slip = (round(max(0.0, float(exit_total)), 2)
+                         if exit_total is not None else None)
+            total_slip = (round(entry_slip + exit_slip, 2)
+                          if entry_slip is not None and exit_slip is not None
+                          else None)
+            remaining_after_entry = (round(max(0.0, SLIPPAGE_RESERVE_USD
+                                               - entry_slip), 2)
+                                     if entry_slip is not None else None)
+            unused_after_close = (round(max(0.0, SLIPPAGE_RESERVE_USD
+                                            - total_slip), 2)
+                                  if total_slip is not None else None)
+            entry_qty = (int(entry.get("quantity") or 0) if entry else 0)
+            costs = fixed_round_trip_costs(entry_qty) if entry_qty > 0 else {}
+            observation.update({
+                "authorized_strategy_risk_usd": (
+                    (self.runner.protection_outcome or {}).get("anchor", {})
+                    .get("authorization", {}).get("authorized_strategy_risk_usd")
+                    if isinstance((self.runner.protection_outcome or {}).get("anchor"), dict)
+                    else None),
+                "actual_entry_slippage_usd": entry_slip,
+                "eventual_exit_slippage_usd": exit_slip,
+                "exit_slippage_ticks": observation.get("slippage_ticks"),
+                "total_slippage_usd": total_slip,
+                "total_slippage_consumed_usd": total_slip,
+                "slippage_reserve_usd": SLIPPAGE_RESERVE_USD,
+                "remaining_slippage_reserve_after_entry_usd": remaining_after_entry,
+                "unused_slippage_reserve_usd": unused_after_close,
+                "slippage_reserve_exceeded": (
+                    total_slip > SLIPPAGE_RESERVE_USD + 0.005
+                    if total_slip is not None else None),
+                "fees_usd": costs.get("fees_usd"),
+                "commissions_usd": costs.get("commissions_usd"),
+                "fees_source": costs.get("fees_source"),
+            })
+        except (TypeError, ValueError, AttributeError, KeyError):
+            # This is additive telemetry after the authoritative exit; it must
+            # not change reconciliation or protection outcomes.
+            observation.update({"total_slippage_usd": None,
+                                "total_slippage_consumed_usd": None,
+                                "unused_slippage_reserve_usd": None,
+                                "slippage_reserve_exceeded": None})
+        self.slippage.record(observation)
         self.ledger.save()
         self._record_exit_lineage(exit_type=exit_type, fill_price=fill_price,
                                   exit_order_id=exit_order_id,

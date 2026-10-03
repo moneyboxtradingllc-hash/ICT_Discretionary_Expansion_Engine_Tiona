@@ -41,6 +41,7 @@ rescue an invalidation that was on the wrong side of price to begin with.
 from __future__ import annotations
 
 import dataclasses
+import math
 from dataclasses import dataclass
 
 from broker.topstepx_client import ORDER_SIDE, ORDER_TYPE, TopstepXContract
@@ -104,6 +105,11 @@ PREFERRED_MAX_STOP_POINTS = 35.0
 ABSOLUTE_MAX_STOP_POINTS = 50.0
 PRODUCTION_MAX_CONTRACTS = 15
 PRODUCTION_MAX_RISK_USD = 350.00
+# Strategy risk and execution slippage are separate authorities.  The reserve
+# is a per-trade allowance after the strategy has already qualified; it is
+# never passed to the sizer.
+STRATEGY_RISK_CAP_USD = PRODUCTION_MAX_RISK_USD
+SLIPPAGE_RESERVE_USD = 30.00
 
 NORMAL_STOP_RANGE = "NORMAL_STOP_RANGE"
 EXTENDED_VOLATILITY_STOP_RANGE = "EXTENDED_VOLATILITY_STOP_RANGE"
@@ -128,13 +134,12 @@ FIXED_ROUND_TRIP_COMMISSIONS_PER_CONTRACT = 0.50
 MEASURED_FIXED_ROUND_TRIP_TOTAL = 1.22
 FIXED_COST_SOURCE = "measured: live Mission C/F Trade.fees + Trade.commissions, 2026-08-05"
 
-# PROVISIONAL reserve, raised to 2 ticks per side (operator, 2026-08-05) until
-# quote-to-fill evidence exists. 2 entry + 2 exit = 4 ticks = $2.00 per MNQ
-# round trip. It is deliberately conservative: sizing down on an unmeasured
-# assumption is recoverable, sizing up on one is not.
+# Legacy per-contract friction estimate used by the existing break-even cost
+# calculation. Preserve its value/behavior in this mission. It is NOT the
+# execution reserve and it is NOT an input to production sizing/authorization.
 SLIPPAGE_RESERVE_TICKS_PER_SIDE = 2.0
-SLIPPAGE_SOURCE = ("provisional conservative reserve, NOT measured; "
-                   "awaiting quote-to-fill capture")
+SLIPPAGE_SOURCE = ("legacy break-even friction estimate, NOT measured; "
+                   "not used for production size or risk authorization")
 
 
 def friction_per_contract(contract: TopstepXContract,
@@ -143,9 +148,9 @@ def friction_per_contract(contract: TopstepXContract,
                           fixed_commissions: float = FIXED_ROUND_TRIP_COMMISSIONS_PER_CONTRACT) -> dict:
     """Round-trip cost of ONE contract in dollars, with provenance attached.
 
-    `fixed` is measured; `slippage_reserve` is not. The caller can see which is
-    which, so a future quote-to-fill measurement can replace the reserve without
-    disturbing the measured part.
+    `fixed` is measured; the legacy per-contract estimate is not. This helper
+    remains for its existing break-even calculation only. Production risk
+    authorization uses `SLIPPAGE_RESERVE_USD` separately.
     """
     fixed = float(fixed_fees) + float(fixed_commissions)
     slip = 2.0 * float(slippage_reserve_ticks_per_side) * float(contract.tick_value or 0.0)
@@ -158,6 +163,18 @@ def friction_per_contract(contract: TopstepXContract,
             "slippage_source": SLIPPAGE_SOURCE,
             "slippage_is_measured": False,
             "total": round(fixed + slip, 4)}
+
+
+def fixed_round_trip_costs(size: int) -> dict:
+    """Measured fees and commissions for reporting, separate from risk/slip."""
+    quantity = int(size)
+    if quantity < 0:
+        raise RiskRejection("invalid_quantity", "quantity cannot be negative")
+    fees = round(quantity * FIXED_ROUND_TRIP_FEES_PER_CONTRACT, 2)
+    commissions = round(quantity * FIXED_ROUND_TRIP_COMMISSIONS_PER_CONTRACT, 2)
+    return {"fees_usd": fees, "commissions_usd": commissions,
+            "known_costs_usd": round(fees + commissions, 2),
+            "fees_source": FIXED_COST_SOURCE}
 
 
 def classify_stop_distance(stop_points: float,
@@ -205,47 +222,52 @@ def extended_volatility_supported(evidence: dict) -> tuple:
 
 def size_for_risk(stop_points: float, contract: TopstepXContract, *,
                   max_risk_usd: float = PRODUCTION_MAX_RISK_USD,
-                  max_contracts: int = PRODUCTION_MAX_CONTRACTS,
-                  slippage_reserve_ticks_per_side: float = SLIPPAGE_RESERVE_TICKS_PER_SIDE) -> dict:
-    """Largest whole MNQ quantity whose ALL-IN risk stays within the cap.
+                  max_contracts: int = PRODUCTION_MAX_CONTRACTS) -> dict:
+    """Largest whole-contract quantity whose structural strategy risk fits.
 
-        contracts x (stop_points x $2.00 + friction_per_contract) <= max_risk
-
-    Friction is inside the cap, never removed to make a trade fit. A stop wide
-    enough that even one contract breaches the cap yields quantity 0, which the
-    caller must treat as a rejection.
+    Only entry-to-structural-stop risk consumes this cap.  Fees are reported
+    separately and the per-trade execution-slippage reserve is deliberately
+    absent from the quantity calculation.
     """
     stop_points = float(stop_points)
     if stop_points <= 0:
         raise RiskRejection("zero_distance_stop", "stop distance must be positive")
-    economics = all_in_risk_for(
-        stop_points=stop_points, size=1, contract=contract,
-        slippage_reserve_ticks_per_side=slippage_reserve_ticks_per_side)
-    fr = economics["friction_detail"]
-    per_contract = economics["all_in_risk_per_contract"]
-    qty = int(float(max_risk_usd) // per_contract) if per_contract > 0 else 0
+    tick_size = float(contract.tick_size or 0.0)
+    tick_value = float(contract.tick_value or 0.0)
+    if tick_size <= 0 or tick_value <= 0:
+        raise RiskRejection("invalid_tick_metadata", "contract tick metadata is invalid")
+    per_contract = round(stop_points * tick_value / tick_size, 2)
+    qty = (int((float(max_risk_usd) + 1e-9) // per_contract)
+           if per_contract > 0 else 0)
     qty = max(0, min(qty, int(max_contracts)))
+    strategy_risk = round(qty * per_contract, 2)
+    fixed = fixed_round_trip_costs(qty)
+    projected = round(strategy_risk + fixed["known_costs_usd"]
+                       + SLIPPAGE_RESERVE_USD, 2)
     return {"contracts": qty,
-            "gross_stop_risk_per_contract": round(stop_points * MNQ_DOLLARS_PER_POINT, 2),
-            "fixed_costs_per_contract": fr["fixed_round_trip"],
-            "slippage_reserve_per_contract": fr["slippage_reserve"],
-            "friction_per_contract": fr["total"], "friction_detail": fr,
-            "all_in_risk_per_contract": round(per_contract, 2),
-            "all_in_planned_risk": round(qty * per_contract, 2),
+            "gross_stop_risk_per_contract": per_contract,
+            "strategy_risk_per_contract": per_contract,
+            "authorized_strategy_risk_usd": strategy_risk,
+            "strategy_risk_cap_usd": float(max_risk_usd),
+            **fixed,
+            "slippage_reserve_usd": SLIPPAGE_RESERVE_USD,
+            "projected_all_in_risk_usd": projected,
+            # Historical output key retained as an additive compatibility alias.
+            # It is a projection, not the strategy-risk authorization basis.
+            "all_in_planned_risk": projected,
             "max_risk_usd": float(max_risk_usd), "max_contracts": int(max_contracts),
             "fits": qty >= 1}
 
 
 def all_in_risk_for(*, stop_points: float, size: int,
                     contract: TopstepXContract,
-                    slippage_reserve_ticks_per_side: float = SLIPPAGE_RESERVE_TICKS_PER_SIDE) -> dict:
-    """Canonical production economics for an already-known quantity.
+                    remaining_slippage_reserve_usd: float = SLIPPAGE_RESERVE_USD) -> dict:
+    """Report separated trade economics; this result is not a sizing gate.
 
-    Initial sizing asks how many contracts fit this expression.  Post-fill
-    authorization asks whether the quantity that actually landed still fits
-    after the fill moved.  They are the same monetary law and therefore share
-    this one calculation rather than maintaining gross-only arithmetic beside
-    the friction-inclusive sizing path.
+    The structural amount is strategy risk.  Fixed fees and the remaining
+    per-trade slippage reserve are reported separately and are never added to
+    the strategy cap.  `remaining_slippage_reserve_usd` lets post-fill callers
+    replace provisional entry slippage with realized entry slippage.
     """
     points = float(stop_points)
     quantity = int(size)
@@ -253,21 +275,27 @@ def all_in_risk_for(*, stop_points: float, size: int,
         raise RiskRejection("zero_distance_stop", "stop distance must be positive")
     if quantity <= 0:
         raise RiskRejection("invalid_quantity", "quantity must be positive")
-    fr = friction_per_contract(contract, slippage_reserve_ticks_per_side)
-    gross_per_contract = points * MNQ_DOLLARS_PER_POINT
-    all_in_per_contract = gross_per_contract + fr["total"]
+    tick_size = float(contract.tick_size or 0.0)
+    tick_value = float(contract.tick_value or 0.0)
+    if tick_size <= 0 or tick_value <= 0:
+        raise RiskRejection("invalid_tick_metadata", "contract tick metadata is invalid")
+    gross_per_contract = points * tick_value / tick_size
+    strategy_risk = round(quantity * gross_per_contract, 2)
+    fixed = fixed_round_trip_costs(quantity)
+    reserve = float(remaining_slippage_reserve_usd)
+    if not math.isfinite(reserve) or reserve < 0:
+        raise RiskRejection("invalid_slippage_reserve", "remaining reserve must be finite and nonnegative")
+    all_in = round(strategy_risk + fixed["known_costs_usd"] + reserve, 2)
     return {
         "quantity": quantity,
         "stop_points": points,
         "gross_stop_risk_per_contract": round(gross_per_contract, 2),
-        "gross_stop_risk": round(quantity * gross_per_contract, 2),
-        "fixed_costs_per_contract": fr["fixed_round_trip"],
-        "slippage_reserve_per_contract": fr["slippage_reserve"],
-        "friction_per_contract": fr["total"],
-        "friction_total": round(quantity * fr["total"], 2),
-        "friction_detail": fr,
-        "all_in_risk_per_contract": round(all_in_per_contract, 2),
-        "all_in_risk": round(quantity * all_in_per_contract, 2),
+        "strategy_risk_usd": strategy_risk,
+        "gross_stop_risk": strategy_risk,
+        **fixed,
+        "slippage_reserve_usd": SLIPPAGE_RESERVE_USD,
+        "remaining_slippage_reserve_usd": round(reserve, 2),
+        "all_in_risk": all_in,
     }
 
 
@@ -492,9 +520,9 @@ def build_production_bracket(*, direction: str, entry_price: float,
     if not sizing["fits"]:
         raise RiskRejection(
             "risk_above_cap",
-            f"even one MNQ risks ${sizing['all_in_risk_per_contract']:,.2f} all-in "
-            f"(stop {geo.stop_points:g} pts + friction), above the "
-            f"${max_risk_usd:,.2f} cap. Friction is not removed to make it fit.")
+            f"even one MNQ has ${sizing['strategy_risk_per_contract']:,.2f} "
+            f"structural strategy risk at a {geo.stop_points:g}-point stop, above the "
+            f"${max_risk_usd:,.2f} strategy-risk cap.")
 
     sized = build_bracket(direction=direction, entry_price=entry_price,
                           invalidation_level=invalidation_level,

@@ -30,27 +30,34 @@ def no_external_calls(monkeypatch):
     monkeypatch.setattr(brain, "run_narrative_brain", forbidden)
 
 
-class TestAllInActualFillAuthorization:
-    def test_gross_pass_all_in_fail_is_refused(self):
-        # 12 * 10 * $2 = $240 gross <= $250; canonical friction makes
-        # all-in $278.64 and must close the already-filled position.
+class TestStrategyRiskAndExecutionReserveAuthorization:
+    def test_lawful_strategy_risk_is_not_refused_for_separate_costs(self):
+        # 12 * 10 * $2 = $240 strategy risk. Known costs and the reserve are
+        # reported separately and do not consume the strategy cap.
         runner, venue = _runner(
             "bullish", 30000.0, 29990.0, 30030.0, 30000.0, size=12)
+        for order in venue._orders:
+            order["size"] = 12
         out = runner.reanchor_protection_to_structure(
             fill_event=_fill(30000.0, 12), working_orders=venue.open_orders())
         auth = out["authorization"]
         assert auth["gross_risk_usd"] == 240.0
-        assert auth["all_in_risk_usd"] == 278.64
-        assert auth["reason"] == "risk_above_cap"
-        assert venue.modifies == []
-        assert venue.closed
+        assert auth["authorized_strategy_risk_usd"] == 240.0
+        assert auth["fees_usd"] == pytest.approx(8.64)
+        assert auth["commissions_usd"] == pytest.approx(6.0)
+        assert auth["remaining_slippage_reserve_usd"] == 30.0
+        assert auth["all_in_risk_usd"] == pytest.approx(284.64)
+        assert auth["authorized"] is True
+        assert venue.closed == []
 
-    def test_exact_all_in_ceiling_preserves_inclusive_boundary(self):
+    def test_strategy_risk_cap_is_independent_of_projected_total_exposure(self):
         runner, _ = _runner(
             "bullish", 30000.0, 29990.0, 30030.0, 30000.0, size=10)
-        runner.max_risk_usd = 232.20
+        runner.max_risk_usd = 200.0
         auth = runner.authorize_actual_fill(_fill(30000.0, 10))
-        assert auth["all_in_risk_usd"] == 232.20
+        assert auth["strategy_risk_cap_usd"] == 200.0
+        assert auth["authorized_strategy_risk_usd"] == 200.0
+        assert auth["all_in_risk_usd"] == pytest.approx(242.2)
         assert auth["authorized"] is True
 
     def test_lower_effective_ceiling_survives_to_actual_fill(self):
@@ -59,9 +66,9 @@ class TestAllInActualFillAuthorization:
         runner.max_risk_usd = 220.0
         auth = runner.authorize_actual_fill(_fill(30000.0, 10))
         assert auth["gross_risk_usd"] == 200.0
-        assert auth["all_in_risk_usd"] == 232.20
+        assert auth["all_in_risk_usd"] == pytest.approx(242.2)
         assert auth["max_risk_usd"] == 220.0
-        assert auth["authorized"] is False
+        assert auth["authorized"] is True
 
     def test_favorable_and_lawful_adverse_fills_keep_structure(self):
         favorable, _ = _runner(

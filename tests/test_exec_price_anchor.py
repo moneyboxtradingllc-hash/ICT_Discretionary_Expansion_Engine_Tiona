@@ -24,6 +24,7 @@ There is no approved bounded-drift doctrine: exact structural prices, or flat.
 """
 import os
 import sys
+from datetime import datetime, timezone
 
 import pytest
 
@@ -137,7 +138,8 @@ def _children(fill, direction, stop_ticks=80, target_ticks=200):
     ]
 
 
-def _runner(direction, entry, stop, target, fill, *, orders=None, size=1):
+def _runner(direction, entry, stop, target, fill, *, orders=None, size=1,
+            max_stop_points=40.0, max_risk_usd=250.0):
     from broker.topstepx_combine_risk import build_bracket
     # The scenario says the entry FILLED, so the venue holds that position.
     session = FakeSession(
@@ -149,11 +151,29 @@ def _runner(direction, entry, stop, target, fill, *, orders=None, size=1):
     r.order_id = ENTRY_ORDER_ID
     r.geometry = build_bracket(direction=direction, entry_price=entry,
                                invalidation_level=stop, target_price=target,
-                               contract=MNQ, size=size, max_risk_usd=250.0,
-                               max_stop_points=40.0, min_reward_to_risk=1.0,
+                               contract=MNQ, size=size, max_risk_usd=max_risk_usd,
+                               max_stop_points=max_stop_points, min_reward_to_risk=1.0,
                                max_contracts=15)
-    r.max_risk_usd = 250.0
-    r.max_stop_points = 40.0
+    from broker.topstepx_slippage import QuoteCapture
+    captured_at = datetime.now(timezone.utc)
+    is_long = direction == "bullish"
+    r.entry_capture = QuoteCapture(
+        captured_at=captured_at,
+        best_bid=entry - 0.25 if is_long else entry,
+        best_ask=entry if is_long else entry + 0.25,
+        last_trade=entry, contract_id=MNQ.id,
+        market_data_age_seconds=0.0, volatility_state="test")
+    r.final_quote_economics = {
+        "decision": "EXECUTE_AS_AUTHORIZED",
+        "final_entry_reference": entry,
+        "final_quote_timestamp": captured_at.isoformat(),
+        "direction": direction, "structural_stop": r.geometry.stop_price,
+        "authorized_target": r.geometry.target_price,
+        "quantity": size,
+        "authorized_strategy_risk_usd": r.geometry.risk_usd,
+    }
+    r.max_risk_usd = max_risk_usd
+    r.max_stop_points = max_stop_points
     r.max_contracts = 15
     r.min_reward_to_risk = 1.0
     return r, session
@@ -246,25 +266,23 @@ class TestPostFillRefusal:
         assert out["authorization"]["reason"] == "stop_distance_above_cap"
         assert session.closed == [MNQ.id]
 
-    def test_adverse_fill_past_risk_cap_flattens(self):
-        """Approved at the cap; ONE adverse point pushes actual risk past it.
-
-        This is the case fill-relative anchoring could never produce, because
-        preserving the distance preserves the money. Holding the structural stop
-        still is what makes the dollar figure move — so the cap has to be
-        re-applied against the real fill, or the repair would fix market truth
-        while quietly breaking the money theorem.
-        """
-        # 12 MNQ x 10 pts = $240 approved (under $250); at 30001 the same
-        # structural stop is 11 pts = $264.
+    def test_adverse_fill_within_reserve_does_not_flatten_at_strategy_cap(self):
+        """Measured entry slip may move fill-to-stop exposure above $250."""
+        # 12 MNQ x 10 pts = $240 strategy risk; one adverse point adds $24
+        # actual entry slippage, within the $30 reserve.
         r, session = _runner("bullish", 30000.0, 29990.0, 30030.0, 30001.0, size=12)
+        for order in session._orders:
+            order["size"] = 12
         assert r.geometry.risk_usd == 240.0            # approval genuinely passed
         out = r.reanchor_protection_to_structure(
             fill_event=_fill(30001.0, size=12), working_orders=session.open_orders())
-        assert out["reanchored"] is False
-        assert out["authorization"]["reason"] == "risk_above_cap"
+        assert out["reanchored"] is True
+        assert out["authorization"]["authorized"] is True
         assert out["authorization"]["risk_usd"] == 264.0
-        assert session.closed == [MNQ.id]
+        assert out["authorization"]["authorized_strategy_risk_usd"] == 240.0
+        assert out["authorization"]["actual_entry_slippage_usd"] == 24.0
+        assert out["authorization"]["remaining_slippage_reserve_usd"] == 6.0
+        assert session.closed == []
 
     def test_adverse_fill_below_r_floor_flattens(self):
         # approved at entry 30000: 20 risk / 25 reward = 1.25R.
@@ -530,6 +548,21 @@ def _fill_runner(fill, *, batches, positions=None, size=1, orders=None,
                                max_contracts=15)
     r.max_risk_usd, r.max_stop_points = 250.0, 40.0
     r.max_contracts, r.min_reward_to_risk = 15, 1.0
+    from broker.topstepx_slippage import QuoteCapture
+    captured_at = datetime.now(timezone.utc)
+    r.entry_capture = QuoteCapture(
+        captured_at=captured_at, best_bid=29999.75, best_ask=30000.0,
+        last_trade=30000.0, contract_id=MNQ.id,
+        market_data_age_seconds=0.0, volatility_state="test")
+    r.final_quote_economics = {
+        "decision": "EXECUTE_AS_AUTHORIZED",
+        "final_entry_reference": 30000.0,
+        "final_quote_timestamp": captured_at.isoformat(),
+        "direction": "bullish", "structural_stop": r.geometry.stop_price,
+        "authorized_target": r.geometry.target_price,
+        "quantity": size,
+        "authorized_strategy_risk_usd": r.geometry.risk_usd,
+    }
     r.prompt_fill_authority = True
     return r, session
 
@@ -559,6 +592,13 @@ class TestFullFillAuthority:
         # exact prices -- this is the case that proves the grid snap is applied
         # to the LEVEL, not reconstructed from a distance off the fill.
         assert out["anchor"]["moved"] == {"stop": 29996.0, "target": 30012.0}
+        auth = out["anchor"]["authorization"]
+        assert auth["authorized"] is True
+        assert auth["post_fill_structural_risk_usd"] == pytest.approx(110.0)
+        assert auth["actual_entry_slippage_usd"] == pytest.approx(14.0)
+        assert auth["post_fill_structural_risk_usd"] - auth[
+            "authorized_strategy_risk_usd"] == pytest.approx(
+                auth["actual_entry_slippage_usd"])
 
     def test_all_valid_timestamps_prove_latest_chronological_fill(self):
         # Lexical ordering would choose 15:00+02; parsed UTC chronology must
