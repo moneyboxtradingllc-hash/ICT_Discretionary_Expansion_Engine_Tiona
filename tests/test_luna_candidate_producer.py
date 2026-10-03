@@ -188,6 +188,20 @@ class TestValidCandidates:
         with pytest.raises(NoCandidate, match="conditional_plan_mode_required"):
             produce(res=result(parsed=p))
 
+    @pytest.mark.parametrize("action", [
+        "watching: bullish FVG retracement; activate on zone touch",
+        "WATCHING: bearish setup; wait for the authorized zone",
+    ])
+    @pytest.mark.parametrize("mode", [
+        {}, {"conditional_plan": True}, {"conditional_trigger": True},
+    ])
+    def test_verbose_watching_action_fails_closed_in_every_producer_mode(
+            self, action, mode):
+        p = parsed(current_action=action,
+                   plan_expires_at="2026-08-05T15:31:00+00:00")
+        with pytest.raises(NoCandidate, match="conditional_plan_action_invalid"):
+            produce(res=result(parsed=p), **mode)
+
     def test_watching_without_explicit_future_expiry_is_refused(self):
         p = parsed(current_action="watching", plan_expires_at=None)
         with pytest.raises(NoCandidate, match="conditional_plan_expiry_invalid"):

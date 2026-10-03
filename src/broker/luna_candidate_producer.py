@@ -1216,6 +1216,11 @@ class CandidateProducer:
         self.last_decision_trace = trace
         _p = brain_result.get("parsed") or {}
         _action = str(_p.get("current_action") or "").strip().lower()
+        if _action.startswith("watching") and _action != "watching":
+            raise NoCandidate(
+                "conditional_plan_action_invalid",
+                "current_action must be the exact token 'watching'; verbose "
+                "watching text cannot authorize immediate exposure")
         if _action == "watching" and not (conditional_plan or conditional_trigger):
             raise NoCandidate("conditional_plan_mode_required",
                               "watching is valid only through the conditional-plan path")

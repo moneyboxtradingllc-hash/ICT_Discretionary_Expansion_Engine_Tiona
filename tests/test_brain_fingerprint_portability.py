@@ -57,7 +57,9 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # and the selected mechanical execution object into the same fingerprint.
     # NARRATIVE-AUTHORITY-1 separates the transfer state from its typed proof
     # family; the current authorization cannot be reused after this prompt change.
-    assert PM.brain_contract_fingerprint() == "brain:d1110cd260335601"
+    # WATCHING-PARSER-FAIL-CLOSED-1 rejects verbose conditional actions at the
+    # candidate boundary; the closure identity rotates with that execution law.
+    assert PM.brain_contract_fingerprint() == "brain:7c3aa082266c2586"
 
 
 @pytest.mark.parametrize("addition", [

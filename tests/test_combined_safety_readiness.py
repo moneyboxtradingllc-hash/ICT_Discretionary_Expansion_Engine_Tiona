@@ -578,8 +578,10 @@ class TestStrategyUntouched:
         # the fingerprint moves again and PROD-20260928 must be reissued.
         # NARRATIVE-AUTHORITY-1 separates confirmed transfer state from its
         # deterministic typed proof family; prior authorization is invalid.
+        # WATCHING-PARSER-FAIL-CLOSED-1 rejects verbose watching text as an
+        # immediate entry, so the closure-bound execution contract rotates.
         from ai_brain.production_model import brain_contract_fingerprint
-        assert brain_contract_fingerprint() == "brain:d1110cd260335601"
+        assert brain_contract_fingerprint() == "brain:7c3aa082266c2586"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.
