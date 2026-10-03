@@ -151,6 +151,20 @@ def _close_trade_after(row, observed_at, *, order_id=CLOSE_ID, side=0,
     return _trade(order_id, created, side=side, size=size, price=price, pnl=2.5)
 
 
+def _prove_with_extra_close_trades(tmp_path, make_extras, *, close_id=None):
+    mission = _mission(tmp_path)
+    row = _close_record(tmp_path, mission, close_id=close_id)
+    observed_at = _record_flat_confirmation(tmp_path, mission, row)
+    trades = [_entry_trade(), _close_trade_after(row, observed_at)]
+    trades.extend(make_extras(row, observed_at))
+    result = CLOSEATTR.prove_emergency_close_attribution(
+        submissions=CLOSEATTR.mission_close_submissions(mission),
+        trades=trades, mission=mission, contract_id=CID,
+        orders=[_close_order()],
+        current_flat_observation=None)
+    return result
+
+
 @pytest.mark.parametrize("response_order_id", [None, CLOSE_ID])
 def test_bot_close_is_attributed_from_exact_intent_fill_and_flat_proof(
         tmp_path, response_order_id):
@@ -295,6 +309,123 @@ def test_ambiguous_or_conflicting_close_evidence_remains_fail_closed(
     assert CLOSEATTR.has_unresolved_bot_close(
         submissions=CLOSEATTR.mission_close_submissions(m), mission=m,
         contract_id=CID)
+
+
+def test_no_id_close_missing_contract_trade_row_is_ambiguous(tmp_path):
+    def extra(row, observed_at):
+        trade = _close_trade_after(row, observed_at, order_id=99901, size=1)
+        trade.pop("contractId")
+        return [trade]
+
+    result = _prove_with_extra_close_trades(tmp_path, extra)
+
+    assert result["status"] == CLOSEATTR.UNKNOWN
+    assert result["reason"] == "ambiguous_trade_evidence"
+
+
+def test_no_id_close_unparseable_matching_contract_timestamp_is_ambiguous(
+        tmp_path):
+    def extra(row, observed_at):
+        trade = _close_trade_after(row, observed_at, order_id=99902, size=1)
+        trade["creationTimestamp"] = "not-a-venue-timestamp"
+        return [trade]
+
+    result = _prove_with_extra_close_trades(tmp_path, extra)
+
+    assert result["status"] == CLOSEATTR.UNKNOWN
+    assert result["reason"] == "ambiguous_trade_evidence"
+
+
+def test_missing_contract_row_outside_window_is_proven_irrelevant(tmp_path):
+    def extra(row, _observed_at):
+        prepared = datetime.fromisoformat(row["prepared_at_utc"])
+        trade = _trade(99903, prepared - timedelta(seconds=1), side=0, size=1)
+        trade.pop("contractId")
+        return [trade]
+
+    result = _prove_with_extra_close_trades(tmp_path, extra)
+
+    assert result["status"] == CLOSEATTR.PROVEN
+    assert result["trade_fill_count"] == 1
+
+
+def test_unparseable_timestamp_different_contract_is_proven_irrelevant(
+        tmp_path):
+    def extra(row, observed_at):
+        trade = _close_trade_after(row, observed_at, order_id=99904, size=1)
+        trade["contractId"] = "OTHER-CONTRACT"
+        trade["creationTimestamp"] = "not-a-venue-timestamp"
+        return [trade]
+
+    result = _prove_with_extra_close_trades(tmp_path, extra)
+
+    assert result["status"] == CLOSEATTR.PROVEN
+    assert result["trade_fill_count"] == 1
+
+
+def test_multiple_relevant_close_orders_are_not_attributed(tmp_path):
+    def extra(row, observed_at):
+        return [_close_trade_after(row, observed_at, order_id=99905, size=1)]
+
+    result = _prove_with_extra_close_trades(tmp_path, extra)
+
+    assert result["status"] == CLOSEATTR.UNKNOWN
+    assert result["reason"] == "conflicting_close_interval_trades"
+
+
+def test_ambiguous_row_prevents_attribution_even_with_conflicting_fill(
+        tmp_path):
+    def extra(row, observed_at):
+        ambiguous = _close_trade_after(
+            row, observed_at, order_id=99906, size=1)
+        ambiguous.pop("contractId")
+        conflict = _close_trade_after(
+            row, observed_at, order_id=99907, side=1, size=1)
+        return [ambiguous, conflict]
+
+    result = _prove_with_extra_close_trades(tmp_path, extra)
+
+    assert result["status"] == CLOSEATTR.UNKNOWN
+    assert result["reason"] == "ambiguous_trade_evidence"
+
+
+def test_truthy_non_boolean_voided_marker_does_not_exclude_trade(tmp_path):
+    def extra(row, observed_at):
+        trade = _close_trade_after(row, observed_at, order_id=99908, size=1)
+        trade["voided"] = "false"
+        return [trade]
+
+    result = _prove_with_extra_close_trades(tmp_path, extra)
+
+    assert result["status"] == CLOSEATTR.UNKNOWN
+
+
+def test_explicit_voided_status_proves_malformed_trade_row_irrelevant(tmp_path):
+    def extra(row, observed_at):
+        trade = _close_trade_after(row, observed_at, order_id=99909, size=1)
+        trade.pop("contractId")
+        trade["creationTimestamp"] = "not-a-venue-timestamp"
+        trade["voided"] = True
+        return [trade]
+
+    result = _prove_with_extra_close_trades(tmp_path, extra)
+
+    assert result["status"] == CLOSEATTR.PROVEN
+    assert result["trade_fill_count"] == 1
+
+
+def test_returned_order_id_path_remains_anchored_with_ambiguous_trade_row(
+        tmp_path):
+    def extra(row, observed_at):
+        trade = _close_trade_after(row, observed_at, order_id=99910, size=1)
+        trade.pop("contractId")
+        return [trade]
+
+    result = _prove_with_extra_close_trades(
+        tmp_path, extra, close_id=CLOSE_ID)
+
+    assert result["status"] == CLOSEATTR.PROVEN
+    assert result["trade_fill_count"] == 1
 
 
 def test_external_trade_without_bot_close_provenance_still_contaminates():

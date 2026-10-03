@@ -17,6 +17,9 @@ from broker import topstepx_submission_record as SUBREC
 SCHEMA = "emergency_close_flat_confirmation.v1"
 PROVEN = "PROVEN"
 UNKNOWN = "UNKNOWN"
+TRADE_RELEVANT = "RELEVANT"
+TRADE_PROVEN_IRRELEVANT = "PROVEN_IRRELEVANT"
+TRADE_AMBIGUOUS = "AMBIGUOUS"
 
 
 def _same(a, b) -> bool:
@@ -155,6 +158,39 @@ def _trade_identity(trade):
     }
 
 
+def _classify_close_trade(trade, *, contract_id, prepared_at, end_at,
+                          entry_order_id):
+    """Classify an account-trade row without treating missing facts as absence.
+
+    The trade search is account-scoped. A row is excluded only by an
+    authoritative fact (voided status, the exact mission entry order, a known
+    different contract, or a parseable timestamp outside the close interval).
+    Otherwise missing identity/time makes its relationship ambiguous.
+    """
+    if not isinstance(trade, dict):
+        return TRADE_AMBIGUOUS, None
+    if trade.get("voided") is True:
+        return TRADE_PROVEN_IRRELEVANT, None
+
+    identity = _trade_identity(trade)
+    if _same(identity["order_id"], entry_order_id):
+        return TRADE_PROVEN_IRRELEVANT, identity
+
+    row_contract = identity["contract_id"]
+    if isinstance(row_contract, str) and not row_contract.strip():
+        row_contract = None
+    if row_contract is not None and not _same(row_contract, contract_id):
+        return TRADE_PROVEN_IRRELEVANT, identity
+
+    created = _timestamp(identity["created"])
+    if created is not None and (created < prepared_at or created > end_at):
+        return TRADE_PROVEN_IRRELEVANT, identity
+
+    if row_contract is None or created is None:
+        return TRADE_AMBIGUOUS, identity
+    return TRADE_RELEVANT, identity
+
+
 def _order_conflicts(order_id, orders, *, contract_id, expected_side,
                      expected_quantity):
     matches = [row for row in (orders or [])
@@ -219,22 +255,28 @@ def prove_emergency_close_attribution(*, submissions, trades, mission,
 
     # Entry fills are expected to precede this close and can share a timestamp
     # at venue resolution. They are already owned through the mission's entry
-    # identity, so exclude only that exact order; any other same-contract fill
-    # in the close interval is potentially conflicting activity.
+    # identity. The account-scoped trade response must be classified row by row:
+    # missing contract/time is ambiguity, not proof that a row is irrelevant.
     entry_id = getattr(mission, "order_id", None)
-    in_window = []
+    relevant = []
+    ambiguous_count = 0
     for trade in trades or []:
-        if bool(_field(trade, "voided")):
-            continue
-        identity = _trade_identity(trade)
-        if not _same(identity["contract_id"], contract_id):
-            continue
-        created = _timestamp(identity["created"])
-        if created is None or created < prepared_at or created > end_at:
-            continue
-        if _same(identity["order_id"], entry_id):
-            continue
-        in_window.append(identity)
+        classification, identity = _classify_close_trade(
+            trade, contract_id=contract_id, prepared_at=prepared_at,
+            end_at=end_at, entry_order_id=entry_id)
+        if classification == TRADE_AMBIGUOUS:
+            ambiguous_count += 1
+        elif classification == TRADE_RELEVANT:
+            relevant.append(identity)
+
+    # A venue-returned order id independently anchors the exact order. Preserve
+    # that existing path; the stricter no-id proof needs a complete, unambiguous
+    # account-trade set before uniqueness can be claimed.
+    response_order_id = row.get("venue_order_id")
+    if response_order_id is None and ambiguous_count:
+        return unknown("ambiguous_trade_evidence")
+
+    in_window = relevant
 
     if not in_window or any(row.get("order_id") is None
                             or row.get("side") is None
@@ -244,7 +286,6 @@ def prove_emergency_close_attribution(*, submissions, trades, mission,
     if len(order_ids) != 1:
         return unknown("conflicting_close_interval_trades")
     order_id = in_window[0]["order_id"]
-    response_order_id = row.get("venue_order_id")
     if (response_order_id is not None
             and not _same(response_order_id, order_id)):
         return unknown("response_and_trade_order_identity_mismatch")
