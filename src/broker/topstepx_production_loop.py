@@ -1169,6 +1169,7 @@ class ProductionLoop:
                 market_data_timestamp=scan["market_data_timestamp"],
                 latest_closed_bar_timestamp=scan["latest_closed_bar_timestamp"],
                 in_window=in_window, now=self.clock(),
+                require_campaign_lifecycle=True,
                 conditional_plan=(str(((scan.get("brain_result") or {}).get("parsed")
                                        or {}).get("current_action") or "").lower()
                                   == "watching"))
@@ -1407,6 +1408,25 @@ class ProductionLoop:
                                   "stored Brain action is not watching")
             snap = scan.get("snapshot") or {}
             brain_input = scan.get("brain_input") or {}
+            plan_brain_result = plan.get("brain_result") or {}
+            from market_data.campaign_lifecycle import evaluate_campaign_lifecycle
+            lifecycle = evaluate_campaign_lifecycle(
+                snapshot=snap,
+                brain_output=parsed,
+                narrative_continuity=(plan_brain_result.get(
+                    "narrative_continuity") or {}),
+                campaign_draw=scan.get("campaign_draw_truth"),
+                session_id=str(getattr(getattr(self, "cycle", None),
+                                       "session_id", "") or ""),
+                contract_id=str(getattr(getattr(self, "cycle", None),
+                                        "contract_id", "") or ""),
+                brain_authority_available=ProductionScanCycle.is_sovereign(
+                    plan_brain_result),
+            )
+            # Refresh the post-cognition gate with current market authorities
+            # and the conditional plan's latest validated Brain phase. The
+            # candidate producer enforces this projection before geometry.
+            snap["campaign_lifecycle"] = lifecycle
             px_block = ((brain_input.get("market") or {}).get("execution_price") or {})
             sided = executable_price(px_block, old.direction)
             if sided is None or not float(zone["low"]) <= float(sided) <= float(zone["high"]):
@@ -1425,7 +1445,8 @@ class ProductionLoop:
                 snapshot_id=scan["snapshot_id"],
                 market_data_timestamp=scan["market_data_timestamp"],
                 latest_closed_bar_timestamp=scan["latest_closed_bar_timestamp"],
-                in_window=in_window, now=now, conditional_trigger=True)
+                in_window=in_window, now=now, conditional_trigger=True,
+                require_campaign_lifecycle=True)
             fresh_zone = (fresh.extras or {}).get("selected_tool_zone") or {}
             if (fresh.direction != old.direction
                     or fresh.extras.get("playbook") != extras.get("playbook")

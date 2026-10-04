@@ -200,6 +200,15 @@ class Cycle:
             "transfer_evidence": {}, "session": "20260806"}
         snapshot = {"timestamp": "2026-08-06T14:59:00+00:00",
                     "active_path_state": active_path,
+                    # ProductionScanCycle now publishes this additional gate
+                    # after cognition. This fake scan models an otherwise valid
+                    # incumbent campaign so these execution-lifecycle tests
+                    # continue to isolate the arm/risk/mission behavior.
+                    "campaign_lifecycle": {
+                        "state": "ACTIVE_DELIVERY",
+                        "participation_permitted": True,
+                        "authorized_direction": direction,
+                    },
                     "market": {"high_since": 29882.0, "low_since": 29878.0},
                     "qualification": {"qualified": True},
                     **_detected("ifvg", "fvg")}

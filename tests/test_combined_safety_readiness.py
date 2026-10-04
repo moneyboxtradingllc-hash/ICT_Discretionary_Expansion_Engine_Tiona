@@ -591,8 +591,10 @@ class TestStrategyUntouched:
         # CAMPAIGN-DRAW-TRUTH-1 binds settled-chart delivery measurement and its
         # history-revision invalidation through ProductionScanCycle; the prior
         # fingerprint cannot authorize this source change.
+        # CAMPAIGN-LIFECYCLE-1 adds a current-authority participation gate; the
+        # prior production authorization cannot survive the semantic rotation.
         from ai_brain.production_model import brain_contract_fingerprint
-        assert brain_contract_fingerprint() == "brain:5523e9c3ffd96d05"
+        assert brain_contract_fingerprint() == "brain:4419bb4d8ac5995f"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.

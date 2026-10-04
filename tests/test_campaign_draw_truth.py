@@ -461,6 +461,10 @@ def test_authoritative_fact_api_has_no_raw_trade_or_candidate_consumer():
         _CONTRACT_SOURCES
     assert ("campaign_ownership_state", "market_state/active_path.py") in \
         _CONTRACT_SOURCES
+    assert ("campaign_lifecycle", "market_data/campaign_lifecycle.py") in \
+        _CONTRACT_SOURCES
+    assert ("campaign_lifecycle_gate", "broker/topstepx_production_loop.py") in \
+        _CONTRACT_SOURCES
 
 
 def test_current_fact_does_not_change_candidate_objective_or_snapshot():

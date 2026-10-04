@@ -274,6 +274,12 @@ _CONTRACT_SOURCES = (
     # draw episode must be retired, so their producer belongs in the same
     # contract closure.
     ("campaign_ownership_state", "market_state/active_path.py"),
+    # CAMPAIGN-LIFECYCLE-1. Lifecycle is an additional permission gate over the
+    # current Brain, ActivePath, and Campaign Draw authorities. Binding its
+    # projection ensures prior authorizations cannot survive a semantic change
+    # to campaign participation state.
+    ("campaign_lifecycle", "market_data/campaign_lifecycle.py"),
+    ("campaign_lifecycle_gate", "broker/topstepx_production_loop.py"),
 )
 
 #: REPO-ROOT-RELATIVE closure. Same contract, different anchor.

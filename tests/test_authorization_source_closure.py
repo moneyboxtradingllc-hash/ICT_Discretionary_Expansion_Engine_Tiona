@@ -130,6 +130,10 @@ MUST_BE_BOUND = {
         "settled-chart delivery/progress facts that the campaign lifecycle will consume",
     "market_state/active_path.py":
         "canonical campaign owner/status/invalidation witness that bounds draw episodes",
+    "market_data/campaign_lifecycle.py":
+        "current-authority lifecycle projection and additional participation rule",
+    "broker/topstepx_production_loop.py":
+        "production candidate and conditional-trigger call sites for the Lifecycle gate",
     # RAW-TRADE-INTERVAL-TRUTH-1C. These sources jointly determine whether a
     # raw GatewayTrade can be lost, replayed, or exposed as current complete
     # evidence. Transport framing and runtime continuity therefore belong in
@@ -158,7 +162,6 @@ MUST_STAY_OUT = {
     "broker/topstepx_mission_state.py",
     "broker/topstepx_mission_reconciler.py",
     "broker/topstepx_mission_recovery.py",
-    "broker/topstepx_production_loop.py",
     "broker/topstepx_production_session.py",
     "broker/topstepx_submission_record.py",
     # circular: the container that carries the hash, and the module computing it

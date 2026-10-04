@@ -133,6 +133,7 @@ _TRACE_STAGE = {
     "execution_price_unavailable": ("evidence_integrity", "NO_EXECUTABLE_PRICE"),
     "contract_mismatch": ("geometry_valid", False),
     "reward_below_qualification": ("reward_risk_valid", False),
+    "campaign_lifecycle_refused": ("lifecycle_permitted", False),
 }
 
 
@@ -1206,7 +1207,8 @@ class CandidateProducer:
                 latest_closed_bar_timestamp: str, in_window: bool = True,
                 ai_state: str = "AI_OK", now: datetime = None,
                 conditional_plan: bool = False,
-                conditional_trigger: bool = False) -> CandidateSnapshot:
+                conditional_trigger: bool = False,
+                require_campaign_lifecycle: bool = False) -> CandidateSnapshot:
         now = now or datetime.now(timezone.utc)
 
         # EVIDENCE, NOT AUTHORITY. The trace records which stage a proposal
@@ -1215,6 +1217,27 @@ class CandidateProducer:
         trace = _blank_trace()
         self.last_decision_trace = trace
         _p = brain_result.get("parsed") or {}
+        lifecycle = (snapshot or {}).get("campaign_lifecycle")
+        if lifecycle is None and require_campaign_lifecycle:
+            lifecycle_reason = "current_campaign_lifecycle_assessment_unavailable"
+            trace["campaign_lifecycle_state"] = None
+            trace["campaign_lifecycle_refusal"] = lifecycle_reason
+            refusal = NoCandidate("campaign_lifecycle_refused", lifecycle_reason)
+            _annotate_trace(trace, refusal.reason, refusal.detail)
+            refusal.decision_trace = dict(trace)
+            raise refusal
+        if lifecycle is not None:
+            from market_data.campaign_lifecycle import participation_permission
+            lifecycle_ok, lifecycle_reason = participation_permission(
+                lifecycle, _p.get("narrative_direction"))
+            if not lifecycle_ok:
+                trace["campaign_lifecycle_state"] = (
+                    lifecycle.get("state") if isinstance(lifecycle, dict) else None)
+                trace["campaign_lifecycle_refusal"] = lifecycle_reason
+                refusal = NoCandidate("campaign_lifecycle_refused", lifecycle_reason)
+                _annotate_trace(trace, refusal.reason, refusal.detail)
+                refusal.decision_trace = dict(trace)
+                raise refusal
         _action = str(_p.get("current_action") or "").strip().lower()
         if _action.startswith("watching") and _action != "watching":
             raise NoCandidate(

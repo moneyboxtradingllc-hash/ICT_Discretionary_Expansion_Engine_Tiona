@@ -34,7 +34,7 @@ def source_bytes(monkeypatch):
 
 @pytest.mark.parametrize("style", ["lf", "crlf", "mixed_files", "mixed_lines"])
 def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
-    assert len(source_bytes) == 35
+    assert len(source_bytes) == 37
     for index, (path, data) in enumerate(source_bytes.items()):
         if style == "crlf" or (style == "mixed_files" and index % 2):
             source_bytes[path] = data.replace(b"\n", b"\r\n")
@@ -69,7 +69,9 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # invalidation. CAMPAIGN-DRAW-TRUTH-1A directly binds its derivation source
     # because the next lifecycle layer will consume those facts. The
     # authorization identity therefore rotates again.
-    assert PM.brain_contract_fingerprint() == "brain:5523e9c3ffd96d05"
+    # CAMPAIGN-LIFECYCLE-1 adds a stateless campaign projection and participation
+    # gate; prior production authorization is stale after this contract change.
+    assert PM.brain_contract_fingerprint() == "brain:4419bb4d8ac5995f"
 
 
 @pytest.mark.parametrize("addition", [
@@ -85,6 +87,8 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     "src/broker/topstepx_realtime.py", "src/broker/topstepx_market_runtime.py",
     "src/data_feed/trade_interval_truth.py",
     "src/market_data/campaign_draw_truth.py",
+    "src/market_data/campaign_lifecycle.py",
+    "src/broker/topstepx_production_loop.py",
     "src/market_state/active_path.py",
 ])
 def test_other_content_changes_remain_bound_in_both_anchors(source_bytes, relative, addition):

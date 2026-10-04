@@ -584,6 +584,19 @@ class ProductionScanCycle:
         campaign_draw_truth = self._campaign_draw_observation(
             snapshot, raw_data.get("1m") or [], brain_block, brain_input,
             invoke_brain=invoke_brain)
+        from market_data.campaign_lifecycle import evaluate_campaign_lifecycle
+        campaign_lifecycle = evaluate_campaign_lifecycle(
+            snapshot=snapshot,
+            brain_output=((brain_block or {}).get("output") or {}),
+            narrative_continuity=(brain_block or {}).get("narrative_continuity") or {},
+            campaign_draw=campaign_draw_truth,
+            session_id=str(getattr(self, "session_id", "") or ""),
+            contract_id=str(snapshot.get("contract_id")
+                            or getattr(self, "contract_id", "")),
+            brain_authority_available=self.is_sovereign(brain_block))
+        # Post-cognition only: this projection is not added to Brain input.
+        # CandidateProducer consumes it as an additional permission gate.
+        snapshot["campaign_lifecycle"] = campaign_lifecycle
 
         # ── TWO-BRAIN SHADOW ────────────────────────────────────────────────
         # Runs AFTER the production thesis is settled, and lands in its own key.
@@ -601,6 +614,7 @@ class ProductionScanCycle:
             "two_brain_shadow": shadow,
             "brain_input": brain_input,
             "campaign_draw_truth": campaign_draw_truth,
+            "campaign_lifecycle": campaign_lifecycle,
             "brain_result": self.to_brain_result(brain_block),
             "qualification": snapshot.get("qualification") or {},
             # PROD-20260807 EVIDENCE DEFECT: the live qualification object was
