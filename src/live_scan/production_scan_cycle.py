@@ -701,7 +701,8 @@ class ProductionScanCycle:
                 session_id=self.session_id,
                 history_revision=int(state.get("history_revision", 0)),
                 derived_state_current=bool(state.get("current")),
-                accepted_view=accepted_view)
+                accepted_view=accepted_view,
+                ownership_state=snapshot.get("active_path_state"))
         except Exception as exc:  # noqa: BLE001 — facts fail closed, scan continues
             return {"authority_status": UNKNOWN,
                     "authority_reason": f"campaign_draw_truth_error:{type(exc).__name__}",

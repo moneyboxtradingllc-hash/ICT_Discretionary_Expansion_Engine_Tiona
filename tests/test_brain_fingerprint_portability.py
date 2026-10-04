@@ -34,7 +34,7 @@ def source_bytes(monkeypatch):
 
 @pytest.mark.parametrize("style", ["lf", "crlf", "mixed_files", "mixed_lines"])
 def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
-    assert len(source_bytes) == 33
+    assert len(source_bytes) == 35
     for index, (path, data) in enumerate(source_bytes.items()):
         if style == "crlf" or (style == "mixed_files" and index % 2):
             source_bytes[path] = data.replace(b"\n", b"\r\n")
@@ -66,10 +66,10 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # 1C binds transport parsing, runtime continuity, and interval truth because
     # each can change whether raw market history is represented as complete.
     # CAMPAIGN-DRAW-TRUTH-1 adds settled-chart measurement and history-revision
-    # invalidation to the closure-bound ProductionScanCycle. Its source change
-    # therefore rotates the identity even though the new fact is not fed back
-    # into Brain or candidate authority.
-    assert PM.brain_contract_fingerprint() == "brain:122441b07d3ca269"
+    # invalidation. CAMPAIGN-DRAW-TRUTH-1A directly binds its derivation source
+    # because the next lifecycle layer will consume those facts. The
+    # authorization identity therefore rotates again.
+    assert PM.brain_contract_fingerprint() == "brain:5523e9c3ffd96d05"
 
 
 @pytest.mark.parametrize("addition", [
@@ -84,6 +84,8 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     "src/ai_brain/brain_prompt.py", "tools/topstepx_production_session.py",
     "src/broker/topstepx_realtime.py", "src/broker/topstepx_market_runtime.py",
     "src/data_feed/trade_interval_truth.py",
+    "src/market_data/campaign_draw_truth.py",
+    "src/market_state/active_path.py",
 ])
 def test_other_content_changes_remain_bound_in_both_anchors(source_bytes, relative, addition):
     before = PM.brain_contract_fingerprint()

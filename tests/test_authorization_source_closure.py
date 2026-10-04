@@ -126,6 +126,10 @@ MUST_BE_BOUND = {
     # higher-timeframe structure the Brain sees.
     "data_feed/timeframe_builder.py":
         "how truthful 1m facts become the higher-timeframe chart Terra sees",
+    "market_data/campaign_draw_truth.py":
+        "settled-chart delivery/progress facts that the campaign lifecycle will consume",
+    "market_state/active_path.py":
+        "canonical campaign owner/status/invalidation witness that bounds draw episodes",
     # RAW-TRADE-INTERVAL-TRUTH-1C. These sources jointly determine whether a
     # raw GatewayTrade can be lost, replayed, or exposed as current complete
     # evidence. Transport framing and runtime continuity therefore belong in

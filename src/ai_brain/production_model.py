@@ -263,6 +263,17 @@ _CONTRACT_SOURCES = (
     ("history_fitness", "data_feed/startup_history_authority.py"),
     ("continuity_law", "data_feed/candle_continuity.py"),
     ("timeframe_construction", "data_feed/timeframe_builder.py"),
+    # CAMPAIGN-DRAW-TRUTH-1A. This module derives the settled-chart delivery
+    # and progress facts that the next lifecycle layer will consume. Binding
+    # it now ensures an authorization cannot survive a semantic change to
+    # campaign-draw evidence while that fact is already part of production
+    # scan output.
+    ("campaign_draw_truth", "market_data/campaign_draw_truth.py"),
+    # Its ownership-episode boundary is read from ActivePath's canonical owner,
+    # status, and last-invalidated witness. Those fields decide whether an old
+    # draw episode must be retired, so their producer belongs in the same
+    # contract closure.
+    ("campaign_ownership_state", "market_state/active_path.py"),
 )
 
 #: REPO-ROOT-RELATIVE closure. Same contract, different anchor.

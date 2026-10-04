@@ -94,11 +94,56 @@ class TestTheRevisionContract:
         history.observe(tape())
         assert history.observe(tape()[-10:]) == 0
 
+    def test_rolling_window_eviction_outside_overlap_is_not_a_deletion(self):
+        history = CONT.HistoryRevision()
+        history.observe(tape()[:80])
+        # The provider's finite window drops ten leading bars and advances at
+        # the tip. Every timestamp in the overlap is unchanged.
+        assert history.observe(tape()[10:90]) == 0
+        assert history.last_removed == []
+
+    def test_changed_ohlcv_inside_overlap_is_a_history_revision(self):
+        history = CONT.HistoryRevision()
+        rows = tape()[:12]
+        history.observe(rows)
+        revised = [dict(row) for row in rows]
+        revised[5]["high"] += 1.0
+        assert history.observe(revised) == 1
+        assert history.last_changed == [CONT.canonical_key(rows[5]).isoformat()]
+        assert history.last_removed == []
+
+    def test_removed_timestamp_inside_overlap_is_a_history_revision(self):
+        history = CONT.HistoryRevision()
+        rows = tape()[:12]
+        history.observe(rows)
+        revised = rows[:5] + rows[6:]
+        assert history.observe(revised) == 1
+        assert history.last_removed == [CONT.canonical_key(rows[5]).isoformat()]
+
+    def test_identical_repeated_window_is_not_a_revision(self):
+        history = CONT.HistoryRevision()
+        rows = tape()[:12]
+        history.observe(rows)
+        assert history.observe([dict(row) for row in rows]) == 0
+        assert history.last_changed == []
+        assert history.last_removed == []
+
+    def test_reappearing_old_bar_with_changed_state_is_still_a_revision(self):
+        history = CONT.HistoryRevision()
+        history.observe(tape()[:40])
+        assert history.observe(tape()[10:50]) == 0  # ordinary window roll
+        restored = [dict(row) for row in tape()[:50]]
+        restored[5]["high"] += 1.0
+        assert history.observe(restored) == 1
+        assert history.last_changed == [CONT.canonical_key(tape()[5]).isoformat()]
+
     def test_the_revision_is_monotonic(self):
         history = CONT.HistoryRevision()
         history.observe(holed())
         first = history.observe(tape())
-        assert history.observe(holed()) == first, "the revision went backward"
+        second = history.observe(holed())
+        assert first == 1 and second == 2, "a later removal was not versioned"
+        assert history.observe(holed()) == second, "an identical view revised again"
 
 
 class TestTheAuditedRebuildSet:

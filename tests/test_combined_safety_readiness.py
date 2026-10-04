@@ -592,7 +592,7 @@ class TestStrategyUntouched:
         # history-revision invalidation through ProductionScanCycle; the prior
         # fingerprint cannot authorize this source change.
         from ai_brain.production_model import brain_contract_fingerprint
-        assert brain_contract_fingerprint() == "brain:122441b07d3ca269"
+        assert brain_contract_fingerprint() == "brain:5523e9c3ffd96d05"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.

@@ -263,30 +263,95 @@ class HistoryRevision:
     def __init__(self) -> None:
         self.revision = 0
         self._keys: set = set()
+        # Keep the last witnessed state for every canonical minute identity so
+        # a corrected old bar can still be recognised if it later re-enters a
+        # finite rolling window. Absence is judged only inside window overlap;
+        # retaining this map does not turn ordinary eviction into deletion.
+        self._known_states: dict = {}
         self._tip = None
+        # The immediately preceding canonical window is retained separately
+        # from `_keys`.  A rolling provider window may evict its leading bars;
+        # only timestamps still inside the overlap can be compared for an
+        # actual removal or state rewrite.
+        self._window_states: dict = {}
+        self._window_start = None
+        self._window_tip = None
         self.last_inserted: list = []
+        self.last_changed: list = []
+        self.last_removed: list = []
+
+    @staticmethod
+    def _bar_state(candle: dict) -> tuple:
+        """Canonical market state for one minute identity.
+
+        Keep this aligned with `market_data.canonical_history._CANDLE_STATE`:
+        revisions to timestamp/contract/OHLCV affect every derived chart fact.
+        Timestamp identity itself is the canonical minute key, so timezone
+        spelling differences do not become false revisions.
+        """
+        return tuple((candle or {}).get(field) for field in
+                     ("contract", "open", "high", "low", "close", "volume"))
 
     def observe(self, candles) -> int:
         """Fold in the current record. Returns the revision after observing."""
-        keys = minute_keys(candles)
+        ordered = normalize(candles)
+        current_states = {canonical_key(row): self._bar_state(row)
+                          for row in ordered if canonical_key(row) is not None}
+        keys = set(current_states)
         inserted = retroactive_change(self._keys, keys, self._tip)
-        if inserted:
+        new_tip = max(keys) if keys else None
+        new_start = min(keys) if keys else None
+
+        changed = sorted(k for k in current_states
+                         if k in self._known_states
+                         and self._known_states[k] != current_states[k])
+        removed = []
+        if (self._window_states and new_start is not None
+                and self._window_start is not None and self._window_tip is not None):
+            # Compare only the timestamps both supplied windows cover. If the
+            # new response has a shorter tip, omitted later timestamps are
+            # outside this overlap and are not called deleted; a changed or
+            # removed timestamp inside the shared span remains a revision.
+            overlap_start = max(self._window_start, new_start)
+            overlap_end = min(self._window_tip, new_tip)
+            if overlap_start <= overlap_end:
+                prior_overlap = {k for k in self._window_states
+                                 if overlap_start <= k <= overlap_end}
+                current_overlap = {k for k in current_states
+                                   if overlap_start <= k <= overlap_end}
+                removed = sorted(prior_overlap - current_overlap)
+                # Same-window changes are already found against the longer
+                # lifetime state map above; this intersection is used only to
+                # establish the comparable deletion span.
+
+        if inserted or changed or removed:
             self.revision += 1
             self.last_inserted = [k.isoformat() for k in inserted]
-        new_tip = tip(candles)
+            self.last_changed = [k.isoformat() for k in changed]
+            self.last_removed = [k.isoformat() for k in removed]
+
         # The tip never moves backward: a shorter record is a partial view, not
         # a rewrite, and treating it as one would bump the revision on every
-        # trimmed window.
+        # trimmed window. The immediately prior window advances even when its
+        # leading edge rolls forward, preserving exactly the overlap needed to
+        # distinguish eviction from deletion.
         if new_tip is not None and (self._tip is None or new_tip >= self._tip):
             self._tip = new_tip
         self._keys |= keys
+        self._known_states.update(current_states)
+        if keys:
+            self._window_states = current_states
+            self._window_start = new_start
+            self._window_tip = new_tip
         return self.revision
 
     def state(self) -> dict:
         return {"revision": self.revision,
                 "tip": self._tip.isoformat() if self._tip else None,
                 "known_minutes": len(self._keys),
-                "last_inserted": list(self.last_inserted)}
+                "last_inserted": list(self.last_inserted),
+                "last_changed": list(self.last_changed),
+                "last_removed": list(self.last_removed)}
 
 
 # ── a market-history WINDOW, not a pile of observations ──────────────────────

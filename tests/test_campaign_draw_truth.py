@@ -45,12 +45,22 @@ def tracker(session=SESSION, contract=CONTRACT):
 
 
 def observe(t, rows, *, campaign=None, revision=0, current=True,
-            session=SESSION, contract=CONTRACT):
+            session=SESSION, contract=CONTRACT, ownership=None):
+    if ownership is None:
+        direction = ((campaign or {}).get("direction")
+                     or (t._active or {}).get("campaign_direction"))
+        if direction in ("bullish", "bearish"):
+            ownership = owner(direction)
     return t.observe(settled_bars=rows, settled_source=source(rows),
                      contract_id=contract, session_id=session,
                      history_revision=revision,
                      derived_state_current=current,
-                     accepted_view=campaign)
+                     accepted_view=campaign, ownership_state=ownership)
+
+
+def owner(direction="bullish", status="active", *, available=True):
+    return {"state_available": available, "owner": direction,
+            "status": status}
 
 
 def test_bullish_settled_bar_proves_delivery_and_progress():
@@ -83,14 +93,94 @@ def test_bearish_settled_bar_proves_delivery_and_uses_low_extreme():
 def test_same_campaign_and_identity_never_resets_anchor_across_scans():
     t = tracker()
     first = [bar(0, high=101, low=99.5, close=100.5)]
-    initial = observe(t, first, campaign=view())
+    initial = observe(t, first, campaign=view(), ownership=owner())
     for offset in range(1, 18):
         rows = [bar(i, high=101 + i / 10, low=99.5, close=100.5)
                 for i in range(max(0, offset - 4), offset + 1)]
-        current = observe(t, rows, campaign=view(), revision=0)
+        current = observe(t, rows, campaign=view(), revision=0,
+                          ownership=owner())
         assert current["anchor_bar_time"] == first[0]["timestamp"]
         assert current["record_id"] == initial["record_id"]
+        assert current["campaign_episode_id"] == initial["campaign_episode_id"]
     assert len(t.audit_records) == 1
+
+
+def test_lost_ownership_then_same_direction_reacquisition_starts_new_episode():
+    t = tracker()
+    first_rows = [bar(0, close=100)]
+    first = observe(t, first_rows, campaign=view(), ownership=owner())
+
+    # ActivePath's contested owner maps through Narrative Continuity to an
+    # unresolved/developing transfer state. That is no longer entry-authorized
+    # ownership for this campaign episode.
+    unresolved = observe(t, [*first_rows, bar(1, high=101.5, close=101)],
+                         campaign=view(authorized=False),
+                         ownership=owner(status="contested"))
+    assert unresolved["authority_status"] == UNKNOWN
+    assert t.audit_records[0]["superseded"] is True
+    assert t.audit_records[0]["superseded_reason"].startswith(
+        "campaign_ownership_lost:")
+
+    reacquired_rows = [*first_rows, bar(1, high=101.5, close=101),
+                       bar(2, high=102.5, close=102)]
+    reacquired = observe(t, reacquired_rows, campaign=view(),
+                         ownership=owner())
+    assert reacquired["record_id"] != first["record_id"]
+    assert reacquired["campaign_episode_id"] != first["campaign_episode_id"]
+    assert reacquired["anchor_bar_time"] == reacquired_rows[-1]["timestamp"]
+    assert t.audit_records[0]["anchor_bar_time"] == first_rows[0]["timestamp"]
+
+
+def test_owner_unavailable_retires_episode_instead_of_allowing_revival():
+    t = tracker()
+    first = observe(t, [bar(0)], campaign=view(), ownership=owner())
+    unresolved = observe(t, [bar(0), bar(1)], campaign=None,
+                         ownership=owner(available=False))
+    assert unresolved["authority_status"] == UNKNOWN
+    assert t.audit_records[0]["superseded_reason"] == \
+        "campaign_ownership_unavailable"
+    resumed = observe(t, [bar(0), bar(1), bar(2)], campaign=view(),
+                      ownership=owner())
+    assert resumed["record_id"] != first["record_id"]
+    assert resumed["campaign_episode_id"] != first["campaign_episode_id"]
+
+
+def test_missing_owner_state_cannot_open_a_campaign_draw():
+    t = tracker()
+    rows = [bar(0)]
+    result = t.observe(settled_bars=rows, settled_source=source(rows),
+                       contract_id=CONTRACT, session_id=SESSION,
+                       history_revision=0, derived_state_current=True,
+                       accepted_view=view(), ownership_state=None)
+    assert result["authority_status"] == UNKNOWN
+    assert result["authority_reason"] == "campaign_owner_state_unavailable"
+    assert t.audit_records == []
+
+
+def test_same_direction_active_path_with_new_invalidation_is_a_new_episode():
+    t = tracker()
+    initial_state = owner()
+    first = observe(t, [bar(0)], campaign=view(), ownership=initial_state)
+
+    # ActivePath may release and re-establish the same direction between two
+    # scans. The final owner/status can look identical, so the canonical
+    # last-invalidated witness must still close the earlier episode.
+    invalidated_state = owner()
+    invalidated_state["last_invalidated"] = {
+        "owner": "bullish", "at": bar(1)["timestamp"], "level": 99.5}
+    held = observe(t, [bar(0), bar(1)], campaign=view(authorized=False),
+                   ownership=invalidated_state)
+    assert held["authority_status"] == UNKNOWN
+    assert t.audit_records[0]["superseded_reason"] == \
+        "campaign_ownership_lost:load_bearing_structure_invalidated"
+
+    next_state = {**invalidated_state}
+    reacquired_rows = [bar(0), bar(1), bar(2, high=102.5, close=102)]
+    reacquired = observe(t, reacquired_rows, campaign=view(),
+                         ownership=next_state)
+    assert reacquired["record_id"] != first["record_id"]
+    assert reacquired["campaign_episode_id"] != first["campaign_episode_id"]
+    assert reacquired["anchor_bar_time"] == reacquired_rows[-1]["timestamp"]
 
 
 def test_objective_identity_change_supersedes_and_anchors_new_record():
@@ -243,6 +333,72 @@ def test_changed_bar_used_by_draw_supersedes_current_authority():
         "campaign_input_bar_superseded"
 
 
+def test_history_revision_revokes_proving_bar_when_ohlc_changes():
+    from data_feed.candle_continuity import HistoryRevision
+
+    t = tracker()
+    history = HistoryRevision()
+    rows = [bar(0)]
+    revision = history.observe(rows)
+    observe(t, rows, campaign=view(), revision=revision)
+    rows = [*rows, bar(1, high=106, close=104)]
+    revision = history.observe(rows)
+    proved = observe(t, rows, campaign=view(), revision=revision)
+    assert proved["authority_status"] == PROVEN_DELIVERED
+
+    revised = [dict(row) for row in rows]
+    revised[1]["high"] = 104.5
+    revision = history.observe(revised)
+    assert revision == 1
+    current = observe(t, revised, campaign=view(), revision=revision)
+    assert current["authority_status"] != PROVEN_DELIVERED
+    assert current["record_id"] != proved["record_id"]
+    assert t.audit_records[0]["superseded"] is True
+    assert t.audit_records[0]["historical_result"] == PROVEN_DELIVERED
+
+
+def test_history_revision_revokes_proving_bar_removed_inside_overlap():
+    from data_feed.candle_continuity import HistoryRevision
+
+    t = tracker()
+    history = HistoryRevision()
+    rows = [bar(0), bar(1, high=106, close=104), bar(2, high=103, close=102)]
+    revision = history.observe(rows)
+    observe(t, [rows[0]], campaign=view(), revision=revision)
+    proved = observe(t, rows, campaign=view(), revision=revision)
+    assert proved["authority_status"] == PROVEN_DELIVERED
+
+    repaired = [rows[0], rows[2]]
+    revision = history.observe(repaired)
+    assert revision == 1
+    current = observe(t, repaired, campaign=view(), revision=revision)
+    assert current["authority_status"] != PROVEN_DELIVERED
+    assert current["record_id"] != proved["record_id"]
+    assert t.audit_records[0]["superseded"] is True
+    assert t.audit_records[0]["historical_result"] == PROVEN_DELIVERED
+
+
+def test_nonproving_interval_revision_invalidates_progress_authority():
+    from data_feed.candle_continuity import HistoryRevision
+
+    t = tracker()
+    history = HistoryRevision()
+    rows = [bar(0), bar(1, high=102), bar(2, high=103)]
+    revision = history.observe(rows)
+    observe(t, [rows[0]], campaign=view(), revision=revision)
+    before = observe(t, rows, campaign=view(), revision=revision)
+    assert before["authority_status"] == PROVEN_NOT_DELIVERED
+    revised = [dict(row) for row in rows]
+    revised[1]["high"] = 104
+    revision = history.observe(revised)
+    assert revision == 1
+    current = observe(t, revised, campaign=view(), revision=revision)
+    assert current["record_id"] != before["record_id"]
+    assert t.audit_records[0]["superseded_reason"] == \
+        "canonical_history_revision_changed"
+    assert current["anchor_bar_time"] == revised[-1]["timestamp"]
+
+
 def test_restart_does_not_resurrect_old_process_authority():
     old_process = tracker()
     rows = [bar(0)]
@@ -300,6 +456,11 @@ def test_authoritative_fact_api_has_no_raw_trade_or_candidate_consumer():
                for n in ast.walk(tree))
     assert '"campaign_draw_truth": campaign_draw_truth' in cycle_source
     assert 'snapshot["campaign_draw_truth"]' not in cycle_source
+    from ai_brain.production_model import _CONTRACT_SOURCES
+    assert ("campaign_draw_truth", "market_data/campaign_draw_truth.py") in \
+        _CONTRACT_SOURCES
+    assert ("campaign_ownership_state", "market_state/active_path.py") in \
+        _CONTRACT_SOURCES
 
 
 def test_current_fact_does_not_change_candidate_objective_or_snapshot():
@@ -311,6 +472,7 @@ def test_current_fact_does_not_change_candidate_objective_or_snapshot():
     snapshot = {
         "contract_id": CONTRACT,
         "timestamp": rows[0]["timestamp"],
+        "active_path_state": owner(),
         "settled_source": {"1m": source(rows)},
         "derived_state": {"history_revision": 0, "current": True},
         "timeframes": {"1m": {"last_candle": rows[0]}},
@@ -339,3 +501,24 @@ def test_current_fact_does_not_change_candidate_objective_or_snapshot():
     assert result["objective_identity"] == \
         "opposing_external_liquidity:buyside@105"
     assert snapshot == before
+
+    # Ownership is supplied from the same mechanically derived active-path
+    # state on every scan, independent of whether a fresh Brain result exists.
+    snapshot["active_path_state"] = owner(status="contested")
+    unresolved = cycle._campaign_draw_observation(
+        snapshot, [{**rows[0], "complete": True}],
+        {"source": "fallback", "output": {}},
+        {"liquidity": {"nearest_buy_side": 105}}, invoke_brain=True)
+    assert unresolved["authority_status"] == UNKNOWN
+    assert cycle.campaign_draw_truth.audit_records[0]["superseded"] is True
+
+
+def test_history_revision_owner_detects_campaign_draw_input_rewrites():
+    from data_feed.candle_continuity import HistoryRevision
+
+    history = HistoryRevision()
+    rows = [bar(0), bar(1, high=103), bar(2)]
+    assert history.observe(rows) == 0
+    removed = [rows[0], rows[2]]
+    assert history.observe(removed) == 1
+    assert history.last_removed == [rows[1]["timestamp"]]

@@ -23,6 +23,7 @@ NO BROKER, NO PROVIDER, NO NETWORK, NO ORDER.
 """
 from __future__ import annotations
 
+import ast
 import glob
 import json
 import os
@@ -786,40 +787,48 @@ class TestProductionDoesNotActivateV2:
                        "source_bar_time", "settled_edge_time", "unidentified"):
             assert leaked not in state, leaked
 
-    def test_settled_source_is_read_by_nothing_that_decides(self):
+    def test_settled_source_is_read_only_by_provenance_and_draw_fact_derivation(self,
+                                                                               tmp_path):
         """STRUCTURAL: does any deciding production module READ the key?
 
-        Same repair as the v2 check above, and the same cause: the governance
-        registry names `settled_source` to record that nothing decides on it.
-        `field_authority` asks the parser, and `production_files` already
-        excludes governance by package location rather than by filename.
-
-        `snapshot_builder` PRODUCES it and `active_path` reads it to build
-        occurrence provenance; neither decides on it. `causal_identity` names it
-        only to say where Category A provenance comes from.
+        ProductionScanCycle may read `settled_source` only inside the narrowly
+        scoped Campaign Draw FACT derivation. The rest of that production file
+        remains under the original structural guard. A synthetic second read
+        outside that function must still be detected.
         """
         from rule_governance.epistemic_closure import authority_ast as AST
         src_root = os.path.join(ROOT, "src")
+        cycle_path = os.path.join(src_root, "live_scan", "production_scan_cycle.py")
+        cycle_source = open(cycle_path, encoding="utf-8").read()
+        cycle_tree = ast.parse(cycle_source)
+        draw_method = next(node for node in ast.walk(cycle_tree)
+                           if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                           and node.name == "_campaign_draw_observation")
+        lines = cycle_source.splitlines(keepends=True)
+        without_draw_read = ("".join(lines[:draw_method.lineno - 1])
+                             + "".join(lines[draw_method.end_lineno:]))
+        lawful_copy = tmp_path / "production_scan_cycle_without_draw_method.py"
+        lawful_copy.write_text(without_draw_read, encoding="utf-8")
         allowed = {os.path.join(src_root, "market_data", "snapshot_builder.py"),
                    os.path.join(src_root, "market_state", "active_path.py"),
-                   os.path.join(src_root, "market_data", "causal_identity.py"),
-                   # CAMPAIGN-DRAW-TRUTH-1 reads settled_source only to bind
-                   # provider-chart evidence to the accepted draw. The result
-                   # is audit/fact telemetry outside Brain, candidate, and
-                   # execution authority.
-                   os.path.join(src_root, "live_scan", "production_scan_cycle.py")}
+                   os.path.join(src_root, "market_data", "causal_identity.py")}
         candidates = [p for p in AST.production_files(src_root)
                       if os.path.abspath(p) not in
-                      {os.path.abspath(a) for a in allowed}]
+                      {os.path.abspath(a) for a in allowed}
+                      and os.path.abspath(p) != os.path.abspath(cycle_path)]
+        candidates.append(str(lawful_copy))
         result = AST.field_authority(candidates, "settled_source")
-        # NOT-PRESENT, not proven-ABSENT. Across ~600 production modules the
-        # honest tri-state answer is UNKNOWN -- many of them build dicts with
-        # computed keys, and no parser can rule out a dynamic read at that
-        # scope. What this test CAN prove is that nothing outside the allowed
-        # set NAMES the field, which is what a decision-bearing consumer would
-        # have to do. Claiming more would be the overreach this framework
-        # exists to refuse.
+        # NOT-PRESENT, not proven-ABSENT. Dynamic constructs elsewhere may
+        # still make the broad repository answer UNKNOWN, but no named read
+        # outside the allowed provenance sites and exact fact method is legal.
         assert result["state"] != AST.PRESENT, result["sites"]
+
+        rogue_copy = tmp_path / "production_scan_cycle_with_rogue_read.py"
+        rogue_copy.write_text(
+            without_draw_read + "\n\ndef unauthorized_second_read(snapshot):\n"
+            "    return snapshot.get('settled_source')\n", encoding="utf-8")
+        rogue = AST.field_authority([str(rogue_copy)], "settled_source")
+        assert rogue["state"] == AST.PRESENT, rogue
 
 
 # ══ V1 BEHAVIOUR PRESERVATION ═══════════════════════════════════════════════

@@ -136,6 +136,7 @@ class CampaignDrawTruth:
         # identity or chronology; a restarted process intentionally gets a
         # different namespace and cannot appear to resume the old authority.
         self._process_namespace = uuid.uuid4().hex
+        self._ownership_episode_id: str | None = None
         self._records: list[dict] = copy.deepcopy(list(audit_records or []))
         # Imported records are strictly audit-only. Even if a caller passes a
         # record whose last in-memory status was COMPLETE, no active authority
@@ -157,12 +158,13 @@ class CampaignDrawTruth:
         """Retire active authority while preserving the prior audit record."""
         if self._active is not None:
             self._active["invalidated_by_history_revision"] = int(revision)
-        self._supersede("canonical_history_revision_changed")
+        self._supersede("canonical_history_revision_changed", close_episode=True)
 
     def observe(self, *, settled_bars, settled_source: dict,
                 contract_id: str, session_id: str, history_revision: int,
                 derived_state_current: bool,
-                accepted_view: dict | None = None) -> dict:
+                accepted_view: dict | None = None,
+                ownership_state: dict | None = None) -> dict:
         """Advance existing facts and optionally bind a fresh accepted view.
 
         `accepted_view` must already contain the canonical objective resolved
@@ -178,10 +180,26 @@ class CampaignDrawTruth:
             cutoff = None
         if (not self.contract_id or contract != self.contract_id
                 or not session or session != self.session_id):
-            self._supersede("session_or_contract_identity_changed")
+            self._supersede("session_or_contract_identity_changed",
+                            close_episode=True)
             return self._unknown("session_or_contract_identity_unavailable")
+
+        # ActivePath is the canonical mechanical owner state. A Campaign Draw
+        # is one continuous ownership episode: contested, invalidated, absent,
+        # unavailable, or differently owned state ends that episode. A later
+        # same-direction reacquisition must receive a new episode ID and anchor.
+        # Descriptive Brain text is deliberately not consulted here.
+        ownership_state = (ownership_state if isinstance(ownership_state, dict)
+                           else None)
+        ownership_loss = self._ownership_loss_reason(self._active,
+                                                       ownership_state)
+        if ownership_loss:
+            self._supersede(ownership_loss, close_episode=True)
+        elif self._active is not None and ownership_state is not None:
+            self._active["active_path_last_invalidated"] = copy.deepcopy(
+                ownership_state.get("last_invalidated") or {})
         if not derived_state_current:
-            self._supersede("derived_history_not_current")
+            self._supersede("derived_history_not_current", close_episode=True)
             return self._unknown("derived_history_not_current")
         if source.get("temporal_status") != "settled" or cutoff is None:
             self._break_current("settled_source_unavailable")
@@ -190,7 +208,7 @@ class CampaignDrawTruth:
         from market_state.active_path import production_session_key
         market_session = production_session_key(cutoff)
         if not market_session:
-            self._supersede("market_session_unavailable")
+            self._supersede("market_session_unavailable", close_episode=True)
             return self._unknown("anchor_market_session_unavailable")
 
         rows, error = _canonical_settled_bars(settled_bars, contract)
@@ -211,10 +229,11 @@ class CampaignDrawTruth:
         # this same scan, because it was authored after the canonical rebuild.
         if (self._active is not None
                 and int(history_revision) != self._active["history_revision"]):
-            self._supersede("canonical_history_revision_changed")
+            self._supersede("canonical_history_revision_changed",
+                            close_episode=True)
         elif (self._active is not None
               and self._active.get("market_session") != market_session):
-            self._supersede("market_session_changed")
+            self._supersede("market_session_changed", close_episode=True)
         elif self._active is not None:
             self._advance(self._active, rows, cutoff)
 
@@ -234,6 +253,15 @@ class CampaignDrawTruth:
         if direction not in ("bullish", "bearish") or not isinstance(objective, dict):
             return self._unknown("accepted_campaign_objective_unavailable",
                                  active=self._active)
+        if ownership_state is None:
+            return self._unknown("campaign_owner_state_unavailable",
+                                 active=self._active)
+        named_owner = str(ownership_state.get("owner") or "").strip().lower()
+        named_status = str(ownership_state.get("status") or "").strip().lower()
+        if (ownership_state.get("state_available") is not True
+                or named_owner != direction or named_status != "active"):
+            return self._unknown("campaign_owner_not_currently_established",
+                                 active=self._active)
         identity = str(objective.get("identity") or "").strip()
         kind = str(objective.get("kind") or "").strip()
         price = _finite(objective.get("price"))
@@ -251,7 +279,13 @@ class CampaignDrawTruth:
             return self._unknown("anchor_bar_lacks_trade_opportunity_authority:" +
                                  str(anchor_reason), active=self._active)
 
-        key = (session, market_session, contract, direction, identity)
+        if self._active is not None and self._active.get("campaign_direction") != direction:
+            self._supersede("campaign_owner_changed", close_episode=True)
+        if self._ownership_episode_id is None:
+            self._ownership_episode_id = uuid.uuid4().hex
+
+        key = (session, market_session, contract, direction, identity,
+               self._ownership_episode_id)
         active_key = self._key(self._active) if self._active else None
         same = active_key == key
         # Reuse a same campaign and draw across changing catalog indices or
@@ -276,6 +310,9 @@ class CampaignDrawTruth:
             "market_session": market_session,
             "contract_id": contract,
             "campaign_direction": direction,
+            "campaign_episode_id": self._ownership_episode_id,
+            "active_path_last_invalidated": copy.deepcopy(
+                (ownership_state or {}).get("last_invalidated") or {}),
             "objective_identity": identity,
             "objective_kind": kind,
             "objective_price": price,
@@ -321,10 +358,34 @@ class CampaignDrawTruth:
             return None
         return tuple(record.get(k) for k in
                      ("session_id", "market_session", "contract_id",
-                      "campaign_direction", "objective_identity"))
+                      "campaign_direction", "objective_identity",
+                      "campaign_episode_id"))
 
-    def _supersede(self, reason: str) -> None:
+    @staticmethod
+    def _ownership_loss_reason(record: dict | None, state: dict | None) -> str | None:
+        if record is None:
+            return None
+        if state is None or state.get("state_available") is not True:
+            return "campaign_ownership_unavailable"
+        owner = str(state.get("owner") or "").strip().lower()
+        status = str(state.get("status") or "").strip().lower()
+        if owner != record.get("campaign_direction") or status != "active":
+            return f"campaign_ownership_lost:owner={owner or 'none'}:status={status or 'unknown'}"
+        invalidation = state.get("last_invalidated") or {}
+        prior_invalidation = record.get("active_path_last_invalidated") or {}
+        direction = record.get("campaign_direction")
+        if (invalidation.get("owner") == direction
+                and (invalidation.get("owner"), invalidation.get("at"),
+                     invalidation.get("level"))
+                != (prior_invalidation.get("owner"), prior_invalidation.get("at"),
+                    prior_invalidation.get("level"))):
+            return "campaign_ownership_lost:load_bearing_structure_invalidated"
+        return None
+
+    def _supersede(self, reason: str, *, close_episode: bool = False) -> None:
         if self._active is None:
+            if close_episode:
+                self._ownership_episode_id = None
             return
         self._active["historical_result"] = self._active.get(
             "authority_status", UNKNOWN)
@@ -333,6 +394,8 @@ class CampaignDrawTruth:
         self._active["authority_status"] = UNKNOWN
         self._active["authority_reason"] = str(reason)
         self._active = None
+        if close_episode:
+            self._ownership_episode_id = None
 
     def _break_current(self, reason: str) -> None:
         """Remove negative/extrema completeness without erasing a proved touch."""
