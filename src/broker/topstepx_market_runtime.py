@@ -16,6 +16,7 @@ second owner is refused rather than quietly given a second reader.
 from __future__ import annotations
 
 import threading
+import uuid
 from datetime import datetime, timezone
 
 EVENT_QUOTE = "GatewayQuote"
@@ -46,6 +47,9 @@ class TopstepXMarketRuntime:
         self.pump_owner_id: "str | None" = None
         self.pump_thread: "threading.Thread | None" = None
         self.connection_generation = 0
+        self.runtime_id = uuid.uuid4().hex
+        self.connection_started_at: "datetime | None" = None
+        self._coverage_listeners: list = []
         self.subscribers: list = []
         self.last_message_at: "datetime | None" = None
         self.last_quote_at: "datetime | None" = None
@@ -79,6 +83,39 @@ class TopstepXMarketRuntime:
         if name not in self.subscribers:
             self.subscribers.append(name)
 
+    def _coverage_epoch_id(self) -> str:
+        contract_id = getattr(self.contract, "id", "unknown")
+        return f"{self.runtime_id}:{contract_id}:{self.connection_generation}"
+
+    def _notify_coverage(self, event: dict) -> None:
+        with self._lock:
+            listeners = tuple(self._coverage_listeners)
+        for listener in listeners:
+            try:
+                listener(dict(event))
+            except Exception:  # noqa: BLE001 — a telemetry observer cannot stop the market pump
+                continue
+
+    def add_coverage_listener(self, listener) -> None:
+        """Observe connection epochs without opening another market stream."""
+        with self._lock:
+            if listener not in self._coverage_listeners:
+                self._coverage_listeners.append(listener)
+            connected = self.hub is not None and self.connection_generation > 0
+            started_at = self.connection_started_at
+            epoch_id = self._coverage_epoch_id() if connected else None
+        if connected:
+            try:
+                listener({"kind": "epoch_started", "coverage_epoch_id": epoch_id,
+                          "at": started_at, "contract_id": getattr(self.contract, "id", None)})
+            except Exception:  # noqa: BLE001 — observers cannot disrupt existing consumers
+                pass
+
+    def remove_coverage_listener(self, listener) -> None:
+        with self._lock:
+            if listener in self._coverage_listeners:
+                self._coverage_listeners.remove(listener)
+
     def attach(self, name: str, event: str, handler) -> None:
         """Register a consumer. Consumers observe; they never drain the socket."""
         if self.hub is None:
@@ -100,7 +137,12 @@ class TopstepXMarketRuntime:
         hub.on(EVENT_QUOTE, self._stamp_quote)
         hub.on(EVENT_TRADE, self._stamp_trade)
         self.hub = hub
-        self.connection_generation = 1
+        self.connection_generation += 1
+        self.connection_started_at = self._clock()
+        self._notify_coverage({"kind": "epoch_started",
+                               "coverage_epoch_id": self._coverage_epoch_id(),
+                               "at": self.connection_started_at,
+                               "contract_id": getattr(self.contract, "id", None)})
         return hub
 
     def start(self, owner_id: str) -> "TopstepXMarketRuntime":
@@ -123,6 +165,12 @@ class TopstepXMarketRuntime:
 
     def stop(self, *, join_timeout: float = 5.0) -> None:
         """Signal the pump, join it, then close the hub exactly once."""
+        if self.hub is not None:
+            self._notify_coverage({"kind": "coverage_broken",
+                                   "coverage_epoch_id": self._coverage_epoch_id(),
+                                   "at": self._clock(),
+                                   "reason": "runtime_stopped",
+                                   "contract_id": getattr(self.contract, "id", None)})
         self._stop.set()
         thread, self.pump_thread = self.pump_thread, None
         if thread is not None and thread.is_alive():
@@ -151,10 +199,21 @@ class TopstepXMarketRuntime:
 
     def _reconnect(self) -> None:
         """The ONLY reconnect authority. Subscribers never run their own."""
+        if self.hub is not None:
+            self._notify_coverage({"kind": "coverage_broken",
+                                   "coverage_epoch_id": self._coverage_epoch_id(),
+                                   "at": self._clock(),
+                                   "reason": "runtime_reconnect",
+                                   "contract_id": getattr(self.contract, "id", None)})
         try:
             self.hub.reconnect()                 # restores the plan in order
             self.connection_generation += 1
+            self.connection_started_at = self._clock()
             self.reconnects += 1
+            self._notify_coverage({"kind": "epoch_started",
+                                   "coverage_epoch_id": self._coverage_epoch_id(),
+                                   "at": self.connection_started_at,
+                                   "contract_id": getattr(self.contract, "id", None)})
             # Freshness is NOT restored here. A reconnected socket has delivered
             # nothing yet, so the stream stays stale until real data arrives.
         except Exception:  # noqa: BLE001

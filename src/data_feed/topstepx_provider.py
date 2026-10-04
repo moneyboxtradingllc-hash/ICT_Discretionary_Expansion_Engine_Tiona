@@ -35,10 +35,12 @@ import hashlib
 import json
 import os
 import threading
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from data_feed import candle_continuity as CONT
 from data_feed.provider_interface import BaseDataProvider, DataFeedError
+from data_feed.trade_interval_truth import TradeIntervalTruth
 
 SOURCE = "topstepx"
 DEFAULT_CACHE_LIMIT = 5000          # ~3.5 days of RTH minutes; bounded on purpose
@@ -147,7 +149,7 @@ class MinuteCandleAggregator:
         self.last_trade_at = max(self.last_trade_at or ts, ts)
         return True
 
-    def ingest_event(self, args: list) -> int:
+    def ingest_event(self, args: list, *, on_unique_event=None) -> int:
         """Handle one GatewayTrade payload: [contractId, [trade, ...]].
 
         Batch-level replay guard: a reconnect can redeliver a whole event, and
@@ -156,6 +158,8 @@ class MinuteCandleAggregator:
         distinct — only a byte-identical redelivery is dropped.
         """
         if not args or len(args) < 2:
+            if on_unique_event is not None:
+                on_unique_event(args, batch_identity_proven=False)
             return 0
         try:
             digest = hashlib.sha1(
@@ -169,6 +173,11 @@ class MinuteCandleAggregator:
             self._seen_batches.append(digest)
             if len(self._seen_batches) > 2000:
                 del self._seen_batches[:1000]
+        if on_unique_event is not None:
+            try:
+                on_unique_event(args, batch_identity_proven=digest is not None)
+            except Exception:  # noqa: BLE001 — interval telemetry cannot alter candle ingestion
+                pass
         payload = args[1]
         rows = payload if isinstance(payload, list) else [payload]
         return sum(1 for r in rows if isinstance(r, dict) and self.ingest_trade(r))
@@ -232,6 +241,9 @@ class TopstepXDataProvider(BaseDataProvider):
         self._stop = threading.Event()
         self.contract = None
         self.aggregator: "MinuteCandleAggregator | None" = None
+        self.trade_interval_truth: TradeIntervalTruth | None = None
+        self._trade_interval_epoch_id: str | None = None
+        self._trade_interval_runtime_epoch_id: str | None = None
         self.last_quote = {}
         # EVENT-WAKE-ACTIONABLE-STRUCTURE-1. Attached by the production owner
         # when it wants to be woken; None everywhere else, so every existing
@@ -260,6 +272,19 @@ class TopstepXDataProvider(BaseDataProvider):
 
         self._session.authenticate()
         self.contract = self._session.resolve_contract(contract_text)
+        # Exact raw-trade interval facts have their own deterministic store;
+        # candle backfill is intentionally not used to heal sub-minute gaps.
+        prior_truth = getattr(self, "trade_interval_truth", None)
+        if prior_truth is not None and prior_truth.contract_id != self.contract.id:
+            prior_truth.mark_coverage_broken(
+                "contract_changed", datetime.now(timezone.utc))
+        self.trade_interval_truth = TradeIntervalTruth(
+            self.contract.id,
+            os.path.join(self.store_dir, "trade_interval_truth",
+                         f"{hashlib.sha256(self.contract.id.encode()).hexdigest()}.json"),
+        )
+        self._trade_interval_epoch_id = None
+        self._trade_interval_runtime_epoch_id = None
         self.aggregator = MinuteCandleAggregator(self.contract.id, self.contract.tick_size)
         self._load_persisted()
         # CANDLE-CONTINUITY (2026-08-11). Before this call, a restart began with
@@ -274,9 +299,55 @@ class TopstepXDataProvider(BaseDataProvider):
             self._session, self.contract, stop_event=self._stop)
         self.runtime.attach("candle-provider", "GatewayTrade", self._on_trade)
         self.runtime.attach("candle-provider", "GatewayQuote", self._on_quote)
+        add_listener = getattr(self.runtime, "add_coverage_listener", None)
+        if callable(add_listener):
+            add_listener(self._on_coverage_event)
         self._connected_at = datetime.now(timezone.utc)
         if self._owns_runtime:
             self.runtime.start("candle-provider")
+
+    def open_trade_interval(self, anchor_at, anchor_reference_price,
+                            anchor_reference_basis: str) -> dict:
+        """Open an exact-time interval only inside the current live raw stream epoch."""
+        tracker = getattr(self, "trade_interval_truth", None)
+        if tracker is None or self.contract is None or self.runtime is None:
+            raise DataFeedError("TOPSTEPX_TRADE_INTERVAL_UNAVAILABLE")
+        runtime_contract = getattr(getattr(self.runtime, "contract", None), "id", None)
+        if runtime_contract != self.contract.id:
+            raise DataFeedError("TOPSTEPX_TRADE_INTERVAL_CONTRACT_MISMATCH")
+        if self.runtime.hub is None or not self.runtime.is_running:
+            raise DataFeedError("TOPSTEPX_TRADE_INTERVAL_STREAM_NOT_LIVE")
+        return tracker.open_interval(
+            self.contract.id, anchor_at, anchor_reference_price,
+            anchor_reference_basis)
+
+    def _on_coverage_event(self, event: dict) -> None:
+        tracker = getattr(self, "trade_interval_truth", None)
+        if tracker is None or not isinstance(event, dict):
+            return
+        kind = event.get("kind")
+        epoch_id = event.get("coverage_epoch_id")
+        at = event.get("at")
+        event_contract = event.get("contract_id")
+        if event_contract and self.contract and event_contract != self.contract.id:
+            tracker.mark_coverage_broken("runtime_contract_mismatch", at,
+                                         epoch_id=self._trade_interval_epoch_id)
+            self._trade_interval_epoch_id = None
+            self._trade_interval_runtime_epoch_id = None
+            return
+        if kind == "coverage_broken":
+            tracker.mark_coverage_broken(
+                event.get("reason") or "coverage_unproven", at,
+                epoch_id=(self._trade_interval_epoch_id
+                          if epoch_id == self._trade_interval_runtime_epoch_id
+                          else epoch_id))
+            if epoch_id == self._trade_interval_runtime_epoch_id:
+                self._trade_interval_epoch_id = None
+                self._trade_interval_runtime_epoch_id = None
+        elif kind == "epoch_started":
+            tracker.begin_coverage_epoch(self.contract.id, epoch_id, at)
+            self._trade_interval_epoch_id = epoch_id
+            self._trade_interval_runtime_epoch_id = epoch_id
 
     @property
     def _thread(self):
@@ -289,6 +360,17 @@ class TopstepXDataProvider(BaseDataProvider):
 
     def stop(self) -> None:
         self._stop.set()
+        tracker = getattr(self, "trade_interval_truth", None)
+        if tracker is not None:
+            tracker.mark_coverage_broken(
+                "provider_stopped", datetime.now(timezone.utc),
+                epoch_id=getattr(self, "_trade_interval_epoch_id", None))
+            self._trade_interval_epoch_id = None
+            self._trade_interval_runtime_epoch_id = None
+        if self.runtime is not None:
+            remove_listener = getattr(self.runtime, "remove_coverage_listener", None)
+            if callable(remove_listener):
+                remove_listener(self._on_coverage_event)
         # Only the owner tears the transport down. A consumer that closed a
         # shared hub would silently blind every other subscriber.
         if self.runtime is not None and self._owns_runtime:
@@ -300,8 +382,41 @@ class TopstepXDataProvider(BaseDataProvider):
         # to live in this provider's own pump loop; with the pump owned by the
         # shared runtime there is no such loop, and a minute that never rolled
         # would never be persisted or served.
+        received_at = datetime.now(timezone.utc)
+        tracker = getattr(self, "trade_interval_truth", None)
+        epoch_id = getattr(self, "_trade_interval_epoch_id", None)
+        stopped = getattr(self, "_stop", None)
+        if (tracker is not None and not (stopped is not None and stopped.is_set())
+                and tracker.current_epoch_id is None
+                and self.runtime is not None and self.runtime.is_running
+                and getattr(getattr(self.runtime, "contract", None), "id", None)
+                == getattr(self.contract, "id", None)):
+            runtime_epoch = getattr(self.runtime, "_coverage_epoch_id", None)
+            if callable(runtime_epoch):
+                source_id = runtime_epoch()
+                epoch_id = f"{source_id}:provider-resume:{uuid.uuid4().hex}"
+                try:
+                    tracker.begin_coverage_epoch(self.contract.id, epoch_id, received_at)
+                    self._trade_interval_epoch_id = epoch_id
+                    self._trade_interval_runtime_epoch_id = source_id
+                except Exception:  # noqa: BLE001 — no interval authority without a proven fresh epoch
+                    epoch_id = None
+
+        def observe_unique(event_args, *, batch_identity_proven):
+            if tracker is not None and epoch_id is not None:
+                try:
+                    tracker.observe_gateway_event(
+                        event_args, epoch_id=epoch_id, received_at=received_at,
+                        batch_identity_proven=batch_identity_proven)
+                except Exception:  # noqa: BLE001 — fail interval truth closed, preserve candle feed
+                    try:
+                        tracker.mark_coverage_broken(
+                            "interval_observer_error", received_at, epoch_id=epoch_id)
+                    except Exception:  # noqa: BLE001 — candle ingestion remains independent
+                        pass
+
         with self._lock:
-            self.aggregator.ingest_event(args)
+            self.aggregator.ingest_event(args, on_unique_event=observe_unique)
             newly = self.aggregator.roll()
             if newly:
                 self._persist(newly)
@@ -547,6 +662,12 @@ class TopstepXDataProvider(BaseDataProvider):
             raise DataFeedError("TopstepX provider was never started")
         if self.is_stale():
             age = self.feed_age_seconds()
+            tracker = getattr(self, "trade_interval_truth", None)
+            if tracker is not None:
+                tracker.mark_coverage_broken(
+                    "market_stream_stale", datetime.now(timezone.utc),
+                    epoch_id=getattr(self, "_trade_interval_epoch_id", None))
+                self._trade_interval_epoch_id = None
             raise DataFeedError(
                 f"TOPSTEPX_BARS_STALE: market stream age "
                 f"{'never' if age is None else f'{age:.0f}s'} exceeds "

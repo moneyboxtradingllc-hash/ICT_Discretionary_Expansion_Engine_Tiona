@@ -59,7 +59,9 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # family; the current authorization cannot be reused after this prompt change.
     # WATCHING-PARSER-FAIL-CLOSED-1 rejects verbose conditional actions at the
     # candidate boundary; the closure identity rotates with that execution law.
-    assert PM.brain_contract_fingerprint() == "brain:7c3aa082266c2586"
+    # RAW-TRADE-INTERVAL-TRUTH-1 changes the fingerprint-bound provider source
+    # because it now preserves exact-time interval coverage facts from GatewayTrade.
+    assert PM.brain_contract_fingerprint() == "brain:8098fe7e009575e9"
 
 
 @pytest.mark.parametrize("addition", [

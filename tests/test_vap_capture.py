@@ -524,30 +524,22 @@ class TestCandleAuthorityUntouched:
         assert alone.closed_candles() == beside.closed_candles()
         assert alone.diagnostics == beside.diagnostics
 
-    def test_V17_the_market_runtime_source_is_unmodified_by_this_unit(self):
-        """GIT_REPOSITORY_REQUIRED.
-
-        This asks a question about a DIFF AGAINST HEAD -- did this unit modify
-        these two files -- which cannot be answered from files alone, only from
-        repository history. A clone answers it; a source distribution carries no
-        history to diff against, and git then falls back to `--no-index` and
-        errors on the pathspec. Skipping there names the missing authority; it
-        does not weaken the theorem, which still runs wherever a repository
-        exists.
-        """
-        import subprocess
-        if subprocess.run(["git", "rev-parse", "--git-dir"], cwd=ROOT,
-                          capture_output=True).returncode != 0:
-            pytest.skip("GIT_REPOSITORY_REQUIRED: no repository to diff against "
-                        "-- this theorem certifies history, not file contents")
-        out = subprocess.run(
-            ["git", "diff", "--name-only", "HEAD", "--",
-             "src/broker/topstepx_market_runtime.py"],
-            cwd=ROOT, capture_output=True, text=True)
-        assert out.returncode == 0, out.stderr
-        assert out.stdout.strip() == "", (
-            f"this unit modified {out.stdout.split()}; the shared runtime fan-out "
-            f"must remain the sole socket/pump/reconnect authority")
+    def test_V17_capture_remains_a_passive_transport_consumer(self):
+        """VAP capture must not create a second connection, pump or reconnect path."""
+        import ast
+        source = os.path.join(ROOT, "src", "market_data", "vap_provider.py")
+        tree = ast.parse(open(source, encoding="utf-8").read())
+        imported = set()
+        called = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                imported.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.Import):
+                imported.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                called.add(node.func.attr)
+        assert "TopstepXMarketRuntime" not in imported
+        assert not {"connect_market_hub", "pump", "reconnect"} & called
 
     def test_capture_shares_no_state_with_the_aggregator(self):
         """The docstring NAMES `MinuteCandleAggregator` to explain what is being

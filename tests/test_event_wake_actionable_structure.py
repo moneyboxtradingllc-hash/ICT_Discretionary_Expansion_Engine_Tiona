@@ -362,7 +362,7 @@ class TestPumpThreadBoundary:
         reg = WakeRegistry()
         p = self._provider(reg)
         p.aggregator = type("Agg", (), {
-            "ingest_event": lambda self, args: None,
+            "ingest_event": lambda self, args, **_kwargs: None,
             "roll": lambda self: [{"timestamp": "2026-08-21T14:24:00+00:00"}],
         })()
         assert not reg.structure_birth.is_set()
@@ -374,7 +374,7 @@ class TestPumpThreadBoundary:
         reg = WakeRegistry()
         p = self._provider(reg)
         p.aggregator = type("Agg", (), {
-            "ingest_event": lambda self, args: None,
+            "ingest_event": lambda self, args, **_kwargs: None,
             "roll": lambda self: [],
         })()
         p._on_trade([None, {}])

@@ -239,6 +239,29 @@ class TestOneHubManySubscribers:
 
 class TestSinglePumpOwnership:
 
+    def test_coverage_observer_sees_epoch_break_and_new_epoch_on_reconnect(self):
+        rt = runtime(ScriptedHub())
+        events = []
+        rt.connect()
+        rt.add_coverage_listener(events.append)
+        first_epoch = rt.health()["connection_generation"]
+        rt._reconnect()
+        assert [event["kind"] for event in events] == [
+            "epoch_started", "coverage_broken", "epoch_started"]
+        assert events[0]["coverage_epoch_id"] != events[2]["coverage_epoch_id"]
+        assert events[1]["reason"] == "runtime_reconnect"
+        assert rt.health()["connection_generation"] == first_epoch + 1
+        rt.stop()
+        assert events[-1]["kind"] == "coverage_broken"
+        assert events[-1]["reason"] == "runtime_stopped"
+
+    def test_coverage_listener_failure_cannot_break_market_runtime(self):
+        rt = runtime(ScriptedHub())
+        rt.add_coverage_listener(lambda _event: (_ for _ in ()).throw(ValueError("observer")))
+        rt.connect()
+        rt._reconnect()
+        assert rt.connection_generation == 2
+
     def test_exactly_one_pump_thread_is_started(self):
         rt = runtime()
         before = threading.active_count()

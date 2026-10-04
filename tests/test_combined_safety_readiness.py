@@ -580,8 +580,11 @@ class TestStrategyUntouched:
         # deterministic typed proof family; prior authorization is invalid.
         # WATCHING-PARSER-FAIL-CLOSED-1 rejects verbose watching text as an
         # immediate entry, so the closure-bound execution contract rotates.
+        # RAW-TRADE-INTERVAL-TRUTH-1 binds exact raw-trade coverage provenance
+        # at the provider seam; prior authorization must not survive that source
+        # change, even though no strategy or candle semantics changed.
         from ai_brain.production_model import brain_contract_fingerprint
-        assert brain_contract_fingerprint() == "brain:7c3aa082266c2586"
+        assert brain_contract_fingerprint() == "brain:8098fe7e009575e9"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.
