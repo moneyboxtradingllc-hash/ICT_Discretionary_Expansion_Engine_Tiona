@@ -311,14 +311,17 @@ class FakeSocket:
         self.sent, self.closed = [], False
         self._inbound = list(inbound or [])
         self.fail_on_connect = fail_on_connect
+        self._recv_count = 0
 
     def send(self, data):
         self.sent.append(data)
 
     def recv(self):
         if self._inbound:
+            self._recv_count += 1
             return self._inbound.pop(0)
-        return "{}\x1e"                       # handshake ack / idle
+        self._recv_count += 1
+        return "{}\x1e" if self._recv_count == 1 else '{"type":6}\x1e'
 
     def close(self):
         self.closed = True
@@ -408,11 +411,21 @@ class TestRealtime:
         h.health.last_event_at = datetime.now(timezone.utc)
         assert not h.health.is_stale(max_age=60)
 
-    def test_a_malformed_event_does_not_kill_the_stream(self):
+    def test_a_malformed_frame_breaks_integrity_and_stops_dispatching_that_read(self):
         h = hub(inbound=["{}\x1e", 'not json at all\x1e{"type":1,"target":"GatewayQuote","arguments":[]}\x1e'])
         h.connect()
-        assert h.pump(max_messages=1) == 1
-        assert h.health.events_seen["GatewayQuote"] == 1
+        with pytest.raises(RealtimeError, match="integrity unproven"):
+            h.pump(max_messages=1)
+        assert "GatewayQuote" not in h.health.events_seen
+        assert any("malformed_signalr_frame" in e for e in h.health.errors)
+
+    def test_an_unhandled_integer_signalr_type_breaks_integrity(self):
+        h = hub(inbound=["{}\x1e", '{"type":99}\x1e'])
+        h.connect()
+        with pytest.raises(RealtimeError, match="integrity unproven"):
+            h.pump(max_messages=1)
+        assert any("unexpected_signalr_message_type:99" in e
+                   for e in h.health.errors)
 
     def test_a_handler_exception_is_recorded_not_raised(self):
         h = hub(inbound=["{}\x1e", '{"type":1,"target":"GatewayUserOrder","arguments":[]}\x1e'])

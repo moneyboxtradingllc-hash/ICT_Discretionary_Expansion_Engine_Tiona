@@ -50,11 +50,16 @@ class TopstepXMarketRuntime:
         self.runtime_id = uuid.uuid4().hex
         self.connection_started_at: "datetime | None" = None
         self._coverage_listeners: list = []
+        self._critical_handler_wrappers: dict = {}
         self.subscribers: list = []
         self.last_message_at: "datetime | None" = None
         self.last_quote_at: "datetime | None" = None
         self.last_trade_at: "datetime | None" = None
         self.reconnects = 0
+        # False after any known transport/critical-consumer integrity failure.
+        # A new socket generation restores transport eligibility, while the
+        # provider still requires a fresh valid GatewayTrade to prove coverage.
+        self.trade_transport_integrity_healthy = True
         # A consumer that owns this runtime may share its own stop signal, so
         # stopping the consumer genuinely stops the reader it started.
         self._stop = stop_event if stop_event is not None else threading.Event()
@@ -116,11 +121,34 @@ class TopstepXMarketRuntime:
             if listener in self._coverage_listeners:
                 self._coverage_listeners.remove(listener)
 
-    def attach(self, name: str, event: str, handler) -> None:
+    def attach(self, name: str, event: str, handler, *,
+               integrity_critical: bool = False) -> None:
         """Register a consumer. Consumers observe; they never drain the socket."""
         if self.hub is None:
             self.connect()
-        self.hub.on(event, handler)
+        registered_handler = handler
+        if integrity_critical:
+            wrapper_key = (event, id(handler))
+            registered_handler = self._critical_handler_wrappers.get(wrapper_key)
+            if registered_handler is None:
+                def guarded(args):
+                    try:
+                        return handler(args)
+                    except Exception as exc:  # noqa: BLE001 — evidence handler failure breaks coverage
+                        self._on_transport_integrity_failure(
+                            f"critical_handler_failed:{event}:{type(exc).__name__}")
+                        raise
+                registered_handler = guarded
+                self._critical_handler_wrappers[wrapper_key] = registered_handler
+        try:
+            self.hub.on(event, registered_handler,
+                        integrity_critical=integrity_critical)
+        except TypeError:
+            # Compatibility for external diagnostic/runtime test adapters that
+            # expose the historical two-argument subscriber surface. Production
+            # SignalRHub always supports the integrity-critical designation;
+            # the wrapper preserves it for the legacy adapter surface.
+            self.hub.on(event, registered_handler)
         if name not in self.subscribers:
             self.subscribers.append(name)
 
@@ -132,12 +160,16 @@ class TopstepXMarketRuntime:
         # and `SignalRHub.subscribe` is keyed, so re-invoking it here would add
         # nothing. The plan is what `reconnect()` replays in order.
         hub = self.session.connect_market_hub()
+        set_integrity_listener = getattr(hub, "set_integrity_failure_listener", None)
+        if callable(set_integrity_listener):
+            set_integrity_listener(self._on_transport_integrity_failure)
         # Stamped by the runtime itself so freshness is transport truth, not a
         # figure any one consumer reports about itself.
         hub.on(EVENT_QUOTE, self._stamp_quote)
         hub.on(EVENT_TRADE, self._stamp_trade)
         self.hub = hub
         self.connection_generation += 1
+        self.trade_transport_integrity_healthy = True
         self.connection_started_at = self._clock()
         self._notify_coverage({"kind": "epoch_started",
                                "coverage_epoch_id": self._coverage_epoch_id(),
@@ -200,6 +232,7 @@ class TopstepXMarketRuntime:
     def _reconnect(self) -> None:
         """The ONLY reconnect authority. Subscribers never run their own."""
         if self.hub is not None:
+            self.trade_transport_integrity_healthy = False
             self._notify_coverage({"kind": "coverage_broken",
                                    "coverage_epoch_id": self._coverage_epoch_id(),
                                    "at": self._clock(),
@@ -210,6 +243,7 @@ class TopstepXMarketRuntime:
             self.connection_generation += 1
             self.connection_started_at = self._clock()
             self.reconnects += 1
+            self.trade_transport_integrity_healthy = True
             self._notify_coverage({"kind": "epoch_started",
                                    "coverage_epoch_id": self._coverage_epoch_id(),
                                    "at": self.connection_started_at,
@@ -217,7 +251,17 @@ class TopstepXMarketRuntime:
             # Freshness is NOT restored here. A reconnected socket has delivered
             # nothing yet, so the stream stays stale until real data arrives.
         except Exception:  # noqa: BLE001
+            self.trade_transport_integrity_healthy = False
             self._stop.wait(self._idle_wait)
+
+    def _on_transport_integrity_failure(self, reason: str) -> None:
+        """Latch and publish known loss of continuity on the canonical hub."""
+        self.trade_transport_integrity_healthy = False
+        self._notify_coverage({"kind": "coverage_broken",
+                               "coverage_epoch_id": self._coverage_epoch_id(),
+                               "at": self._clock(),
+                               "reason": str(reason or "transport_integrity_unproven"),
+                               "contract_id": getattr(self.contract, "id", None)})
 
     # ── health ────────────────────────────────────────────────────────────────
     def _stamp_quote(self, args) -> None:

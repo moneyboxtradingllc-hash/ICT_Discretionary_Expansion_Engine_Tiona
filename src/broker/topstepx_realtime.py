@@ -118,8 +118,28 @@ class SignalRHub:
         # set makes a duplicate subscribe a no-op instead of a second stream.
         self._plan: list = []
         self._plan_keys: set = set()
+        self._invocation_targets: dict[str, str] = {}
         self.health = StreamHealth()
         self._handlers: dict = {}
+        self._integrity_critical_handlers: set = set()
+        self._integrity_failure_listener = None
+        self._pending_integrity_failure: str | None = None
+
+    def set_integrity_failure_listener(self, listener) -> None:
+        """Install the shared runtime's fail-closed market-integrity observer."""
+        self._integrity_failure_listener = listener
+
+    def _mark_integrity_failure(self, reason: str) -> None:
+        reason = str(reason or "market_message_integrity_unproven")
+        if self._pending_integrity_failure is None:
+            self._pending_integrity_failure = reason
+        self.health.errors.append(f"market_integrity_failure:{reason}")
+        listener = self._integrity_failure_listener
+        if callable(listener):
+            try:
+                listener(reason)
+            except Exception:  # noqa: BLE001 — integrity evidence remains latched locally
+                pass
 
     # ── connection ────────────────────────────────────────────────────────────
     def _url_with_token(self) -> str:
@@ -193,12 +213,15 @@ class SignalRHub:
 
     def _invoke(self, sub: Subscription) -> None:
         self._invocation_id += 1
-        self._send_raw({"type": 1, "invocationId": str(self._invocation_id),
+        invocation_id = str(self._invocation_id)
+        self._invocation_targets[invocation_id] = sub.method
+        self._send_raw({"type": 1, "invocationId": invocation_id,
                         "target": sub.method, "arguments": list(sub.args)})
         if sub.event not in self.health.subscriptions:
             self.health.subscriptions.append(sub.event)
 
-    def on(self, event: str, handler: Callable[[list], None]) -> None:
+    def on(self, event: str, handler: Callable[[list], None], *,
+           integrity_critical: bool = False) -> None:
         """Add a handler for `event`. Many consumers may share one event.
 
         This deliberately APPENDS. A single-slot mapping silently replaced the
@@ -211,6 +234,8 @@ class SignalRHub:
         handlers = self._handlers.setdefault(event, [])
         if handler not in handlers:
             handlers.append(handler)
+        if integrity_critical:
+            self._integrity_critical_handlers.add((event, handler))
 
     def replay_subscriptions(self) -> list:
         """Re-invoke every planned subscription, in the original order.
@@ -262,23 +287,60 @@ class SignalRHub:
                 raw = self._conn.recv()
             except Exception as exc:  # noqa: BLE001
                 self.health.errors.append(f"recv_failed:{type(exc).__name__}")
-                break
+                self._mark_integrity_failure(f"receive_failed:{type(exc).__name__}")
+                raise RealtimeError("market receive failed; raw-trade continuity broken") from exc
             if raw is None:
-                break
-            for msg in _split_frames(raw):
+                self._mark_integrity_failure("receive_ended_without_close_proof")
+                raise RealtimeError(
+                    "market receive ended without close proof; raw-trade continuity broken")
+            if not isinstance(raw, str):
+                self._mark_integrity_failure("malformed_transport_frame_type")
+                raise RealtimeError(
+                    "market receive returned a non-text frame; raw-trade continuity broken")
+            self._pending_integrity_failure = None
+            for msg in _split_frames(raw, on_malformed=self._mark_integrity_failure):
+                if self._pending_integrity_failure is not None:
+                    break
                 seen += self._dispatch(msg)
+                if self._pending_integrity_failure is not None:
+                    break
+            if self._pending_integrity_failure is not None:
+                reason = self._pending_integrity_failure
+                self._pending_integrity_failure = None
+                raise RealtimeError(
+                    f"market message integrity unproven: {reason}")
         return seen
 
     def _dispatch(self, msg: dict) -> int:
+        if not isinstance(msg, dict):
+            self._mark_integrity_failure("malformed_transport_message")
+            return 0
         mtype = msg.get("type")
         if mtype == 6:          # ping/keepalive — traffic, not an event
             return 0
-        if mtype != 1:          # completions, close frames, protocol chatter
+        if mtype == 3:          # invocation completion
+            if msg.get("error"):
+                invocation_id = str(msg.get("invocationId") or "")
+                completed_target = self._invocation_targets.get(invocation_id)
+                if completed_target == "SubscribeContractTrades" or completed_target is None:
+                    self._mark_integrity_failure("trade_subscription_completion_unproven")
+                else:
+                    self.health.errors.append(
+                        f"hub_error:{completed_target}:{msg.get('error')}")
+            return 0
+        if mtype not in {1, 3, 6}:
+            # This client only consumes invocations, invocation completions,
+            # and pings. Any other protocol frame is outside the understood
+            # transport contract, so it cannot preserve raw-trade completeness.
+            self._mark_integrity_failure(f"unexpected_signalr_message_type:{mtype}")
             if msg.get("error"):
                 self.health.errors.append(f"hub_error:{msg['error']}")
             return 0
-        target = msg.get("target") or ""
-        args = msg.get("arguments") or []
+        target = msg.get("target")
+        args = msg.get("arguments")
+        if not isinstance(target, str) or not target or not isinstance(args, list):
+            self._mark_integrity_failure("malformed_invocation_message")
+            return 0
         self.health.events_seen[target] = self.health.events_seen.get(target, 0) + 1
         self.health.last_event_at = self._clock()
         for handler in list(self._handlers.get(target) or ()):
@@ -286,6 +348,9 @@ class SignalRHub:
                 handler(args)
             except Exception as exc:  # noqa: BLE001 — a handler bug is not a feed failure
                 self.health.errors.append(f"handler_error:{target}:{type(exc).__name__}")
+                if (target, handler) in self._integrity_critical_handlers:
+                    self._mark_integrity_failure(
+                        f"critical_handler_failed:{target}:{type(exc).__name__}")
         # ONE event counts once however many consumers observed it. Counting per
         # handler would inflate the feed's own evidence of activity.
         return 1
@@ -318,7 +383,7 @@ def _ws_scheme(url: str) -> str:
     return url
 
 
-def _split_frames(raw: str) -> list:
+def _split_frames(raw: str, *, on_malformed=None) -> list:
     """Split a SignalR payload into JSON objects on the record separator.
 
     One WebSocket read can carry several frames; a frame that will not parse is
@@ -330,9 +395,16 @@ def _split_frames(raw: str) -> list:
         if not chunk:
             continue
         try:
-            out.append(json.loads(chunk))
+            message = json.loads(chunk)
         except json.JSONDecodeError:
+            if callable(on_malformed):
+                on_malformed("malformed_signalr_frame")
             continue
+        if not isinstance(message, dict):
+            if callable(on_malformed):
+                on_malformed("malformed_transport_message")
+            continue
+        out.append(message)
     return out
 
 

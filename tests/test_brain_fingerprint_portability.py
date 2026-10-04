@@ -14,7 +14,7 @@ from ai_brain import production_model as PM
 
 @pytest.fixture
 def source_bytes(monkeypatch):
-    """Exercise the actual 30-file hash without rewriting production files."""
+    """Exercise the actual closure hash without rewriting production files."""
     sources = {}
     for label, relative in PM._CONTRACT_SOURCES + PM._CONTRACT_SOURCES_REPO:
         base = ROOT if (label, relative) in PM._CONTRACT_SOURCES_REPO else ROOT / "src"
@@ -34,7 +34,7 @@ def source_bytes(monkeypatch):
 
 @pytest.mark.parametrize("style", ["lf", "crlf", "mixed_files", "mixed_lines"])
 def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
-    assert len(source_bytes) == 30
+    assert len(source_bytes) == 33
     for index, (path, data) in enumerate(source_bytes.items()):
         if style == "crlf" or (style == "mixed_files" and index % 2):
             source_bytes[path] = data.replace(b"\n", b"\r\n")
@@ -63,7 +63,9 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # non-retroactive and verifies runtime epoch identity on each event.
     # 1B binds intervals to a proven raw-trade event-time frontier and
     # revalidates trade-only freshness before any interval can be read as live.
-    assert PM.brain_contract_fingerprint() == "brain:4737123b78337935"
+    # 1C binds transport parsing, runtime continuity, and interval truth because
+    # each can change whether raw market history is represented as complete.
+    assert PM.brain_contract_fingerprint() == "brain:a7a0c942e6d71e45"
 
 
 @pytest.mark.parametrize("addition", [
@@ -76,6 +78,8 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
 ])
 @pytest.mark.parametrize("relative", [
     "src/ai_brain/brain_prompt.py", "tools/topstepx_production_session.py",
+    "src/broker/topstepx_realtime.py", "src/broker/topstepx_market_runtime.py",
+    "src/data_feed/trade_interval_truth.py",
 ])
 def test_other_content_changes_remain_bound_in_both_anchors(source_bytes, relative, addition):
     before = PM.brain_contract_fingerprint()

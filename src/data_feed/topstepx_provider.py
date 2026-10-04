@@ -297,7 +297,17 @@ class TopstepXDataProvider(BaseDataProvider):
         self._owns_runtime = runtime is None
         self.runtime = runtime or TopstepXMarketRuntime(
             self._session, self.contract, stop_event=self._stop)
-        self.runtime.attach("candle-provider", "GatewayTrade", self._on_trade)
+        try:
+            self.runtime.attach("candle-provider", "GatewayTrade", self._on_trade,
+                                integrity_critical=True)
+        except TypeError as exc:
+            # Historical injected runtimes used by standalone collection and
+            # test adapters expose only attach(name, event, handler). The real
+            # TopstepXMarketRuntime supports the critical flag; preserve the
+            # legacy adapter contract without changing that production path.
+            if "integrity_critical" not in str(exc):
+                raise
+            self.runtime.attach("candle-provider", "GatewayTrade", self._on_trade)
         self.runtime.attach("candle-provider", "GatewayQuote", self._on_quote)
         add_listener = getattr(self.runtime, "add_coverage_listener", None)
         if callable(add_listener):
@@ -325,13 +335,14 @@ class TopstepXDataProvider(BaseDataProvider):
             self._trade_interval_epoch_id = None
             self._trade_interval_runtime_epoch_id = None
 
-    def _validate_trade_interval_authority_locked(self, tracker, *, now=None):
+    def _validate_trade_interval_authority_locked(self, tracker):
         """Fail closed unless current runtime and valid raw trades prove freshness."""
-        now = parse_ts(now or datetime.now(timezone.utc))
+        now = datetime.now(timezone.utc)
         runtime = self.runtime
         tracker_epoch_id = getattr(self, "_trade_interval_epoch_id", None)
         runtime_epoch_id = self._runtime_trade_epoch_id()
         if (runtime is None or runtime.hub is None or not runtime.is_running
+                or not getattr(runtime, "trade_transport_integrity_healthy", True)
                 or getattr(getattr(runtime, "contract", None), "id", None)
                 != getattr(self.contract, "id", None)
                 or getattr(tracker, "contract_id", None)
@@ -347,7 +358,7 @@ class TopstepXDataProvider(BaseDataProvider):
                 tracker, "runtime_epoch_mismatch", now)
             raise DataFeedError("TOPSTEPX_TRADE_INTERVAL_EPOCH_MISMATCH")
 
-        evidence = tracker.coverage_evidence(tracker_epoch_id)
+        evidence = tracker._provider_current_coverage_evidence(tracker_epoch_id)
         if evidence is None:
             raise DataFeedError("TOPSTEPX_TRADE_INTERVAL_COVERAGE_UNPROVEN")
         threshold = float(getattr(self, "_stale_seconds", DEFAULT_STALE_SECONDS))
@@ -387,11 +398,13 @@ class TopstepXDataProvider(BaseDataProvider):
             if runtime_contract != self.contract.id:
                 raise DataFeedError("TOPSTEPX_TRADE_INTERVAL_CONTRACT_MISMATCH")
             self._validate_trade_interval_authority_locked(tracker)
-            return tracker.open_interval(
+            record = tracker._register_interval(
                 self.contract.id, requested_at, anchor_reference_price,
                 anchor_reference_basis)
+            record["authority_scope"] = "CURRENT_PROVIDER_VALIDATED"
+            return record
 
-    def read_authoritative_trade_interval(self, interval_id: str, *, now=None) -> dict:
+    def read_authoritative_trade_interval(self, interval_id: str) -> dict:
         """Canonical live-authority read for exact raw-trade interval facts.
 
         Callers must use this instead of treating a durable COMPLETE row as
@@ -402,10 +415,11 @@ class TopstepXDataProvider(BaseDataProvider):
         if tracker is None or self.contract is None or self.runtime is None:
             raise DataFeedError("TOPSTEPX_TRADE_INTERVAL_UNAVAILABLE")
         with self._lock:
-            epoch_id = self._validate_trade_interval_authority_locked(tracker, now=now)
-            record = tracker.authoritative_interval(interval_id, epoch_id=epoch_id)
+            epoch_id = self._validate_trade_interval_authority_locked(tracker)
+            record = tracker._provider_current_interval_record(interval_id, epoch_id=epoch_id)
             if record is None:
                 raise DataFeedError("TOPSTEPX_TRADE_INTERVAL_NOT_AUTHORITATIVE")
+            record["authority_scope"] = "CURRENT_PROVIDER_VALIDATED"
             return record
 
     def _on_coverage_event(self, event: dict) -> None:

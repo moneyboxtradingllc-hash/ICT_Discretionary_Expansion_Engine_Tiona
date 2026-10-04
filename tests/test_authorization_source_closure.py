@@ -14,10 +14,12 @@ The closure covered three files: prompt, schema, validator. Everything else
 that determines what the Brain receives, or how its answer becomes a trade,
 was outside it.
 
-WHAT THIS FILE PINS: the closure's membership, both directions. A file that can
-change the decision must be in it; the execution and mission-lifecycle modules
-must stay OUT, because binding them would invalidate a live approval every time
-a safety repair lands, without making any decision more honest.
+WHAT THIS FILE PINS: the closure's membership, both directions. A source that
+can change Brain-visible market truth or how an answer becomes a trade belongs
+in the closure. Execution and mission-lifecycle modules that do not change
+those semantics stay OUT; raw-market evidence integrity sources are explicitly
+included when they determine whether facts supplied to future decisions are
+complete.
 """
 from __future__ import annotations
 
@@ -124,6 +126,16 @@ MUST_BE_BOUND = {
     # higher-timeframe structure the Brain sees.
     "data_feed/timeframe_builder.py":
         "how truthful 1m facts become the higher-timeframe chart Terra sees",
+    # RAW-TRADE-INTERVAL-TRUTH-1C. These sources jointly determine whether a
+    # raw GatewayTrade can be lost, replayed, or exposed as current complete
+    # evidence. Transport framing and runtime continuity therefore belong in
+    # the same authorization closure as the interval fact store.
+    "broker/topstepx_realtime.py":
+        "whether a transport frame/receive/dispatch failure breaks raw-trade truth",
+    "broker/topstepx_market_runtime.py":
+        "runtime-generation continuity and transport-integrity authority",
+    "data_feed/trade_interval_truth.py":
+        "event frontier, epoch replay identity, extrema and stored completeness",
 }
 
 #: Bound, but anchored at the REPOSITORY ROOT rather than `src/`.

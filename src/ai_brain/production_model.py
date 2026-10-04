@@ -253,6 +253,13 @@ _CONTRACT_SOURCES = (
     # MARKET REALITY -- whether the chart exists at all
     ("history_capability", "broker/topstepx_live_session.py"),
     ("history_acquisition", "data_feed/topstepx_provider.py"),
+    # RAW-TRADE-INTERVAL-TRUTH-1C: these sources decide whether raw-event
+    # continuity may be claimed. A transport parser/runtime change can lose a
+    # GatewayTrade without changing provider code; the interval tracker owns
+    # replay/frontier/extrema truth consumed by future Brain-visible context.
+    ("realtime_transport_integrity", "broker/topstepx_realtime.py"),
+    ("market_runtime_integrity", "broker/topstepx_market_runtime.py"),
+    ("raw_trade_interval_truth", "data_feed/trade_interval_truth.py"),
     ("history_fitness", "data_feed/startup_history_authority.py"),
     ("continuity_law", "data_feed/candle_continuity.py"),
     ("timeframe_construction", "data_feed/timeframe_builder.py"),

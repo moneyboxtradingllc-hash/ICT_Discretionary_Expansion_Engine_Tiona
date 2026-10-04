@@ -7,6 +7,7 @@ does not retain raw trades and has no strategy or execution authority.
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import math
 import os
@@ -72,6 +73,10 @@ class TradeIntervalTruth:
         self._lock = threading.RLock()
         self._intervals: dict[str, dict] = {}
         self._epochs: dict[str, dict] = {}
+        # Digests are deliberately retained for the complete live epoch. A
+        # bounded eviction window cannot distinguish a late replay from a new
+        # equal-timestamp event around an interval frontier.
+        self._seen_batch_digests: dict[str, set[str]] = {}
         self._current_epoch_id: str | None = None
         self._storage_healthy = True
         self._storage_error: str | None = None
@@ -89,19 +94,41 @@ class TradeIntervalTruth:
         with self._lock:
             return self._current_epoch_id
 
-    def coverage_evidence(self, epoch_id: str | None = None) -> dict | None:
-        """Return current live proof metadata; persisted rows alone are not authority."""
+    @staticmethod
+    def _audit_interval_view(record: dict) -> dict:
+        view = copy.deepcopy(record)
+        view["authority_scope"] = "AUDIT_ONLY"
+        view["last_recorded_coverage_status"] = view.pop("coverage_status", None)
+        return view
+
+    @staticmethod
+    def _audit_epoch_view(epoch: dict) -> dict:
+        view = copy.deepcopy(epoch)
+        view["authority_scope"] = "AUDIT_ONLY"
+        view["last_recorded_epoch_status"] = view.pop("status", None)
+        view["last_recorded_trade_coverage_status"] = view.pop(
+            "trade_coverage_status", None)
+        return view
+
+    def audit_coverage_epoch(self, epoch_id: str | None = None) -> dict | None:
+        """Return stored epoch history explicitly scoped as audit data."""
         with self._lock:
             target = str(epoch_id or self._current_epoch_id or "")
             epoch = self._epochs.get(target)
-            if (not self._storage_healthy or target != self._current_epoch_id
+            return self._audit_epoch_view(epoch) if epoch else None
+
+    def _provider_current_coverage_evidence(self, epoch_id: str) -> dict | None:
+        """Internal evidence accessor; provider must validate runtime and freshness."""
+        with self._lock:
+            epoch = self._epochs.get(str(epoch_id))
+            if (not self._storage_healthy or str(epoch_id) != self._current_epoch_id
                     or not epoch or epoch.get("status") != "ACTIVE"
                     or epoch.get("trade_coverage_status") != "PROVEN"):
                 return None
             return copy.deepcopy(epoch)
 
-    def authoritative_interval(self, interval_id: str, *, epoch_id: str) -> dict | None:
-        """Return a COMPLETE interval only while its live proven epoch is current."""
+    def _provider_current_interval_record(self, interval_id: str, *, epoch_id: str) -> dict | None:
+        """Private stored row for the provider after its live checks succeed."""
         with self._lock:
             if not self._storage_healthy or str(epoch_id) != self._current_epoch_id:
                 return None
@@ -272,6 +299,10 @@ class TradeIntervalTruth:
                 changed = True
         if changed:
             self._persist_locked()
+        # Raw event identities are intentionally process local. _load has
+        # already invalidated every old epoch, so a restart never inherits a
+        # dedup/frontier claim as live continuity.
+        self._seen_batch_digests.clear()
 
     def _now(self) -> datetime:
         return _parse_aware(self._clock(), name="clock")
@@ -332,7 +363,7 @@ class TradeIntervalTruth:
             if not self._storage_healthy:
                 raise TradeIntervalTruthError("interval_storage_unavailable")
             if self._current_epoch_id == epoch:
-                return copy.deepcopy(self._epochs[epoch])
+                return self._audit_epoch_view(self._epochs[epoch])
             if epoch in self._epochs:
                 raise TradeIntervalTruthError("coverage_epoch_id_reused")
             prior = self._current_epoch_id
@@ -350,8 +381,9 @@ class TradeIntervalTruth:
                                    "last_observation_sequence": 0,
                                    "last_valid_trade_received_at": None}
             self._current_epoch_id = epoch
+            self._seen_batch_digests[epoch] = set()
             self._persist_locked()
-            return copy.deepcopy(self._epochs[epoch])
+            return self._audit_epoch_view(self._epochs[epoch])
 
     def _break_epoch_locked(self, reason: str, stamp: datetime,
                             epoch_id: str | None = None) -> bool:
@@ -368,6 +400,7 @@ class TradeIntervalTruth:
                 changed = self._mark_incomplete_locked(record, reason, stamp) or changed
         if target and target == self._current_epoch_id:
             self._current_epoch_id = None
+        self._seen_batch_digests.pop(target, None)
         return changed
 
     def mark_coverage_broken(self, reason: str, at=None,
@@ -379,8 +412,8 @@ class TradeIntervalTruth:
             if changed:
                 self._persist_locked()
 
-    def open_interval(self, contract_id: str, requested_at,
-                      anchor_reference_price, anchor_reference_basis: str) -> dict:
+    def _register_interval(self, contract_id: str, requested_at,
+                           anchor_reference_price, anchor_reference_basis: str) -> dict:
         """Open against the observed market-event frontier.
 
         Request and registration timestamps are local lineage only. The
@@ -495,6 +528,20 @@ class TradeIntervalTruth:
             if not rows:
                 return
 
+            try:
+                batch_digest = hashlib.sha256(
+                    json.dumps(args, sort_keys=True, default=str,
+                               separators=(",", ":")).encode("utf-8")).hexdigest()
+            except Exception:  # noqa: BLE001 — identity uncertainty breaks coverage
+                self._break_epoch_locked("trade_batch_identity_unproven", received,
+                                         epoch_id)
+                self._persist_locked()
+                return
+            seen = self._seen_batch_digests.setdefault(epoch_id, set())
+            if batch_digest in seen:
+                # Replay classification precedes every authority-bearing update.
+                return
+
             updates = []
             malformed_reason = None
             for row in rows:
@@ -527,6 +574,10 @@ class TradeIntervalTruth:
                 self._break_epoch_locked(malformed_reason, received, epoch_id)
                 self._persist_locked()
                 return
+
+            # Retain identity for the whole uninterrupted epoch. If the process
+            # restarts, _load invalidates that epoch and starts with an empty set.
+            seen.add(batch_digest)
 
             changed = False
             epoch = self._epochs[epoch_id]
@@ -597,18 +648,18 @@ class TradeIntervalTruth:
                     "status": CLOSED, "at": _iso(stamp),
                     "reason": str(reason or "closed")})
                 self._persist_locked()
-            return copy.deepcopy(record)
+            return self._audit_interval_view(record)
 
     def get_interval(self, interval_id: str) -> dict | None:
-        """Return stored audit facts; callers need the provider authority read for live use."""
+        """Return AUDIT_ONLY history, never a current-live authority record."""
         with self._lock:
             record = self._intervals.get(str(interval_id))
-            return copy.deepcopy(record) if record else None
+            return self._audit_interval_view(record) if record else None
 
     def active_intervals(self, contract_id: str | None = None) -> list:
         contract = str(contract_id or self.contract_id)
         if contract != self.contract_id:
             return []
         with self._lock:
-            return [copy.deepcopy(record) for record in self._intervals.values()
+            return [self._audit_interval_view(record) for record in self._intervals.values()
                     if record.get("coverage_status") != CLOSED]
