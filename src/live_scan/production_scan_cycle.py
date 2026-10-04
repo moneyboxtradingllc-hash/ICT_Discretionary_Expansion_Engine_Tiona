@@ -871,9 +871,19 @@ class ProductionScanCycle:
     @staticmethod
     def is_sovereign(brain_block: dict) -> bool:
         """Only a clean validated llm read may author a production candidate."""
-        b = brain_block or {}
+        b = brain_block if isinstance(brain_block, dict) else {}
+        output = b.get("output")
         return (b.get("source") == SOURCE_LLM and not b.get("fallback_reason")
-                and bool(b.get("output")))
+                and isinstance(output, dict) and bool(output))
+
+    @staticmethod
+    def is_validated_brain_result(brain_result: dict) -> bool:
+        """Validate the converted CandidateProducer result shape explicitly."""
+        result = brain_result if isinstance(brain_result, dict) else {}
+        parsed = result.get("parsed")
+        return (result.get("ok") is True and result.get("source") == SOURCE_LLM
+                and not result.get("fallback_reason")
+                and isinstance(parsed, dict) and bool(parsed))
 
     @staticmethod
     def engine_inventory(snapshot: dict) -> dict:

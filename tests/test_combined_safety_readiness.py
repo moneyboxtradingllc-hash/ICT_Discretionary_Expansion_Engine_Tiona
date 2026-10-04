@@ -594,7 +594,7 @@ class TestStrategyUntouched:
         # CAMPAIGN-LIFECYCLE-1 adds a current-authority participation gate; the
         # prior production authorization cannot survive the semantic rotation.
         from ai_brain.production_model import brain_contract_fingerprint
-        assert brain_contract_fingerprint() == "brain:4419bb4d8ac5995f"
+        assert brain_contract_fingerprint() == "brain:a369bcf07183d1ac"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.

@@ -1409,10 +1409,21 @@ class ProductionLoop:
             snap = scan.get("snapshot") or {}
             brain_input = scan.get("brain_input") or {}
             plan_brain_result = plan.get("brain_result") or {}
+            if not ProductionScanCycle.is_validated_brain_result(plan_brain_result):
+                raise NoCandidate("conditional_plan_authority_invalid",
+                                  "stored converted Brain result is not validated")
             from market_data.campaign_lifecycle import evaluate_campaign_lifecycle
+            # A converted CandidateProducer result is not a Brain block, and a
+            # plan-time response is not the trigger scan's validated phase.
+            # Read phase authority only from this scan's correctly typed block.
+            current_brain_block = scan.get("brain_block")
+            current_brain_output = (
+                current_brain_block.get("output")
+                if isinstance(current_brain_block, dict)
+                and isinstance(current_brain_block.get("output"), dict) else {})
             lifecycle = evaluate_campaign_lifecycle(
                 snapshot=snap,
-                brain_output=parsed,
+                brain_output=current_brain_output,
                 narrative_continuity=(plan_brain_result.get(
                     "narrative_continuity") or {}),
                 campaign_draw=scan.get("campaign_draw_truth"),
@@ -1421,11 +1432,12 @@ class ProductionLoop:
                 contract_id=str(getattr(getattr(self, "cycle", None),
                                         "contract_id", "") or ""),
                 brain_authority_available=ProductionScanCycle.is_sovereign(
-                    plan_brain_result),
+                    current_brain_block),
             )
-            # Refresh the post-cognition gate with current market authorities
-            # and the conditional plan's latest validated Brain phase. The
-            # candidate producer enforces this projection before geometry.
+            # The LATENCY-1 trigger has no fresh Brain response, so the current
+            # block fails sovereignty and Lifecycle refuses unless current
+            # positive facts establish a different fail-closed state (such as
+            # TRANSFER_UNRESOLVED or a proven completed destination).
             snap["campaign_lifecycle"] = lifecycle
             px_block = ((brain_input.get("market") or {}).get("execution_price") or {})
             sided = executable_price(px_block, old.direction)

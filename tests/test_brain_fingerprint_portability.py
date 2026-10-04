@@ -71,7 +71,9 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # authorization identity therefore rotates again.
     # CAMPAIGN-LIFECYCLE-1 adds a stateless campaign projection and participation
     # gate; prior production authorization is stale after this contract change.
-    assert PM.brain_contract_fingerprint() == "brain:4419bb4d8ac5995f"
+    # CAMPAIGN-LIFECYCLE-1 repair binds the public Draw contract and the
+    # no-Brain conditional-trigger phase refusal; old authorization is stale.
+    assert PM.brain_contract_fingerprint() == "brain:a369bcf07183d1ac"
 
 
 @pytest.mark.parametrize("addition", [

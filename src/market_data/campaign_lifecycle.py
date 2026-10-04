@@ -68,6 +68,7 @@ def _forming(path: dict) -> bool:
 
 def _no_campaign_draw(draw: dict) -> bool:
     return (draw.get("authority_status") == "UNKNOWN"
+            and draw.get("process_authority") == "CURRENT_PROCESS_ONLY"
             and draw.get("authority_reason") == "no_accepted_campaign_draw"
             and not draw.get("campaign_episode_id"))
 
@@ -94,8 +95,7 @@ def _valid_draw(draw, *, snapshot, direction, session_id, contract_id,
     cutoff = _instant(draw.get("settled_cutoff"))
     anchor = _instant(draw.get("anchor_bar_time"))
     if (cutoff is None or anchor is None or anchor > cutoff
-            or draw.get("anchor_price_basis") != "settled_1m_source_bar_close"
-            or not str(draw.get("anchor_bar_digest") or "").strip()):
+            or draw.get("anchor_price_basis") != "settled_1m_source_bar_close"):
         return False, "campaign_draw_anchor_or_cutoff_invalid"
     try:
         from market_state.active_path import production_session_key
@@ -172,16 +172,6 @@ def evaluate_campaign_lifecycle(*, snapshot, brain_output,
         return _result(AUTHORITY_UNKNOWN, "active_path_unavailable",
                        draw=draw, phase=phase or None)
 
-    # A causal ActivePath formation is descriptive only. It has no owner and
-    # cannot pass participation, regardless of the model's proposed direction.
-    if _forming(path):
-        return _result(ESTABLISHING, "active_path_causal_hypothesis_only",
-                       draw=draw, phase=phase or None)
-
-    if brain_authority_available is not True:
-        return _result(AUTHORITY_UNKNOWN, "current_brain_authority_unavailable",
-                       draw=draw, phase=phase or None)
-
     try:
         from ai_brain.narrative_continuity import (
             candidate_direction_authorized, recheck_narrative_continuity)
@@ -189,6 +179,11 @@ def evaluate_campaign_lifecycle(*, snapshot, brain_output,
     except Exception as exc:  # noqa: BLE001 -- authority failure is explicit
         return _result(AUTHORITY_UNKNOWN,
                        f"narrative_continuity_unavailable:{type(exc).__name__}",
+                       draw=draw, phase=phase or None)
+    if (not isinstance(current, dict)
+            or not isinstance(current.get("active_path"), dict)
+            or current["active_path"].get("available") is not True):
+        return _result(AUTHORITY_UNKNOWN, "current_narrative_continuity_unavailable",
                        draw=draw, phase=phase or None)
     control = current.get("control_state")
 
@@ -198,6 +193,18 @@ def evaluate_campaign_lifecycle(*, snapshot, brain_output,
                        draw=draw, control_state=control, phase=phase or None)
 
     if control == "unestablished":
+        # Forming is descriptive only. Recheck Narrative Continuity first so a
+        # new hypothesis cannot hide a failed incumbent. It is lawful only when
+        # current available authorities also report no accepted Draw.
+        if _forming(path):
+            if _no_campaign_draw(draw):
+                return _result(ESTABLISHING,
+                               "active_path_causal_hypothesis_only",
+                               draw=draw, control_state=control,
+                               phase=phase or None)
+            return _result(AUTHORITY_UNKNOWN,
+                           "forming_hypothesis_conflicts_with_campaign_draw",
+                           draw=draw, control_state=control, phase=phase or None)
         if (path.get("owner") in (None, "none") and path.get("status") == "none"
                 and _no_campaign_draw(draw)):
             return _result(UNESTABLISHED, "current_authorities_report_no_campaign",
@@ -206,7 +213,17 @@ def evaluate_campaign_lifecycle(*, snapshot, brain_output,
                        "unestablished_control_conflicts_with_current_facts",
                        draw=draw, control_state=control, phase=phase or None)
 
-    direction = str(output.get("narrative_direction") or "").strip().lower()
+    if _forming(path):
+        return _result(AUTHORITY_UNKNOWN,
+                       "forming_hypothesis_conflicts_with_narrative_control",
+                       draw=draw, control_state=control, phase=phase or None)
+
+    # Narrative Continuity supplies the already-authorized current owner.
+    # Brain must agree with it for ACTIVE_DELIVERY / RETRACING, but Lifecycle
+    # never obtains or changes direction from local tools or a missing response.
+    direction = (current.get("confirmed_to") if control == "confirmed_transfer"
+                 else current.get("dominant_direction"))
+    direction = str(direction or "").strip().lower()
     if direction not in _DIRECTIONS:
         return _result(AUTHORITY_UNKNOWN, "narrative_direction_unavailable",
                        draw=draw, control_state=control, phase=phase or None)
@@ -259,6 +276,18 @@ def evaluate_campaign_lifecycle(*, snapshot, brain_output,
     if draw.get("authority_status") == "PROVEN_DELIVERED":
         return _result(DESTINATION_SUBSTANTIALLY_DELIVERED,
                        "settled_campaign_objective_touch_proven",
+                       direction=direction, draw=draw, control_state=control,
+                       phase=phase or None)
+
+    if brain_authority_available is not True:
+        return _result(AUTHORITY_UNKNOWN, "current_brain_authority_unavailable",
+                       direction=direction, draw=draw, control_state=control,
+                       phase=phase or None)
+
+    brain_direction = str(output.get("narrative_direction") or "").strip().lower()
+    if brain_direction != direction:
+        return _result(AUTHORITY_UNKNOWN,
+                       "current_brain_direction_does_not_match_authorized_owner",
                        direction=direction, draw=draw, control_state=control,
                        phase=phase or None)
     if phase == "retracement":

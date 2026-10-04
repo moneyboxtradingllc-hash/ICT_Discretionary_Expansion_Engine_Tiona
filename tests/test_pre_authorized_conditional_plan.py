@@ -1,7 +1,7 @@
 """LATENCY-1: a quote trigger routes an existing plan without paid cognition."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 import os
 import sys
@@ -153,104 +153,133 @@ def test_mechanics_only_plan_scan_inside_zone_dispatches_existing_plan(monkeypat
 
 
 def test_trigger_uses_stored_brain_plan_and_current_mechanics_without_recalling_brain(monkeypatch):
-    import broker.topstepx_production_loop as production_loop
+    from market_data.campaign_draw_truth import CampaignDrawTruth
+    from market_state.active_path import production_session_key
+    from live_scan.production_scan_cycle import ProductionScanCycle
+    from broker.luna_candidate_producer import CandidateProducer
+    from broker import topstepx_execution_price
 
-    monkeypatch.setattr(production_loop.DLB, "resolve", lambda **_kwargs: {
-        "entry_permitted": True, "allowed_planned_risk": 300.0})
-    old_objective = SimpleNamespace(identity="obj-1", price=90.0)
+    contract = "CON.F.US.MNQ.Z26"
+    session = "PROD-20260930"
+    base = datetime(2026, 9, 30, 14, 0, tzinfo=timezone.utc)
+
+    def candle(offset):
+        at = (base + timedelta(minutes=offset)).isoformat()
+        return {"timestamp": at, "open": 100.0, "high": 100.5,
+                "low": 99.5, "close": 100.0, "volume": 10,
+                "contract": contract, "members": 1, "expected_members": 1,
+                "complete": True}
+
+    rows = [candle(i) for i in range(3)]
+    ownership = {"state_available": True, "owner": "bearish", "status": "active"}
+    accepted = {"direction_authorized": True, "direction": "bearish",
+                "objective": {"identity": "opposing_external_liquidity:sellside@95",
+                              "kind": "opposing_external_liquidity", "price": 95},
+                "brain_lineage": {"source": "llm", "snapshot_id": "author-scan"}}
+    tracker = CampaignDrawTruth(contract_id=contract, session_id=session,
+                                instrument="MNQ")
+    tracker.observe(
+        settled_bars=[rows[0]],
+        settled_source={"source_bar_time": rows[0]["timestamp"],
+                        "temporal_status": "settled",
+                        "settled_edge_basis": "no_member_list_published"},
+        contract_id=contract, session_id=session, history_revision=4,
+        derived_state_current=True, accepted_view=accepted,
+        ownership_state=ownership)
+    public_draw = tracker.observe(
+        settled_bars=rows,
+        settled_source={"source_bar_time": rows[-1]["timestamp"],
+                        "temporal_status": "settled",
+                        "settled_edge_basis": "no_member_list_published"},
+        contract_id=contract, session_id=session, history_revision=4,
+        derived_state_current=True, accepted_view=accepted,
+        ownership_state=ownership)
+    assert public_draw["authority_status"] == "PROVEN_NOT_DELIVERED"
+    assert "anchor_bar_digest" not in public_draw
+
+    current_at = rows[-1]["timestamp"]
+    owner_path = {
+        "state_available": True, "owner": "bearish", "status": "active",
+        "forming_direction": None,
+        "session": production_session_key(current_at),
+        "origin": {"direction": "bearish", "event": "buy_side_raid_rejected",
+                   "proof_family": "rejected_raid_reclaim", "at": rows[0]["timestamp"],
+                   "occurrence_id": "owner-origin"},
+        "load_bearing_structure": {"level": 101.0, "side": "high", "intact": True},
+        "progression": {"supporting_timeframes": ["5m"]},
+        "transfer_evidence": {},
+        "last_invalidated": None,
+    }
+    snapshot = {"timestamp": current_at, "contract_id": contract,
+                "derived_state": {"current": True, "history_revision": 4,
+                                  "derived_revision": 4},
+                "active_path_state": owner_path}
+    continuity = {"prior_thesis": {"direction": "bearish",
+                                    "campaign_established": True,
+                                    "timestamp": rows[0]["timestamp"],
+                                    "falsifier_status": "not_occurred"}}
+    authored_block = {"source": "llm", "output": {
+        "narrative_direction": "bearish", "narrative_phase": "continuation",
+        "current_action": "watching"}, "fallback_reason": None,
+        "llm_model": "gpt-6-luna", "narrative_continuity": continuity}
+    stored_brain_result = ProductionScanCycle.to_brain_result(authored_block)
     old = SimpleNamespace(direction="bearish", extras={
         "activation_zone": {"occurrence_id": "occ-11", "direction": "bearish",
                             "low": 100.0, "high": 101.0},
-        "plan_expires_at": "2026-09-30T14:05:00+00:00",
+        "plan_expires_at": (NOW + timedelta(minutes=5)).isoformat(),
         "playbook": "trend_continuation", "tool_family": ["fvg"],
         "structural_invalidation": {"structure_identity": "inv-1"},
-        "conditional_plan_transfer_evidence": "unchanged",
-    }, invalidation_price=110.0, objective=old_objective)
-    stored_brain_result = {"parsed": {"current_action": "watching"},
-                           "model": "gpt-6-luna"}
-    fresh = SimpleNamespace(candidate_id="fresh-11", direction="bearish", extras={
-        "playbook": "trend_continuation", "tool_family": ["fvg"],
-        "selected_tool_occurrence_id": "occ-11",
-        "selected_tool_zone": {"low": 100.0, "high": 101.0},
-        "structural_invalidation": {"structure_identity": "inv-1"},
-    }, invalidation_price=110.0, objective=old_objective)
-    producer_calls = []
-
-    class Producer:
-        def produce(self, **kwargs):
-            producer_calls.append(kwargs)
-            return fresh
-
-    loop = ProductionLoop.__new__(ProductionLoop)
-    loop.active_conditional_plan = {
-        "plan_id": "plan-11", "candidate": old,
-        "parsed": {"current_action": "watching"},
-        "brain_result": stored_brain_result,
+        "conditional_plan_transfer_evidence": owner_path["transfer_evidence"],
+        "conditional_plan_snapshot_id": "author-scan",
+    }, invalidation_price=110.0, objective=SimpleNamespace(identity="obj-1", price=95.0))
+    trigger_block = {"source": "preauthorized_plan_trigger", "output": None,
+                     "fallback_reason": None}
+    scan = {
+        "snapshot": snapshot, "brain_block": trigger_block,
+        "brain_input": {"market": {"execution_price": {}}},
+        "campaign_draw_truth": public_draw,
+        "brain_result": ProductionScanCycle.to_brain_result(trigger_block),
+        "qualification": {}, "engine_inventory": {},
+        "snapshot_id": "trigger-scan-12", "market_data_timestamp": current_at,
+        "latest_closed_bar_timestamp": current_at,
     }
+    plan = {"plan_id": "plan-11", "candidate": old,
+            "parsed": dict(stored_brain_result["parsed"]),
+            "brain_result": stored_brain_result}
+    loop = ProductionLoop.__new__(ProductionLoop)
+    loop.active_conditional_plan = plan
     loop.candles = SimpleNamespace(wake_registry=SimpleNamespace(
         clear_conditional_watch=lambda **_kwargs: True))
-    loop.producer = Producer()
+    loop.producer = CandidateProducer(account_fingerprint="acct:test", contract=contract,
+                                      allow_prose_objective_fallback=True)
+    loop.cycle = SimpleNamespace(session_id=session, contract_id=contract)
     loop.clock = lambda: NOW
-    loop._in_window = lambda: True
-    plan_events = []
-    loop._record_plan_events = lambda _plan_id, rows: plan_events.extend(rows)
-    decision_records = []
-    evidence_records = []
-    loop._record_decision = lambda *args, **kwargs: decision_records.append(
-        (args, kwargs))
-    loop._attach_evidence = lambda *args, **kwargs: evidence_records.append(
-        (args, kwargs))
-    loop.ps = SimpleNamespace(
-        session=object(), contract=SimpleNamespace(id="MNQ"), runner=None,
-        sizing={"stop_range": "structure", "reward_to_risk": 2.0},
-        build_runner=lambda *_args, **_kwargs: SimpleNamespace(geometry=SimpleNamespace(
-            size=1, stop_points=10.0, stop_price=110.0, target_price=90.0,
-            risk_usd=200.0)),
-    )
-    loop.mission = SimpleNamespace(
-        trade_missions=[], authorization=object(), active_mission=None,
-        candidate_count=0)
-    loop.armed = True
-    executions = []
-    loop._execute = lambda candidate, candidate_scan, sized, in_window: (
-        executions.append((candidate, candidate_scan, sized, in_window))
-        or {"outcome": "MOCK_EXECUTION"})
-    scan = {
-        "snapshot": {"active_path_state": {"transfer_evidence": "unchanged"}},
-        "brain_input": {"market": {"execution_price": {
-            "available": True, "fresh": True, "best_bid": 100.5,
-            "best_ask": 100.75}}},
-        "brain_result": {"parsed": {"current_action": "stand_down"}},
-        "qualification": {}, "engine_inventory": {},
-        "snapshot_id": "snapshot-11", "market_data_timestamp": "now",
-        "latest_closed_bar_timestamp": "bar-now",
-    }
+    loop._record_plan_events = lambda *_args, **_kwargs: None
+    loop._record_decision = lambda *_args, **_kwargs: None
+    monkeypatch.setattr(topstepx_execution_price, "executable_price",
+                        lambda *_args: 100.5)
+    authority_blocks = []
+    monkeypatch.setattr(ProductionScanCycle, "is_sovereign",
+                        staticmethod(lambda block: (
+                            authority_blocks.append(block) or
+                            (block.get("source") == "llm"
+                             and isinstance(block.get("output"), dict)
+                             and bool(block.get("output"))
+                             and not block.get("fallback_reason")))))
 
     result = loop._execute_conditional_plan(scan, conditional_event={
         "plan_id": "plan-11", "occurrence_id": "occ-11",
         "reason": "conditional_plan_zone_reached", "price": 100.5,
     }, in_window=True)
 
-    assert result == {"outcome": "MOCK_EXECUTION"}
-    assert producer_calls[0]["brain_result"] is stored_brain_result
-    assert producer_calls[0]["conditional_trigger"] is True
-    assert len(executions) == 1
-    assert executions[0][0] is fresh
-    assert executions[0][1] is scan
-    assert executions[0][3] is True
-    assert evidence_records[0][1]["brain_result_override"] is stored_brain_result
-    assert decision_records[0][1]["brain_output_override"] == {
-        "current_action": "watching"}
-    assert decision_records[0][1]["conditional_plan_id"] == "plan-11"
+    assert result["outcome"] == "NO_CANDIDATE"
+    assert result["reason"] == "campaign_lifecycle_refused"
+    assert snapshot["campaign_lifecycle"]["state"] == "AUTHORITY_UNKNOWN"
+    assert snapshot["campaign_lifecycle"]["reason"] == \
+        "current_brain_authority_unavailable"
+    assert authority_blocks == [trigger_block]
+    assert scan["brain_result"]["parsed"] == {}
     assert loop.active_conditional_plan is None
-    assert any(event["event"] == "entry_condition_reached"
-               for event in plan_events)
-    assert not any(event["event"] == "entry_zone_reached"
-                   for event in plan_events)
-    accepted = [event for event in plan_events
-                if event["event"] == "plan_mechanics_accepted"]
-    assert len(accepted) == 1
-    assert accepted[0]["trigger_scan_id"] == "snapshot-11"
 
 
 def test_pending_wake_records_trigger_scan_completion_without_brain_call():
@@ -355,85 +384,34 @@ def test_production_scan_cycle_invocation_counter_is_zero_on_trigger_scan(monkey
     assert shadow_calls == ["shadow"]
 
 
-@pytest.mark.parametrize("mutation", [
-    "direction", "tool_family", "invalidation_price", "invalidation_identity",
-    "objective_identity", "objective_price", "occurrence_id", "zone_low",
-    "zone_high",
-])
-def test_brain_authorized_plan_semantic_mutations_fail_closed(mutation):
-    old_objective = SimpleNamespace(identity="obj-exact", price=90.0)
-    old = SimpleNamespace(direction="bearish", extras={
-        "activation_zone": {"occurrence_id": "occ-exact", "direction": "bearish",
-                            "low": 100.0, "high": 101.0},
-        "plan_expires_at": "2026-09-30T14:05:00+00:00",
-        "conditional_plan_snapshot_id": "author-scan",
-        "playbook": "trend_continuation", "tool_family": ["fvg"],
-        "structural_invalidation": {"structure_identity": "inv-exact"},
-        "conditional_plan_transfer_evidence": "unchanged",
-    }, invalidation_price=110.0, objective=old_objective)
-    fresh_objective = SimpleNamespace(identity="obj-exact", price=90.0)
-    fresh = SimpleNamespace(direction="bearish", extras={
-        "playbook": "trend_continuation", "tool_family": ["fvg"],
-        "selected_tool_occurrence_id": "occ-exact",
-        "selected_tool_zone": {"low": 100.0, "high": 101.0},
-        "structural_invalidation": {"structure_identity": "inv-exact"},
-    }, invalidation_price=110.0, objective=fresh_objective)
-    if mutation == "direction":
-        fresh.direction = "bullish"
-    elif mutation == "tool_family":
-        fresh.extras["tool_family"] = ["order_block"]
-    elif mutation == "invalidation_price":
-        fresh.invalidation_price = 111.0
-    elif mutation == "invalidation_identity":
-        fresh.extras["structural_invalidation"]["structure_identity"] = "inv-new"
-    elif mutation == "objective_identity":
-        fresh.objective.identity = "obj-new"
-    elif mutation == "objective_price":
-        fresh.objective.price = 89.0
-    elif mutation == "occurrence_id":
-        fresh.extras["selected_tool_occurrence_id"] = "occ-new"
-    elif mutation == "zone_low":
-        fresh.extras["selected_tool_zone"]["low"] = 99.75
-    elif mutation == "zone_high":
-        fresh.extras["selected_tool_zone"]["high"] = 101.25
+@pytest.mark.parametrize("phase", ["continuation", "retracement"])
+def test_cached_plan_phase_cannot_authorize_no_brain_trigger(phase):
+    from live_scan.production_scan_cycle import ProductionScanCycle
+    from market_data.campaign_lifecycle import AUTHORITY_UNKNOWN
+    from broker.luna_candidate_producer import NoCandidate
+    from test_campaign_lifecycle import real_candidate_gate, real_public_draw, classify
 
-    class Producer:
-        def produce(self, **_kwargs):
-            return fresh
+    plan_block = {"source": "llm", "output": {
+        "narrative_direction": "bullish", "narrative_phase": phase,
+        "current_action": "watching"}, "fallback_reason": None,
+        "llm_model": "gpt-6-luna", "narrative_continuity": {}}
+    stored_result = ProductionScanCycle.to_brain_result(plan_block)
+    trigger_block = {"source": "preauthorized_plan_trigger", "output": None,
+                     "fallback_reason": None}
+    current_result = ProductionScanCycle.to_brain_result(trigger_block)
+    assert current_result["parsed"] == {}
+    assert ProductionScanCycle.is_sovereign(trigger_block) is False
+    assert ProductionScanCycle.is_sovereign(stored_result) is False
+    assert ProductionScanCycle.is_validated_brain_result(stored_result) is True
+    assert ProductionScanCycle.is_validated_brain_result(current_result) is False
 
-    loop = ProductionLoop.__new__(ProductionLoop)
-    loop.active_conditional_plan = {
-        "plan_id": "plan-exact", "candidate": old,
-        "parsed": {"current_action": "watching"},
-        "brain_result": {"parsed": {"current_action": "watching"}},
-    }
-    loop.candles = SimpleNamespace(wake_registry=SimpleNamespace(
-        clear_conditional_watch=lambda **_kwargs: True))
-    loop.producer = Producer()
-    loop.clock = lambda: NOW
-    loop._record_plan_events = lambda *_args: None
-    loop._record_decision = lambda *_args, **_kwargs: None
-    loop._attach_evidence = lambda *_args, **_kwargs: pytest.fail(
-        "a mutated plan must not reach candidate evidence attachment")
-    venue_calls = []
-    loop._execute = lambda *_args, **_kwargs: venue_calls.append("submit")
-    scan = {
-        "snapshot": {"active_path_state": {"transfer_evidence": "unchanged"}},
-        "brain_input": {"market": {"execution_price": {
-            "available": True, "fresh": True,
-            "best_bid": 100.5, "best_ask": 100.75}}},
-        "snapshot_id": "trigger-scan", "market_data_timestamp": "now",
-        "latest_closed_bar_timestamp": "bar-now",
-    }
-
-    refused = loop._execute_conditional_plan(scan, conditional_event={
-        "plan_id": "plan-exact", "occurrence_id": "occ-exact",
-        "reason": "conditional_plan_zone_reached", "price": 100.5,
-    }, in_window=True)
-    assert refused["outcome"] == "NO_CANDIDATE"
-    assert refused["reason"] == "conditional_plan_material_change"
-    assert venue_calls == []
-    assert loop.active_conditional_plan is None
+    assessment = classify(
+        output=stored_result["parsed"], campaign=real_public_draw(),
+        brain_available=ProductionScanCycle.is_sovereign(trigger_block))
+    assert assessment["state"] == AUTHORITY_UNKNOWN
+    with pytest.raises(NoCandidate) as refusal:
+        real_candidate_gate(assessment)
+    assert refusal.value.reason == "campaign_lifecycle_refused"
 
 
 def test_plan_publication_has_a_reconcilable_terminal_disposition():

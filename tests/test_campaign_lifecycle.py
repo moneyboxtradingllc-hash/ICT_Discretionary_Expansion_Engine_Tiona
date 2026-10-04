@@ -11,6 +11,8 @@ from market_data.campaign_lifecycle import (
     ACTIVE_DELIVERY, AUTHORITY_UNKNOWN, DESTINATION_SUBSTANTIALLY_DELIVERED,
     ESTABLISHING, RETRACING, TRANSFER_UNRESOLVED, UNESTABLISHED,
     evaluate_campaign_lifecycle, participation_permission)
+from market_data.campaign_draw_truth import (
+    CampaignDrawTruth, PROVEN_DELIVERED, PROVEN_NOT_DELIVERED)
 
 
 CONTRACT = "CON.F.US.MNQ.Z26"
@@ -38,7 +40,6 @@ def draw(*, direction="bullish", status="PROVEN_NOT_DELIVERED", **overrides):
         "objective_price": 105.0,
         "anchor_bar_time": stamp(0),
         "anchor_bar_close": 100.0,
-        "anchor_bar_digest": "anchor-digest",
         "anchor_price_basis": "settled_1m_source_bar_close",
         "settled_cutoff": stamp(2),
         "history_revision": REVISION,
@@ -116,11 +117,278 @@ def classify(*, snap=None, output=None, continuity=None, campaign=None,
         brain_authority_available=brain_available)
 
 
+def real_public_draw(*, delivered=False, direction="bullish"):
+    """Build actual public authority through CampaignDrawTruth.observe()."""
+    identity = ("opposing_external_liquidity:buyside@105" if direction == "bullish"
+                else "opposing_external_liquidity:sellside@95")
+    price = 105 if direction == "bullish" else 95
+    accepted = {
+        "direction_authorized": True,
+        "direction": direction,
+        "objective": {"identity": identity,
+                      "kind": "opposing_external_liquidity", "price": price},
+        "brain_lineage": {"source": "llm", "snapshot_id": "scan-current"},
+    }
+    ownership = {"state_available": True, "owner": direction, "status": "active"}
+
+    def candle(offset, *, high=100.5, low=99.5):
+        return {"timestamp": stamp(offset), "open": 100, "high": high,
+                "low": low, "close": 100, "volume": 10,
+                "contract": CONTRACT, "members": 1, "expected_members": 1,
+                "complete": True}
+
+    def observe(tracker, rows):
+        return tracker.observe(
+            settled_bars=rows,
+            settled_source={"source_bar_time": rows[-1]["timestamp"],
+                            "temporal_status": "settled",
+                            "settled_edge_basis": "no_member_list_published"},
+            contract_id=CONTRACT, session_id=SESSION,
+            history_revision=REVISION, derived_state_current=True,
+            accepted_view=accepted, ownership_state=ownership)
+
+    tracker = CampaignDrawTruth(contract_id=CONTRACT, session_id=SESSION,
+                                instrument="MNQ")
+    rows = [candle(0)]
+    observe(tracker, rows)
+    if delivered:
+        rows.append(candle(1, high=105.25, low=99.75))
+    else:
+        rows.extend((candle(1), candle(2)))
+    return observe(tracker, rows)
+
+
+def real_no_campaign_draw(path=None):
+    tracker = CampaignDrawTruth(contract_id=CONTRACT, session_id=SESSION,
+                                instrument="MNQ")
+    rows = [{"timestamp": stamp(i), "open": 100, "high": 100.5,
+             "low": 99.5, "close": 100, "volume": 10,
+             "contract": CONTRACT, "members": 1, "expected_members": 1,
+             "complete": True} for i in range(3)]
+    return tracker.observe(
+        settled_bars=rows,
+        settled_source={"source_bar_time": stamp(2),
+                        "temporal_status": "settled",
+                        "settled_edge_basis": "no_member_list_published"},
+        contract_id=CONTRACT, session_id=SESSION,
+        history_revision=REVISION, derived_state_current=True,
+        accepted_view=None,
+        ownership_state=path or {"state_available": True, "owner": "none",
+                                 "status": "none"})
+
+
+def real_superseded_draw():
+    tracker = CampaignDrawTruth(contract_id=CONTRACT, session_id=SESSION,
+                                instrument="MNQ")
+    rows = [{"timestamp": stamp(i), "open": 100, "high": 100.5,
+             "low": 99.5, "close": 100, "volume": 10,
+             "contract": CONTRACT, "members": 1, "expected_members": 1,
+             "complete": True} for i in range(3)]
+    accepted = {"direction_authorized": True, "direction": "bullish",
+                "objective": {"identity": "opposing_external_liquidity:buyside@105",
+                              "kind": "opposing_external_liquidity", "price": 105},
+                "brain_lineage": {"source": "llm", "snapshot_id": "old-scan"}}
+    source = {"source_bar_time": stamp(0), "temporal_status": "settled",
+              "settled_edge_basis": "no_member_list_published"}
+    tracker.observe(
+        settled_bars=[rows[0]], settled_source=source,
+        contract_id=CONTRACT, session_id=SESSION,
+        history_revision=REVISION, derived_state_current=True,
+        accepted_view=accepted,
+        ownership_state={"state_available": True, "owner": "bullish",
+                         "status": "active"})
+    tracker.invalidate_for_history_revision(REVISION + 1)
+    current = tracker.observe(
+        settled_bars=rows,
+        settled_source={**source, "source_bar_time": stamp(2)},
+        contract_id=CONTRACT, session_id=SESSION,
+        history_revision=REVISION + 1, derived_state_current=True,
+        accepted_view=None,
+        ownership_state={"state_available": True, "owner": "bullish",
+                         "status": "active"})
+    assert tracker.audit_records[0]["superseded"] is True
+    assert current["authority_status"] == "UNKNOWN"
+    return current
+
+
+def production_block(direction="bullish", phase="continuation", **overrides):
+    block = {"source": "llm", "output": brain(direction, phase),
+             "fallback_reason": None, "llm_model": "gpt-6-luna",
+             "narrative_continuity": {}}
+    block.update(overrides)
+    return block
+
+
+def real_candidate_gate(assessment, direction="bullish"):
+    from broker.luna_candidate_producer import CandidateProducer
+    from live_scan.production_scan_cycle import ProductionScanCycle
+
+    block = production_block(direction, "continuation")
+    result = ProductionScanCycle.to_brain_result(block)
+    result["parsed"]["current_action"] = "stand_down"
+    return CandidateProducer(account_fingerprint="acct:test", contract=CONTRACT,
+                             allow_prose_objective_fallback=True).produce(
+        brain_result=result, brain_input={},
+        snapshot={"campaign_lifecycle": assessment}, qualification={},
+        engine_inventory={}, snapshot_id="scan-current",
+        market_data_timestamp=stamp(2), latest_closed_bar_timestamp=stamp(2),
+        require_campaign_lifecycle=True)
+
+
 def test_established_active_campaign_projects_active_delivery():
     result = classify()
     assert result["state"] == ACTIVE_DELIVERY
     assert result["participation_permitted"] is True
     assert result["authorized_direction"] == "bullish"
+
+
+@pytest.mark.parametrize(("phase", "expected"), [
+    ("continuation", ACTIVE_DELIVERY),
+    ("distribution", ACTIVE_DELIVERY),
+    ("retracement", RETRACING),
+])
+def test_real_public_draw_and_current_brain_conversion_drive_lifecycle_and_gate(
+        phase, expected):
+    from live_scan.production_scan_cycle import ProductionScanCycle
+    from broker.luna_candidate_producer import NoCandidate
+
+    public = real_public_draw()
+    assert public["authority_status"] == PROVEN_NOT_DELIVERED
+    assert "anchor_bar_digest" not in public
+    block = production_block(phase=phase)
+    converted = ProductionScanCycle.to_brain_result(block)
+    assert converted["parsed"]["narrative_phase"] == phase
+    assert ProductionScanCycle.is_sovereign(block) is True
+    assert ProductionScanCycle.is_sovereign(converted) is False
+    assert ProductionScanCycle.is_validated_brain_result(converted) is True
+    assert ProductionScanCycle.is_validated_brain_result(block) is False
+    result = classify(output=block["output"], campaign=public,
+                      brain_available=ProductionScanCycle.is_sovereign(block))
+    assert result["state"] == expected
+    with pytest.raises(NoCandidate) as refusal:
+        real_candidate_gate(result)
+    # The actual CandidateProducer crossed Lifecycle and refused only at the
+    # later Brain action gate; no fake Producer is allowed to skip Lifecycle.
+    assert getattr(refusal.value, "reason", None) != "campaign_lifecycle_refused"
+
+
+def test_real_public_delivered_draw_refuses_real_candidate_producer():
+    public = real_public_draw(delivered=True)
+    assert public["authority_status"] == PROVEN_DELIVERED
+    assert public["delivery_evidence_bar"] == stamp(1)
+    result = classify(campaign=public)
+    assert result["state"] == DESTINATION_SUBSTANTIALLY_DELIVERED
+    from broker.luna_candidate_producer import NoCandidate
+    with pytest.raises(NoCandidate) as refusal:
+        real_candidate_gate(result)
+    assert refusal.value.reason == "campaign_lifecycle_refused"
+
+
+def test_real_scan_responses_replace_previous_brain_phase_each_scan():
+    from live_scan.production_scan_cycle import ProductionScanCycle
+
+    public = real_public_draw()
+    phases = (("continuation", ACTIVE_DELIVERY),
+              ("retracement", RETRACING),
+              ("continuation", ACTIVE_DELIVERY))
+    prior_block = None
+    for current_phase, expected in phases:
+        block = production_block(phase=current_phase)
+        converted = ProductionScanCycle.to_brain_result(block)
+        assert converted["parsed"]["narrative_phase"] == current_phase
+        assessment = classify(output=block["output"], campaign=public,
+                              brain_available=ProductionScanCycle.is_sovereign(block))
+        assert assessment["state"] == expected
+        if current_phase == "retracement":
+            stale = classify(output=prior_block["output"], campaign=public,
+                              brain_available=ProductionScanCycle.is_sovereign(
+                                  prior_block))
+            assert stale["state"] == ACTIVE_DELIVERY
+            assert assessment["state"] == RETRACING
+        prior_block = block
+
+
+@pytest.mark.parametrize("scenario,expected", [
+    ("normal", AUTHORITY_UNKNOWN),
+    ("unresolved", TRANSFER_UNRESOLVED),
+    ("delivered", DESTINATION_SUBSTANTIALLY_DELIVERED),
+    ("superseded", AUTHORITY_UNKNOWN),
+    ("revision_changed", AUTHORITY_UNKNOWN),
+    ("opposite_confirmed", AUTHORITY_UNKNOWN),
+    ("same_direction_new_episode", AUTHORITY_UNKNOWN),
+])
+def test_cached_plan_phase_cannot_survive_current_campaign_truth_changes(
+        scenario, expected):
+    from live_scan.production_scan_cycle import ProductionScanCycle
+
+    plan_output = brain("bullish", "retracement")
+    snap = snapshot()
+    continuity = {}
+    campaign = real_public_draw()
+    if scenario == "unresolved":
+        path = active_path(status="forming", owner="none",
+                           load_bearing_structure=None,
+                           forming_direction="bearish",
+                           last_invalidated={"owner": "bullish", "at": stamp(1),
+                                             "level": 99.0})
+        snap = snapshot(path=path)
+        continuity = prior_bullish_thesis()
+        campaign = real_no_campaign_draw(path)
+    elif scenario == "delivered":
+        campaign = real_public_draw(delivered=True)
+    elif scenario == "superseded":
+        campaign = real_superseded_draw()
+    elif scenario == "revision_changed":
+        snap = snapshot(revision=REVISION + 1)
+    elif scenario == "opposite_confirmed":
+        from market_state.active_path import (
+            LIQUIDITY_SWEEP, PROTECTED_SWING_REGISTERED,
+            PROTECTED_SWING_VIOLATED, STRUCTURE_BREAK, ActivePath,
+            occurrence_id)
+
+        def event(kind, at, **fields):
+            return {"occurrence_id": occurrence_id(
+                        CONTRACT, kind, "1m", at,
+                        fields.get("direction") or fields.get("side") or ""),
+                    "event_type": kind, "contract": CONTRACT,
+                    "source_tf": "1m", "event_time": at, **fields}
+
+        machine = ActivePath()
+        machine.enforce_lifecycle(stamp(0), CONTRACT)
+        machine.ingest([
+            event(LIQUIDITY_SWEEP, stamp(0), sweep_direction="below_low",
+                  reclaimed=True),
+            event(STRUCTURE_BREAK, stamp(1), direction="bullish",
+                  broken_level=100),
+            event(PROTECTED_SWING_REGISTERED, stamp(2), side="low", level=99),
+            event(PROTECTED_SWING_VIOLATED, stamp(3), side="low", level=99),
+            event(LIQUIDITY_SWEEP, stamp(4), sweep_direction="above_high",
+                  reclaimed=True),
+            event(STRUCTURE_BREAK, stamp(5), direction="bearish",
+                  broken_level=101),
+            event(PROTECTED_SWING_REGISTERED, stamp(6), side="high", level=101),
+        ])
+        path = machine.state()
+        assert (path["owner"], path["status"]) == ("bearish", "active")
+        snap = snapshot(direction="bearish", path=path)
+        snap["timestamp"] = stamp(6)
+        continuity = prior_bullish_thesis()
+        campaign = real_public_draw(direction="bearish")
+    elif scenario == "same_direction_new_episode":
+        old_public = real_public_draw()
+        campaign = real_public_draw()
+        assert campaign["campaign_episode_id"] != old_public["campaign_episode_id"]
+
+    trigger_block = {"source": "preauthorized_plan_trigger", "output": None,
+                     "fallback_reason": None}
+    result = classify(snap=snap, output=plan_output, continuity=continuity,
+                      campaign=campaign,
+                      brain_available=ProductionScanCycle.is_sovereign(trigger_block))
+    assert result["state"] == expected
+    from broker.luna_candidate_producer import NoCandidate
+    with pytest.raises(NoCandidate) as refusal:
+        real_candidate_gate(result, "bullish")
+    assert refusal.value.reason == "campaign_lifecycle_refused"
 
 
 def test_valid_retracement_with_intact_owner_projects_retracing():
@@ -235,6 +503,7 @@ def test_affirmative_no_campaign_is_unestablished():
     result = classify(
         snap=snapshot(path=path),
         campaign={"authority_status": "UNKNOWN",
+                  "process_authority": "CURRENT_PROCESS_ONLY",
                   "authority_reason": "no_accepted_campaign_draw"},
         output=brain(direction="neutral", phase="neutral"))
     assert result["state"] == UNESTABLISHED
@@ -243,9 +512,114 @@ def test_affirmative_no_campaign_is_unestablished():
 def test_forming_causal_hypothesis_is_establishing_and_never_permits():
     path = active_path(status="forming", owner="none", load_bearing_structure=None,
                        forming_direction="bullish")
-    result = classify(snap=snapshot(path=path), campaign=None)
+    result = classify(snap=snapshot(path=path),
+                      campaign=real_no_campaign_draw(path))
     assert result["state"] == ESTABLISHING
     assert participation_permission(result, "bullish")[0] is False
+
+
+def test_real_active_path_failed_incumbent_plus_new_forming_hypothesis_is_transfer():
+    from ai_brain.narrative_continuity import (
+        STATE_VERSION, build_narrative_continuity, recheck_narrative_continuity)
+    from market_state.active_path import (
+        LIQUIDITY_SWEEP, PROTECTED_SWING_REGISTERED,
+        PROTECTED_SWING_VIOLATED, STRUCTURE_BREAK, ActivePath,
+        occurrence_id)
+
+    def event(kind, at, **fields):
+        tf = "1m"
+        return {"occurrence_id": occurrence_id(CONTRACT, kind, tf, at,
+                                                fields.get("direction")
+                                                or fields.get("side") or ""),
+                "event_type": kind, "contract": CONTRACT, "source_tf": tf,
+                "event_time": at, **fields}
+
+    path_machine = ActivePath()
+    path_machine.enforce_lifecycle(stamp(0), CONTRACT)
+    path_machine.ingest([
+        event(LIQUIDITY_SWEEP, stamp(0), sweep_direction="below_low",
+              reclaimed=True),
+        event(STRUCTURE_BREAK, stamp(1), direction="bullish",
+              broken_level=100.0),
+        event(PROTECTED_SWING_REGISTERED, stamp(2), side="low", level=99.0,
+              basis="sell_side_raid_rejected"),
+    ])
+    incumbent = path_machine.state()
+    assert (incumbent["owner"], incumbent["status"]) == ("bullish", "active")
+    assert incumbent["load_bearing_structure"]["intact"] is True
+    assert incumbent["progression"]["supporting_timeframes"]
+
+    initial_snapshot = snapshot(path=incumbent)
+    prior_memory = {"available": True, "last": {
+        "narrative_state_version": STATE_VERSION,
+        "campaign_direction": "bullish", "campaign_established": True,
+        "timestamp": stamp(1), "thesis_falsifier_status": "not_occurred",
+    }}
+    authored_continuity = build_narrative_continuity(initial_snapshot, prior_memory)
+    assert authored_continuity["control_state"] == "incumbent_intact"
+
+    path_machine.ingest([
+        event(PROTECTED_SWING_VIOLATED, stamp(3), side="low", level=99.0),
+        event(LIQUIDITY_SWEEP, stamp(4), sweep_direction="above_high",
+              reclaimed=True),
+    ])
+    forming = path_machine.state()
+    assert forming["owner"] == "none"
+    assert forming["status"] == "forming"
+    assert forming["forming_direction"] == "bearish"
+    assert forming["origin"]["proof_family"] == "rejected_raid_reclaim"
+    assert forming["last_invalidated"]["owner"] == "bullish"
+
+    current_snapshot = snapshot(path=forming)
+    current_snapshot["timestamp"] = stamp(4)
+    current_continuity = recheck_narrative_continuity(
+        current_snapshot, authored_continuity)
+    assert current_continuity["control_state"] == "developing_transfer"
+    result = classify(snap=current_snapshot, output={},
+                      continuity=authored_continuity,
+                      campaign=real_no_campaign_draw(forming),
+                      brain_available=False)
+    assert result["state"] == TRANSFER_UNRESOLVED
+    assert result["participation_permitted"] is False
+
+
+def test_lawful_initial_real_active_path_formation_establishes_and_refuses():
+    from ai_brain.narrative_continuity import build_narrative_continuity
+    from market_state.active_path import LIQUIDITY_SWEEP, ActivePath, occurrence_id
+
+    path_machine = ActivePath()
+    path_machine.enforce_lifecycle(stamp(0), CONTRACT)
+    path_machine.ingest([{
+        "occurrence_id": occurrence_id(CONTRACT, LIQUIDITY_SWEEP, "1m",
+                                        stamp(0), "below_low"),
+        "event_type": LIQUIDITY_SWEEP, "contract": CONTRACT,
+        "source_tf": "1m", "event_time": stamp(0),
+        "sweep_direction": "below_low", "reclaimed": True,
+    }])
+    path = path_machine.state()
+    assert (path["owner"], path["status"], path["forming_direction"]) == (
+        "none", "forming", "bullish")
+    snap = snapshot(path=path)
+    continuity = build_narrative_continuity(snap, {"available": False})
+    assert continuity["control_state"] == "unestablished"
+    result = classify(snap=snap, output={}, continuity=continuity,
+                      campaign=real_no_campaign_draw(path), brain_available=False)
+    assert result["state"] == ESTABLISHING
+    assert participation_permission(result, "bullish")[0] is False
+
+
+def test_forming_cannot_mask_unavailable_narrative_authority(monkeypatch):
+    import ai_brain.narrative_continuity as continuity_module
+
+    path = active_path(status="forming", owner="none", load_bearing_structure=None,
+                       forming_direction="bullish")
+
+    def unavailable(*_args, **_kwargs):
+        raise RuntimeError("continuity unavailable")
+
+    monkeypatch.setattr(continuity_module, "recheck_narrative_continuity", unavailable)
+    result = classify(snap=snapshot(path=path), campaign=real_no_campaign_draw(path))
+    assert result["state"] == AUTHORITY_UNKNOWN
 
 
 def test_missing_brain_authority_is_not_unestablished():
