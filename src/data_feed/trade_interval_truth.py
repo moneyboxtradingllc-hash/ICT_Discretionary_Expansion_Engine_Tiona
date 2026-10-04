@@ -16,7 +16,8 @@ import uuid
 from datetime import datetime, timezone
 
 
-SCHEMA = "trade_interval_truth.v1"
+SCHEMA = "trade_interval_truth.v2"
+_LEGACY_SCHEMA = "trade_interval_truth.v1"
 COMPLETE = "COMPLETE"
 INCOMPLETE = "INCOMPLETE"
 CLOSED = "CLOSED"
@@ -71,10 +72,6 @@ class TradeIntervalTruth:
         self._lock = threading.RLock()
         self._intervals: dict[str, dict] = {}
         self._epochs: dict[str, dict] = {}
-        # Receipt-time watermark is intentionally process-local. A restart
-        # invalidates every active epoch, so it never needs to be reconstructed
-        # from minute candles or persisted as market-history authority.
-        self._epoch_last_received_at: dict[str, datetime] = {}
         self._current_epoch_id: str | None = None
         self._storage_healthy = True
         self._storage_error: str | None = None
@@ -92,14 +89,41 @@ class TradeIntervalTruth:
         with self._lock:
             return self._current_epoch_id
 
+    def coverage_evidence(self, epoch_id: str | None = None) -> dict | None:
+        """Return current live proof metadata; persisted rows alone are not authority."""
+        with self._lock:
+            target = str(epoch_id or self._current_epoch_id or "")
+            epoch = self._epochs.get(target)
+            if (not self._storage_healthy or target != self._current_epoch_id
+                    or not epoch or epoch.get("status") != "ACTIVE"
+                    or epoch.get("trade_coverage_status") != "PROVEN"):
+                return None
+            return copy.deepcopy(epoch)
+
+    def authoritative_interval(self, interval_id: str, *, epoch_id: str) -> dict | None:
+        """Return a COMPLETE interval only while its live proven epoch is current."""
+        with self._lock:
+            if not self._storage_healthy or str(epoch_id) != self._current_epoch_id:
+                return None
+            epoch = self._epochs.get(str(epoch_id))
+            record = self._intervals.get(str(interval_id))
+            if (not epoch or epoch.get("status") != "ACTIVE"
+                    or epoch.get("trade_coverage_status") != "PROVEN"
+                    or not record or record.get("coverage_status") != COMPLETE
+                    or record.get("coverage_epoch_id") != str(epoch_id)):
+                return None
+            return copy.deepcopy(record)
+
     def _load(self) -> None:
         if not os.path.exists(self.path):
             return
         try:
             with open(self.path, encoding="utf-8") as fh:
                 blob = json.load(fh)
-            if not isinstance(blob, dict) or blob.get("schema") != SCHEMA:
+            if (not isinstance(blob, dict)
+                    or blob.get("schema") not in {SCHEMA, _LEGACY_SCHEMA}):
                 raise ValueError("schema_mismatch")
+            legacy = blob.get("schema") == _LEGACY_SCHEMA
             if str(blob.get("contract_id") or "") != self.contract_id:
                 raise ValueError("contract_mismatch")
             intervals = blob.get("intervals")
@@ -110,8 +134,39 @@ class TradeIntervalTruth:
                 if (not isinstance(epoch, dict)
                         or epoch.get("coverage_epoch_id") != epoch_id
                         or epoch.get("contract_id") != self.contract_id
-                        or epoch.get("status") not in {"ACTIVE", INCOMPLETE}):
+                        or epoch.get("status") not in {"PENDING", "ACTIVE", INCOMPLETE}):
                     raise ValueError("coverage_epoch_invalid")
+                if not legacy:
+                    if epoch.get("trade_coverage_status") not in {"PENDING", "PROVEN", INCOMPLETE}:
+                        raise ValueError("trade_coverage_status_invalid")
+                    if (epoch.get("status") == "ACTIVE"
+                            and epoch.get("trade_coverage_status") != "PROVEN"):
+                        raise ValueError("active_epoch_without_proven_trade_coverage")
+                    if (epoch.get("status") == "PENDING"
+                            and epoch.get("trade_coverage_status") != "PENDING"):
+                        raise ValueError("pending_epoch_trade_status_mismatch")
+                    for key in ("frontier_observation_sequence", "last_observation_sequence"):
+                        value = epoch.get(key)
+                        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                            raise ValueError(f"{key}_invalid")
+                    if epoch.get("event_time_frontier") is not None:
+                        _parse_aware(epoch["event_time_frontier"], name="event_time_frontier")
+                    if (epoch.get("status") == "ACTIVE"
+                            and (epoch.get("event_time_frontier") is None
+                                 or epoch.get("frontier_observation_sequence", 0) < 1
+                                 or epoch.get("last_observation_sequence", 0)
+                                 < epoch.get("frontier_observation_sequence", 0))):
+                        raise ValueError("active_epoch_frontier_invalid")
+                    if (epoch.get("status") == "PENDING"
+                            and (epoch.get("event_time_frontier") is not None
+                                 or epoch.get("last_observation_sequence", 0) != 0)):
+                        raise ValueError("pending_epoch_has_trade_frontier")
+                    if epoch.get("last_valid_trade_received_at") is not None:
+                        _parse_aware(epoch["last_valid_trade_received_at"],
+                                     name="last_valid_trade_received_at")
+                    if epoch.get("first_valid_trade_received_at") is not None:
+                        _parse_aware(epoch["first_valid_trade_received_at"],
+                                     name="first_valid_trade_received_at")
                 _parse_aware(epoch.get("started_at"), name="epoch_started_at")
                 if epoch.get("ended_at") is not None:
                     _parse_aware(epoch["ended_at"], name="epoch_ended_at")
@@ -123,14 +178,22 @@ class TradeIntervalTruth:
                         or record.get("coverage_epoch_id") not in epochs):
                     raise ValueError("interval_record_invalid")
                 if (record.get("coverage_status") == COMPLETE
-                        and epochs[record["coverage_epoch_id"]].get("status") != "ACTIVE"):
+                        and (epochs[record["coverage_epoch_id"]].get("status") != "ACTIVE"
+                             or (not legacy and epochs[record["coverage_epoch_id"]].get(
+                                 "trade_coverage_status") != "PROVEN"))):
                     raise ValueError("complete_interval_epoch_not_active")
                 if (record.get("coverage_status") == INCOMPLETE
                         and not str(record.get("incomplete_reason") or "").strip()):
                     raise ValueError("incomplete_interval_reason_missing")
                 _parse_aware(record.get("anchor_at"), name="anchor_at")
+                if not legacy and (isinstance(record.get("anchor_observation_sequence"), bool)
+                                   or not isinstance(record.get("anchor_observation_sequence"), int)
+                                   or record["anchor_observation_sequence"] < 0):
+                    raise ValueError("anchor_observation_sequence_invalid")
                 if record.get("requested_at") is not None:
                     _parse_aware(record["requested_at"], name="requested_at")
+                if record.get("registered_at") is not None:
+                    _parse_aware(record["registered_at"], name="registered_at")
                 _parse_aware(record.get("created_at"), name="created_at")
                 _parse_aware(record.get("updated_at"), name="updated_at")
                 _finite_price(record.get("anchor_reference_price"),
@@ -175,9 +238,30 @@ class TradeIntervalTruth:
         # COMPLETE interval is sealed as incomplete before a new epoch can open.
         now = self._now()
         changed = False
+        if legacy:
+            # v1 anchors mixed local registration time with venue event time.
+            # Preserve those records for audit, but never carry their COMPLETE
+            # claim into the event-frontier contract.
+            for epoch in self._epochs.values():
+                epoch.update(status=INCOMPLETE, trade_coverage_status=INCOMPLETE,
+                             incomplete_reason="legacy_event_frontier_unavailable",
+                             ended_at=epoch.get("ended_at") or _iso(now),
+                             event_time_frontier=None,
+                             frontier_observation_sequence=0,
+                             last_observation_sequence=0,
+                             last_valid_trade_received_at=None)
+                changed = True
+            for record in self._intervals.values():
+                record.setdefault("anchor_observation_sequence", 0)
+                record.setdefault("registered_at", record.get("created_at") or _iso(now))
+                if record.get("coverage_status") == COMPLETE:
+                    self._mark_incomplete_locked(
+                        record, "legacy_event_frontier_unavailable", now)
+                    changed = True
         for epoch in self._epochs.values():
-            if epoch.get("status") == "ACTIVE":
+            if epoch.get("status") in {"PENDING", "ACTIVE"}:
                 epoch.update(status=INCOMPLETE,
+                             trade_coverage_status=INCOMPLETE,
                              incomplete_reason="process_restart_without_exact_trade_backfill",
                              ended_at=_iso(now))
                 changed = True
@@ -258,8 +342,13 @@ class TradeIntervalTruth:
                                    "contract_id": contract,
                                    "started_at": _iso(stamp),
                                    "ended_at": None,
-                                   "status": "ACTIVE",
-                                   "incomplete_reason": None}
+                                   "status": "PENDING",
+                                   "trade_coverage_status": "PENDING",
+                                   "incomplete_reason": None,
+                                   "event_time_frontier": None,
+                                   "frontier_observation_sequence": 0,
+                                   "last_observation_sequence": 0,
+                                   "last_valid_trade_received_at": None}
             self._current_epoch_id = epoch
             self._persist_locked()
             return copy.deepcopy(self._epochs[epoch])
@@ -269,8 +358,9 @@ class TradeIntervalTruth:
         target = str(epoch_id or self._current_epoch_id or "")
         changed = False
         epoch = self._epochs.get(target) if target else None
-        if epoch and epoch.get("status") == "ACTIVE":
-            epoch.update(status=INCOMPLETE, ended_at=_iso(stamp),
+        if epoch and epoch.get("status") in {"PENDING", "ACTIVE"}:
+            epoch.update(status=INCOMPLETE, trade_coverage_status=INCOMPLETE,
+                         ended_at=_iso(stamp),
                          incomplete_reason=str(reason))
             changed = True
         for record in self._intervals.values():
@@ -291,11 +381,12 @@ class TradeIntervalTruth:
 
     def open_interval(self, contract_id: str, requested_at,
                       anchor_reference_price, anchor_reference_basis: str) -> dict:
-        """Open at registration time; ``requested_at`` is audit metadata only.
+        """Open against the observed market-event frontier.
 
-        An interval cannot be backdated because the tracker deliberately does
-        not retain raw trades. The authoritative anchor is captured while the
-        tracker lock is held, after all earlier observations have completed.
+        Request and registration timestamps are local lineage only. The
+        authoritative anchor is the latest proven venue event-time frontier
+        plus its provider observation sequence, captured while both provider
+        dispatch and tracker state are serialized.
         """
         requested = (_parse_aware(requested_at, name="requested_at")
                      if requested_at is not None else None)
@@ -310,26 +401,28 @@ class TradeIntervalTruth:
         with self._lock:
             if not self._storage_healthy:
                 raise TradeIntervalTruthError("interval_storage_unavailable")
-            # Capture the actual anchor only once registration owns the state
-            # lock. A caller's older Brain/request timestamp is never coverage.
+            # Local time is descriptive only; do not compare it with venue
+            # event timestamps or let it define event membership.
             now = self._now()
-            if requested is not None and requested > now:
-                raise TradeIntervalTruthError("requested_at_in_future")
             epoch_id = self._current_epoch_id
             epoch = self._epochs.get(epoch_id or "")
-            if not epoch or epoch.get("status") != "ACTIVE":
+            if (not epoch or epoch.get("status") != "ACTIVE"
+                    or epoch.get("trade_coverage_status") != "PROVEN"):
                 raise TradeIntervalTruthError("live_coverage_epoch_unavailable")
-            if now < _parse_aware(epoch["started_at"], name="epoch_start"):
-                raise TradeIntervalTruthError("anchor_precedes_coverage_epoch")
-            last_received = self._epoch_last_received_at.get(epoch_id)
-            if last_received is not None and now <= last_received:
-                raise TradeIntervalTruthError("anchor_not_after_last_observed_event")
+            frontier = epoch.get("event_time_frontier")
+            frontier_sequence = epoch.get("frontier_observation_sequence")
+            if (frontier is None or isinstance(frontier_sequence, bool)
+                    or not isinstance(frontier_sequence, int)):
+                raise TradeIntervalTruthError("event_time_frontier_unavailable")
+            anchor_at = _parse_aware(frontier, name="event_time_frontier")
             interval_id = uuid.uuid4().hex
             record = {
                 "interval_id": interval_id,
                 "contract_id": self.contract_id,
-                "anchor_at": _iso(now),
+                "anchor_at": _iso(anchor_at),
+                "anchor_observation_sequence": frontier_sequence,
                 "requested_at": _iso(requested) if requested is not None else None,
+                "registered_at": _iso(now),
                 "anchor_reference_price": reference,
                 "anchor_reference_basis": basis,
                 "coverage_epoch_id": epoch_id,
@@ -348,7 +441,7 @@ class TradeIntervalTruth:
                 "created_at": _iso(now),
                 "updated_at": _iso(now),
                 "coverage_transitions": [{"status": COMPLETE, "at": _iso(now),
-                                           "reason": "opened_in_live_epoch"}],
+                                           "reason": "opened_at_proven_event_frontier"}],
             }
             self._intervals[interval_id] = record
             self._persist_locked()
@@ -369,10 +462,12 @@ class TradeIntervalTruth:
                               batch_identity_proven: bool = True) -> None:
         """Observe one unique GatewayTrade batch, preserving event-time semantics.
 
-        Authenticated late trades from the same uninterrupted epoch are accepted
-        for extrema even if their candle minute was already closed. Batch
-        de-duplication is owned by MinuteCandleAggregator and this callback is
-        invoked only for a batch it accepted as new.
+        Batch de-duplication is owned by MinuteCandleAggregator and this
+        callback is invoked only for a batch it accepted as new. Event membership
+        uses the composite (venue event timestamp, provider observation sequence)
+        boundary. A later-delivered print strictly older than the anchor frontier
+        is pre-anchor and excluded; equal-timestamp prints are ordered by their
+        explicit dispatch sequence. No local receipt clock participates.
         """
         received = _parse_aware(received_at if received_at is not None else self._now(),
                                 name="received_at")
@@ -433,20 +528,31 @@ class TradeIntervalTruth:
                 self._persist_locked()
                 return
 
-            # A later interval anchor must be newer than every event already
-            # consumed by this epoch, even when no interval was open yet.
-            if updates:
-                previous_received = self._epoch_last_received_at.get(epoch_id)
-                if previous_received is None or received > previous_received:
-                    self._epoch_last_received_at[epoch_id] = received
-
             changed = False
+            epoch = self._epochs[epoch_id]
+            if updates:
+                if epoch.get("trade_coverage_status") == "PENDING":
+                    epoch.update(status="ACTIVE", trade_coverage_status="PROVEN",
+                                 first_valid_trade_received_at=_iso(received))
+                epoch["last_valid_trade_received_at"] = _iso(received)
+                changed = True
             for event_at, price in updates:
+                sequence = int(epoch.get("last_observation_sequence") or 0) + 1
+                epoch["last_observation_sequence"] = sequence
+                previous_frontier = epoch.get("event_time_frontier")
+                previous_frontier_at = (_parse_aware(previous_frontier,
+                                                      name="event_time_frontier")
+                                        if previous_frontier else None)
+                if previous_frontier_at is None or event_at >= previous_frontier_at:
+                    epoch["event_time_frontier"] = _iso(event_at)
+                    epoch["frontier_observation_sequence"] = sequence
                 event_iso = _iso(event_at)
                 for record in self._intervals.values():
                     if (record.get("coverage_status") != COMPLETE
                             or record.get("coverage_epoch_id") != epoch_id
-                            or event_at < _parse_aware(record["anchor_at"], name="anchor_at")):
+                            or (event_at, sequence) <= (
+                                _parse_aware(record["anchor_at"], name="anchor_at"),
+                                int(record.get("anchor_observation_sequence") or 0))):
                         continue
                     if record["first_observed_trade_at"] is None or event_at < _parse_aware(
                             record["first_observed_trade_at"], name="first_observed_trade_at"):
@@ -458,6 +564,7 @@ class TradeIntervalTruth:
                         record["first_received_at"] = _iso(received)
                     record["last_received_at"] = _iso(received)
                     record["trade_count"] += 1
+                    record["last_observation_sequence"] = sequence
                     high = record["highest_trade_price"]
                     if high is None or price > high or (
                             price == high and event_at < _parse_aware(
@@ -493,6 +600,7 @@ class TradeIntervalTruth:
             return copy.deepcopy(record)
 
     def get_interval(self, interval_id: str) -> dict | None:
+        """Return stored audit facts; callers need the provider authority read for live use."""
         with self._lock:
             record = self._intervals.get(str(interval_id))
             return copy.deepcopy(record) if record else None

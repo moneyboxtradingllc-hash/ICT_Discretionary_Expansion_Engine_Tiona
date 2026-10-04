@@ -325,6 +325,52 @@ class TopstepXDataProvider(BaseDataProvider):
             self._trade_interval_epoch_id = None
             self._trade_interval_runtime_epoch_id = None
 
+    def _validate_trade_interval_authority_locked(self, tracker, *, now=None):
+        """Fail closed unless current runtime and valid raw trades prove freshness."""
+        now = parse_ts(now or datetime.now(timezone.utc))
+        runtime = self.runtime
+        tracker_epoch_id = getattr(self, "_trade_interval_epoch_id", None)
+        runtime_epoch_id = self._runtime_trade_epoch_id()
+        if (runtime is None or runtime.hub is None or not runtime.is_running
+                or getattr(getattr(runtime, "contract", None), "id", None)
+                != getattr(self.contract, "id", None)
+                or getattr(tracker, "contract_id", None)
+                != getattr(self.contract, "id", None)):
+            self._break_trade_interval_epoch_locked(
+                tracker, "runtime_trade_stream_unavailable", now)
+            raise DataFeedError("TOPSTEPX_TRADE_INTERVAL_STREAM_NOT_LIVE")
+        if (runtime_epoch_id is None
+                or runtime_epoch_id != getattr(self, "_trade_interval_runtime_epoch_id", None)
+                or tracker_epoch_id is None
+                or tracker_epoch_id != tracker.current_epoch_id):
+            self._break_trade_interval_epoch_locked(
+                tracker, "runtime_epoch_mismatch", now)
+            raise DataFeedError("TOPSTEPX_TRADE_INTERVAL_EPOCH_MISMATCH")
+
+        evidence = tracker.coverage_evidence(tracker_epoch_id)
+        if evidence is None:
+            raise DataFeedError("TOPSTEPX_TRADE_INTERVAL_COVERAGE_UNPROVEN")
+        threshold = float(getattr(self, "_stale_seconds", DEFAULT_STALE_SECONDS))
+        valid_receipt = evidence.get("last_valid_trade_received_at")
+        valid_age = None
+        if valid_receipt is not None:
+            valid_age = (now - parse_ts(valid_receipt)).total_seconds()
+
+        # Runtime timestamps are measured in the runtime's own local clock
+        # domain. This is a receipt-freshness check, never compared with venue
+        # event timestamps or used to define interval membership.
+        runtime_trade_at = getattr(runtime, "last_trade_at", None)
+        runtime_clock = getattr(runtime, "_clock", None)
+        runtime_now = runtime_clock() if callable(runtime_clock) else now
+        runtime_age = (None if runtime_trade_at is None else
+                       (parse_ts(runtime_now) - parse_ts(runtime_trade_at)).total_seconds())
+        if (valid_age is None or valid_age < 0 or valid_age > threshold
+                or runtime_age is None or runtime_age < 0 or runtime_age > threshold):
+            self._break_trade_interval_epoch_locked(
+                tracker, "raw_trade_stream_stale", now)
+            raise DataFeedError("TOPSTEPX_TRADE_INTERVAL_STREAM_STALE")
+        return tracker_epoch_id
+
     def open_trade_interval(self, requested_at, anchor_reference_price,
                             anchor_reference_basis: str) -> dict:
         """Register an interval atomically at acceptance, never at request time.
@@ -340,21 +386,27 @@ class TopstepXDataProvider(BaseDataProvider):
             runtime_contract = getattr(getattr(self.runtime, "contract", None), "id", None)
             if runtime_contract != self.contract.id:
                 raise DataFeedError("TOPSTEPX_TRADE_INTERVAL_CONTRACT_MISMATCH")
-            if self.runtime.hub is None or not self.runtime.is_running:
-                raise DataFeedError("TOPSTEPX_TRADE_INTERVAL_STREAM_NOT_LIVE")
-            runtime_epoch_id = self._runtime_trade_epoch_id()
-            expected_runtime_epoch_id = getattr(
-                self, "_trade_interval_runtime_epoch_id", None)
-            tracker_epoch_id = getattr(self, "_trade_interval_epoch_id", None)
-            if (runtime_epoch_id is None
-                    or expected_runtime_epoch_id != runtime_epoch_id
-                    or tracker_epoch_id != tracker.current_epoch_id):
-                self._break_trade_interval_epoch_locked(
-                    tracker, "runtime_epoch_mismatch", datetime.now(timezone.utc))
-                raise DataFeedError("TOPSTEPX_TRADE_INTERVAL_EPOCH_MISMATCH")
+            self._validate_trade_interval_authority_locked(tracker)
             return tracker.open_interval(
                 self.contract.id, requested_at, anchor_reference_price,
                 anchor_reference_basis)
+
+    def read_authoritative_trade_interval(self, interval_id: str, *, now=None) -> dict:
+        """Canonical live-authority read for exact raw-trade interval facts.
+
+        Callers must use this instead of treating a durable COMPLETE row as
+        current authority. Runtime generation, provider epoch, and raw-trade
+        freshness are revalidated atomically with the provider event lock.
+        """
+        tracker = getattr(self, "trade_interval_truth", None)
+        if tracker is None or self.contract is None or self.runtime is None:
+            raise DataFeedError("TOPSTEPX_TRADE_INTERVAL_UNAVAILABLE")
+        with self._lock:
+            epoch_id = self._validate_trade_interval_authority_locked(tracker, now=now)
+            record = tracker.authoritative_interval(interval_id, epoch_id=epoch_id)
+            if record is None:
+                raise DataFeedError("TOPSTEPX_TRADE_INTERVAL_NOT_AUTHORITATIVE")
+            return record
 
     def _on_coverage_event(self, event: dict) -> None:
         tracker = getattr(self, "trade_interval_truth", None)

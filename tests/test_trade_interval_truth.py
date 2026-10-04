@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 from data_feed.trade_interval_truth import (  # noqa: E402
     COMPLETE, CLOSED, INCOMPLETE, TradeIntervalTruth, TradeIntervalTruthError,
 )
+from data_feed.provider_interface import DataFeedError  # noqa: E402
 from data_feed.topstepx_provider import MinuteCandleAggregator, TopstepXDataProvider  # noqa: E402
 
 CID = "CON.F.US.MNQ.U26"
@@ -43,6 +44,10 @@ def row(price, at, contract=CID):
 
 def opened(tracker, anchor=ANCHOR):
     tracker.begin_coverage_epoch(CID, "epoch-A", BASE)
+    # A socket epoch is pending until a valid unique same-contract raw trade
+    # proves GatewayTrade is delivering. This event also seeds the event-time
+    # frontier captured by subsequent registration.
+    observe(tracker, row(100, anchor), received=BASE + timedelta(seconds=1))
     return tracker.open_interval(CID, anchor, 100, "test_market_reference")
 
 
@@ -50,6 +55,28 @@ def observe(tracker, *rows, epoch="epoch-A", received=None, envelope=CID):
     tracker.observe_gateway_event(
         [envelope, list(rows)], epoch_id=epoch,
         received_at=received or BASE + timedelta(seconds=9))
+
+
+def provider_with_live_trade(tmp_path, *, epoch_id="runtime-A", prove=True):
+    now = datetime.now(timezone.utc)
+    clock = Clock(now)
+    tracker = TradeIntervalTruth(CID, str(tmp_path / f"{epoch_id}.json"), clock=clock)
+    tracker.begin_coverage_epoch(CID, epoch_id, now)
+    if prove:
+        tracker.observe_gateway_event(
+            [CID, [row(100, ANCHOR)]], epoch_id=epoch_id, received_at=now)
+    provider = object.__new__(TopstepXDataProvider)
+    provider._lock = threading.Lock()
+    provider.trade_interval_truth = tracker
+    provider.contract = SimpleNamespace(id=CID, tick_size=0.25)
+    provider._trade_interval_epoch_id = epoch_id
+    provider._trade_interval_runtime_epoch_id = epoch_id
+    provider._stale_seconds = 120.0
+    provider.runtime = SimpleNamespace(
+        contract=SimpleNamespace(id=CID), hub=object(), is_running=True,
+        _coverage_epoch_id=lambda: epoch_id, _clock=clock,
+        last_trade_at=now if prove else None, last_quote_at=now if prove else None)
+    return provider, clock
 
 
 def test_exact_timestamp_anchor_excludes_pre_anchor_trade(tmp_path):
@@ -69,18 +96,18 @@ def test_exact_timestamp_anchor_excludes_pre_anchor_trade(tmp_path):
 
 
 def test_past_request_time_is_metadata_not_a_retroactive_coverage_anchor(tmp_path):
-    clock = Clock(ANCHOR - timedelta(seconds=2))
+    clock = Clock(ANCHOR)
     tracker = TradeIntervalTruth(CID, str(tmp_path / "intervals.json"), clock=clock)
     tracker.begin_coverage_epoch(CID, "epoch-A", BASE)
     observe(tracker, row(120, ANCHOR - timedelta(seconds=1)),
             received=ANCHOR - timedelta(milliseconds=500))
 
-    # The requested/Brain time is deliberately historical. Registration itself
-    # occurs now and cannot recover the already-consumed 120 print.
-    clock.at = ANCHOR
+    # The requested/Brain time is deliberately historical. Registration binds
+    # to the already-observed venue event frontier, not local wall time.
     interval = tracker.open_interval(CID, BASE, 100, "test_market_reference")
     assert interval["requested_at"] == BASE.isoformat()
-    assert interval["anchor_at"] == ANCHOR.isoformat()
+    assert interval["anchor_at"] == (ANCHOR - timedelta(seconds=1)).isoformat()
+    assert interval["registered_at"] == ANCHOR.isoformat()
     assert interval["coverage_status"] == COMPLETE
     assert interval["highest_trade_price"] is None
 
@@ -91,15 +118,122 @@ def test_past_request_time_is_metadata_not_a_retroactive_coverage_anchor(tmp_pat
     assert current["trade_count"] == 1
 
 
-def test_anchor_cannot_precede_a_trade_already_consumed_by_the_epoch(tmp_path):
-    clock = Clock(ANCHOR)
-    tracker = TradeIntervalTruth(CID, str(tmp_path / "intervals.json"), clock=clock)
+def test_registration_uses_market_frontier_when_venue_clock_is_ahead(tmp_path):
+    # The just-consumed print's venue clock is later than the local registration
+    # clock. Its actual event time, not datetime.now(), defines the anchor.
+    local_clock = Clock(ANCHOR)
+    tracker = TradeIntervalTruth(CID, str(tmp_path / "intervals.json"),
+                                 clock=local_clock)
     tracker.begin_coverage_epoch(CID, "epoch-A", BASE)
-    observe(tracker, row(105, ANCHOR - timedelta(milliseconds=1)),
+    frontier = ANCHOR + timedelta(milliseconds=138)
+    observe(tracker, row(105, frontier), received=ANCHOR - timedelta(milliseconds=12))
+    interval = tracker.open_interval(CID, BASE, 100, "test_market_reference")
+    assert interval["anchor_at"] == frontier.isoformat()
+    assert interval["registered_at"] == ANCHOR.isoformat()
+    observe(tracker, row(999, frontier - timedelta(milliseconds=1)),
             received=ANCHOR + timedelta(milliseconds=1))
-    with pytest.raises(TradeIntervalTruthError,
-                       match="anchor_not_after_last_observed_event"):
-        tracker.open_interval(CID, BASE, 100, "test_market_reference")
+    assert tracker.get_interval(interval["interval_id"])["highest_trade_price"] is None
+
+
+def test_registration_does_not_let_local_clock_move_market_frontier(tmp_path):
+    # The local process clock may be ahead of venue event time. A genuinely
+    # later-dispatched event after the frontier still belongs to the interval.
+    local_clock = Clock(ANCHOR + timedelta(seconds=10))
+    tracker = TradeIntervalTruth(CID, str(tmp_path / "intervals.json"),
+                                 clock=local_clock)
+    tracker.begin_coverage_epoch(CID, "epoch-A", BASE)
+    frontier = ANCHOR
+    observe(tracker, row(100, frontier), received=ANCHOR + timedelta(seconds=1))
+    interval = tracker.open_interval(CID, BASE, 100, "test_market_reference")
+    assert interval["anchor_at"] == frontier.isoformat()
+    assert interval["registered_at"] == (ANCHOR + timedelta(seconds=10)).isoformat()
+    observe(tracker, row(105, frontier + timedelta(milliseconds=1)),
+            received=ANCHOR + timedelta(seconds=11))
+    assert tracker.get_interval(interval["interval_id"])["highest_trade_price"] == 105
+
+
+def test_connected_epoch_without_a_valid_trade_cannot_open_interval(tmp_path):
+    tracker = make_tracker(tmp_path)
+    tracker.begin_coverage_epoch(CID, "epoch-A", BASE)
+    with pytest.raises(TradeIntervalTruthError, match="live_coverage_epoch_unavailable"):
+        tracker.open_interval(CID, BASE, 100, "pending")
+    assert tracker.coverage_evidence("epoch-A") is None
+
+
+def test_provider_refuses_connected_but_not_yet_proven_trade_generation(tmp_path):
+    provider, _clock = provider_with_live_trade(tmp_path, prove=False)
+    with pytest.raises(DataFeedError, match="COVERAGE_UNPROVEN"):
+        provider.open_trade_interval(BASE, 100, "pending_generation")
+
+
+def test_reconnect_epoch_stays_pending_until_first_valid_trade(tmp_path):
+    provider, clock = provider_with_live_trade(tmp_path)
+    old = provider.open_trade_interval(BASE, 100, "epoch_A")
+    tracker = provider.trade_interval_truth
+    tracker.mark_coverage_broken("runtime_reconnect", clock.at,
+                                 epoch_id="runtime-A")
+    tracker.begin_coverage_epoch(CID, "runtime-B", clock.at)
+    provider._trade_interval_epoch_id = "runtime-B"
+    provider._trade_interval_runtime_epoch_id = "runtime-B"
+    provider.runtime._coverage_epoch_id = lambda: "runtime-B"
+    provider.runtime.last_trade_at = None
+    with pytest.raises(DataFeedError, match="COVERAGE_UNPROVEN"):
+        provider.open_trade_interval(BASE, 100, "before_first_B_trade")
+    tracker.observe_gateway_event(
+        [CID, [row(101, ANCHOR + timedelta(seconds=1))]],
+        epoch_id="runtime-B", received_at=clock.at)
+    provider.runtime.last_trade_at = clock.at
+    new = provider.open_trade_interval(BASE, 100, "after_first_B_trade")
+    assert tracker.get_interval(old["interval_id"])["coverage_status"] == INCOMPLETE
+    assert new["coverage_status"] == COMPLETE
+
+
+def test_authority_read_requires_fresh_raw_trade_not_live_quotes(tmp_path):
+    provider, clock = provider_with_live_trade(tmp_path)
+    interval = provider.open_trade_interval(BASE, 100, "fresh_trade")
+    provider.runtime.last_quote_at = clock.at + timedelta(seconds=121)
+    clock.at = clock.at + timedelta(seconds=121)
+    with pytest.raises(DataFeedError, match="STREAM_STALE"):
+        provider.read_authoritative_trade_interval(interval["interval_id"], now=clock.at)
+    current = provider.trade_interval_truth.get_interval(interval["interval_id"])
+    assert current["coverage_status"] == INCOMPLETE
+    assert current["incomplete_reason"] == "raw_trade_stream_stale"
+
+
+def test_unique_trade_freshness_is_required_even_if_runtime_sees_replays(tmp_path):
+    provider, clock = provider_with_live_trade(tmp_path)
+    interval = provider.open_trade_interval(BASE, 100, "fresh_trade")
+    clock.at = clock.at + timedelta(seconds=121)
+    # A raw transport message refreshed the runtime receipt clock, but no new
+    # unique validated same-contract trade refreshed interval coverage.
+    provider.runtime.last_trade_at = clock.at
+    provider.runtime.last_quote_at = clock.at
+    with pytest.raises(DataFeedError, match="STREAM_STALE"):
+        provider.read_authoritative_trade_interval(interval["interval_id"], now=clock.at)
+    assert provider.trade_interval_truth.get_interval(
+        interval["interval_id"])["coverage_status"] == INCOMPLETE
+
+
+def test_authority_read_returns_only_current_complete_fresh_interval(tmp_path):
+    provider, clock = provider_with_live_trade(tmp_path)
+    interval = provider.open_trade_interval(BASE, 100, "fresh_trade")
+    assert provider.read_authoritative_trade_interval(
+        interval["interval_id"], now=clock.at)["coverage_status"] == COMPLETE
+
+
+def test_late_event_older_than_captured_frontier_cannot_make_post_anchor_extreme(tmp_path):
+    tracker = make_tracker(tmp_path)
+    tracker.begin_coverage_epoch(CID, "epoch-A", BASE)
+    frontier = ANCHOR + timedelta(seconds=5)
+    observe(tracker, row(100, frontier), received=BASE + timedelta(seconds=8))
+    interval = tracker.open_interval(CID, BASE, 100, "event_frontier")
+    observe(tracker, row(999, frontier - timedelta(milliseconds=1)),
+            received=BASE + timedelta(seconds=9))
+    current = tracker.get_interval(interval["interval_id"])
+    assert current["highest_trade_price"] is None
+    observe(tracker, row(105, frontier + timedelta(milliseconds=1)),
+            received=BASE + timedelta(seconds=10))
+    assert tracker.get_interval(interval["interval_id"])["highest_trade_price"] == 105
 
 
 def test_finite_zero_price_is_preserved_as_market_fact(tmp_path):
@@ -164,7 +298,7 @@ def test_authenticated_late_event_updates_interval_but_not_closed_candle(tmp_pat
 
 def test_provider_serializes_interval_registration_with_raw_trade_dispatch(tmp_path):
     tracker = make_tracker(tmp_path)
-    tracker.begin_coverage_epoch(CID, "epoch-A", BASE)
+    tracker.begin_coverage_epoch(CID, "runtime-A", BASE)
     registered = threading.Event()
     allow_open_return = threading.Event()
     event_waiting_for_lock = threading.Event()
@@ -194,16 +328,20 @@ def test_provider_serializes_interval_registration_with_raw_trade_dispatch(tmp_p
     provider._lock = OrderedProviderLock()
     provider.trade_interval_truth = tracker
     provider.contract = SimpleNamespace(id=CID, tick_size=0.25)
+    runtime_clock = Clock(datetime.now(timezone.utc))
     provider.runtime = SimpleNamespace(
         contract=SimpleNamespace(id=CID), hub=object(), is_running=True,
-        _coverage_epoch_id=lambda: "runtime-A")
-    provider._trade_interval_epoch_id = "epoch-A"
+        _coverage_epoch_id=lambda: "runtime-A", _clock=runtime_clock,
+        last_trade_at=runtime_clock.at)
+    provider._stale_seconds = 120
+    provider._trade_interval_epoch_id = "runtime-A"
     provider._trade_interval_runtime_epoch_id = "runtime-A"
     provider._stop = threading.Event()
     provider.aggregator = MinuteCandleAggregator(CID, tick_size=0.25)
     provider.wake_registry = None
     provider._persist = lambda _rows: None
     provider._trim = lambda: None
+    provider._on_trade([CID, [row(100, ANCHOR)]])
     errors = []
     returned = []
 
@@ -298,6 +436,31 @@ def test_process_restart_marks_active_interval_incomplete_without_backfill(tmp_p
         restarted.open_interval(CID, BASE + timedelta(minutes=1), 100, "no_epoch")
 
 
+def test_legacy_v1_records_are_preserved_but_never_keep_complete_authority(tmp_path):
+    path = tmp_path / "legacy.json"
+    tracker = make_tracker(tmp_path, path=path)
+    interval = opened(tracker)
+    blob = json.loads(path.read_text(encoding="utf-8"))
+    blob["schema"] = "trade_interval_truth.v1"
+    epoch = blob["coverage_epochs"]["epoch-A"]
+    for key in ("trade_coverage_status", "event_time_frontier",
+                "frontier_observation_sequence", "last_observation_sequence",
+                "last_valid_trade_received_at", "first_valid_trade_received_at"):
+        epoch.pop(key, None)
+    record = blob["intervals"][interval["interval_id"]]
+    record.pop("anchor_observation_sequence", None)
+    record.pop("registered_at", None)
+    path.write_text(json.dumps(blob), encoding="utf-8")
+
+    migrated = make_tracker(tmp_path, path=path, now=ANCHOR + timedelta(minutes=1))
+    preserved = migrated.get_interval(interval["interval_id"])
+    assert migrated.storage_health["healthy"] is True, migrated.storage_health
+    assert preserved["coverage_status"] == INCOMPLETE
+    assert preserved["incomplete_reason"] == "legacy_event_frontier_unavailable"
+    assert preserved["anchor_observation_sequence"] == 0
+    assert json.loads(path.read_text(encoding="utf-8"))["schema"] == "trade_interval_truth.v2"
+
+
 def test_corrupt_persisted_extrema_are_unavailable_not_authoritative(tmp_path):
     path = tmp_path / "durable.json"
     tracker = make_tracker(tmp_path, path=path)
@@ -390,7 +553,7 @@ def test_interval_state_persists_extrema_but_not_raw_trade_list(tmp_path):
     record = raw["intervals"][interval["interval_id"]]
     assert record["highest_trade_price"] == 105
     assert "trades" not in record and "raw_events" not in record
-    assert raw["schema"] == "trade_interval_truth.v1"
+    assert raw["schema"] == "trade_interval_truth.v2"
 
 
 def test_interval_observer_error_does_not_change_candle_ingestion():

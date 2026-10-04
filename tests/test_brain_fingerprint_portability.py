@@ -61,7 +61,9 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # candidate boundary; the closure identity rotates with that execution law.
     # RAW-TRADE-INTERVAL-TRUTH-1A makes exact-time coverage registration
     # non-retroactive and verifies runtime epoch identity on each event.
-    assert PM.brain_contract_fingerprint() == "brain:ef38fceea448f5bf"
+    # 1B binds intervals to a proven raw-trade event-time frontier and
+    # revalidates trade-only freshness before any interval can be read as live.
+    assert PM.brain_contract_fingerprint() == "brain:4737123b78337935"
 
 
 @pytest.mark.parametrize("addition", [

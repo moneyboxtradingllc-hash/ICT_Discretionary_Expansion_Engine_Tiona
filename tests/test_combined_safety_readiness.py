@@ -583,8 +583,10 @@ class TestStrategyUntouched:
         # RAW-TRADE-INTERVAL-TRUTH-1 binds exact raw-trade coverage provenance
         # at the provider seam; prior authorization must not survive that source
         # change, even though no strategy or candle semantics changed.
+        # RAW-TRADE-INTERVAL-TRUTH-1B requires a proven event frontier and fresh
+        # unique trade coverage before interval facts may be read as live.
         from ai_brain.production_model import brain_contract_fingerprint
-        assert brain_contract_fingerprint() == "brain:ef38fceea448f5bf"
+        assert brain_contract_fingerprint() == "brain:4737123b78337935"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.
