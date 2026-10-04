@@ -588,8 +588,11 @@ class TestStrategyUntouched:
         # 1C binds transport-integrity propagation, runtime continuity, and the
         # interval audit store because each can change whether those raw facts
         # are complete; previous authorization is therefore stale.
+        # CAMPAIGN-DRAW-TRUTH-1 binds settled-chart delivery measurement and its
+        # history-revision invalidation through ProductionScanCycle; the prior
+        # fingerprint cannot authorize this source change.
         from ai_brain.production_model import brain_contract_fingerprint
-        assert brain_contract_fingerprint() == "brain:a7a0c942e6d71e45"
+        assert brain_contract_fingerprint() == "brain:122441b07d3ca269"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.

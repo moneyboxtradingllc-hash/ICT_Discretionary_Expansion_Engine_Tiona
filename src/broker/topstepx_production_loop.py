@@ -205,6 +205,10 @@ class ProductionLoop:
                 record["activation_zone"] = ((plan_candidate.extras or {}).get(
                     "activation_zone") if plan_candidate is not None else None)
             record["active_draw"] = str(parsed.get("active_draw") or "")[:200]
+            # CAMPAIGN-DRAW-TRUTH-1 is chart-evidence telemetry only. This
+            # journal write preserves the same-scan fact for audit; no reader
+            # feeds it back into candidate, risk, or execution authority.
+            record["campaign_draw_truth"] = scan.get("campaign_draw_truth")
             record["invalidation_level"] = parsed.get("invalidation_level")
             # Same-scan descriptive VAP evidence; this writer is best-effort
             # telemetry and is never read by production authority.

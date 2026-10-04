@@ -65,7 +65,11 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # revalidates trade-only freshness before any interval can be read as live.
     # 1C binds transport parsing, runtime continuity, and interval truth because
     # each can change whether raw market history is represented as complete.
-    assert PM.brain_contract_fingerprint() == "brain:a7a0c942e6d71e45"
+    # CAMPAIGN-DRAW-TRUTH-1 adds settled-chart measurement and history-revision
+    # invalidation to the closure-bound ProductionScanCycle. Its source change
+    # therefore rotates the identity even though the new fact is not fed back
+    # into Brain or candidate authority.
+    assert PM.brain_contract_fingerprint() == "brain:122441b07d3ca269"
 
 
 @pytest.mark.parametrize("addition", [

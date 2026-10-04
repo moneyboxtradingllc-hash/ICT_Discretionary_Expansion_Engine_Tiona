@@ -125,6 +125,13 @@ class ProductionScanCycle:
         # is likewise not the same as broken.
         from market_data import occurrence_ledger as _OL
         self.contract_id = str(contract_id or "").strip()
+        # CAMPAIGN-DRAW-TRUTH-1. Process-local deterministic chart facts only:
+        # a new ProductionScanCycle deliberately cannot restore current draw
+        # authority from old decision records after a process restart.
+        from market_data.campaign_draw_truth import CampaignDrawTruth
+        self.campaign_draw_truth = CampaignDrawTruth(
+            contract_id=self.contract_id, session_id=self.session_id,
+            instrument=self.symbol)
         self.occurrence_ledger = None
         self.occurrence_ledger_status = _OL.NOT_CONFIGURED
         self.occurrence_ledger_error = ""
@@ -191,6 +198,10 @@ class ProductionScanCycle:
         # result forward as though it belonged to the rebuilt state. The durable
         # LEDGER is a different question and is deliberately NOT here.
         "last_occurrence_writes",
+        # CAMPAIGN-DRAW-TRUTH-1. The live measurement depends on the exact
+        # settled tape. Its store owns both current derivation and audit history:
+        # on revision it retires current authority but keeps the old record.
+        "campaign_draw_truth",
         # ACTIVE-PATH-STATE-1 (2026-08-24). DERIVED ownership, and derived
         # knowledge may never outlive the history that produced it. Every input
         # to it -- sweeps, structure breaks, the protected-swing ladder -- comes
@@ -289,6 +300,21 @@ class ProductionScanCycle:
         record = {"revision": revision, "from_revision": self._derived_revision,
                   "bars": len(bars), "ok": False, "derived": 0,
                   "inserted": list(self._history.last_inserted)}
+        # A draw conclusion formed from the previous tape cannot survive even
+        # when the replay below is too short or fails. Preserve its record as
+        # audit history, then replace the tracker with an empty-authority
+        # instance; a later fresh Brain view must establish a new anchor.
+        try:
+            from market_data.campaign_draw_truth import CampaignDrawTruth
+            prior_draw_truth = self.campaign_draw_truth
+            prior_draw_truth.invalidate_for_history_revision(revision)
+            draw_audit = prior_draw_truth.audit_records
+        except Exception:  # noqa: BLE001 — failed derived state remains refused
+            from market_data.campaign_draw_truth import CampaignDrawTruth
+            draw_audit = []
+        self.campaign_draw_truth = CampaignDrawTruth(
+            contract_id=self.contract_id, session_id=self.session_id,
+            instrument=self.symbol, audit_records=draw_audit)
         # A rebuild that DERIVES NOTHING must never claim currency. Below the
         # confirmation lookback the replay loop simply does not execute, so
         # without this the method would return ok on an empty tape and open the
@@ -550,6 +576,15 @@ class ProductionScanCycle:
             brain_block = run_narrative_brain(snapshot, self.symbol, self.stance_memory)
         snapshot["ai_brain"] = brain_block
 
+        # A fact-only lane, deliberately outside the snapshot / Brain payload
+        # and candidate input. It binds only a sovereign, Narrative-Authority-
+        # authorized campaign view to an already enumerated deterministic
+        # objective; settled bars then measure provider-chart delivery.
+        brain_input = self._brain_input(snapshot)
+        campaign_draw_truth = self._campaign_draw_observation(
+            snapshot, raw_data.get("1m") or [], brain_block, brain_input,
+            invoke_brain=invoke_brain)
+
         # ── TWO-BRAIN SHADOW ────────────────────────────────────────────────
         # Runs AFTER the production thesis is settled, and lands in its own key.
         # `brain_result` -- the only thing CandidateProducer reads -- is built
@@ -564,7 +599,8 @@ class ProductionScanCycle:
             "snapshot": snapshot,
             "brain_block": brain_block,
             "two_brain_shadow": shadow,
-            "brain_input": self._brain_input(snapshot),
+            "brain_input": brain_input,
+            "campaign_draw_truth": campaign_draw_truth,
             "brain_result": self.to_brain_result(brain_block),
             "qualification": snapshot.get("qualification") or {},
             # PROD-20260807 EVIDENCE DEFECT: the live qualification object was
@@ -593,6 +629,85 @@ class ProductionScanCycle:
             "memory_retrieval_telemetry": getattr(
                 self, "_last_retrieval_telemetry", None),
         }
+
+    def _campaign_draw_observation(self, snapshot: dict, settled_bars: list,
+                                   brain_block: dict, brain_input: dict, *,
+                                   invoke_brain: bool) -> dict:
+        """Measure settled chart delivery without adding strategy authority."""
+        from market_data.campaign_draw_truth import UNKNOWN
+
+        accepted_view = None
+        b = brain_block if isinstance(brain_block, dict) else {}
+        output = b.get("output") if isinstance(b.get("output"), dict) else {}
+        if invoke_brain and self.is_sovereign(b):
+            direction = str(output.get("narrative_direction") or "").strip().lower()
+            try:
+                from ai_brain.narrative_continuity import candidate_direction_authorized
+                authorized, refusal = candidate_direction_authorized(
+                    direction, snapshot, b.get("narrative_continuity") or {})
+            except Exception as exc:  # noqa: BLE001 — a fact lane may not cost a scan
+                authorized, refusal = False, (
+                    f"narrative_authority_unavailable:{type(exc).__name__}")
+            objective = None
+            reason = refusal
+            if authorized:
+                try:
+                    from broker.luna_candidate_producer import (
+                        enumerate_objectives, resolve_objective)
+                    from market_data.object_identity import canonical_instant
+                    source = ((snapshot or {}).get("settled_source") or {}).get(
+                        "1m") or {}
+                    anchor_stamp = canonical_instant(
+                        source.get("source_bar_time"), strict=True)
+                    anchor_bar = next(
+                        row for row in settled_bars
+                        if canonical_instant(row.get("timestamp"), strict=True)
+                        == anchor_stamp)
+                    objective = resolve_objective(
+                        output.get("active_draw") or "",
+                        enumerate_objectives(snapshot, brain_input),
+                        direction=direction,
+                        reference_price=float(anchor_bar["close"]))
+                    reason = None
+                except Exception as exc:  # noqa: BLE001 — unavailable is UNKNOWN
+                    reason = f"campaign_draw_unresolved:{type(exc).__name__}:{exc}"
+            accepted_view = {
+                "direction_authorized": bool(authorized and objective is not None),
+                "refusal_reason": reason,
+                "direction": direction,
+                "objective": objective,
+                "brain_lineage": {
+                    "source": b.get("source"),
+                    "model": b.get("llm_model"),
+                    "snapshot_id": str(snapshot.get("snapshot_id") or ""),
+                    "narrative_control_state": (
+                        (b.get("narrative_continuity") or {}).get("control_state")),
+                    "narrative_authority_guard": (
+                        dict(b.get("narrative_authority_guard") or {})
+                        if isinstance(b.get("narrative_authority_guard"), dict)
+                        else {}),
+                    "active_draw": str(output.get("active_draw") or "")[:240],
+                    "provider_call_completed_at": b.get(
+                        "provider_call_completed_at"),
+                },
+            }
+
+        state = snapshot.get("derived_state") or {}
+        try:
+            return self.campaign_draw_truth.observe(
+                settled_bars=settled_bars,
+                settled_source=((snapshot.get("settled_source") or {}).get("1m") or {}),
+                contract_id=str(snapshot.get("contract_id") or self.contract_id),
+                session_id=self.session_id,
+                history_revision=int(state.get("history_revision", 0)),
+                derived_state_current=bool(state.get("current")),
+                accepted_view=accepted_view)
+        except Exception as exc:  # noqa: BLE001 — facts fail closed, scan continues
+            return {"authority_status": UNKNOWN,
+                    "authority_reason": f"campaign_draw_truth_error:{type(exc).__name__}",
+                    "coverage_status": "UNKNOWN", "history_complete": False,
+                    "evidence_basis": "provider_settled_1m_chart",
+                    "claim_scope": "chart_delivery_not_exchange_tick_sequence"}
 
     # ── adapters ──────────────────────────────────────────────────────────────
     def _update_structure_flips(self, snapshot: dict) -> list:

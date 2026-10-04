@@ -802,7 +802,12 @@ class TestProductionDoesNotActivateV2:
         src_root = os.path.join(ROOT, "src")
         allowed = {os.path.join(src_root, "market_data", "snapshot_builder.py"),
                    os.path.join(src_root, "market_state", "active_path.py"),
-                   os.path.join(src_root, "market_data", "causal_identity.py")}
+                   os.path.join(src_root, "market_data", "causal_identity.py"),
+                   # CAMPAIGN-DRAW-TRUTH-1 reads settled_source only to bind
+                   # provider-chart evidence to the accepted draw. The result
+                   # is audit/fact telemetry outside Brain, candidate, and
+                   # execution authority.
+                   os.path.join(src_root, "live_scan", "production_scan_cycle.py")}
         candidates = [p for p in AST.production_files(src_root)
                       if os.path.abspath(p) not in
                       {os.path.abspath(a) for a in allowed}]
