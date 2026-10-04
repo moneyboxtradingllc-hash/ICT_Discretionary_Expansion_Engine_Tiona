@@ -584,7 +584,7 @@ class TestStrategyUntouched:
         # at the provider seam; prior authorization must not survive that source
         # change, even though no strategy or candle semantics changed.
         from ai_brain.production_model import brain_contract_fingerprint
-        assert brain_contract_fingerprint() == "brain:8098fe7e009575e9"
+        assert brain_contract_fingerprint() == "brain:ef38fceea448f5bf"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.

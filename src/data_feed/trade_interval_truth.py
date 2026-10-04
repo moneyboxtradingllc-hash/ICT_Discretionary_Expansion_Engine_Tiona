@@ -71,6 +71,10 @@ class TradeIntervalTruth:
         self._lock = threading.RLock()
         self._intervals: dict[str, dict] = {}
         self._epochs: dict[str, dict] = {}
+        # Receipt-time watermark is intentionally process-local. A restart
+        # invalidates every active epoch, so it never needs to be reconstructed
+        # from minute candles or persisted as market-history authority.
+        self._epoch_last_received_at: dict[str, datetime] = {}
         self._current_epoch_id: str | None = None
         self._storage_healthy = True
         self._storage_error: str | None = None
@@ -125,6 +129,8 @@ class TradeIntervalTruth:
                         and not str(record.get("incomplete_reason") or "").strip()):
                     raise ValueError("incomplete_interval_reason_missing")
                 _parse_aware(record.get("anchor_at"), name="anchor_at")
+                if record.get("requested_at") is not None:
+                    _parse_aware(record["requested_at"], name="requested_at")
                 _parse_aware(record.get("created_at"), name="created_at")
                 _parse_aware(record.get("updated_at"), name="updated_at")
                 _finite_price(record.get("anchor_reference_price"),
@@ -283,9 +289,16 @@ class TradeIntervalTruth:
             if changed:
                 self._persist_locked()
 
-    def open_interval(self, contract_id: str, anchor_at,
+    def open_interval(self, contract_id: str, requested_at,
                       anchor_reference_price, anchor_reference_basis: str) -> dict:
-        anchor = _parse_aware(anchor_at, name="anchor_at")
+        """Open at registration time; ``requested_at`` is audit metadata only.
+
+        An interval cannot be backdated because the tracker deliberately does
+        not retain raw trades. The authoritative anchor is captured while the
+        tracker lock is held, after all earlier observations have completed.
+        """
+        requested = (_parse_aware(requested_at, name="requested_at")
+                     if requested_at is not None else None)
         reference = _finite_price(anchor_reference_price,
                                   name="anchor_reference_price")
         basis = str(anchor_reference_basis or "").strip()
@@ -294,23 +307,29 @@ class TradeIntervalTruth:
             raise TradeIntervalTruthError("contract_mismatch")
         if not basis:
             raise TradeIntervalTruthError("anchor_reference_basis_required")
-        now = self._now()
-        if anchor > now:
-            raise TradeIntervalTruthError("anchor_in_future")
         with self._lock:
             if not self._storage_healthy:
                 raise TradeIntervalTruthError("interval_storage_unavailable")
+            # Capture the actual anchor only once registration owns the state
+            # lock. A caller's older Brain/request timestamp is never coverage.
+            now = self._now()
+            if requested is not None and requested > now:
+                raise TradeIntervalTruthError("requested_at_in_future")
             epoch_id = self._current_epoch_id
             epoch = self._epochs.get(epoch_id or "")
             if not epoch or epoch.get("status") != "ACTIVE":
                 raise TradeIntervalTruthError("live_coverage_epoch_unavailable")
-            if anchor < _parse_aware(epoch["started_at"], name="epoch_start"):
+            if now < _parse_aware(epoch["started_at"], name="epoch_start"):
                 raise TradeIntervalTruthError("anchor_precedes_coverage_epoch")
+            last_received = self._epoch_last_received_at.get(epoch_id)
+            if last_received is not None and now <= last_received:
+                raise TradeIntervalTruthError("anchor_not_after_last_observed_event")
             interval_id = uuid.uuid4().hex
             record = {
                 "interval_id": interval_id,
                 "contract_id": self.contract_id,
-                "anchor_at": _iso(anchor),
+                "anchor_at": _iso(now),
+                "requested_at": _iso(requested) if requested is not None else None,
                 "anchor_reference_price": reference,
                 "anchor_reference_basis": basis,
                 "coverage_epoch_id": epoch_id,
@@ -413,6 +432,13 @@ class TradeIntervalTruth:
                 self._break_epoch_locked(malformed_reason, received, epoch_id)
                 self._persist_locked()
                 return
+
+            # A later interval anchor must be newer than every event already
+            # consumed by this epoch, even when no interval was open yet.
+            if updates:
+                previous_received = self._epoch_last_received_at.get(epoch_id)
+                if previous_received is None or received > previous_received:
+                    self._epoch_last_received_at[epoch_id] = received
 
             changed = False
             for event_at, price in updates:

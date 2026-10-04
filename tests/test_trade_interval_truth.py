@@ -6,6 +6,7 @@ import sys
 import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -32,7 +33,7 @@ class Clock:
 
 def make_tracker(tmp_path, *, contract=CID, now=None, path=None):
     return TradeIntervalTruth(contract, str(path or (tmp_path / "intervals.json")),
-                              clock=Clock(now or BASE + timedelta(minutes=1)))
+                              clock=Clock(now or ANCHOR))
 
 
 def row(price, at, contract=CID):
@@ -48,7 +49,7 @@ def opened(tracker, anchor=ANCHOR):
 def observe(tracker, *rows, epoch="epoch-A", received=None, envelope=CID):
     tracker.observe_gateway_event(
         [envelope, list(rows)], epoch_id=epoch,
-        received_at=received or BASE + timedelta(minutes=1))
+        received_at=received or BASE + timedelta(seconds=9))
 
 
 def test_exact_timestamp_anchor_excludes_pre_anchor_trade(tmp_path):
@@ -65,6 +66,40 @@ def test_exact_timestamp_anchor_excludes_pre_anchor_trade(tmp_path):
     assert actual["first_observed_trade_at"] == ANCHOR.isoformat()
     assert actual["trade_count"] == 3
     assert actual["coverage_status"] == COMPLETE
+
+
+def test_past_request_time_is_metadata_not_a_retroactive_coverage_anchor(tmp_path):
+    clock = Clock(ANCHOR - timedelta(seconds=2))
+    tracker = TradeIntervalTruth(CID, str(tmp_path / "intervals.json"), clock=clock)
+    tracker.begin_coverage_epoch(CID, "epoch-A", BASE)
+    observe(tracker, row(120, ANCHOR - timedelta(seconds=1)),
+            received=ANCHOR - timedelta(milliseconds=500))
+
+    # The requested/Brain time is deliberately historical. Registration itself
+    # occurs now and cannot recover the already-consumed 120 print.
+    clock.at = ANCHOR
+    interval = tracker.open_interval(CID, BASE, 100, "test_market_reference")
+    assert interval["requested_at"] == BASE.isoformat()
+    assert interval["anchor_at"] == ANCHOR.isoformat()
+    assert interval["coverage_status"] == COMPLETE
+    assert interval["highest_trade_price"] is None
+
+    observe(tracker, row(105, ANCHOR + timedelta(milliseconds=1)),
+            received=ANCHOR + timedelta(seconds=1))
+    current = tracker.get_interval(interval["interval_id"])
+    assert current["highest_trade_price"] == 105
+    assert current["trade_count"] == 1
+
+
+def test_anchor_cannot_precede_a_trade_already_consumed_by_the_epoch(tmp_path):
+    clock = Clock(ANCHOR)
+    tracker = TradeIntervalTruth(CID, str(tmp_path / "intervals.json"), clock=clock)
+    tracker.begin_coverage_epoch(CID, "epoch-A", BASE)
+    observe(tracker, row(105, ANCHOR - timedelta(milliseconds=1)),
+            received=ANCHOR + timedelta(milliseconds=1))
+    with pytest.raises(TradeIntervalTruthError,
+                       match="anchor_not_after_last_observed_event"):
+        tracker.open_interval(CID, BASE, 100, "test_market_reference")
 
 
 def test_finite_zero_price_is_preserved_as_market_fact(tmp_path):
@@ -106,6 +141,12 @@ def test_authenticated_late_event_updates_interval_but_not_closed_candle(tmp_pat
     provider.aggregator = MinuteCandleAggregator(CID, tick_size=0.25)
     provider.trade_interval_truth = tracker
     provider._trade_interval_epoch_id = "epoch-A"
+    provider._trade_interval_runtime_epoch_id = "epoch-A"
+    provider.runtime = SimpleNamespace(
+        contract=SimpleNamespace(id=CID), hub=object(), is_running=True,
+        _coverage_epoch_id=lambda: "epoch-A")
+    provider.contract = SimpleNamespace(id=CID, tick_size=0.25)
+    provider._stop = threading.Event()
     provider.wake_registry = None
     provider._persist = lambda _rows: None
     provider._trim = lambda: None
@@ -121,6 +162,111 @@ def test_authenticated_late_event_updates_interval_but_not_closed_candle(tmp_pat
     assert current["highest_trade_at"] == (ANCHOR + timedelta(seconds=5)).isoformat()
 
 
+def test_provider_serializes_interval_registration_with_raw_trade_dispatch(tmp_path):
+    tracker = make_tracker(tmp_path)
+    tracker.begin_coverage_epoch(CID, "epoch-A", BASE)
+    registered = threading.Event()
+    allow_open_return = threading.Event()
+    event_waiting_for_lock = threading.Event()
+    lock = threading.Lock()
+
+    class OrderedProviderLock:
+        def __enter__(self):
+            if threading.current_thread().name == "trade-dispatch":
+                event_waiting_for_lock.set()
+            lock.acquire()
+            return self
+
+        def __exit__(self, *_exc):
+            lock.release()
+
+    original_open = tracker.open_interval
+
+    def pause_after_registration(*args, **kwargs):
+        record = original_open(*args, **kwargs)
+        registered.set()
+        if not allow_open_return.wait(2):
+            raise AssertionError("test did not release interval registration")
+        return record
+
+    tracker.open_interval = pause_after_registration
+    provider = object.__new__(TopstepXDataProvider)
+    provider._lock = OrderedProviderLock()
+    provider.trade_interval_truth = tracker
+    provider.contract = SimpleNamespace(id=CID, tick_size=0.25)
+    provider.runtime = SimpleNamespace(
+        contract=SimpleNamespace(id=CID), hub=object(), is_running=True,
+        _coverage_epoch_id=lambda: "runtime-A")
+    provider._trade_interval_epoch_id = "epoch-A"
+    provider._trade_interval_runtime_epoch_id = "runtime-A"
+    provider._stop = threading.Event()
+    provider.aggregator = MinuteCandleAggregator(CID, tick_size=0.25)
+    provider.wake_registry = None
+    provider._persist = lambda _rows: None
+    provider._trim = lambda: None
+    errors = []
+    returned = []
+
+    def open_interval():
+        try:
+            returned.append(provider.open_trade_interval(
+                BASE, 100, "mechanics_registration_reference"))
+        except Exception as exc:  # noqa: BLE001 — surface thread errors below
+            errors.append(exc)
+
+    opener = threading.Thread(target=open_interval, name="interval-open")
+    opener.start()
+    assert registered.wait(2)
+    dispatcher = threading.Thread(
+        target=lambda: provider._on_trade(
+            [CID, [row(105, ANCHOR + timedelta(milliseconds=1))]]),
+        name="trade-dispatch")
+    dispatcher.start()
+    try:
+        assert event_waiting_for_lock.wait(2)
+    finally:
+        allow_open_return.set()
+    opener.join(2)
+    dispatcher.join(2)
+
+    assert not opener.is_alive() and not dispatcher.is_alive()
+    assert errors == []
+    assert len(returned) == 1
+    record = tracker.get_interval(returned[0]["interval_id"])
+    assert record["anchor_at"] == ANCHOR.isoformat()
+    assert record["highest_trade_price"] == 105
+    assert record["trade_count"] == 1
+
+
+def test_trade_event_detects_runtime_epoch_mismatch_before_interval_update(tmp_path):
+    tracker = make_tracker(tmp_path)
+    interval = opened(tracker)
+    provider = object.__new__(TopstepXDataProvider)
+    provider._lock = threading.Lock()
+    provider.aggregator = MinuteCandleAggregator(CID, tick_size=0.25)
+    provider.trade_interval_truth = tracker
+    provider._trade_interval_epoch_id = "epoch-A"
+    provider._trade_interval_runtime_epoch_id = "runtime-A"
+    provider.runtime = SimpleNamespace(
+        contract=SimpleNamespace(id=CID), hub=object(), is_running=True,
+        _coverage_epoch_id=lambda: "runtime-B")
+    provider.contract = SimpleNamespace(id=CID, tick_size=0.25)
+    provider._stop = threading.Event()
+    provider.wake_registry = None
+    provider._persist = lambda _rows: None
+    provider._trim = lambda: None
+
+    provider._on_trade([CID, [row(120, ANCHOR + timedelta(seconds=1))]])
+
+    current = tracker.get_interval(interval["interval_id"])
+    assert current["coverage_status"] == INCOMPLETE
+    assert current["incomplete_reason"] == "runtime_epoch_mismatch"
+    assert current["highest_trade_price"] is None
+    # Interval truth fails closed while the ordinary candle observer still
+    # receives the event through its existing ingestion path.
+    assert provider.aggregator.closed_candles()[-1]["high"] == 120
+
+
 def test_reconnect_breaks_old_interval_and_new_epoch_can_open_new_one(tmp_path):
     tracker = make_tracker(tmp_path)
     old = opened(tracker)
@@ -131,6 +277,7 @@ def test_reconnect_breaks_old_interval_and_new_epoch_can_open_new_one(tmp_path):
     tracker.begin_coverage_epoch(CID, "epoch-B", BASE + timedelta(seconds=21))
     observe(tracker, row(120, ANCHOR + timedelta(seconds=3)), epoch="epoch-B")
     assert tracker.get_interval(old["interval_id"])["highest_trade_price"] == 102
+    tracker._clock.at = BASE + timedelta(seconds=23)
     new = tracker.open_interval(CID, BASE + timedelta(seconds=22), 100, "fresh_epoch")
     assert new["coverage_status"] == COMPLETE
 

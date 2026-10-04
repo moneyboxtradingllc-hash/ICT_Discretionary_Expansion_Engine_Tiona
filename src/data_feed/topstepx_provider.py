@@ -306,48 +306,82 @@ class TopstepXDataProvider(BaseDataProvider):
         if self._owns_runtime:
             self.runtime.start("candle-provider")
 
-    def open_trade_interval(self, anchor_at, anchor_reference_price,
+    def _runtime_trade_epoch_id(self):
+        runtime = self.runtime
+        epoch_getter = getattr(runtime, "_coverage_epoch_id", None)
+        if not callable(epoch_getter):
+            return None
+        try:
+            return epoch_getter()
+        except Exception:  # noqa: BLE001 — unavailable generation cannot prove coverage
+            return None
+
+    def _break_trade_interval_epoch_locked(self, tracker, reason, at) -> None:
+        epoch_id = (getattr(self, "_trade_interval_epoch_id", None)
+                    or tracker.current_epoch_id)
+        try:
+            tracker.mark_coverage_broken(reason, at, epoch_id=epoch_id)
+        finally:
+            self._trade_interval_epoch_id = None
+            self._trade_interval_runtime_epoch_id = None
+
+    def open_trade_interval(self, requested_at, anchor_reference_price,
                             anchor_reference_basis: str) -> dict:
-        """Open an exact-time interval only inside the current live raw stream epoch."""
+        """Register an interval atomically at acceptance, never at request time.
+
+        ``requested_at`` may preserve Brain/request lineage, but the tracker
+        captures the authoritative anchor while both the provider event lock
+        and tracker lock are held. Trade callbacks use this same provider lock.
+        """
         tracker = getattr(self, "trade_interval_truth", None)
         if tracker is None or self.contract is None or self.runtime is None:
             raise DataFeedError("TOPSTEPX_TRADE_INTERVAL_UNAVAILABLE")
-        runtime_contract = getattr(getattr(self.runtime, "contract", None), "id", None)
-        if runtime_contract != self.contract.id:
-            raise DataFeedError("TOPSTEPX_TRADE_INTERVAL_CONTRACT_MISMATCH")
-        if self.runtime.hub is None or not self.runtime.is_running:
-            raise DataFeedError("TOPSTEPX_TRADE_INTERVAL_STREAM_NOT_LIVE")
-        return tracker.open_interval(
-            self.contract.id, anchor_at, anchor_reference_price,
-            anchor_reference_basis)
+        with self._lock:
+            runtime_contract = getattr(getattr(self.runtime, "contract", None), "id", None)
+            if runtime_contract != self.contract.id:
+                raise DataFeedError("TOPSTEPX_TRADE_INTERVAL_CONTRACT_MISMATCH")
+            if self.runtime.hub is None or not self.runtime.is_running:
+                raise DataFeedError("TOPSTEPX_TRADE_INTERVAL_STREAM_NOT_LIVE")
+            runtime_epoch_id = self._runtime_trade_epoch_id()
+            expected_runtime_epoch_id = getattr(
+                self, "_trade_interval_runtime_epoch_id", None)
+            tracker_epoch_id = getattr(self, "_trade_interval_epoch_id", None)
+            if (runtime_epoch_id is None
+                    or expected_runtime_epoch_id != runtime_epoch_id
+                    or tracker_epoch_id != tracker.current_epoch_id):
+                self._break_trade_interval_epoch_locked(
+                    tracker, "runtime_epoch_mismatch", datetime.now(timezone.utc))
+                raise DataFeedError("TOPSTEPX_TRADE_INTERVAL_EPOCH_MISMATCH")
+            return tracker.open_interval(
+                self.contract.id, requested_at, anchor_reference_price,
+                anchor_reference_basis)
 
     def _on_coverage_event(self, event: dict) -> None:
         tracker = getattr(self, "trade_interval_truth", None)
         if tracker is None or not isinstance(event, dict):
             return
-        kind = event.get("kind")
-        epoch_id = event.get("coverage_epoch_id")
-        at = event.get("at")
-        event_contract = event.get("contract_id")
-        if event_contract and self.contract and event_contract != self.contract.id:
-            tracker.mark_coverage_broken("runtime_contract_mismatch", at,
-                                         epoch_id=self._trade_interval_epoch_id)
-            self._trade_interval_epoch_id = None
-            self._trade_interval_runtime_epoch_id = None
-            return
-        if kind == "coverage_broken":
-            tracker.mark_coverage_broken(
-                event.get("reason") or "coverage_unproven", at,
-                epoch_id=(self._trade_interval_epoch_id
-                          if epoch_id == self._trade_interval_runtime_epoch_id
-                          else epoch_id))
-            if epoch_id == self._trade_interval_runtime_epoch_id:
-                self._trade_interval_epoch_id = None
-                self._trade_interval_runtime_epoch_id = None
-        elif kind == "epoch_started":
-            tracker.begin_coverage_epoch(self.contract.id, epoch_id, at)
-            self._trade_interval_epoch_id = epoch_id
-            self._trade_interval_runtime_epoch_id = epoch_id
+        with self._lock:
+            kind = event.get("kind")
+            epoch_id = event.get("coverage_epoch_id")
+            at = event.get("at")
+            event_contract = event.get("contract_id")
+            if event_contract and self.contract and event_contract != self.contract.id:
+                self._break_trade_interval_epoch_locked(
+                    tracker, "runtime_contract_mismatch", at or datetime.now(timezone.utc))
+                return
+            if kind == "coverage_broken":
+                tracker.mark_coverage_broken(
+                    event.get("reason") or "coverage_unproven", at,
+                    epoch_id=(self._trade_interval_epoch_id
+                              if epoch_id == self._trade_interval_runtime_epoch_id
+                              else epoch_id))
+                if epoch_id == self._trade_interval_runtime_epoch_id:
+                    self._trade_interval_epoch_id = None
+                    self._trade_interval_runtime_epoch_id = None
+            elif kind == "epoch_started":
+                tracker.begin_coverage_epoch(self.contract.id, epoch_id, at)
+                self._trade_interval_epoch_id = epoch_id
+                self._trade_interval_runtime_epoch_id = epoch_id
 
     @property
     def _thread(self):
@@ -359,14 +393,15 @@ class TopstepXDataProvider(BaseDataProvider):
         return None                 # ownership is the runtime's, not this class's
 
     def stop(self) -> None:
-        self._stop.set()
-        tracker = getattr(self, "trade_interval_truth", None)
-        if tracker is not None:
-            tracker.mark_coverage_broken(
-                "provider_stopped", datetime.now(timezone.utc),
-                epoch_id=getattr(self, "_trade_interval_epoch_id", None))
-            self._trade_interval_epoch_id = None
-            self._trade_interval_runtime_epoch_id = None
+        with self._lock:
+            self._stop.set()
+            tracker = getattr(self, "trade_interval_truth", None)
+            if tracker is not None:
+                tracker.mark_coverage_broken(
+                    "provider_stopped", datetime.now(timezone.utc),
+                    epoch_id=getattr(self, "_trade_interval_epoch_id", None))
+                self._trade_interval_epoch_id = None
+                self._trade_interval_runtime_epoch_id = None
         if self.runtime is not None:
             remove_listener = getattr(self.runtime, "remove_coverage_listener", None)
             if callable(remove_listener):
@@ -383,39 +418,87 @@ class TopstepXDataProvider(BaseDataProvider):
         # shared runtime there is no such loop, and a minute that never rolled
         # would never be persisted or served.
         received_at = datetime.now(timezone.utc)
-        tracker = getattr(self, "trade_interval_truth", None)
-        epoch_id = getattr(self, "_trade_interval_epoch_id", None)
-        stopped = getattr(self, "_stop", None)
-        if (tracker is not None and not (stopped is not None and stopped.is_set())
-                and tracker.current_epoch_id is None
-                and self.runtime is not None and self.runtime.is_running
-                and getattr(getattr(self.runtime, "contract", None), "id", None)
-                == getattr(self.contract, "id", None)):
-            runtime_epoch = getattr(self.runtime, "_coverage_epoch_id", None)
-            if callable(runtime_epoch):
-                source_id = runtime_epoch()
-                epoch_id = f"{source_id}:provider-resume:{uuid.uuid4().hex}"
-                try:
-                    tracker.begin_coverage_epoch(self.contract.id, epoch_id, received_at)
-                    self._trade_interval_epoch_id = epoch_id
-                    self._trade_interval_runtime_epoch_id = source_id
-                except Exception:  # noqa: BLE001 — no interval authority without a proven fresh epoch
-                    epoch_id = None
+        with self._lock:
+            tracker = getattr(self, "trade_interval_truth", None)
+            interval_epoch_id = getattr(self, "_trade_interval_epoch_id", None)
+            interval_runtime_epoch_id = getattr(
+                self, "_trade_interval_runtime_epoch_id", None)
+            runtime = getattr(self, "runtime", None)
+            runtime_epoch_id = self._runtime_trade_epoch_id() if runtime is not None else None
+            runtime_contract_id = getattr(getattr(runtime, "contract", None), "id", None)
+            stopped = getattr(self, "_stop", None)
+            skip_interval_event = False
 
-        def observe_unique(event_args, *, batch_identity_proven):
-            if tracker is not None and epoch_id is not None:
+            if tracker is not None and not (stopped is not None and stopped.is_set()):
+                if (runtime is None or not runtime.is_running
+                        or runtime_contract_id != getattr(self.contract, "id", None)
+                        or runtime_epoch_id is None):
+                    try:
+                        self._break_trade_interval_epoch_locked(
+                            tracker, "runtime_epoch_unavailable", received_at)
+                    except Exception:  # noqa: BLE001 — candle ingestion remains independent
+                        pass
+                    skip_interval_event = True
+                elif interval_runtime_epoch_id != runtime_epoch_id:
+                    # A listener can fail without stopping the market pump. A
+                    # trade is an independent opportunity to detect that stale
+                    # cached coverage epoch. Break old authority before this
+                    # event can reach any interval, then require a later event
+                    # to establish a fresh provider-scoped epoch.
+                    if (interval_runtime_epoch_id is not None
+                            or interval_epoch_id is not None
+                            or tracker.current_epoch_id is not None):
+                        try:
+                            self._break_trade_interval_epoch_locked(
+                                tracker, "runtime_epoch_mismatch", received_at)
+                        except Exception:  # noqa: BLE001 — candle ingestion remains independent
+                            pass
+                        skip_interval_event = True
+                    elif tracker.current_epoch_id is None:
+                        # No old interval exists to preserve. Start a new local
+                        # epoch at this observed boundary after a missed startup
+                        # notification; never backdate it to runtime connect.
+                        resumed_id = f"{runtime_epoch_id}:provider-resume:{uuid.uuid4().hex}"
+                        try:
+                            tracker.begin_coverage_epoch(
+                                self.contract.id, resumed_id, received_at)
+                            self._trade_interval_epoch_id = resumed_id
+                            self._trade_interval_runtime_epoch_id = runtime_epoch_id
+                            interval_epoch_id = resumed_id
+                            interval_runtime_epoch_id = runtime_epoch_id
+                        except Exception:  # noqa: BLE001 — no interval authority on failed epoch open
+                            skip_interval_event = True
+                elif tracker.current_epoch_id != interval_epoch_id:
+                    try:
+                        self._break_trade_interval_epoch_locked(
+                            tracker, "provider_epoch_mismatch", received_at)
+                    except Exception:  # noqa: BLE001 — candle ingestion remains independent
+                        pass
+                    skip_interval_event = True
+
+            def observe_unique(event_args, *, batch_identity_proven):
+                if tracker is None or skip_interval_event or interval_epoch_id is None:
+                    return
                 try:
+                    current_runtime_epoch = self._runtime_trade_epoch_id()
+                    if (current_runtime_epoch is None
+                            or current_runtime_epoch != interval_runtime_epoch_id
+                            or self._trade_interval_runtime_epoch_id
+                            != current_runtime_epoch
+                            or tracker.current_epoch_id != interval_epoch_id):
+                        self._break_trade_interval_epoch_locked(
+                            tracker, "runtime_epoch_mismatch", received_at)
+                        return
                     tracker.observe_gateway_event(
-                        event_args, epoch_id=epoch_id, received_at=received_at,
+                        event_args, epoch_id=interval_epoch_id, received_at=received_at,
                         batch_identity_proven=batch_identity_proven)
                 except Exception:  # noqa: BLE001 — fail interval truth closed, preserve candle feed
                     try:
-                        tracker.mark_coverage_broken(
-                            "interval_observer_error", received_at, epoch_id=epoch_id)
+                        self._break_trade_interval_epoch_locked(
+                            tracker, "interval_observer_error", received_at)
                     except Exception:  # noqa: BLE001 — candle ingestion remains independent
                         pass
 
-        with self._lock:
             self.aggregator.ingest_event(args, on_unique_event=observe_unique)
             newly = self.aggregator.roll()
             if newly:
