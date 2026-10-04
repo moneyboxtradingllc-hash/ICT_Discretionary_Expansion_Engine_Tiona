@@ -132,6 +132,8 @@ MUST_BE_BOUND = {
         "canonical campaign owner/status/invalidation witness that bounds draw episodes",
     "market_data/campaign_lifecycle.py":
         "current-authority lifecycle projection and additional participation rule",
+    "market_data/trade_horizon.py":
+        "current-candidate campaign relation and published protected-structure/payoff evidence",
     "broker/topstepx_production_loop.py":
         "production candidate and conditional-trigger call sites for the Lifecycle gate",
     # RAW-TRADE-INTERVAL-TRUTH-1C. These sources jointly determine whether a

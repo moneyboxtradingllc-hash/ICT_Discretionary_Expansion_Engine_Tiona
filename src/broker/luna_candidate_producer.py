@@ -1208,7 +1208,9 @@ class CandidateProducer:
                 ai_state: str = "AI_OK", now: datetime = None,
                 conditional_plan: bool = False,
                 conditional_trigger: bool = False,
-                require_campaign_lifecycle: bool = False) -> CandidateSnapshot:
+                require_campaign_lifecycle: bool = False,
+                campaign_draw: dict = None,
+                campaign_session_id: str = "") -> CandidateSnapshot:
         now = now or datetime.now(timezone.utc)
 
         # EVIDENCE, NOT AUTHORITY. The trace records which stage a proposal
@@ -1384,6 +1386,33 @@ class CandidateProducer:
                     "reward_below_qualification",
                     f"authentic geometry yields {rr:.2f}R, below the {self.min_r:.2f} floor. "
                     f"Neither boundary may be moved to improve it.")
+
+            # Descriptive candidate scope only: this cannot alter geometry,
+            # eligibility, or the selected-target reward floor.
+            try:
+                from market_data.trade_horizon import project_trade_horizon
+                trade_horizon = project_trade_horizon(
+                    snapshot=snapshot, brain_input=brain_input,
+                    campaign_draw=campaign_draw,
+                    campaign_lifecycle=(snapshot or {}).get("campaign_lifecycle"),
+                    direction=direction, entry_price=reference_price,
+                    stop_price=invalidation.price,
+                    objective_identity=objective.identity,
+                    objective_kind=objective.kind,
+                    objective_price=objective.price,
+                    snapshot_id=snapshot_id,
+                    session_id=campaign_session_id,
+                    contract_id=self.contract.id,
+                    narrative_phase=parsed.get("narrative_phase"))
+            except Exception as exc:  # noqa: BLE001 -- facts never gate entry
+                from market_data.trade_horizon import AUTHORITY_UNKNOWN
+                trade_horizon = {
+                    "schema_version": 1,
+                    "classification": AUTHORITY_UNKNOWN,
+                    "classification_reason":
+                        f"trade_horizon_projection_error:{type(exc).__name__}",
+                }
+            trace["trade_horizon"] = trade_horizon
         except NoCandidate as exc:
             _annotate_trace(trace, exc.reason, exc.detail)
             exc.decision_trace = dict(trace)
@@ -1402,6 +1431,7 @@ class CandidateProducer:
             created_at=now,
             narrative=str(parsed.get("market_story") or "")[:200],
             extras={
+                "trade_horizon": trade_horizon,
                 "candidate_expires_at": (now + timedelta(seconds=self.ttl_seconds)).isoformat(),
                 "contract_symbol": getattr(self.contract, "name", ""),
                 "latest_closed_bar_timestamp": latest_closed_bar_timestamp,
@@ -1456,6 +1486,8 @@ class CandidateProducer:
                 "mechanical_evidence_digest": _digest(brain_input),
                 "brain_response_digest": _digest(parsed),
             })
+
+        cand.extras["trade_horizon"]["candidate_id"] = cand.candidate_id
 
         # Exact execution-object geometry is carried only while a pre-authorized
         # plan is being published or revalidated. Ordinary candidates retain the

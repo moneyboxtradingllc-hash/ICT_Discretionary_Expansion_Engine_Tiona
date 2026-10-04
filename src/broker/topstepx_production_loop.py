@@ -492,6 +492,7 @@ class ProductionLoop:
                     "eligible_only_because_floor_moved": trace.get(
                         "eligible_only_because_floor_moved"),
                 },
+                "trade_horizon": trace.get("trade_horizon"),
                 # The Combine governor lives on another branch and is NOT in this
                 # build. Recorded as absent rather than fabricated.
                 "profit_governor": None,
@@ -1170,6 +1171,8 @@ class ProductionLoop:
                 latest_closed_bar_timestamp=scan["latest_closed_bar_timestamp"],
                 in_window=in_window, now=self.clock(),
                 require_campaign_lifecycle=True,
+                campaign_draw=scan.get("campaign_draw_truth"),
+                campaign_session_id=str(getattr(self.cycle, "session_id", "") or ""),
                 conditional_plan=(str(((scan.get("brain_result") or {}).get("parsed")
                                        or {}).get("current_action") or "").lower()
                                   == "watching"))
@@ -1458,7 +1461,10 @@ class ProductionLoop:
                 market_data_timestamp=scan["market_data_timestamp"],
                 latest_closed_bar_timestamp=scan["latest_closed_bar_timestamp"],
                 in_window=in_window, now=now, conditional_trigger=True,
-                require_campaign_lifecycle=True)
+                require_campaign_lifecycle=True,
+                campaign_draw=scan.get("campaign_draw_truth"),
+                campaign_session_id=str(getattr(getattr(self, "cycle", None),
+                                                "session_id", "") or ""))
             fresh_zone = (fresh.extras or {}).get("selected_tool_zone") or {}
             if (fresh.direction != old.direction
                     or fresh.extras.get("playbook") != extras.get("playbook")

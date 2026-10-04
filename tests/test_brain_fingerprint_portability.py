@@ -34,7 +34,7 @@ def source_bytes(monkeypatch):
 
 @pytest.mark.parametrize("style", ["lf", "crlf", "mixed_files", "mixed_lines"])
 def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
-    assert len(source_bytes) == 37
+    assert len(source_bytes) == 38
     for index, (path, data) in enumerate(source_bytes.items()):
         if style == "crlf" or (style == "mixed_files" and index % 2):
             source_bytes[path] = data.replace(b"\n", b"\r\n")
@@ -73,7 +73,9 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # gate; prior production authorization is stale after this contract change.
     # CAMPAIGN-LIFECYCLE-1 repair binds the public Draw contract and the
     # no-Brain conditional-trigger phase refusal; old authorization is stale.
-    assert PM.brain_contract_fingerprint() == "brain:a369bcf07183d1ac"
+    # TRADE-HORIZON-1 adds candidate-scope and protected-structure evidence;
+    # prior production authorization is stale after this rotation.
+    assert PM.brain_contract_fingerprint() == "brain:9f8f15d75836a857"
 
 
 @pytest.mark.parametrize("addition", [

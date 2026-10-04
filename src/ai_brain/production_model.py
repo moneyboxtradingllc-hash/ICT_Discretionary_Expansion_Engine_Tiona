@@ -280,6 +280,10 @@ _CONTRACT_SOURCES = (
     # to campaign participation state.
     ("campaign_lifecycle", "market_data/campaign_lifecycle.py"),
     ("campaign_lifecycle_gate", "broker/topstepx_production_loop.py"),
+    # TRADE-HORIZON-1. This current-candidate fact projection records the
+    # selected trade destination relative to the current public campaign draw
+    # and publishes bounded protected-structure/payoff evidence.
+    ("trade_horizon", "market_data/trade_horizon.py"),
 )
 
 #: REPO-ROOT-RELATIVE closure. Same contract, different anchor.

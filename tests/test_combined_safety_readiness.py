@@ -593,8 +593,10 @@ class TestStrategyUntouched:
         # fingerprint cannot authorize this source change.
         # CAMPAIGN-LIFECYCLE-1 adds a current-authority participation gate; the
         # prior production authorization cannot survive the semantic rotation.
+        # TRADE-HORIZON-1 adds candidate-scope evidence; its source is also in
+        # the canonical contract closure.
         from ai_brain.production_model import brain_contract_fingerprint
-        assert brain_contract_fingerprint() == "brain:a369bcf07183d1ac"
+        assert brain_contract_fingerprint() == "brain:9f8f15d75836a857"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.
