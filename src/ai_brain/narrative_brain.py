@@ -368,9 +368,10 @@ def _deterministic(snapshot: dict, brain_input: dict, analogs: list) -> dict:
             "structure": 40,
         },
         "memory_matches": analogs or [],          # AB-4 — retrieval wired in
-        "current_action": ("avoid_" + na["forbidden_trade_direction"]
-                           if na.get("forbidden_trade_direction") else
-                           ("prepare_" + direction if fav else "stand_down")),
+        # This deterministic package is descriptive/fallback evidence. It has
+        # no authority to propose immediate or conditional exposure, so its
+        # action is always the explicit non-permission token.
+        "current_action": "stand_down",
         "reason": ("; ".join(na.get("reasons", [])) or "deterministic NA synthesis") + analog_note,
         "must_not_do": ([f"do not trade {na['forbidden_trade_direction']}"]
                         if na.get("forbidden_trade_direction") else []),

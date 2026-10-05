@@ -52,7 +52,7 @@ def _good(direction="bearish", pb="liquidity_sweep_reversal", tools=None):
         "preferred_tools": ["ifvg"], "invalidation_level": 702.5,
         "thesis_health": "n/a", "contradiction_flags": [], "warnings": [],
         "confidence_by_component": {"delivery": 25, "liquidity": 60, "structure": 40},
-        "current_action": "avoid_bullish", "reason": "x",
+        "current_action": "stand_down", "reason": "x",
         "must_not_do": ["do not trade bullish"], "protected_high_status": "approaching",
         "protected_low_status": "none", "dominant_reasoning": _FULL_REASON,
         "recommended_playbook_family": pb,

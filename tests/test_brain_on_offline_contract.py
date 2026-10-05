@@ -88,7 +88,7 @@ def _valid_brain_json(**overrides) -> str:
         "narrative_direction": "bearish",
         "narrative_phase": "distribution",
         "phase_confidence": 72,
-        "current_action": "wait_for_retracement",
+        "current_action": "watching",
         "reason": "awaiting retracement into the 5m bearish order block",
         "allowed_direction": "bearish",
     })

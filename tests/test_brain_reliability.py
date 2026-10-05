@@ -42,7 +42,7 @@ def _out(reason=_SHALLOW, direction="bearish", phase="manipulation"):
         "preferred_tools": ["ifvg"], "invalidation_level": 702.5,
         "thesis_health": "n/a", "contradiction_flags": [], "warnings": [],
         "confidence_by_component": {"delivery": 25, "liquidity": 60, "structure": 40},
-        "current_action": "avoid_bullish", "reason": "x",
+        "current_action": "stand_down", "reason": "x",
         "must_not_do": ["do not trade bullish"],
         "protected_high_status": "approaching", "protected_low_status": "none",
         "dominant_reasoning": reason,

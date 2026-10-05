@@ -75,7 +75,7 @@ class TestObservedDegradationsReproduce:
         """CORE validation does not police tool_family; the OUTPUT schema does."""
         core = {"market_story": "s", "narrative_direction": "bullish",
                 "narrative_phase": "continuation", "phase_confidence": 70,
-                "allowed_direction": "bullish", "current_action": "a", "reason": "r",
+                "allowed_direction": "bullish", "current_action": "stand_down", "reason": "r",
                 "recommended_tool_family": "fvg"}
         assert validate_llm_core(core)[0] is True
 

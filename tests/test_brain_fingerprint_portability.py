@@ -34,7 +34,7 @@ def source_bytes(monkeypatch):
 
 @pytest.mark.parametrize("style", ["lf", "crlf", "mixed_files", "mixed_lines"])
 def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
-    assert len(source_bytes) == 41
+    assert len(source_bytes) == 42
     for index, (path, data) in enumerate(source_bytes.items()):
         if style == "crlf" or (style == "mixed_files" and index % 2):
             source_bytes[path] = data.replace(b"\n", b"\r\n")
@@ -76,7 +76,9 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # authorization is stale.
     # TRADE-HORIZON-1 adds candidate-scope and protected-structure evidence;
     # prior production authorization is stale after this rotation.
-    assert PM.brain_contract_fingerprint() == "brain:007e883d0fa3acba"
+    # EXPLICIT-BRAIN-ACTION-AUTHORITY binds prompt/schema/producer enforcement
+    # and the safe stand_down emitted by deterministic/fallback assembly.
+    assert PM.brain_contract_fingerprint() == "brain:1711ab180c888aab"
 
 
 @pytest.mark.parametrize("addition", [
@@ -95,6 +97,7 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     "src/market_data/campaign_lifecycle.py",
     "src/broker/topstepx_production_loop.py",
     "src/market_state/active_path.py",
+    "src/ai_brain/narrative_brain.py",
 ])
 def test_other_content_changes_remain_bound_in_both_anchors(source_bytes, relative, addition):
     before = PM.brain_contract_fingerprint()

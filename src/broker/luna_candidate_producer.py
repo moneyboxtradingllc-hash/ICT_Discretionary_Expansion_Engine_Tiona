@@ -1316,18 +1316,14 @@ class CandidateProducer:
                     "PREAUTHORIZED_PLAN_JUDGMENT")
                 trace["campaign_lifecycle_authority_note"] = (
                     "current phase remains UNKNOWN; exact bound watching plan verified")
-        _action = str(_p.get("current_action") or "").strip().lower()
-        if _action.startswith("watching") and _action != "watching":
-            raise NoCandidate(
-                "conditional_plan_action_invalid",
-                "current_action must be the exact token 'watching'; verbose "
-                "watching text cannot authorize immediate exposure")
-        if _action == "watching" and not (conditional_plan or conditional_trigger):
-            raise NoCandidate("conditional_plan_mode_required",
-                              "watching is valid only through the conditional-plan path")
-        if conditional_plan and _action != "watching":
-            raise NoCandidate("conditional_plan_action_invalid",
-                              "a conditional plan requires current_action=watching")
+        from ai_brain.brain_schema import (
+            ACTION_PROPOSE_ENTRY, ACTION_STAND_DOWN, ACTION_WATCHING,
+            canonical_action)
+        raw_action = _p.get("current_action")
+        _action = canonical_action(raw_action)
+        trace["brain_action_received"] = (
+            _action if _action is not None else
+            f"invalid:{type(raw_action).__name__}:{str(raw_action)[:80]}")
         trace["requested_objective_id"] = _p.get("objective_id")
         trace["requested_invalidation_level"] = _p.get("invalidation_level")
         trace["requested_invalidation_id"] = _p.get("invalidation_id")
@@ -1354,7 +1350,46 @@ class CandidateProducer:
             trace.update(self._observe_session_phase(snapshot, _p))
             self._check_brain(brain_result, ai_state)
             parsed = brain_result.get("parsed") or {}
-            self._assert_action_permits_entry(parsed)
+            # Source sovereignty retains precedence over action interpretation:
+            # a fallback or malformed Brain package is refused for that reason
+            # before its action token can be treated as a candidate judgment.
+            raw_action = parsed.get("current_action")
+            action = canonical_action(raw_action)
+
+            def refuse_action(reason: str, detail: str) -> None:
+                refusal = NoCandidate(reason, detail)
+                trace["brain_action_refusal_reason"] = refusal.reason
+                _annotate_trace(trace, refusal.reason, refusal.detail)
+                refusal.decision_trace = dict(trace)
+                raise refusal
+
+            if action is None:
+                # Preserve explicit refusals for legacy stand-down prose. It
+                # stays refusal-only and never aliases to a positive token.
+                legacy = (raw_action.strip().lower()
+                          if isinstance(raw_action, str) else "")
+                if legacy.startswith("watching"):
+                    refuse_action(
+                        "conditional_plan_action_invalid",
+                        "current_action must be the exact token 'watching'; verbose "
+                        "watching text cannot authorize exposure")
+                if any(legacy.startswith(token) for token in self.NON_ENTRY_ACTIONS):
+                    refuse_action(
+                        "action_declines_entry",
+                        f"current_action={legacy!r} declines entry; the direction is a "
+                        "market narrative, not a trade")
+                refuse_action(
+                    "brain_action_invalid",
+                    "current_action must be exactly propose_entry, watching, or stand_down")
+            if action == ACTION_WATCHING and not (conditional_plan or conditional_trigger):
+                refuse_action("conditional_plan_mode_required",
+                              "watching is valid only through the conditional-plan path")
+            if conditional_plan and action != ACTION_WATCHING:
+                refuse_action("conditional_plan_action_invalid",
+                              "a conditional plan requires current_action=watching")
+            self._assert_action_permits_entry(
+                parsed, conditional_authorized=(conditional_plan
+                                                or conditional_trigger))
             direction = self._direction(parsed, qualification, trace)
             # NARRATIVE-AUTHORITY-1: execution geometry is downstream of an
             # established campaign. A counter-flow tool cannot authorize a
@@ -1634,7 +1669,8 @@ class CandidateProducer:
                          "do_not_trade", "flat", "wait", "hold_off")
 
     @classmethod
-    def _assert_action_permits_entry(cls, parsed: dict) -> None:
+    def _assert_action_permits_entry(cls, parsed: dict, *,
+                                     conditional_authorized: bool = False) -> None:
         """A stand-down never becomes a candidate, whatever else it carries.
 
         SEPARATE-DIRECTION-FROM-ENTRY-ELIGIBILITY (2026-08-06): the prompt used
@@ -1645,13 +1681,29 @@ class CandidateProducer:
         family, and that incidental refusal would no longer fire. This gate is
         explicit and reads the action itself.
         """
-        action = str((parsed or {}).get("current_action") or "").strip().lower()
+        from ai_brain.brain_schema import (
+            ACTION_PROPOSE_ENTRY, ACTION_STAND_DOWN, ACTION_WATCHING,
+            canonical_action)
+        action = canonical_action((parsed or {}).get("current_action"))
+        if action == ACTION_PROPOSE_ENTRY:
+            return
+        if action == ACTION_WATCHING:
+            if conditional_authorized:
+                return
+            raise NoCandidate("conditional_plan_mode_required",
+                              "watching cannot authorize an immediate candidate")
+        if action is None:
+            raise NoCandidate(
+                "brain_action_invalid",
+                "current_action must be exactly propose_entry, watching, or stand_down")
         for token in cls.NON_ENTRY_ACTIONS:
-            if action.startswith(token):
+            if action == ACTION_STAND_DOWN or action.startswith(token):
                 raise NoCandidate(
                     "action_declines_entry",
                     f"current_action={action!r} declines entry; the direction is a "
                     f"market narrative, not a trade")
+        raise NoCandidate("brain_action_invalid",
+                          f"current_action={action!r} is not an entry authorization")
 
     @staticmethod
     def _check_brain(brain_result: dict, ai_state: str) -> None:

@@ -513,7 +513,7 @@ def _thesis(direction: str, invalidation) -> dict:
         "market_story": "probe story long enough to read as prose",
         "narrative_direction": direction, "narrative_phase": "continuation",
         "phase_confidence": 70, "allowed_direction": direction,
-        "current_action": "wait_for_retest", "reason": "probe reason",
+        "current_action": "watching", "reason": "probe reason",
         "invalidation_level": invalidation,
         "recommended_playbook_family": "continuation",
         "recommended_tool_family": ["fvg"],

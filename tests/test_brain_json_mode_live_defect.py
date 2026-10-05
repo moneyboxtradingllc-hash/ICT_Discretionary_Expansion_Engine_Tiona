@@ -69,7 +69,7 @@ CLEAN_OBJ = {
     "narrative_phase": "transition",
     "phase_confidence": 72,
     "allowed_direction": "conflicted",
-    "current_action": "Stand down with no position.",
+    "current_action": "stand_down",
     "reason": "No confirmed protected low and no fresh liquidity event.",
 }
 CLEAN = json.dumps(CLEAN_OBJ)

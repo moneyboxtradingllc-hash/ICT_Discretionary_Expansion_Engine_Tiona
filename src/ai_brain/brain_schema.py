@@ -17,6 +17,26 @@ _PHASES = {"accumulation", "manipulation", "distribution", "reversal",
            "continuation", "retracement", "exhaustion", "transition",
            "neutral", "conflicted"}
 
+# current_action is an authority token, not free-form descriptive prose. Keep
+# recognition here so validation, candidate production, and conditional-plan
+# routing share the same exact contract.
+ACTION_PROPOSE_ENTRY = "propose_entry"
+ACTION_WATCHING = "watching"
+ACTION_STAND_DOWN = "stand_down"
+CANONICAL_ACTIONS = frozenset((ACTION_PROPOSE_ENTRY, ACTION_WATCHING,
+                               ACTION_STAND_DOWN))
+
+
+def canonical_action(value):
+    """Return an exact supported action token; never infer intent from prose."""
+    return value if isinstance(value, str) and value in CANONICAL_ACTIONS else None
+
+
+def validate_current_action(value) -> tuple[bool, str | None]:
+    if canonical_action(value) is None:
+        return False, "current_action must be exactly propose_entry, watching, or stand_down"
+    return True, None
+
 _REQUIRED = {
     "market_story":              str,
     "narrative_direction":       str,   # in _DIRECTIONS
@@ -152,6 +172,9 @@ def validate_llm_core(resp: dict) -> tuple:
                 return False, f"missing core field: {f}"
             if not isinstance(resp[f], t):
                 return False, f"{f} wrong type"
+        action_ok, action_reason = validate_current_action(resp.get("current_action"))
+        if not action_ok:
+            return False, action_reason
         if resp["narrative_direction"] not in _DIRECTIONS:
             return False, f"narrative_direction '{resp['narrative_direction']}' invalid"
         if resp["narrative_phase"] not in _PHASES:
@@ -197,6 +220,9 @@ def validate_brain_output(resp: dict) -> tuple:
                 return False, f"missing field: {field}"
             if not isinstance(resp[field], typ):
                 return False, f"{field} wrong type: {type(resp[field]).__name__}"
+        action_ok, action_reason = validate_current_action(resp.get("current_action"))
+        if not action_ok:
+            return False, action_reason
         if resp["narrative_direction"] not in _DIRECTIONS:
             return False, f"narrative_direction '{resp['narrative_direction']}' invalid"
         if resp["narrative_phase"] not in _PHASES:

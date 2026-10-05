@@ -59,7 +59,7 @@ _GOOD_LLM = {  # a schema-core-valid LLM narrative payload
     "preferred_tools": ["bearish_ifvg"], "invalidation_level": 702.5,
     "thesis_health": "n/a", "contradiction_flags": [], "warnings": [],
     "confidence_by_component": {"delivery": 25, "liquidity": 60, "structure": 40},
-    "current_action": "avoid_bullish", "reason": "delivery bearish vs bias bullish",
+    "current_action": "stand_down", "reason": "delivery bearish vs bias bullish",
     "must_not_do": ["do not trade bullish"], "protected_high_status": "approaching",
     "protected_low_status": "none",
     "dominant_reasoning": ("Buy-side liquidity was swept and reclaimed; price trades "
@@ -123,6 +123,7 @@ class TestLLMDisabledDeterministic(_Base):
             res = run_narrative_brain(_snap(), "QQQ", StanceMemory(persist=False))
         m.assert_not_called()
         self.assertEqual(res["source"], "deterministic")
+        self.assertEqual(res["output"]["current_action"], "stand_down")
 
 
 class TestFailedLLMExplicitFallback(_Base):
@@ -133,6 +134,7 @@ class TestFailedLLMExplicitFallback(_Base):
                 res = run_narrative_brain(_snap(), "QQQ", StanceMemory(persist=False))
         self.assertEqual(res["source"], "llm_failed_fallback")
         self.assertEqual(res["fallback_reason"], "no_json_in_response")
+        self.assertEqual(res["output"]["current_action"], "stand_down")
         self.assertTrue(any("explicit deterministic fallback" in m for m in cm.output))
         # output still schema-valid (deterministic core)
         ok, _ = validate_brain_output(res["output"])
@@ -171,7 +173,7 @@ class TestCoreValidator(_Base):
     def test_core_validator_accepts_narrative_only(self):
         core = {"market_story": "x", "narrative_direction": "bearish",
                 "narrative_phase": "manipulation", "phase_confidence": 50,
-                "allowed_direction": "bearish", "current_action": "avoid_bullish",
+                "allowed_direction": "bearish", "current_action": "stand_down",
                 "reason": "y"}
         ok, _ = validate_llm_core(core)
         self.assertTrue(ok)

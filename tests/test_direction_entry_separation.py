@@ -66,7 +66,7 @@ def stand_down(direction="bearish", **over):
 
 def entry(direction="bearish", **over):
     base = dict(narrative_direction=direction, allowed_direction=direction,
-                current_action="enter on retest of 29500",
+                current_action="propose_entry",
                 recommended_playbook_family="trend_continuation",
                 recommended_tool_family=["fvg"], invalidation_level=29500.0)
     base.update(over)

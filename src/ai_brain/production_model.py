@@ -166,6 +166,9 @@ _CONTRACT_SOURCES = (
     ("prompt", "ai_brain/brain_prompt.py"),
     ("schema", "ai_brain/brain_schema.py"),
     ("validator", "ai_brain/brain_validation.py"),
+    # Deterministic/fallback assembly emits the explicit stand-down token and
+    # must remain bound with the action authority contract.
+    ("brain_assembly", "ai_brain/narrative_brain.py"),
     ("input", "ai_brain/brain_input.py"),
     ("protected_swings", "narrative_authority/protected_swings.py"),
     # LUNA-SWING-SEQUENCE-TRUTH-1 (2026-09-01) — THE STRUCTURAL/REGIME TRUTH

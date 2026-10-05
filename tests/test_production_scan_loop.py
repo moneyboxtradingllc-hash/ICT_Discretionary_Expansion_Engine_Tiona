@@ -163,7 +163,7 @@ def parsed(**over):
          "invalidation_level": 29875.0, "active_draw": "buy side liquidity above",
          "recommended_playbook_family": "continuation",
          "recommended_tool_family": ["fvg"], "market_story": "bullish continuation",
-         "current_action": "await_retest"}
+         "current_action": "propose_entry"}
     p.update(over)
     return p
 
@@ -338,6 +338,31 @@ class TestArmGatesTheOrderPath:
 
 
 class TestLunaGating:
+
+    @pytest.mark.parametrize("action", [
+        "pending confirmation", "unknown", "", "await_retest",
+        "watching: enter when the zone is touched",
+    ])
+    def test_malformed_action_never_becomes_a_candidate_or_conditional_plan(
+            self, tmp_path, action):
+        loop, _, session, mission = build(
+            tmp_path, cycle=Cycle(output=parsed(current_action=action)))
+        out = loop.scan_once()
+        assert out["outcome"] == PL.NO_CANDIDATE
+        assert mission.candidate_count == 0
+        assert mission.token_count == 0
+        assert mission.entry_attempt_count == 0
+        assert session.place_calls == 0
+        assert loop.active_candidate is None
+        assert loop.active_conditional_plan is None
+
+    def test_malformed_action_refusal_is_recorded_as_action_authority(self,
+                                                                      tmp_path):
+        loop, _, _, _ = build(
+            tmp_path, cycle=Cycle(output=parsed(current_action="unknown")))
+        out = loop.scan_once()
+        assert out["outcome"] == PL.NO_CANDIDATE
+        assert out["reason"] == "brain_action_invalid"
 
     def test_neutral_produces_no_candidate(self, tmp_path):
         loop, _, s, m = build(tmp_path, cycle=Cycle(output={"narrative_direction": "neutral"}))

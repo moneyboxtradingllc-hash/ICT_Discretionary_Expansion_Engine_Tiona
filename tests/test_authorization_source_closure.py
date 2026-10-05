@@ -43,6 +43,8 @@ MUST_BE_BOUND = {
     "ai_brain/brain_prompt.py": "the instructions themselves",
     "ai_brain/brain_schema.py": "the shape of an acceptable answer",
     "ai_brain/brain_validation.py": "which answers are accepted or repaired",
+    "ai_brain/narrative_brain.py":
+        "Brain action emitted by deterministic and fallback assembly",
     "ai_brain/brain_input.py": "the evidence payload -- the v13 defect",
     "narrative_authority/protected_swings.py": "which structures are protected",
     "market_state/mtf_market_state.py": "the per-timeframe synthesis",

@@ -74,7 +74,9 @@ def parsed(**over):
          "active_draw": "buy side liquidity above",
          "recommended_playbook_family": "continuation",
          "recommended_tool_family": ["fvg"], "market_story": "bullish continuation",
-         "current_action": "await_retest"}
+         # A positive candidate fixture must carry explicit entry intent.
+         # await_retest describes waiting and is not authorization.
+         "current_action": "propose_entry"}
     p.update(over)
     return p
 
@@ -144,6 +146,29 @@ class TestValidCandidates:
         assert c.extras["tool_family"] == ["fvg"]
         assert c.extras["sovereign_conversion"] is True
         assert c.extras["model"] == PRODUCTION_MODEL
+
+    @pytest.mark.parametrize("action", [
+        "pending confirmation", "unknown", "", "   ", None, 7, True,
+        [], {}, "await_retest", "propose_entry after confirmation",
+        "propose_entryXYZ", "enter on retest of 29500",
+        "enter now if price confirms",
+    ])
+    def test_only_explicit_entry_action_can_produce_an_immediate_candidate(self,
+                                                                         action):
+        maker = producer()
+        with pytest.raises(NoCandidate) as exc:
+            produce(maker, res=result(parsed=parsed(current_action=action)))
+        assert exc.value.reason == "brain_action_invalid"
+        assert maker.last_decision_trace["brain_action_refusal_reason"] == \
+            "brain_action_invalid"
+
+    def test_legacy_wait_refusal_and_verbose_watching_remain_refusals(self):
+        for action, reason in (("waiting for confirmation", "action_declines_entry"),
+                               ("watching: enter after touch",
+                                "conditional_plan_action_invalid")):
+            with pytest.raises(NoCandidate) as exc:
+                produce(res=result(parsed=parsed(current_action=action)))
+            assert exc.value.reason == reason
 
     def test_plan_wake_uses_only_the_directional_executable_side_and_exact_id(self):
         registry = WakeRegistry()

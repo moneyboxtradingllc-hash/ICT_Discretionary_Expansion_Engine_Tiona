@@ -41,7 +41,7 @@ GOOD_LLM = {
     "warnings": [],
     "confidence_by_component": {"delivery": 60, "liquidity": 60,
                                 "structure": 50},
-    "current_action": "await_retest",
+    "current_action": "stand_down",
     "reason": "Evidence is constructive but entry still requires a retest.",
     "must_not_do": ["do not chase price"],
     "protected_high_status": "none",

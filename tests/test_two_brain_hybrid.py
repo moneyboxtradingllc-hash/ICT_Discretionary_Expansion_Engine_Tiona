@@ -325,7 +325,8 @@ class TestBaselineParity:
     def test_wrong_model_still_fires_without_an_envelope(self, monkeypatch):
         monkeypatch.delenv("TWO_BRAIN_MODE", raising=False)
         with pytest.raises(NoCandidate) as exc:
-            self.produce({"ok": True, "parsed": {"narrative_direction": "bearish"},
+            self.produce({"ok": True, "parsed": {"narrative_direction": "bearish",
+                                                    "current_action": "propose_entry"},
                           "fallback_reason": None, "model": "some-other-model"})
         assert exc.value.reason == "wrong_model"
 
@@ -333,14 +334,16 @@ class TestBaselineParity:
         """No envelope: the pre-hybrid law applies, exactly as at baseline."""
         monkeypatch.setenv("TWO_BRAIN_MODE", TB.MATERIAL_REJECT_VETO)
         with pytest.raises(NoCandidate) as exc:
-            self.produce({"ok": True, "parsed": {"narrative_direction": "bearish"},
+            self.produce({"ok": True, "parsed": {"narrative_direction": "bearish",
+                                                    "current_action": "propose_entry"},
                           "fallback_reason": None, "source": "deterministic"})
         assert exc.value.reason == "wrong_model"
 
     def test_fallback_reason_still_refused(self, monkeypatch):
         monkeypatch.delenv("TWO_BRAIN_MODE", raising=False)
         with pytest.raises(NoCandidate) as exc:
-            self.produce({"ok": True, "parsed": {"narrative_direction": "bearish"},
+            self.produce({"ok": True, "parsed": {"narrative_direction": "bearish",
+                                                    "current_action": "propose_entry"},
                           "fallback_reason": "llm_failed", "model": PRODUCTION_MODEL})
         assert exc.value.reason == "fallback_not_authoritative"
 
@@ -349,7 +352,8 @@ class TestBaselineParity:
         p = proposal()
         env = TB.build_envelope(proposal=p, review=review(p=p))
         with pytest.raises(NoCandidate) as exc:
-            self.produce({"ok": True, "parsed": {"narrative_direction": "bearish"},
+            self.produce({"ok": True, "parsed": {"narrative_direction": "bearish",
+                                                    "current_action": "propose_entry"},
                           "fallback_reason": None,
                           TB.HYBRID_ENVELOPE_KEY: env})
         assert exc.value.reason == "hybrid_envelope_unauthorized"
@@ -380,7 +384,7 @@ class TestMechanicalSovereignty:
 
         parsed = {"narrative_direction": "bearish", "allowed_direction": "bearish",
                   "narrative_phase": "distribution",
-                  "current_action": "propose bearish entry",
+                  "current_action": "propose_entry",
                   "recommended_playbook_family": "liquidity_sweep_reversal",
                   "recommended_tool_family": [EXEMPLAR],
                   "invalidation_level": 29855.0,

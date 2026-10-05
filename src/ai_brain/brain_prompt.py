@@ -159,6 +159,16 @@ dominant campaign direction and the selected playbook/tool must agree with it.
 Conflicted or neutral direction cannot carry a proposal. Stand down whenever
 the campaign or transfer state is unresolved.
 
+ACTION AUTHORITY IS EXPLICIT. `current_action` is one of exactly three tokens:
+- `propose_entry`: you explicitly propose an immediate entry now, subject to all
+  existing authority and execution gates.
+- `watching`: you explicitly authorize only the exact conditional plan and
+  expiry you publish; it never authorizes immediate exposure.
+- `stand_down`: you authorize no new exposure and no conditional plan.
+Use `stand_down` when waiting for confirmation or when entry intent is absent.
+Do not replace these tokens with free-form explanations or imply an entry from
+direction, phase, geometry, confidence, a tool, or an objective.
+
 Only cite analogs that appear in the provided memory_retrieval input; never
 invent analog timestamps.
 
@@ -191,7 +201,7 @@ Output ONLY valid JSON, exactly this schema, no prose, no markdown:
  "contradiction_flags": ["<string>", ...],
  "warnings": ["<string>", ...],
  "confidence_by_component": {"delivery": <int>, "liquidity": <int>, "structure": <int>},
- "current_action": "<string>",
+ "current_action": "propose_entry|watching|stand_down",
  "reason": "<string>",
  "must_not_do": ["<string>", ...],
  "protected_high_status": "approaching|rejecting|violating|below|none",
@@ -313,6 +323,7 @@ invalidations. They are produced by the deterministic engine from this exact
 snapshot. Nothing outside those lists can be traded against.
 
 When current_action proposes an entry you MUST return:
+  "current_action":  "propose_entry",
   "objective_id":    the id of the object your thesis actually intends to reach
   "invalidation_id": the id of the structure that actually invalidates it
 Both must be copied EXACTLY from the supplied lists. Never invent an id, never

@@ -588,7 +588,7 @@ class TestTheHallucinationCase:
         parsed = {"recommended_playbook_family": "continuation",
                   "recommended_tool_family": ["unicorn_block"]}
         # every earlier gate passes
-        CandidateProducer._assert_action_permits_entry({"current_action": "enter"})
+        CandidateProducer._assert_action_permits_entry({"current_action": "propose_entry"})
         assert CandidateProducer._direction(parsed | {"narrative_direction": "bullish"},
                                             qual) == "bullish"
         playbook, tools = CandidateProducer._playbook(parsed, qual)

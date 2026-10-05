@@ -1164,6 +1164,7 @@ class ProductionLoop:
                     "detail": "no sovereign directional thesis", "scan": scan["scan_count"]}
 
         in_window = bool(self._in_window())
+        from ai_brain.brain_schema import canonical_action
         try:
             candidate = self.producer.produce(
                 brain_result=scan["brain_result"], brain_input=scan["brain_input"],
@@ -1176,9 +1177,9 @@ class ProductionLoop:
                 require_campaign_lifecycle=True,
                 campaign_draw=scan.get("campaign_draw_truth"),
                 campaign_session_id=str(getattr(self.cycle, "session_id", "") or ""),
-                conditional_plan=(str(((scan.get("brain_result") or {}).get("parsed")
-                                       or {}).get("current_action") or "").lower()
-                                  == "watching"))
+                conditional_plan=(canonical_action(
+                    ((scan.get("brain_result") or {}).get("parsed") or {}).get(
+                        "current_action")) == "watching"))
         except NoCandidate as exc:
             self._clear_conditional_plan()
             self._record_decision(scan, "REJECTED", exc.reason, str(exc))
