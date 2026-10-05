@@ -252,6 +252,9 @@ def test_trigger_uses_stored_brain_plan_and_current_mechanics_without_recalling_
         clear_conditional_watch=lambda **_kwargs: True))
     loop.producer = CandidateProducer(account_fingerprint="acct:test", contract=contract,
                                       allow_prose_objective_fallback=True)
+    # This archive-style fixture has no process-custodied plan authority; it
+    # must remain refused even though it carries an old parsed Brain result.
+    loop.mission = SimpleNamespace(authorization=None)
     loop.cycle = SimpleNamespace(session_id=session, contract_id=contract)
     loop.clock = lambda: NOW
     loop._record_plan_events = lambda *_args, **_kwargs: None
@@ -273,11 +276,11 @@ def test_trigger_uses_stored_brain_plan_and_current_mechanics_without_recalling_
     }, in_window=True)
 
     assert result["outcome"] == "NO_CANDIDATE"
-    assert result["reason"] == "campaign_lifecycle_refused"
-    assert snapshot["campaign_lifecycle"]["state"] == "AUTHORITY_UNKNOWN"
-    assert snapshot["campaign_lifecycle"]["reason"] == \
-        "current_brain_authority_unavailable"
-    assert authority_blocks == [trigger_block]
+    assert result["reason"] == "conditional_plan_authority_invalid"
+    # The incomplete archive plan refuses before it can substitute for current
+    # phase authority or publish an assessment.
+    assert snapshot.get("campaign_lifecycle") is None
+    assert authority_blocks == []
     assert scan["brain_result"]["parsed"] == {}
     assert loop.active_conditional_plan is None
 

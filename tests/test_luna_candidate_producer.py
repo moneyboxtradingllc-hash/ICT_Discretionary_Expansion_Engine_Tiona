@@ -179,7 +179,9 @@ class TestValidCandidates:
         plan = produce(maker, res=result(parsed=p), in_window=False,
                        conditional_plan=True)
         assert plan.extras["conditional_plan"] is True
-        with pytest.raises(NoCandidate, match="reward_below_qualification"):
+        # A raw conditional_trigger flag has no plan authority and may not
+        # bypass Lifecycle merely to reach the ordinary reward gate.
+        with pytest.raises(NoCandidate, match="campaign_lifecycle_refused"):
             produce(maker, res=result(parsed=p), conditional_trigger=True)
 
     def test_watching_cannot_fall_through_to_an_immediate_candidate(self):
@@ -199,7 +201,9 @@ class TestValidCandidates:
             self, action, mode):
         p = parsed(current_action=action,
                    plan_expires_at="2026-08-05T15:31:00+00:00")
-        with pytest.raises(NoCandidate, match="conditional_plan_action_invalid"):
+        expected = ("campaign_lifecycle_refused" if mode.get("conditional_trigger")
+                    else "conditional_plan_action_invalid")
+        with pytest.raises(NoCandidate, match=expected):
             produce(res=result(parsed=p), **mode)
 
     def test_watching_without_explicit_future_expiry_is_refused(self):

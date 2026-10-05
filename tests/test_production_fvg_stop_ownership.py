@@ -287,10 +287,10 @@ class TestToolVerificationIsNotStopAuthority:
     def test_downstream_occurrence_read_only_revalidates_conditional_plan_identity(self):
         """6 — ordinary candidate logic ignores occurrence IDs as authority.
 
-        LATENCY-1 adds one bounded production consumer: at a conditional trigger,
-        the loop compares the re-detected occurrence with the exact authorized
-        occurrence and refuses on mismatch. That read protects plan identity; it
-        does not choose entry, stop, target, or risk geometry.
+        LATENCY-1 adds two bounded consumers: the loop validates the exact trigger
+        occurrence, and the process-local plan wrapper binds and rechecks that
+        occurrence against the authored plan and fresh candidate. These reads
+        protect plan identity; they do not choose entry, stop, target, or risk.
 
         THIS IS A CLAIM ABOUT SOURCE CONTENTS, so it is answered by reading the
         source. It used `git grep`, which made a statement about the code
@@ -316,6 +316,15 @@ class TestToolVerificationIsNotStopAuthority:
                         found.append(
                             _os.path.relpath(p, repo).replace(_os.sep, "/"))
         assert sorted(found) == [
+            "src/broker/conditional_plan_authority.py",
             "src/broker/luna_candidate_producer.py",
             "src/broker/topstepx_production_loop.py",
         ], found
+        wrapper_path = _os.path.join(
+            root, "broker", "conditional_plan_authority.py")
+        with open(wrapper_path, encoding="utf-8") as fh:
+            wrapper = fh.read()
+        # The wrapper may read the field only to bind the authored occurrence
+        # and compare it against the current old/fresh candidate identities.
+        assert wrapper.count("selected_tool_occurrence_id") == 4
+        assert 'fresh_extras.get("selected_tool_occurrence_id") != bound.get("occurrence_id")' in wrapper

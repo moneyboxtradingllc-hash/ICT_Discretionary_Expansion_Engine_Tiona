@@ -522,8 +522,8 @@ def test_missing_production_observation_time_does_not_fall_back_to_candle(
     assert provider.call_count == 1
 
 
-def test_real_brain_timing_reaches_conditional_plan_telemetry(monkeypatch, tmp_path):
-    """Provider timing survives the actual Brain -> scan -> plan path."""
+def test_fake_candidate_cannot_publish_unbound_conditional_plan(monkeypatch, tmp_path):
+    """Provider timing survives while incomplete plan authority is refused."""
     import adaptive_learning.capital_intelligence_engine as capital
     import live_scan.production_scan_cycle as cycle_module
     import shared_context.council as council
@@ -670,7 +670,8 @@ def test_real_brain_timing_reaches_conditional_plan_telemetry(monkeypatch, tmp_p
 
     result = loop.scan_once()
 
-    assert result["outcome"] == "CONDITIONAL_PLAN_PUBLISHED"
+    assert result["outcome"] == "NO_CANDIDATE"
+    assert result["reason"].startswith("conditional_plan_authority_capture_failed:")
     assert provider.call_count == 1
     # This is the actual result returned from run_narrative_brain and
     # propagated through ProductionScanCycle.scan into production publication.
@@ -692,7 +693,9 @@ def test_real_brain_timing_reaches_conditional_plan_telemetry(monkeypatch, tmp_p
     completed = next(e for e in events if e["event"] == "brain_decision_completed")
     assert completed["timestamp"] == archived["provider_call_completed_at"]
     assert completed["latency_seconds"] == archived["provider_latency_seconds"]
-    assert next(e for e in events if e["event"] == "plan_published")
+    assert next(e for e in events if e["event"] == "plan_authority_refused")[
+        "reason"] == result["reason"]
+    assert not any(e["event"] == "plan_published" for e in events)
 
     # The following mechanics-only scan uses the cycle's real trigger branch;
     # there must be no second provider/Brain invocation.

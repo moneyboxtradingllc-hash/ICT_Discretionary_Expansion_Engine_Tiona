@@ -1177,6 +1177,10 @@ class CandidateProducer:
     #: invalidation identity was published. Live production leaves this false.
     allow_numeric_invalidation_fallback: bool = False
     _superseded: list = field(default_factory=list)
+    # Identity scope for in-memory conditional-plan authority. It is recreated
+    # with this producer and is never serialized or restored after restart.
+    _conditional_plan_scope: object = field(default_factory=object, init=False,
+                                           repr=False)
     #: Stage-by-stage record of the LAST produce() call. Written only; the
     #: producer never reads it back, so evidence cannot become authority.
     last_decision_trace: dict = field(default_factory=dict)
@@ -1201,6 +1205,16 @@ class CandidateProducer:
                 "session_phase_mechanical_reason": context["mechanical_reason"],
                 "session_phase_brain_disagreed": disagreed}
 
+    def capture_conditional_plan_authority(self, *, candidate, scan,
+                                           authorization, process_session_id,
+                                           now):
+        from broker.conditional_plan_authority import capture
+        return capture(scope=self._conditional_plan_scope, candidate=candidate,
+                       scan=scan, brain_block=(scan or {}).get("brain_block"),
+                       brain_result=(scan or {}).get("brain_result"),
+                       authorization=authorization,
+                       process_session_id=process_session_id, now=now)
+
     def produce(self, *, brain_result: dict, brain_input: dict, snapshot: dict,
                 qualification: dict, engine_inventory: dict,
                 snapshot_id: str, market_data_timestamp: str,
@@ -1210,7 +1224,12 @@ class CandidateProducer:
                 conditional_trigger: bool = False,
                 require_campaign_lifecycle: bool = False,
                 campaign_draw: dict = None,
-                campaign_session_id: str = "") -> CandidateSnapshot:
+                campaign_session_id: str = "",
+                conditional_plan_authority=None,
+                conditional_plan_candidate=None,
+                conditional_session_authorization=None,
+                process_session_id: str = "",
+                conditional_plan_trigger_event: dict = None) -> CandidateSnapshot:
         now = now or datetime.now(timezone.utc)
 
         # EVIDENCE, NOT AUTHORITY. The trace records which stage a proposal
@@ -1220,6 +1239,35 @@ class CandidateProducer:
         self.last_decision_trace = trace
         _p = brain_result.get("parsed") or {}
         lifecycle = (snapshot or {}).get("campaign_lifecycle")
+        if conditional_trigger and isinstance(lifecycle, dict):
+            trace["campaign_lifecycle_assessment"] = dict(lifecycle)
+            trace["campaign_lifecycle_current_reason"] = lifecycle.get("reason")
+        if conditional_trigger:
+            # A trigger is never allowed to omit the normal restrictive
+            # Lifecycle gate. Only the sealed conditional-plan wrapper may
+            # satisfy its one current-phase-only refusal.
+            require_campaign_lifecycle = True
+        conditional_plan_ok = False
+        conditional_plan_reason = "conditional_plan_authority_missing_or_unbound"
+        if conditional_trigger:
+            if conditional_plan_authority is not None:
+                from broker.conditional_plan_authority import validate
+                (conditional_plan_ok, conditional_plan_reason,
+                 plan_evidence) = validate(
+                    authority=conditional_plan_authority,
+                    scope=self._conditional_plan_scope,
+                    candidate=conditional_plan_candidate,
+                    candidate_at_trigger=None,
+                    brain_result=brain_result, snapshot=snapshot,
+                    brain_input=brain_input, draw=campaign_draw,
+                    lifecycle=lifecycle,
+                    authorization=conditional_session_authorization,
+                    process_session_id=process_session_id,
+                    contract_id=self.contract.id,
+                    session_id=campaign_session_id,
+                    trigger_event=conditional_plan_trigger_event,
+                    trigger_snapshot_id=snapshot_id, now=now)
+                trace["conditional_plan_authority"] = plan_evidence
         if lifecycle is None and require_campaign_lifecycle:
             lifecycle_reason = "current_campaign_lifecycle_assessment_unavailable"
             trace["campaign_lifecycle_state"] = None
@@ -1232,14 +1280,42 @@ class CandidateProducer:
             from market_data.campaign_lifecycle import participation_permission
             lifecycle_ok, lifecycle_reason = participation_permission(
                 lifecycle, _p.get("narrative_direction"))
+            lifecycle_gate_reason = lifecycle_reason
             if not lifecycle_ok:
-                trace["campaign_lifecycle_state"] = (
-                    lifecycle.get("state") if isinstance(lifecycle, dict) else None)
-                trace["campaign_lifecycle_refusal"] = lifecycle_reason
-                refusal = NoCandidate("campaign_lifecycle_refused", lifecycle_reason)
+                if conditional_trigger and conditional_plan_ok:
+                    lifecycle_reason = "preauthorized_plan_judgment_verified"
+                else:
+                    lifecycle_reason = conditional_plan_reason if conditional_trigger else lifecycle_reason
+                if conditional_trigger and conditional_plan_ok:
+                    trace["campaign_lifecycle_state"] = lifecycle.get("state")
+                    # Preserve the current Lifecycle refusal as evidence; the
+                    # separate plan authority explains the narrow permission.
+                    trace["campaign_lifecycle_refusal"] = lifecycle_gate_reason
+                    trace["campaign_lifecycle_authority_basis"] = (
+                        "PREAUTHORIZED_PLAN_JUDGMENT")
+                    trace["campaign_lifecycle_authority_note"] = (
+                        "current phase remains UNKNOWN; exact bound watching plan verified")
+                else:
+                    trace["campaign_lifecycle_state"] = (
+                        lifecycle.get("state") if isinstance(lifecycle, dict) else None)
+                    trace["campaign_lifecycle_refusal"] = lifecycle_reason
+                    refusal = NoCandidate("campaign_lifecycle_refused", lifecycle_reason)
+                    _annotate_trace(trace, refusal.reason, refusal.detail)
+                    refusal.decision_trace = dict(trace)
+                    raise refusal
+            elif conditional_trigger and not conditional_plan_ok:
+                refusal = NoCandidate("campaign_lifecycle_refused",
+                                      conditional_plan_reason)
                 _annotate_trace(trace, refusal.reason, refusal.detail)
                 refusal.decision_trace = dict(trace)
                 raise refusal
+            elif conditional_trigger:
+                trace["campaign_lifecycle_state"] = lifecycle.get("state")
+                trace["campaign_lifecycle_refusal"] = None
+                trace["campaign_lifecycle_authority_basis"] = (
+                    "PREAUTHORIZED_PLAN_JUDGMENT")
+                trace["campaign_lifecycle_authority_note"] = (
+                    "current phase remains UNKNOWN; exact bound watching plan verified")
         _action = str(_p.get("current_action") or "").strip().lower()
         if _action.startswith("watching") and _action != "watching":
             raise NoCandidate(
@@ -1498,6 +1574,28 @@ class CandidateProducer:
                 "low": (selected_tool or {}).get("zone_low"),
                 "high": (selected_tool or {}).get("zone_high"),
             }
+
+        if conditional_trigger:
+            from broker.conditional_plan_authority import validate
+            plan_ok, plan_reason, plan_evidence = validate(
+                authority=conditional_plan_authority,
+                scope=self._conditional_plan_scope,
+                candidate=conditional_plan_candidate,
+                candidate_at_trigger=cand,
+                brain_result=brain_result, snapshot=snapshot,
+                brain_input=brain_input, draw=campaign_draw,
+                lifecycle=lifecycle,
+                authorization=conditional_session_authorization,
+                process_session_id=process_session_id,
+                contract_id=self.contract.id,
+                session_id=campaign_session_id,
+                trigger_event=conditional_plan_trigger_event,
+                trigger_snapshot_id=snapshot_id, now=now)
+            if not plan_ok:
+                raise NoCandidate("conditional_plan_authority_invalid", plan_reason)
+            trace["conditional_plan_authority"] = plan_evidence
+            cand.extras["conditional_plan_authority"] = plan_evidence
+            cand.extras["current_lifecycle_assessment"] = dict(lifecycle)
 
         if conditional_plan:
             expiry = _aware_expiry(parsed.get("plan_expires_at"), now)

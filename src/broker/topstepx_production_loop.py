@@ -152,7 +152,8 @@ class ProductionLoop:
                          execution_economics: dict = None, *,
                          brain_output_override: dict = None,
                          conditional_plan_id: str = None,
-                         plan_authored_scan_id: str = None):
+                         plan_authored_scan_id: str = None,
+                         preauthorized_plan_authoring: dict = None):
         """One death certificate per scan. Never raises; observability only.
 
         PROD-20260807 EVIDENCE DEFECT: the live qualification object was never
@@ -194,6 +195,8 @@ class ProductionLoop:
                 record["decision_authority"] = "PREAUTHORIZED_CONDITIONAL_PLAN"
                 record["conditional_plan_id"] = conditional_plan_id
                 record["plan_authored_scan_id"] = plan_authored_scan_id
+            if isinstance(preauthorized_plan_authoring, dict):
+                record["preauthorized_plan_authoring"] = preauthorized_plan_authoring
             if disposition == "CONDITIONAL_PLAN":
                 from broker.candidate_decision_record import CONDITIONAL_PLAN_PUBLISHED
                 record["final_disposition"] = CONDITIONAL_PLAN_PUBLISHED
@@ -1197,11 +1200,36 @@ class ProductionLoop:
         # carried between scans.
         self.active_candidate = candidate
         if candidate.extras.get("conditional_plan"):
+            try:
+                authority_now = self.clock()
+                plan_authority = self.producer.capture_conditional_plan_authority(
+                    candidate=candidate, scan=scan,
+                    authorization=self.mission.authorization,
+                    process_session_id=str(getattr(self.cycle, "session_id", "") or ""),
+                    now=authority_now)
+            except Exception as exc:  # noqa: BLE001 -- no unbound watch is published
+                self.active_candidate = None
+                self._clear_conditional_plan()
+                reason = f"conditional_plan_authority_capture_failed:{type(exc).__name__}"
+                attempted_brain = scan.get("brain_block") or {}
+                self._record_plan_events(candidate.candidate_id, [
+                    {"event": "brain_call_started",
+                     "timestamp": attempted_brain.get("provider_call_started_at")},
+                    {"event": "brain_decision_completed",
+                     "timestamp": attempted_brain.get("provider_call_completed_at"),
+                     "latency_seconds": attempted_brain.get("provider_latency_seconds")},
+                    {"event": "plan_authority_refused",
+                     "timestamp": authority_now.isoformat(), "reason": reason},
+                ])
+                self._record_decision(scan, "REJECTED", reason, str(exc))
+                return {"outcome": NO_CANDIDATE, "reason": reason,
+                        "detail": str(exc), "scan": scan["scan_count"]}
             self._clear_conditional_plan()
             zone = candidate.extras["activation_zone"]
             plan_id = candidate.candidate_id
             self.active_conditional_plan = {
                 "plan_id": plan_id, "candidate": candidate,
+                "authority": plan_authority,
                 "parsed": dict(candidate.extras["conditional_plan_brain_output"]),
                 "brain_result": dict(candidate.extras["conditional_plan_brain_result"]),
                 "published_at": self.clock().isoformat(),
@@ -1405,28 +1433,38 @@ class ProductionLoop:
                         "conditional_plan_armed_inside"}):
                 raise NoCandidate("conditional_plan_trigger_mismatch",
                                   "wake does not match the authorized plan identity")
-            parsed = dict(plan.get("parsed") or {})
+            parsed_copy = dict(plan.get("parsed") or {})
+            from broker.conditional_plan_authority import (
+                matches_authoring_output, matches_authoring_result)
+            if not matches_authoring_output(
+                    authority=plan.get("authority"),
+                    scope=self.producer._conditional_plan_scope,
+                    parsed=parsed_copy):
+                raise NoCandidate("conditional_plan_authority_invalid",
+                                  "detached authoring output differs from bound Brain judgment")
+            authority_payload = plan["authority"].payload()
+            if not matches_authoring_result(
+                    authority=plan.get("authority"),
+                    scope=self.producer._conditional_plan_scope,
+                    brain_result=plan.get("brain_result")):
+                raise NoCandidate("conditional_plan_authority_invalid",
+                                  "detached converted Brain result differs from bound judgment")
+            parsed = authority_payload["parsed"]
             if str(parsed.get("current_action") or "").lower() != "watching":
                 raise NoCandidate("conditional_plan_authority_invalid",
                                   "stored Brain action is not watching")
             snap = scan.get("snapshot") or {}
             brain_input = scan.get("brain_input") or {}
-            plan_brain_result = plan.get("brain_result") or {}
+            plan_brain_result = authority_payload["brain_result"]
             if not ProductionScanCycle.is_validated_brain_result(plan_brain_result):
                 raise NoCandidate("conditional_plan_authority_invalid",
                                   "stored converted Brain result is not validated")
             from market_data.campaign_lifecycle import evaluate_campaign_lifecycle
-            # A converted CandidateProducer result is not a Brain block, and a
-            # plan-time response is not the trigger scan's validated phase.
-            # Read phase authority only from this scan's correctly typed block.
-            current_brain_block = scan.get("brain_block")
-            current_brain_output = (
-                current_brain_block.get("output")
-                if isinstance(current_brain_block, dict)
-                and isinstance(current_brain_block.get("output"), dict) else {})
+            # This trigger deliberately makes no Brain call. Historical plan
+            # phase remains authoring evidence only; current Lifecycle must
+            # represent the exact phase-unavailable refusal.
             lifecycle = evaluate_campaign_lifecycle(
-                snapshot=snap,
-                brain_output=current_brain_output,
+                snapshot=snap, brain_output={},
                 narrative_continuity=(plan_brain_result.get(
                     "narrative_continuity") or {}),
                 campaign_draw=scan.get("campaign_draw_truth"),
@@ -1434,8 +1472,7 @@ class ProductionLoop:
                                        "session_id", "") or ""),
                 contract_id=str(getattr(getattr(self, "cycle", None),
                                         "contract_id", "") or ""),
-                brain_authority_available=ProductionScanCycle.is_sovereign(
-                    current_brain_block),
+                brain_authority_available=False,
             )
             # The LATENCY-1 trigger has no fresh Brain response, so the current
             # block fails sovereignty and Lifecycle refuses unless current
@@ -1454,7 +1491,7 @@ class ProductionLoop:
                                   "active-path transfer evidence changed after plan publication")
 
             fresh = self.producer.produce(
-                brain_result=plan["brain_result"], brain_input=brain_input,
+                brain_result=plan_brain_result, brain_input=brain_input,
                 snapshot=snap, qualification=scan.get("qualification") or {},
                 engine_inventory=scan.get("engine_inventory") or {},
                 snapshot_id=scan["snapshot_id"],
@@ -1464,7 +1501,13 @@ class ProductionLoop:
                 require_campaign_lifecycle=True,
                 campaign_draw=scan.get("campaign_draw_truth"),
                 campaign_session_id=str(getattr(getattr(self, "cycle", None),
-                                                "session_id", "") or ""))
+                                                "session_id", "") or ""),
+                conditional_plan_authority=plan.get("authority"),
+                conditional_plan_candidate=old,
+                conditional_session_authorization=self.mission.authorization,
+                process_session_id=str(getattr(getattr(self, "cycle", None),
+                                               "session_id", "") or ""),
+                conditional_plan_trigger_event=dict(event))
             fresh_zone = (fresh.extras or {}).get("selected_tool_zone") or {}
             if (fresh.direction != old.direction
                     or fresh.extras.get("playbook") != extras.get("playbook")
@@ -1477,6 +1520,7 @@ class ProductionLoop:
                             "structure_identity") != ((extras.get("structural_invalidation")
                                                        or {}).get("structure_identity")))
                     or fresh.objective.identity != old.objective.identity
+                    or fresh.objective.kind != old.objective.kind
                     or fresh.objective.price != old.objective.price):
                 raise NoCandidate("conditional_plan_material_change",
                                   "selected tool, direction, playbook, invalidation or objective changed")
@@ -1484,13 +1528,21 @@ class ProductionLoop:
             fresh.extras["conditional_plan_trigger"] = dict(event)
             fresh.extras["conditional_plan_authored_scan_id"] = extras.get(
                 "conditional_plan_snapshot_id")
-            self._attach_evidence(
-                fresh, scan, brain_result_override=plan["brain_result"])
+            fresh.extras["preauthorized_plan_authoring"] = {
+                "authority_basis": "PREAUTHORIZED_PLAN_JUDGMENT",
+                "authoring_snapshot_id": extras.get(
+                    "conditional_plan_snapshot_id"),
+                "authoring_phase": parsed.get("narrative_phase"),
+                "brain_response_digest": extras.get("brain_response_digest"),
+                "parsed": plan["authority"].payload()["parsed"],
+            }
+            self._attach_evidence(fresh, scan)
             self._record_decision(
                 scan, "CANDIDATE", None, "conditional_plan_triggered",
-                brain_output_override=parsed,
                 conditional_plan_id=plan["plan_id"],
-                plan_authored_scan_id=extras.get("conditional_plan_snapshot_id"))
+                plan_authored_scan_id=extras.get("conditional_plan_snapshot_id"),
+                preauthorized_plan_authoring=fresh.extras[
+                    "preauthorized_plan_authoring"])
             self.mission.candidate_count += 1
             budget = DLB.resolve(
                 session=self.ps.session, contract_id=self.ps.contract.id,

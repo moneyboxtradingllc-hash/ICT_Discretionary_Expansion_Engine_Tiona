@@ -134,6 +134,8 @@ MUST_BE_BOUND = {
         "current-authority lifecycle projection and additional participation rule",
     "market_data/trade_horizon.py":
         "current-candidate campaign relation and published protected-structure/payoff evidence",
+    "broker/conditional_plan_authority.py":
+        "process-local validation that binds historical watching judgment to current causal truth",
     "broker/topstepx_production_loop.py":
         "production candidate and conditional-trigger call sites for the Lifecycle gate",
     # RAW-TRADE-INTERVAL-TRUTH-1C. These sources jointly determine whether a

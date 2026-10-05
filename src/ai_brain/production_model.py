@@ -284,6 +284,9 @@ _CONTRACT_SOURCES = (
     # selected trade destination relative to the current public campaign draw
     # and publishes bounded protected-structure/payoff evidence.
     ("trade_horizon", "market_data/trade_horizon.py"),
+    # LATENCY-1 preauthorized judgment survives only through this sealed,
+    # process-local lineage contract; changes must stale session authority.
+    ("conditional_plan_authority", "broker/conditional_plan_authority.py"),
 )
 
 #: REPO-ROOT-RELATIVE closure. Same contract, different anchor.
