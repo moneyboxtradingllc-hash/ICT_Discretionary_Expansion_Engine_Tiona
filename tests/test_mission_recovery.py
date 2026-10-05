@@ -22,6 +22,7 @@ from broker.topstepx_session_authorization import (         # noqa: E402
     AuthorizationRefused, ProductionSessionMission, SessionAuthorization)
 from broker.topstepx_production_loop import ProductionLoop  # noqa: E402
 from broker.topstepx_execution_runner import RunnerHalt, INVALIDATION_TOUCHED  # noqa: E402
+from broker import topstepx_execution_runner as R                         # noqa: E402
 
 SESSION = "PROD-TEST"
 FINGERPRINT = "acct:test"
@@ -310,6 +311,83 @@ class TestTheDoctrineCeilingStillHolds:
             mission, RunnerHalt(INVALIDATION_TOUCHED), runner)
         assert mission.state == MS.ATTEMPT_CONSUMED
         assert sm.trades_used() == 1
+
+    def test_conditional_final_quote_terminalization_requires_runner_proof(self, store):
+        sm = session_mission(store)
+        mission = sm.open_trade_mission(**OPEN_ARGS)
+        runner = R.ExecutionRunner(
+            session=object(), account_fingerprint=FINGERPRINT,
+            contract=type("Contract", (), {"id": CONTRACT, "tick_size": 0.25})())
+        refusal = R.ConditionalFinalQuoteRefusal(
+            R.STALE_CANDIDATE, "outside the sealed zone", runner=runner,
+            refusal_reason="conditional_plan_final_quote_outside_authorized_zone",
+            pre_submission_proven=True,
+            _seal=R._CONDITIONAL_FINAL_QUOTE_REFUSAL_SEAL)
+
+        assert ProductionLoop._terminalize_unused_freshness_mission(
+            mission, refusal, runner)
+        assert mission.state == MS.TERMINAL_REFUSAL
+        assert mission.attempt_count == 0
+        assert sm.active_mission is None
+
+    @pytest.mark.parametrize("case", [
+        "plain_stale_candidate", "arbitrary_exception", "wrong_runner",
+        "token_present", "entry_attempted", "not_pre_submission",
+        "attempt_consumed", "mission_token_spent", "order_recorded",
+        "submission_recorded", "acknowledgement_recorded", "mission_not_armed",
+    ])
+    def test_conditional_final_quote_terminalization_rejects_unproven_or_spent(
+            self, store, case):
+        sm = session_mission(store)
+        mission = sm.open_trade_mission(**OPEN_ARGS)
+        runner = R.ExecutionRunner(
+            session=object(), account_fingerprint=FINGERPRINT,
+            contract=type("Contract", (), {"id": CONTRACT, "tick_size": 0.25})())
+        other_runner = R.ExecutionRunner(
+            session=object(), account_fingerprint=FINGERPRINT,
+            contract=type("Contract", (), {"id": CONTRACT, "tick_size": 0.25})())
+        if case == "plain_stale_candidate":
+            exc = RunnerHalt(R.STALE_CANDIDATE, "unrelated stale candidate")
+        elif case == "arbitrary_exception":
+            exc = RuntimeError("unrelated failure")
+        else:
+            refusal_runner = other_runner if case == "wrong_runner" else runner
+            exc = R.ConditionalFinalQuoteRefusal(
+                R.STALE_CANDIDATE, "outside the sealed zone",
+                runner=refusal_runner,
+                refusal_reason="conditional_plan_final_quote_outside_authorized_zone",
+                pre_submission_proven=case != "not_pre_submission",
+                _seal=R._CONDITIONAL_FINAL_QUOTE_REFUSAL_SEAL)
+        if case == "token_present":
+            runner.token = object()
+        elif case == "entry_attempted":
+            runner._entry_attempted = True
+        elif case == "attempt_consumed":
+            mission.consume_attempt(candidate_fingerprint="cand", token_id="tok")
+        elif case == "mission_token_spent":
+            mission.token_spent = True
+        elif case == "order_recorded":
+            mission.order_id = "order-1"
+        elif case == "submission_recorded":
+            mission.submitted_at = "2026-08-10T14:00:00+00:00"
+        elif case == "acknowledgement_recorded":
+            mission.acknowledged_at = "2026-08-10T14:00:00+00:00"
+        elif case == "mission_not_armed":
+            mission.transition(MS.STATE_UNCERTAIN, "execution may be in flight")
+
+        assert not ProductionLoop._terminalize_unused_freshness_mission(
+            mission, exc, runner)
+        assert mission.state != MS.TERMINAL_REFUSAL
+
+    def test_conditional_final_quote_refusal_cannot_be_fabricated_without_seal(self):
+        runner = R.ExecutionRunner(
+            session=object(), account_fingerprint=FINGERPRINT,
+            contract=type("Contract", (), {"id": CONTRACT, "tick_size": 0.25})())
+        with pytest.raises(TypeError, match="runner-issued"):
+            R.ConditionalFinalQuoteRefusal(
+                R.STALE_CANDIDATE, "forged", runner=runner,
+                refusal_reason="conditional_plan_final_quote_outside_authorized_zone",
+                pre_submission_proven=True)
 
     def test_unattempted_terminal_refusal_does_not_spend_trade_slot(self, store):
         sm = session_mission(store)

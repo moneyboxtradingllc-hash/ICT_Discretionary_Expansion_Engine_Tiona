@@ -163,6 +163,29 @@ class RunnerHalt(RuntimeError):
         self.detail = detail
 
 
+_CONDITIONAL_FINAL_QUOTE_REFUSAL_SEAL = object()
+
+
+class ConditionalFinalQuoteRefusal(RunnerHalt):
+    """Typed proof that conditional authority failed before token minting.
+
+    Instances are created only by the final quote authority gate below. The
+    runner reference lets ProductionLoop distinguish that exact pre-submit
+    refusal from unrelated STALE_CANDIDATE failures.
+    """
+
+    def __init__(self, state: str, detail: str, *, runner,
+                 refusal_reason: str, pre_submission_proven: bool,
+                 _seal=None):
+        if _seal is not _CONDITIONAL_FINAL_QUOTE_REFUSAL_SEAL:
+            raise TypeError("conditional final quote refusals are runner-issued")
+        super().__init__(state, detail)
+        self.runner = runner
+        self.refusal_reason = refusal_reason
+        self.pre_submission_proven = pre_submission_proven is True
+        self._seal = _seal
+
+
 @dataclass
 class Transition:
     state: str
@@ -544,10 +567,8 @@ class ExecutionRunner:
                     "final_entry_reference": reference,
                     "final_quote_timestamp": capture.captured_at.isoformat(),
                 }
-                self._invalidate(f"conditional plan final quote refused: {reason}")
-                self._halt(STALE_CANDIDATE,
-                           f"conditional plan final quote refused: {reason}",
-                           {"final_quote_refusal": reason})
+                self._halt_conditional_final_quote_refusal(
+                    reason, f"conditional plan final quote refused: {reason}")
         elif (self.conditional_plan_authority is not None
               or self.conditional_plan_scope is not None):
             reason = "conditional_plan_context_without_plan_candidate"
@@ -555,10 +576,8 @@ class ExecutionRunner:
                 "decision": "REFUSE", "refusal_reason": reason,
                 "final_quote": capture.evidence(self.contract.tick_size),
             }
-            self._invalidate("conditional plan context did not match candidate")
-            self._halt(STALE_CANDIDATE,
-                       "conditional plan context did not match candidate",
-                       {"final_quote_refusal": reason})
+            self._halt_conditional_final_quote_refusal(
+                reason, "conditional plan context did not match candidate")
         self.final_quote_economics = {
             "decision": "PENDING_FINAL_FRESHNESS",
             "final_quote": capture.evidence(self.contract.tick_size),
@@ -829,6 +848,19 @@ class ExecutionRunner:
         if self.token is not None and not self.token.spent:
             self.token = None
         self._to(WAITING_FOR_CANDIDATE, f"candidate invalidated ({why}); bracket destroyed")
+
+    def _halt_conditional_final_quote_refusal(self, reason: str, detail: str):
+        """Raise sealed evidence from the exact pre-token final quote boundary."""
+        pre_submission_proven = (
+            self.token is None and not self._entry_attempted
+            and self.order_id is None and self.submission_record is None
+            and self.submit_at is None and self.ack_at is None)
+        self._invalidate(f"conditional plan final quote refused: {reason}")
+        self._to(STALE_CANDIDATE, detail, {"final_quote_refusal": reason})
+        raise ConditionalFinalQuoteRefusal(
+            STALE_CANDIDATE, detail, runner=self, refusal_reason=reason,
+            pre_submission_proven=pre_submission_proven,
+            _seal=_CONDITIONAL_FINAL_QUOTE_REFUSAL_SEAL)
 
     def submit(self, *, account_id: int, custom_tag: str = None,
                candidate_snapshot=None) -> dict:

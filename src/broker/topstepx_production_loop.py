@@ -1793,16 +1793,35 @@ class ProductionLoop:
 
     @staticmethod
     def _terminalize_unused_freshness_mission(mission, exc, runner) -> bool:
-        """Close only a freshness-refused mission proven never attempted."""
+        """Close only a refusal proven to have happened before an attempt."""
         from broker import topstepx_execution_runner as R
-        if (not isinstance(exc, R.RunnerHalt)
-                or exc.state not in set(R._STALE_REASON_STATE.values())
+        conditional_final_quote = (
+            isinstance(exc, R.ConditionalFinalQuoteRefusal)
+            and exc.runner is runner
+            and exc._seal is R._CONDITIONAL_FINAL_QUOTE_REFUSAL_SEAL
+            and exc.pre_submission_proven is True
+            and isinstance(runner, R.ExecutionRunner)
+            and exc.state == R.STALE_CANDIDATE
+            and isinstance(exc.refusal_reason, str)
+            and exc.refusal_reason.startswith("conditional_plan_")
+            and runner.token is None
+            and mission.state == MS.ARMED
+            and not mission.token_id
+            and not mission.submitted_at
+            and not mission.acknowledged_at)
+        recognized_freshness = (
+            isinstance(exc, R.RunnerHalt)
+            and exc.state in set(R._STALE_REASON_STATE.values()))
+        if (not (conditional_final_quote or recognized_freshness)
                 or mission.attempt_count != 0 or mission.order_id is not None
                 or mission.token_spent
                 or getattr(runner, "_entry_attempted", False)):
             return False
+        note = (f"pre-submit conditional final quote refusal: "
+                f"{exc.refusal_reason}" if conditional_final_quote else
+                f"pre-submit freshness refusal: {exc.state}")
         mission.transition(MS.TERMINAL_REFUSAL,
-                           f"pre-submit freshness refusal: {exc.state}")
+                           note)
         return True
 
     # ── reconciliation ────────────────────────────────────────────────────────

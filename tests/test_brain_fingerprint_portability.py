@@ -76,7 +76,7 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # authorization is stale.
     # TRADE-HORIZON-1 adds candidate-scope and protected-structure evidence;
     # prior production authorization is stale after this rotation.
-    assert PM.brain_contract_fingerprint() == "brain:3a56562a126d9a40"
+    assert PM.brain_contract_fingerprint() == "brain:007e883d0fa3acba"
 
 
 @pytest.mark.parametrize("addition", [
