@@ -450,3 +450,99 @@ def validate(*, authority, scope, candidate, candidate_at_trigger,
                     "narrative_phase": lifecycle.get("narrative_phase"),
                 }}
     return True, None, evidence
+
+
+def validate_final_quote(*, authority, scope, candidate, contract_id,
+                        executable_price, now):
+    """Bind the final priced entry to the original conditional plan zone.
+
+    This is called after the production quote has passed freshness and venue
+    quality checks, immediately before the final candidate freshness/economics
+    checks and token minting. Candidate evidence is checked against the sealed
+    authoring record; it cannot supply or widen the zone.
+    """
+    def refuse(reason):
+        return False, reason
+
+    from broker.topstepx_candidate_freshness import CandidateSnapshot
+
+    if (not isinstance(authority, ConditionalPlanAuthority)
+            or authority._seal is not _SEAL or authority._scope is not scope):
+        return refuse("conditional_plan_final_quote_authority_missing_or_unbound")
+    try:
+        bound = authority.payload()
+    except Exception:  # noqa: BLE001
+        return refuse("conditional_plan_final_quote_authority_malformed")
+    if not isinstance(candidate, CandidateSnapshot):
+        return refuse("conditional_plan_final_quote_candidate_invalid")
+    if not _aware_datetime(now):
+        return refuse("conditional_plan_final_quote_time_invalid")
+    try:
+        expiry = datetime.fromisoformat(str(bound.get("expires_at")).replace(
+            "Z", "+00:00"))
+        if expiry.tzinfo is None or now >= expiry.astimezone(now.tzinfo):
+            return refuse("conditional_plan_expired_before_final_quote")
+    except Exception:  # noqa: BLE001
+        return refuse("conditional_plan_final_quote_expiry_invalid")
+
+    zone = bound.get("activation_zone")
+    low = _finite(zone.get("low")) if isinstance(zone, dict) else None
+    high = _finite(zone.get("high")) if isinstance(zone, dict) else None
+    price = _finite(executable_price)
+    extras = candidate.extras if isinstance(candidate.extras, dict) else {}
+    authority_evidence = extras.get("conditional_plan_authority")
+    current_lifecycle = extras.get("current_lifecycle_assessment")
+    invalidation = extras.get("structural_invalidation")
+    objective = candidate.objective.evidence()
+    expected_zone = {"low": (zone or {}).get("low"),
+                     "high": (zone or {}).get("high")} if isinstance(zone, dict) else None
+    if (not bound.get("plan_id") or candidate.direction != bound.get("direction")
+            or candidate.contract_id != contract_id
+            or extras.get("conditional_plan_id") != bound.get("plan_id")
+            or extras.get("selected_tool_occurrence_id") != bound.get("occurrence_id")
+            or not isinstance(zone, dict)
+            or zone.get("direction") != bound.get("direction")
+            or zone.get("occurrence_id") != bound.get("occurrence_id")
+            or _json(extras.get("selected_tool_zone")) != _json(expected_zone)
+            or _json(extras.get("tool_family")) != _json(bound.get("tool_family"))
+            or extras.get("playbook") != bound.get("playbook")
+            or candidate.invalidation_price != bound.get("invalidation_price")
+            or not isinstance(invalidation, dict)
+            or _json(invalidation.get("structure_identity"))
+                != _json((bound.get("invalidation") or {}).get("structure_identity"))
+            or objective.get("identity")
+                != (bound.get("objective") or {}).get("identity")
+            or objective.get("kind") != (bound.get("objective") or {}).get("kind")
+            or objective.get("price") != (bound.get("objective") or {}).get("price")
+            or not isinstance(authority_evidence, dict)
+            or authority_evidence.get("authority_basis") != AUTHORITY_BASIS
+            or authority_evidence.get("state") != "VERIFIED"
+            or authority_evidence.get("authoring_snapshot_id")
+                != bound.get("authoring_snapshot_id")
+            or authority_evidence.get("authoring_phase") != bound.get("authoring_phase")
+            or authority_evidence.get("campaign_episode_id")
+                != (bound.get("draw") or {}).get("campaign_episode_id")
+            or authority_evidence.get("history_revision") != bound.get("history_revision")
+            or authority_evidence.get("trigger_snapshot_id") != candidate.snapshot_id
+            or not isinstance(authority_evidence.get("current_lifecycle"), dict)
+            or authority_evidence["current_lifecycle"].get("state") != "AUTHORITY_UNKNOWN"
+            or authority_evidence["current_lifecycle"].get("reason")
+                != PHASE_UNAVAILABLE_REASON
+            or authority_evidence["current_lifecycle"].get("narrative_phase") is not None
+            or not isinstance(current_lifecycle, dict)
+            or current_lifecycle.get("state") != "AUTHORITY_UNKNOWN"
+            or current_lifecycle.get("reason") != PHASE_UNAVAILABLE_REASON
+            or low is None or high is None or low > high or price is None):
+        return refuse("conditional_plan_final_quote_lineage_invalid")
+    if not low <= price <= high:
+        return refuse("conditional_plan_final_quote_outside_authorized_zone")
+    if not isinstance(bound.get("brain_fingerprint"), str) \
+            or not bound.get("brain_fingerprint"):
+        return refuse("conditional_plan_brain_fingerprint_missing")
+    try:
+        from ai_brain.production_model import brain_contract_fingerprint
+        if brain_contract_fingerprint() != bound.get("brain_fingerprint"):
+            return refuse("conditional_plan_brain_fingerprint_changed")
+    except Exception:  # noqa: BLE001
+        return refuse("conditional_plan_brain_fingerprint_unavailable")
+    return True, None

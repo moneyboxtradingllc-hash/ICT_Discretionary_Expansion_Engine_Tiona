@@ -1559,7 +1559,9 @@ class ProductionLoop:
             managed_runner = self.ps.runner
             try:
                 runner = self.ps.build_runner(
-                    fresh, max_risk_usd=budget["allowed_planned_risk"])
+                    fresh, max_risk_usd=budget["allowed_planned_risk"],
+                    conditional_plan_authority=plan.get("authority"),
+                    conditional_plan_scope=self.producer._conditional_plan_scope)
             finally:
                 if self.mission.active_mission is not None:
                     self.ps.runner = managed_runner

@@ -326,5 +326,5 @@ class TestToolVerificationIsNotStopAuthority:
             wrapper = fh.read()
         # The wrapper may read the field only to bind the authored occurrence
         # and compare it against the current old/fresh candidate identities.
-        assert wrapper.count("selected_tool_occurrence_id") == 4
+        assert wrapper.count("selected_tool_occurrence_id") == 5
         assert 'fresh_extras.get("selected_tool_occurrence_id") != bound.get("occurrence_id")' in wrapper

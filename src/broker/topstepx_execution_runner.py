@@ -222,6 +222,10 @@ class ExecutionRunner:
     #: into the evidence -- V13 recorded the smoke constants on a production
     #: submission because `evidence()` imported them instead of being told.
     execution_lane: str = "smoke"
+    #: A conditional trigger carries process-local proof from its producer.
+    #: Candidate audit extras cannot stand in for either value.
+    conditional_plan_authority: Any = None
+    conditional_plan_scope: Any = None
     #: EXEC-PRICE-ANCHOR-1 — does this runner own the PROMPT post-fill lifecycle?
     #:
     #: Set by `ProductionSession.build_runner` and nowhere else, so the smoke
@@ -518,6 +522,43 @@ class ExecutionRunner:
         final_market = dict(market or {})
         final_market["current_executable_price"] = reference
         final_market["now"] = now
+        candidate_extras = (candidate_snapshot.extras
+                            if isinstance(candidate_snapshot.extras, dict) else {})
+        has_conditional_plan_identity = (
+            candidate_extras.get("conditional_plan_id") is not None
+            or candidate_extras.get("conditional_plan") is True
+            or isinstance(candidate_extras.get("conditional_plan_authority"), dict)
+            or isinstance(candidate_extras.get("preauthorized_plan_authoring"), dict))
+        if has_conditional_plan_identity:
+            from broker.conditional_plan_authority import validate_final_quote
+            valid, reason = validate_final_quote(
+                authority=self.conditional_plan_authority,
+                scope=self.conditional_plan_scope,
+                candidate=candidate_snapshot, contract_id=self.contract.id,
+                executable_price=reference, now=now)
+            if not valid:
+                self.final_quote_economics = {
+                    "decision": "REFUSE",
+                    "refusal_reason": reason,
+                    "final_quote": capture.evidence(self.contract.tick_size),
+                    "final_entry_reference": reference,
+                    "final_quote_timestamp": capture.captured_at.isoformat(),
+                }
+                self._invalidate(f"conditional plan final quote refused: {reason}")
+                self._halt(STALE_CANDIDATE,
+                           f"conditional plan final quote refused: {reason}",
+                           {"final_quote_refusal": reason})
+        elif (self.conditional_plan_authority is not None
+              or self.conditional_plan_scope is not None):
+            reason = "conditional_plan_context_without_plan_candidate"
+            self.final_quote_economics = {
+                "decision": "REFUSE", "refusal_reason": reason,
+                "final_quote": capture.evidence(self.contract.tick_size),
+            }
+            self._invalidate("conditional plan context did not match candidate")
+            self._halt(STALE_CANDIDATE,
+                       "conditional plan context did not match candidate",
+                       {"final_quote_refusal": reason})
         self.final_quote_economics = {
             "decision": "PENDING_FINAL_FRESHNESS",
             "final_quote": capture.evidence(self.contract.tick_size),

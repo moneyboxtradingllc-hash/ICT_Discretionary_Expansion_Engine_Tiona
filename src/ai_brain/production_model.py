@@ -287,6 +287,10 @@ _CONTRACT_SOURCES = (
     # LATENCY-1 preauthorized judgment survives only through this sealed,
     # process-local lineage contract; changes must stale session authority.
     ("conditional_plan_authority", "broker/conditional_plan_authority.py"),
+    # The conditional plan's exact zone is enforced against the final sided
+    # production quote before authorization is minted.
+    ("conditional_final_quote", "broker/topstepx_execution_runner.py"),
+    ("conditional_runner_context", "broker/topstepx_production_session.py"),
 )
 
 #: REPO-ROOT-RELATIVE closure. Same contract, different anchor.

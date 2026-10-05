@@ -34,7 +34,7 @@ def source_bytes(monkeypatch):
 
 @pytest.mark.parametrize("style", ["lf", "crlf", "mixed_files", "mixed_lines"])
 def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
-    assert len(source_bytes) == 39
+    assert len(source_bytes) == 41
     for index, (path, data) in enumerate(source_bytes.items()):
         if style == "crlf" or (style == "mixed_files" and index % 2):
             source_bytes[path] = data.replace(b"\n", b"\r\n")
@@ -76,7 +76,7 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # authorization is stale.
     # TRADE-HORIZON-1 adds candidate-scope and protected-structure evidence;
     # prior production authorization is stale after this rotation.
-    assert PM.brain_contract_fingerprint() == "brain:b16290d1c7172f7d"
+    assert PM.brain_contract_fingerprint() == "brain:3a56562a126d9a40"
 
 
 @pytest.mark.parametrize("addition", [

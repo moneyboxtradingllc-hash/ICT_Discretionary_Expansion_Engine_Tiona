@@ -136,6 +136,10 @@ MUST_BE_BOUND = {
         "current-candidate campaign relation and published protected-structure/payoff evidence",
     "broker/conditional_plan_authority.py":
         "process-local validation that binds historical watching judgment to current causal truth",
+    "broker/topstepx_execution_runner.py":
+        "final conditional quote remains inside the exact Brain-authorized zone before minting",
+    "broker/topstepx_production_session.py":
+        "sealed process-local conditional authority is explicitly carried into the production runner",
     "broker/topstepx_production_loop.py":
         "production candidate and conditional-trigger call sites for the Lifecycle gate",
     # RAW-TRADE-INTERVAL-TRUTH-1C. These sources jointly determine whether a
@@ -160,13 +164,13 @@ MUST_BE_BOUND_REPO = {
 }
 
 #: Deliberately OUT. Safety machinery: it governs how a decision is carried
-#: out, not what is decided, and it changes far more often.
+#: out, not what is decided, and it changes far more often. The production
+#: runner/session are narrow exceptions because they carry and enforce the
+#: conditional plan's bound final-quote zone before minting.
 MUST_STAY_OUT = {
-    "broker/topstepx_execution_runner.py",
     "broker/topstepx_mission_state.py",
     "broker/topstepx_mission_reconciler.py",
     "broker/topstepx_mission_recovery.py",
-    "broker/topstepx_production_session.py",
     "broker/topstepx_submission_record.py",
     # circular: the container that carries the hash, and the module computing it
     "broker/topstepx_session_authorization.py",
