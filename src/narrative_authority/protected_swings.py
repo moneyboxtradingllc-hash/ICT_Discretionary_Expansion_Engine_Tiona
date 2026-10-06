@@ -20,6 +20,8 @@ level persists until violated, not until the next scan forgets the sweep.
 
 Never raises. State degrades safely on missing data.
 """
+import math
+
 # MTF-RESTORATION (2026-08-11). Was ("15m", "5m") -- 1m and 3m could never
 # register protected structure at all. On 2026-08-10 that discarded 90 of 140
 # sweep+reclaim events, and they came from exactly the two timeframes the
@@ -106,6 +108,11 @@ class ProtectedSwingTracker:
         # run of "equal" swings it never made.
         self.high_lineage = {}       # tf -> [record, ...] oldest first
         self.low_lineage = {}
+        # Scope for the currently occupied slot. The public swing record stays
+        # contract-agnostic for existing consumers; this process-local witness
+        # prevents a later sweep from reaffirming a life observed under another
+        # exact contract or production session.
+        self._slot_scopes = {}       # (side, tf) -> (contract_id, session_key)
 
     # ── backward-compatible summary ──────────────────────────────────────────
     # Consumers across brain_input, outcome assembly and memory read these two
@@ -188,6 +195,108 @@ class ProtectedSwingTracker:
         return record
 
     @staticmethod
+    def _reaffirmed_sweep_level(snapshot: dict, liq: dict, *, tf: str,
+                                side: str, existing: dict,
+                                scope: tuple | None) -> float | None:
+        """Return the exact current slot level named by this settled sweep.
+
+        Liquidity identifies the level the candle actually swept. Structure
+        separately publishes its latest confirmed pivot, which can be a nearby
+        different level. A later sweep of the still-live protected life must
+        not replace that life with the newer pivot before the occurrence writer
+        can bind the causal association.
+        """
+        if (not isinstance(snapshot, dict) or not isinstance(liq, dict)
+                or not isinstance(existing, dict) or not isinstance(scope, tuple)):
+            return None
+        contract = str(snapshot.get("contract_id") or "").strip()
+        if not contract or scope[0] != contract:
+            return None
+        fact = liq.get("sweep_fact")
+        if not isinstance(fact, dict):
+            return None
+        expected_direction = "below_low" if side == "low" else "above_high"
+        if (liq.get("sweep_detected") is not True
+                or liq.get("reclaim_detected") is not True
+                or fact.get("sweep_direction") != expected_direction
+                or fact.get("reclaimed") is not True
+                or fact.get("source_tf") not in (None, tf)):
+            return None
+        try:
+            from market_data.object_identity import canonical_instant
+            from market_state.active_path import production_session_key
+
+            event_at = canonical_instant(fact.get("event_time"), strict=True)
+            registered_at = canonical_instant(
+                existing.get("registered_at"), strict=True)
+            observed_at = canonical_instant(snapshot.get("timestamp"), strict=True)
+            swept = fact.get("swept_level")
+            level = existing.get("level")
+            if isinstance(swept, bool) or isinstance(level, bool):
+                return None
+            swept, level = float(swept), float(level)
+            if (not math.isfinite(swept) or not math.isfinite(level)
+                    or swept != level or event_at <= registered_at
+                    or observed_at < event_at):
+                return None
+            event_session = production_session_key(str(event_at))
+            if (not event_session
+                    or scope[1] != event_session
+                    or production_session_key(existing.get("registered_at"))
+                        != event_session
+                    or production_session_key(snapshot.get("timestamp"))
+                        != event_session):
+                return None
+            source = ((snapshot.get("settled_source") or {}).get(tf) or {})
+            source_at = canonical_instant(source.get("source_bar_time"), strict=True)
+            source_bars = fact.get("source_bars")
+            if (source_at != event_at or not isinstance(source_bars, list)
+                    or event_at not in [canonical_instant(x, strict=True)
+                                        for x in source_bars]):
+                return None
+        except Exception:  # noqa: BLE001 -- malformed chronology is not authority
+            return None
+
+        expected_id = f"{tf}:swing_{side}:{round(level, 4):g}"
+        if (existing.get("timeframe") != tf
+                or existing.get("side") not in (None, side)
+                or existing.get("role") != timeframe_role(tf)
+                or existing.get("swing_id") != expected_id
+                or not existing.get("basis")):
+            return None
+
+        candles = (((snapshot.get("timeframes") or {}).get(tf) or {})
+                   .get("recent_candles") or [])
+        event_candle_found = False
+        for candle in candles:
+            if not isinstance(candle, dict):
+                return None
+            if (candle.get("temporal_status") != "settled"
+                    and candle.get("complete") is not True):
+                continue
+            try:
+                candle_at = canonical_instant(
+                    candle.get("timestamp") or candle.get("time") or candle.get("t"),
+                    strict=True)
+                close = candle.get("close")
+                if isinstance(close, bool):
+                    return None
+                close = float(close)
+                if not math.isfinite(close):
+                    return None
+            except Exception:  # noqa: BLE001 -- malformed settled bars fail closed
+                return None
+            if candle_at == event_at:
+                event_candle_found = True
+            if registered_at < candle_at <= event_at:
+                if ((side == "low" and close < level)
+                        or (side == "high" and close > level)):
+                    return None
+        if not event_candle_found:
+            return None
+        return level
+
+    @staticmethod
     def _ordinal(side: str, level: float, prior: "float | None") -> tuple:
         """Where a confirmed swing sits relative to the one it succeeded.
 
@@ -226,6 +335,12 @@ class ProtectedSwingTracker:
         structure = snapshot.get("structure", {}) or {}
         ts        = snapshot.get("timestamp", "")
         price     = _current_price(snapshot)
+        contract = str(snapshot.get("contract_id") or "").strip()
+        try:
+            from market_state.active_path import production_session_key
+            session = production_session_key(ts)
+        except Exception:  # noqa: BLE001
+            session = None
 
         # ── Registration: sweep + reclaim, PER TIMEFRAME ────────────────────
         # Each timeframe owns its own slot. A 15m registration no longer
@@ -238,18 +353,31 @@ class ProtectedSwingTracker:
                 continue
             st    = structure.get(tf, {}) or {}
             sweep = liq.get("sweep_direction", "")
-            if sweep == "above_high" and st.get("last_swing_high") is not None:
-                self.protected_highs[tf] = self._note_lineage(
-                    "high", tf, self._register(
-                        self.protected_highs.get(tf), tf=tf, side="high",
-                        level=float(st["last_swing_high"]), ts=ts,
-                        basis="buy_side_raid_rejected"))
-            elif sweep == "below_low" and st.get("last_swing_low") is not None:
-                self.protected_lows[tf] = self._note_lineage(
-                    "low", tf, self._register(
-                        self.protected_lows.get(tf), tf=tf, side="low",
-                        level=float(st["last_swing_low"]), ts=ts,
-                        basis="sell_side_raid_rejected"))
+            if sweep == "above_high":
+                side, registry, key, structure_key = (
+                    "high", self.protected_highs, "highs", "last_swing_high")
+                basis = "buy_side_raid_rejected"
+            elif sweep == "below_low":
+                side, registry, key, structure_key = (
+                    "low", self.protected_lows, "lows", "last_swing_low")
+                basis = "sell_side_raid_rejected"
+            else:
+                continue
+            existing = registry.get(tf)
+            reaffirmed = self._reaffirmed_sweep_level(
+                snapshot, liq, tf=tf, side=side, existing=existing,
+                scope=self._slot_scopes.get((side, tf)))
+            structural_level = st.get(structure_key)
+            if reaffirmed is not None:
+                level = reaffirmed
+            elif structural_level is not None:
+                level = float(structural_level)
+            else:
+                continue
+            registry[tf] = self._note_lineage(
+                side, tf, self._register(existing, tf=tf, side=side,
+                                         level=level, ts=ts, basis=basis))
+            self._slot_scopes[(side, tf)] = (contract, session)
 
         # A completed close on the protected swing's OWN timeframe owns
         # invalidation. Wicks, other timeframe closes, and distance buffers
@@ -258,10 +386,12 @@ class ProtectedSwingTracker:
             close = _completed_close(snapshot, tf)
             if rec and close is not None and close > rec["level"]:
                 self.protected_highs.pop(tf, None)
+                self._slot_scopes.pop(("high", tf), None)
         for tf, rec in list(self.protected_lows.items()):
             close = _completed_close(snapshot, tf)
             if rec and close is not None and close < rec["level"]:
                 self.protected_lows.pop(tf, None)
+                self._slot_scopes.pop(("low", tf), None)
 
         return self.state()
 

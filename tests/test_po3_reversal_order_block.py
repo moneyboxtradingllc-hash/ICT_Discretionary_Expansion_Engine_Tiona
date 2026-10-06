@@ -953,7 +953,17 @@ class TestReaffirmedProtectedAnchorChronology:
             step = base()
             step["timestamp"] = bar["timestamp"]
             step["timeframes"]["5m"]["recent_candles"] = [copy.deepcopy(bar)]
-            step["structure"]["5m"] = {f"last_swing_{side}": anchor_level}
+            # The later liquidity detector can select the still-live anchor
+            # while structure has already confirmed a newer, nearby pivot.
+            # The sweep fact and the structural pivot answer different
+            # questions; the protected lifetime must follow the exact level
+            # the settled sweep reclaimed.
+            structural_level = anchor_level
+            if bar["timestamp"] == SWEEP_TIME:
+                structural_level = (anchor_level - 1.0 if bullish
+                                    else anchor_level + 1.0)
+            step["structure"]["5m"] = {
+                f"last_swing_{side}": structural_level}
             step["settled_source"] = {"5m": {
                 "source_bar_time": bar["timestamp"],
                 "settled_edge_time": bar["timestamp"]}}
