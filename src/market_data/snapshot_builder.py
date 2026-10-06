@@ -342,6 +342,7 @@ def build_snapshot(
     contract_id: str = None,
     execution_price: dict = None,
     invoke_brain: bool = True,
+    pre_cognition_hook=None,
 ) -> dict:
     timeframes = {}
     all_normalized = {}
@@ -891,6 +892,13 @@ def build_snapshot(
     # mechanical-owned pipeline is unchanged (bit-for-bit).
     from ai_brain.ecu import ecu_enabled, produce_thesis
     if ecu_enabled() and invoke_brain:
+        # ProductionScanCycle uses this single-use seam to attach facts whose
+        # producers need the completed snapshot before the canonical ECU call.
+        # The hook is not a second cognition path and is ignored by rebuilds.
+        if pre_cognition_hook is not None:
+            if not callable(pre_cognition_hook):
+                raise TypeError("pre_cognition_hook must be callable")
+            pre_cognition_hook(snapshot)
         candidate = produce_thesis(snapshot)
         snapshot["candidate_thesis"] = candidate
         snapshot["brain_thesis"] = candidate   # shadow default: pipeline bit-for-bit unchanged

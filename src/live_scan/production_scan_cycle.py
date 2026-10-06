@@ -539,6 +539,31 @@ class ProductionScanCycle:
         # quote move between them, showing the Brain a price its own tool
         # locations were never computed from.
         execution_price = self._execution_price()
+
+        ecu_facts = {"prepared": False}
+
+        def _prepare_current_ecu_facts(current_snapshot):
+            """Attach this occurrence's path and retained formations before ECU."""
+            current_snapshot["candle_continuity"] = continuity
+            current_snapshot["derived_state"] = {
+                "history_revision": self._history.revision,
+                "derived_revision": self._derived_revision,
+                "current": self.derived_state_is_current(),
+                "last_rebuild": (self.rebuilds[-1] if self.rebuilds else None),
+            }
+            self.last_occurrence_writes = self._record_sweep_occurrences(
+                current_snapshot)
+            current_snapshot["active_path_state"] = self._update_active_path(
+                current_snapshot)
+            self._attach_reversal_formation(current_snapshot, raw_data)
+            # ECU needs current physical objects before it authors direction
+            # and playbook. This pass is descriptive only; snapshot_builder
+            # still rebuilds the final toolbox after qualification, playbook
+            # and risk are current, preserving their normal selection order.
+            from toolbox.toolbox_engine import run_toolbox
+            current_snapshot["toolbox"] = run_toolbox(current_snapshot)
+            ecu_facts["prepared"] = True
+
         snapshot = build_snapshot(
             raw_data, memory=self.memory,
             experience_summary=self.prev_experience_summary,
@@ -550,40 +575,21 @@ class ProductionScanCycle:
             expansion_stability=self.expansion_stability,
             capital_report=capital_report, htf_context=htf_context,
             contract_id=self.contract_id, execution_price=execution_price,
-            invoke_brain=invoke_brain)
-        snapshot["candle_continuity"] = continuity
-        # The revision contract, carried to whoever decides whether to trade.
-        # A repaired tape with stale trackers is the same lie under a new flag,
-        # so healthy candles are NOT sufficient -- the derived facts must have
-        # been built from the history that exists now.
-        snapshot["derived_state"] = {
-            "history_revision": self._history.revision,
-            "derived_revision": self._derived_revision,
-            "current": self.derived_state_is_current(),
-            "last_rebuild": (self.rebuilds[-1] if self.rebuilds else None),
-        }
-
-        # Record observed tape facts. Deliberately AFTER the snapshot is fully
-        # built and deliberately NOT written into it: the ledger is a memory of
-        # what happened, not an input to this scan's decision. Nothing about
-        # qualification, tooling, candidates or the Brain payload may change
-        # because a fact was remembered.
-        self.last_occurrence_writes = self._record_sweep_occurrences(snapshot)
-
-        # ACTIVE-PATH-STATE-1 (2026-08-24). Record the structural chronology the
-        # organism was throwing away, then derive current ownership from it.
-        #
-        # This block runs AFTER the snapshot is otherwise complete and writes
-        # exactly one key. It is the accumulated answer to "which side owns the
-        # tape", which no instantaneous field in this snapshot can give: BOS is
-        # a boolean that expires next scan, and the protected-swing tracker pops
-        # each level as the next one registers.
-        #
-        # FACTS ARE DURABLE, STATE IS DERIVED. The ledger keeps the events
-        # forever; ownership is recomputed here every scan and never read back
-        # from disk as a conclusion.
-        snapshot["active_path_state"] = self._update_active_path(snapshot)
-        self._attach_reversal_formation(snapshot, raw_data)
+            invoke_brain=invoke_brain,
+            pre_cognition_hook=_prepare_current_ecu_facts)
+        if not ecu_facts["prepared"]:
+            snapshot["candle_continuity"] = continuity
+            # Repaired history is usable only after derived state converges.
+            snapshot["derived_state"] = {
+                "history_revision": self._history.revision,
+                "derived_revision": self._derived_revision,
+                "current": self.derived_state_is_current(),
+                "last_rebuild": (self.rebuilds[-1] if self.rebuilds else None),
+            }
+            # The non-ECU path keeps its established post-build ordering.
+            self.last_occurrence_writes = self._record_sweep_occurrences(snapshot)
+            snapshot["active_path_state"] = self._update_active_path(snapshot)
+            self._attach_reversal_formation(snapshot, raw_data)
 
         cur_qual = (snapshot.get("qualification", {}).get("status") or "no_trade").lower()
         self.bars_in_state = (self.bars_in_state + 1
@@ -1277,7 +1283,8 @@ class ProductionScanCycle:
                 fact.update(_po3_stamp(fact, self._prior_po3_range,
                                        self._prior_po3_session_date))
                 occurrence = liquidity_sweep_occurrence(
-                    fact, source_tf=tf, contract=self.contract_id)
+                    fact, source_tf=tf, contract=self.contract_id,
+                    snapshot=snapshot)
                 if occurrence is None:
                     continue          # unprovable identity is not an occurrence
                 written.append(ledger.record(occurrence))

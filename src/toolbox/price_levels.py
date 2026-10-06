@@ -2007,6 +2007,36 @@ def _detect_current_po3_reversal_order_block(snapshot: dict, direction: str) -> 
                     registered_source = _instant(registration.get("source_bar_time"))
                     same_timeframe = (anchor_tf == tf
                                       and registered_source == sweep_at)
+                    association = sweep.get("protected_swing_lifetime")
+                    association_observed_at = _instant(
+                        association.get("observed_at")) if isinstance(
+                            association, dict) else None
+                    try:
+                        from market_state.active_path import production_session_key
+                        current_session = production_session_key(
+                            (snapshot or {}).get("timestamp"))
+                    except Exception:  # noqa: BLE001
+                        current_session = None
+                    reaffirmed_lifetime = (
+                        anchor_tf == tf
+                        and isinstance(association, dict)
+                        and association.get("contract") == contract
+                        and association.get("market_session") == current_session
+                        and association.get("source_tf") == tf
+                        and association.get("side") == expected_side
+                        and association.get("swing_id") == swing.get("swing_id")
+                        and association.get("registered_at") == swing.get("registered_at")
+                        and association.get("level") == anchor_level
+                        and association.get("basis") == swing.get("basis")
+                        and association.get("sweep_occurrence_id")
+                            == sweep.get("occurrence_id")
+                        and registered_source is not None
+                        and registered_source <= sweep_at
+                        and association_observed_at is not None
+                        and sweep_at <= association_observed_at <= cutoff
+                        and sweep_at in [_instant(x) for x in
+                                         (sweep.get("source_bars") or [])]
+                    )
                     # Cross-timeframe price coincidence is insufficient. The
                     # sweep occurrence must name this exact canonical anchor
                     # registration (or its swing identity, while the full
@@ -2018,7 +2048,8 @@ def _detect_current_po3_reversal_order_block(snapshot: dict, direction: str) -> 
                             swing.get("swing_id"))
                         and registered_source is not None
                         and registered_source <= sweep_at)
-                    if not (same_timeframe or cross_timeframe):
+                    if not (same_timeframe or reaffirmed_lifetime
+                            or cross_timeframe):
                         continue
                     terminated = False
                     for life_event in life_rows:

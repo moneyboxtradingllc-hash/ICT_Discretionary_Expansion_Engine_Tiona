@@ -330,8 +330,8 @@ class ReversalFormationCustody:
             fact = facts.get("sweep_fact")
             if not isinstance(fact, dict):
                 continue
-            row = liquidity_sweep_occurrence(fact, source_tf=tf,
-                                             contract=contract)
+            row = liquidity_sweep_occurrence(
+                fact, source_tf=tf, contract=contract, snapshot=snapshot)
             if row:
                 self._sweeps[row["occurrence_id"]] = row
 

@@ -55,6 +55,7 @@ from __future__ import annotations
 import copy
 import os
 import sys
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -860,3 +861,168 @@ class TestProducerOwnedFormationLifetime:
         assert attached["available"] is True, attached
         assert attached["formation_authority"]["status"] == \
             "CURRENT_PROCESS_REVALIDATED"
+
+
+class TestReaffirmedProtectedAnchorChronology:
+    """A later sweep may use the same still-live anchor without minting a new
+    protected-swing life. These synthetic bars exercise the real tracker,
+    occurrence extractor, reversal detector and public catalog."""
+
+    @staticmethod
+    def later_sweep_on_existing_life(direction="bullish"):
+        from narrative_authority.protected_swings import ProtectedSwingTracker
+        from market_state.active_path import extract_occurrences
+        from market_data.sweep_occurrence import liquidity_sweep_occurrence
+        from market_data.swing_evidence import build_swing_evidence
+        from structure.liquidity_engine import PRIOR_ADJACENT, analyze_liquidity
+
+        bullish = direction == "bullish"
+        side = "low" if bullish else "high"
+        side_bucket = "lows" if bullish else "highs"
+        anchor_level = SWING_LOW if bullish else round(60000.0 - SWING_LOW, 4)
+        sweep_direction = "below_low" if bullish else "above_high"
+        liquidity_side = "sell_side" if bullish else "buy_side"
+        bars = (BARS if bullish else
+                bearish_mirror_snapshot()["timeframes"]["5m"]["recent_candles"])
+        base = snapshot if bullish else bearish_mirror_snapshot
+
+        # The later sweep fact comes from the production liquidity detector,
+        # with canonical 5m adjacency/extrema evidence. The earlier prefix makes
+        # the defended protected level a confirmed pivot before the new sweep.
+        mirror = (lambda value: round(60000.0 - value, 4)) if not bullish else None
+
+        def prebar(hhmm, values):
+            o, h, low, close = values
+            if mirror:
+                o, h, low, close = (mirror(o), mirror(low), mirror(h), mirror(close))
+            return _c(_ts(hhmm), o, h, low, close)
+
+        prefix = [
+            prebar("00:55", (29480.00, 29490.00, 29470.00, 29475.00)),
+            prebar("01:00", (29475.00, 29488.00, 29465.00, 29470.00)),
+            prebar("01:05", (29470.00, 29482.00, 29455.00, 29460.00)),
+            prebar("01:10", (29455.00, 29465.00, SWING_LOW, 29440.00)),
+            prebar("01:15", (29440.00, 29455.00, 29435.00, 29445.00)),
+            prebar("01:20", (29445.00, 29460.00, 29438.00, 29450.00)),
+            prebar("01:25", (29450.00, 29465.00, 29440.00, 29455.00)),
+        ]
+        detector_bars = copy.deepcopy(prefix + bars[:8])
+        for row in detector_bars:
+            start = datetime.fromisoformat(row["timestamp"])
+            row["source_member_times"] = [
+                (start + timedelta(minutes=offset)).isoformat()
+                for offset in range(5)]
+            row["members"] = row["expected_members"] = 5
+            row["complete"] = True
+        swing_evidence = build_swing_evidence(
+            detector_bars, detector_bars, 5)
+        detected = analyze_liquidity(
+            detector_bars,
+            {"authority": PRIOR_ADJACENT,
+             "close": detector_bars[-2]["close"]},
+            swing_evidence=swing_evidence)
+        assert detected["sweep_detected"] is True, detected
+        assert detected["reclaim_detected"] is True, detected
+        assert detected["sweep_fact"]["event_time"] == SWEEP_TIME
+        assert detected["sweep_fact"]["swept_level"] == anchor_level
+
+        tracker = ProtectedSwingTracker()
+        birth = base()
+        birth["timestamp"] = _ts("01:10")
+        birth["timeframes"]["5m"]["recent_candles"] = [
+            (_c(_ts("01:10"), 29438.00, 29445.00, 29428.75, 29440.00)
+             if bullish else
+             _c(_ts("01:10"), 30562.00, 30571.25, 30555.00, 30560.00))]
+        birth["structure"]["5m"] = {
+            f"last_swing_{side}": anchor_level}
+        birth["liquidity"]["5m"].update(
+            sweep_detected=True, reclaim_detected=True,
+            sweep_direction=sweep_direction)
+        birth["settled_source"] = {"5m": {
+            "source_bar_time": _ts("01:10"),
+            "settled_edge_time": _ts("01:10")}}
+        birth["protected_swings"] = tracker.update(birth)
+        original = birth["protected_swings"]["by_timeframe"][side_bucket]["5m"]
+        lifetime = [r for r in extract_occurrences(
+            birth, {}, birth["contract_id"])
+                    if r.get("event_type") == "PROTECTED_SWING_REGISTERED"]
+
+        # Replay subsequent settled bars through the real stateful tracker.
+        later_sweeps = []
+        for bar in bars[:8]:
+            step = base()
+            step["timestamp"] = bar["timestamp"]
+            step["timeframes"]["5m"]["recent_candles"] = [copy.deepcopy(bar)]
+            step["structure"]["5m"] = {f"last_swing_{side}": anchor_level}
+            step["settled_source"] = {"5m": {
+                "source_bar_time": bar["timestamp"],
+                "settled_edge_time": bar["timestamp"]}}
+            if bar["timestamp"] == SWEEP_TIME:
+                step["liquidity"] = {"5m": detected}
+            prior = copy.deepcopy(tracker.state()["by_timeframe"])
+            step["protected_swings"] = tracker.update(step)
+            events = extract_occurrences(step, prior, step["contract_id"])
+            lifetime.extend(r for r in events if r.get("event_type") ==
+                            "PROTECTED_SWING_REGISTERED")
+            if bar["timestamp"] == SWEEP_TIME:
+                fact = detected["sweep_fact"]
+                row = liquidity_sweep_occurrence(
+                    fact, source_tf="5m", contract=step["contract_id"],
+                    snapshot=step)
+                assert row and row.get("protected_swing_lifetime")
+                later_sweeps.append(row)
+
+        current = base()
+        current["protected_swings"] = tracker.state()
+        current["protected_swing_lifetime_history"] = lifetime
+        current["reversal_sweep_history"] = later_sweeps
+        assert current["protected_swings"]["by_timeframe"][side_bucket]["5m"][
+            "registered_at"] == original["registered_at"]
+        assert not [r for r in lifetime if r.get("event_time") == SWEEP_TIME]
+        return current
+
+    @pytest.mark.parametrize("direction", ["bullish", "bearish"])
+    def test_later_sweep_of_same_intact_life_establishes_the_object(self, direction):
+        current = self.later_sweep_on_existing_life(direction)
+        result = block(direction=direction, snap=current)
+        assert result["available"] is True, result
+
+    @pytest.mark.parametrize("direction", ["bullish", "bearish"])
+    def test_later_sweep_of_same_life_reaches_the_public_catalog(self, direction):
+        rows = [r for r in self._catalog(
+            self.later_sweep_on_existing_life(direction))
+                if r.get("tool_family") == "po3_reversal_order_block"]
+        assert len(rows) == 1 and rows[0]["direction"] == direction
+
+    def test_mismatched_lifetime_attestation_still_refuses(self):
+        current = self.later_sweep_on_existing_life()
+        current["reversal_sweep_history"][0]["protected_swing_lifetime"][
+            "swing_id"] = "same-price-different-life"
+        result = block(snap=current)
+        assert result["available"] is False
+        assert result["reason"] == "SWEEP_NOT_ASSOCIATED_WITH_CURRENT_PROTECTED_ANCHOR_LIFE"
+
+    def test_later_registered_same_price_life_cannot_borrow_the_old_sweep(self):
+        current = self.later_sweep_on_existing_life()
+        new_registered_at = _ts("02:17")
+        registration = current["protected_swing_lifetime_history"][0]
+        registration.update(source_bar_time=_ts("02:15"),
+                            registered_at=new_registered_at,
+                            event_time=new_registered_at)
+        current["protected_swings"]["by_timeframe"]["lows"]["5m"][
+            "registered_at"] = new_registered_at
+        result = block(snap=current)
+        assert result["available"] is False
+        assert result["reason"] == "SWEEP_NOT_ASSOCIATED_WITH_CURRENT_PROTECTED_ANCHOR_LIFE"
+
+    def test_later_sweep_without_lifetime_attestation_is_unknown(self):
+        current = self.later_sweep_on_existing_life()
+        current["reversal_sweep_history"][0].pop("protected_swing_lifetime")
+        result = block(snap=current)
+        assert result["available"] is False
+        assert result["reason"] == "SWEEP_NOT_ASSOCIATED_WITH_CURRENT_PROTECTED_ANCHOR_LIFE"
+
+    @staticmethod
+    def _catalog(snap):
+        from broker.luna_candidate_producer import authorized_tool_catalog
+        return authorized_tool_catalog(snap)

@@ -901,6 +901,20 @@ def _sweep_facts(snapshot: dict) -> list:
     return out
 
 
+def _derived_history_authority(snapshot):
+    """Expose only the current derived-history authority to Brain cognition.
+
+    Rebuild diagnostics can contain large event lists and are not needed to
+    judge whether this occurrence's derived facts match canonical history.
+    Missing or malformed producer authority remains unavailable.
+    """
+    state = (snapshot or {}).get("derived_state")
+    if not isinstance(state, dict):
+        return None
+    return {key: state.get(key) for key in
+            ("history_revision", "derived_revision", "current")}
+
+
 def build_brain_input(snapshot: dict, stance_history: dict) -> dict:
     """Full two-sided evidence payload for the narrative brain. Never raises."""
     try:
@@ -1133,6 +1147,11 @@ def build_brain_input(snapshot: dict, stance_history: dict) -> dict:
             # established owner, or a new owner after the active-path transfer
             # sequence is confirmed. Absent means unavailable, not "no path".
             "active_path_state": (snapshot or {}).get("active_path_state"),
+            # A phase or object cannot be current when its candle-derived
+            # authority was built against a different history revision. Carry
+            # the producer's actual revision contract when available; missing
+            # authority remains missing rather than being reconstructed here.
+            "derived_state": _derived_history_authority(snapshot),
             # STRUCTURE-FLIP (2026-08-11) — the SECOND invalidation family,
             # kept beside protected swings rather than merged into them. A
             # broken swing low is not a protected high; conflating them would

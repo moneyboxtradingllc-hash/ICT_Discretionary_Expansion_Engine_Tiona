@@ -34,6 +34,8 @@ reasoning is adopted, its implementation is not.
 """
 from __future__ import annotations
 
+import math
+
 from market_data.object_identity import (canonical_contract, canonical_instant,
                                          market_object_id)
 
@@ -45,7 +47,7 @@ LIQUIDITY_SWEEP = "LIQUIDITY_SWEEP"
 
 
 def liquidity_sweep_occurrence(sweep_fact: dict, *, source_tf: str,
-                               contract) -> "dict | None":
+                               contract, snapshot: dict = None) -> "dict | None":
     """The canonical LIQUIDITY_SWEEP occurrence for ONE authoritative sweep fact.
 
     Consumes the birth evidence `liquidity_engine` publishes at the instant of
@@ -67,7 +69,7 @@ def liquidity_sweep_occurrence(sweep_fact: dict, *, source_tf: str,
                                          timeframe=str(source_tf), instant=when)
     except Exception:            # noqa: BLE001 — unprovable identity is absence
         return None
-    return {
+    row = {
         "occurrence_id": occurrence_id,
         "event_type": LIQUIDITY_SWEEP,
         "contract": canonical_contract(contract, where=LIQUIDITY_SWEEP),
@@ -90,4 +92,86 @@ def liquidity_sweep_occurrence(sweep_fact: dict, *, source_tf: str,
         "po3_scope": sweep_fact.get("po3_scope") or "unknown",
         "po3_scope_reference": sweep_fact.get("po3_scope_reference"),
         "scope_reason": sweep_fact.get("scope_reason"),
+    }
+    # Bind the protected life that was simultaneously current when this sweep
+    # was observed. This is additive evidence: the canonical sweep identity
+    # above is unchanged, and an absent/mismatched anchor simply leaves this
+    # optional relationship unavailable.
+    lifetime = protected_swing_lifetime_at_sweep(
+        row, snapshot=snapshot, source_tf=str(source_tf))
+    if lifetime is not None:
+        row["protected_swing_lifetime"] = lifetime
+    return row
+
+
+def protected_swing_lifetime_at_sweep(sweep: dict, *, snapshot: dict,
+                                      source_tf: str) -> dict | None:
+    """Name an exact current protected life observed with a settled sweep.
+
+    The relationship is captured at the producer boundary, where the detector
+    event and current registry coexist. Price equality is one required field,
+    never the identity proof by itself.
+    """
+    if not isinstance(sweep, dict) or not isinstance(snapshot, dict):
+        return None
+    contract = str(snapshot.get("contract_id") or "").strip()
+    direction = sweep.get("sweep_direction")
+    side = "low" if direction == "below_low" else (
+        "high" if direction == "above_high" else None)
+    if (not contract or sweep.get("contract") != contract or not side
+            or sweep.get("source_tf") != source_tf
+            or sweep.get("reclaimed") is not True):
+        return None
+    try:
+        level = float(sweep.get("swept_level"))
+        if not math.isfinite(level):
+            return None
+    except (TypeError, ValueError, OverflowError):
+        return None
+    event_at = sweep.get("event_time")
+    source_bars = sweep.get("source_bars")
+    if not isinstance(source_bars, list) or event_at not in source_bars:
+        return None
+    registry = (((snapshot.get("protected_swings") or {}).get("by_timeframe")
+                 or {}).get("lows" if side == "low" else "highs") or {})
+    record = registry.get(source_tf)
+    if not isinstance(record, dict):
+        return None
+    try:
+        protected_level = float(record.get("level"))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if (protected_level != level
+            or record.get("timeframe") != source_tf
+            or record.get("side") not in (None, side)
+            or record.get("role") not in ("context", "active_leg")
+            or not record.get("swing_id") or not record.get("registered_at")
+            or not record.get("basis")):
+        return None
+    observed_at = snapshot.get("timestamp")
+    try:
+        from market_data.object_identity import canonical_instant
+        if (canonical_instant(observed_at, strict=True)
+                < canonical_instant(event_at, strict=True)):
+            return None
+    except Exception:  # noqa: BLE001 - ambiguous chronology is not authority
+        return None
+    try:
+        from market_state.active_path import production_session_key
+        session = production_session_key(observed_at)
+    except Exception:  # noqa: BLE001
+        return None
+    if not session:
+        return None
+    return {
+        "contract": contract,
+        "market_session": session,
+        "source_tf": source_tf,
+        "side": side,
+        "swing_id": str(record["swing_id"]),
+        "registered_at": str(record["registered_at"]),
+        "level": protected_level,
+        "basis": str(record["basis"]),
+        "observed_at": str(observed_at),
+        "sweep_occurrence_id": sweep.get("occurrence_id"),
     }
