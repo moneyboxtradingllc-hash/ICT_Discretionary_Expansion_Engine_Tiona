@@ -195,6 +195,60 @@ class ProtectedSwingTracker:
         return record
 
     @staticmethod
+    def _latest_settled_edge(snapshot: dict, tf: str):
+        """Return the newest settled candle identity from this public TF view.
+
+        The edge is derived only from the same annotated timeframe candles
+        consumed by the tracker. Ambiguous ordering, duplicate timestamps,
+        malformed rows, and contradictory completion markers withhold it.
+        """
+        if not isinstance(snapshot, dict):
+            return None
+        block = ((snapshot.get("timeframes") or {}).get(tf) or {})
+        candles = block.get("recent_candles")
+        if not isinstance(candles, list) or not candles:
+            return None
+        try:
+            from market_data.object_identity import canonical_instant
+
+            prior = None
+            settled = []
+            for candle in candles:
+                if not isinstance(candle, dict):
+                    return None
+                stamp = canonical_instant(
+                    candle.get("timestamp") or candle.get("time") or candle.get("t"),
+                    strict=True)
+                if prior is not None and stamp <= prior:
+                    return None
+                prior = stamp
+                status = candle.get("temporal_status")
+                complete = candle.get("complete")
+                if complete not in (None, True, False):
+                    return None
+                if status == "settled":
+                    if complete is False:
+                        return None
+                    is_settled = True
+                elif status in (None, "unknown", "forming", "historical_incomplete"):
+                    if complete is True and status is not None:
+                        return None
+                    is_settled = complete is True
+                else:
+                    return None
+                if is_settled:
+                    close = candle.get("close")
+                    if isinstance(close, bool):
+                        return None
+                    close = float(close)
+                    if not math.isfinite(close):
+                        return None
+                    settled.append(stamp)
+            return settled[-1] if settled else None
+        except Exception:  # noqa: BLE001 -- malformed edge evidence is UNKNOWN
+            return None
+
+    @staticmethod
     def _reaffirmed_sweep_level(snapshot: dict, liq: dict, *, tf: str,
                                 side: str, existing: dict,
                                 scope: tuple | None) -> float | None:
@@ -247,12 +301,12 @@ class ProtectedSwingTracker:
                     or production_session_key(snapshot.get("timestamp"))
                         != event_session):
                 return None
-            source = ((snapshot.get("settled_source") or {}).get(tf) or {})
-            source_at = canonical_instant(source.get("source_bar_time"), strict=True)
             source_bars = fact.get("source_bars")
-            if (source_at != event_at or not isinstance(source_bars, list)
+            if (not isinstance(source_bars, list)
                     or event_at not in [canonical_instant(x, strict=True)
-                                        for x in source_bars]):
+                                        for x in source_bars]
+                    or ProtectedSwingTracker._latest_settled_edge(snapshot, tf)
+                        != event_at):
                 return None
         except Exception:  # noqa: BLE001 -- malformed chronology is not authority
             return None
@@ -364,10 +418,43 @@ class ProtectedSwingTracker:
             else:
                 continue
             existing = registry.get(tf)
+            fact = liq.get("sweep_fact")
+            if isinstance(fact, dict):
+                try:
+                    from market_data.object_identity import canonical_instant
+                    fact_edge = canonical_instant(fact.get("event_time"), strict=True)
+                    source_bars = fact.get("source_bars")
+                    source_edges = ([canonical_instant(value, strict=True)
+                                     for value in source_bars]
+                                    if isinstance(source_bars, list) else [])
+                    swept_level = fact.get("swept_level")
+                    if isinstance(swept_level, bool):
+                        continue
+                    swept_level = float(swept_level)
+                except Exception:  # noqa: BLE001 -- malformed event is not authority
+                    continue
+                expected_direction = "below_low" if side == "low" else "above_high"
+                if (self._latest_settled_edge(snapshot, tf) != fact_edge
+                        or fact.get("sweep_direction") != expected_direction
+                        or fact.get("reclaimed") is not True
+                        or fact.get("source_tf") not in (None, tf)
+                        or not math.isfinite(swept_level)
+                        or fact_edge not in source_edges):
+                    continue
+            elif fact is not None:
+                continue
             reaffirmed = self._reaffirmed_sweep_level(
                 snapshot, liq, tf=tf, side=side, existing=existing,
                 scope=self._slot_scopes.get((side, tf)))
             structural_level = st.get(structure_key)
+            expected_swing_id = (
+                f"{tf}:swing_{side}:{round(float(structural_level), 4):g}"
+                if structural_level is not None else None)
+            if (existing and not isinstance(fact, dict)
+                    and expected_swing_id == existing.get("swing_id")):
+                # Without a current sweep witness, equal geometry cannot renew
+                # the same structural life or preserve its birthday by itself.
+                continue
             if reaffirmed is not None:
                 level = reaffirmed
             elif structural_level is not None:

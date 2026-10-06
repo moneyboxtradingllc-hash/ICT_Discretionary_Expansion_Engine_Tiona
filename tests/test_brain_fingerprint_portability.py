@@ -83,7 +83,7 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # ICT REVERSAL ENTRY COMPOSITION binds settled reversal formation custody,
     # causal protected-anchor lifetimes and the confirmed-reversal participation
     # amendment. Previous authorization is stale after this change.
-    assert PM.brain_contract_fingerprint() == "brain:117a66a68e63f2ff"
+    assert PM.brain_contract_fingerprint() == "brain:e9582f7ee4486678"
 
 
 @pytest.mark.parametrize("addition", [

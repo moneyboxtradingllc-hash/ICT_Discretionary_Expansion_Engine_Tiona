@@ -338,6 +338,104 @@ def test_real_production_sweep_lifetime_and_catalog_survive_later_sweep(
         live["registered_at"]
 
 
+@pytest.mark.parametrize("invalid_edge", [
+    "older_event", "forming_event", "missing_fact", "malformed_fact",
+    "contradictory_fact",
+])
+def test_real_lifetime_cannot_be_reaffirmed_without_current_settled_edge(
+        tmp_path, monkeypatch, invalid_edge):
+    """The producer's timeframe view rejects stale or absent sweep edges."""
+    cycle, scan, _ = _current_return_scan(tmp_path, monkeypatch)
+    tracker = copy.deepcopy(cycle.swing_tracker)
+    snapshot = copy.deepcopy(scan["snapshot"])
+    record = copy.deepcopy(tracker.protected_lows["5m"])
+    candles = snapshot["timeframes"]["5m"]["recent_candles"]
+    latest = candles[-1]
+    fact = {
+        "source_tf": "5m",
+        "event_time": latest["timestamp"],
+        "sweep_direction": "below_low",
+        "swept_level": record["level"],
+        "reclaimed": True,
+        "source_bars": [latest["timestamp"]],
+    }
+    liq = {"sweep_detected": True, "reclaim_detected": True,
+           "sweep_direction": "below_low", "sweep_fact": fact}
+    if invalid_edge == "older_event":
+        prior = candles[-2]
+        fact["event_time"] = prior["timestamp"]
+        fact["source_bars"] = [prior["timestamp"]]
+    elif invalid_edge == "forming_event":
+        latest["temporal_status"] = "forming"
+    elif invalid_edge == "malformed_fact":
+        fact["source_bars"] = "not-a-source-list"
+    elif invalid_edge == "contradictory_fact":
+        fact["source_tf"] = "1m"
+    else:
+        liq.pop("sweep_fact")
+        snapshot["structure"]["5m"]["last_swing_low"] = record["level"]
+    snapshot["liquidity"]["5m"] = liq
+
+    prior_lineage_count = len(tracker.low_lineage["5m"])
+    state = tracker.update(snapshot)
+    current = state["by_timeframe"]["lows"]["5m"]
+    assert current["registered_at"] == record["registered_at"]
+    assert current["level"] == record["level"]
+    assert len(tracker.low_lineage["5m"]) == prior_lineage_count
+
+
+@pytest.mark.parametrize("direction", ["bullish", "bearish"])
+def test_real_newer_protected_pivot_replaces_incumbent_lifetime(
+        tmp_path, monkeypatch, direction):
+    """A confirmed new pivot remains replaceable after reaffirmation repair."""
+    cycle = _cycle(tmp_path, monkeypatch)
+    base_history = list(TAPE_1M)
+    if direction == "bearish":
+        base_history = [{**bar,
+                         "open": 60000.0 - bar["open"],
+                         "high": 60000.0 - bar["low"],
+                         "low": 60000.0 - bar["high"],
+                         "close": 60000.0 - bar["close"]}
+                        for bar in base_history]
+    for end in range(5, len(base_history) + 1, 5):
+        rows = base_history[:end]
+        cycle.scan(rows, now=_now_for(rows), invoke_brain=False)
+    side = "low" if direction == "bullish" else "high"
+    registry = cycle.swing_tracker.protected_lows if side == "low" \
+        else cycle.swing_tracker.protected_highs
+    incumbent = copy.deepcopy(registry["5m"])
+    history = list(base_history)
+    appended = [
+        ("03:00", 29460, 29465, 29445, 29455),
+        ("03:05", 29455, 29460, 29440, 29450),
+        ("03:10", 29450, 29470, 29448, 29460),
+        ("03:15", 29460, 29468, 29452, 29461),
+        ("03:20", 29461, 29466, 29455, 29462),
+        ("03:25", 29462, 29470, 29458, 29465),
+        # Sweep the newly confirmed 29440 low while preserving the old 29429.75
+        # lifetime. The capped high avoids a simultaneous buy-side sweep.
+        ("03:30", 29460, 29464, 29438, 29448),
+    ]
+    last_scan = None
+    for hhmm, open_, high, low, close in appended:
+        if direction == "bearish":
+            mirror = lambda value: 60000.0 - value
+            open_, high, low, close = (
+                mirror(open_), mirror(low), mirror(high), mirror(close))
+        history.extend(_expand_5m((hhmm, open_, high, low, close)))
+        last_scan = cycle.scan(history, now=_now_for(history), invoke_brain=False)
+
+    snapshot = last_scan["snapshot"]
+    fact = snapshot["liquidity"]["5m"].get("sweep_fact") or {}
+    assert fact.get("sweep_direction") == (
+        "below_low" if direction == "bullish" else "above_high"), fact
+    assert fact.get("swept_level") == (29440.0 if direction == "bullish" else 30560.0)
+    replacement = registry["5m"]
+    assert replacement["level"] != incumbent["level"]
+    assert replacement["registered_at"] != incumbent["registered_at"]
+    assert replacement["registered_at"] == snapshot["timestamp"]
+
+
 def test_changed_anchor_lifetime_cannot_reuse_retained_formation(
         tmp_path, monkeypatch):
     _, scan, _ = _current_return_scan(tmp_path, monkeypatch)
