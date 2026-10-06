@@ -237,18 +237,25 @@ def extract_occurrences(snapshot: dict, prior_protected: dict, contract: str) ->
                     out.append({
                         "occurrence_id": occurrence_id(
                             contract, PROTECTED_SWING_REGISTERED, tf,
-                            rec.get("registered_at") or ts, f"{side}@{lvl}"),
+                            rec.get("registered_at") or ts,
+                            (f"{side}@{lvl}:{rec.get('swing_id')}@"
+                             f"{rec.get('registered_at')}")),
                         "event_type": PROTECTED_SWING_REGISTERED,
                         "contract": contract, "source_tf": tf, "event_time": ts,
                         "side": side, "level": lvl, "basis": rec.get("basis"),
                         "swing_id": rec.get("swing_id"),
                         "registered_at": rec.get("registered_at"),
+                        **provenance(tf),
                         "observed_at": ts})
-                elif old.get("level") != lvl:
+                elif (old.get("level") != lvl
+                      or old.get("swing_id") != rec.get("swing_id")
+                      or old.get("registered_at") != rec.get("registered_at")):
                     out.append({
                         "occurrence_id": occurrence_id(
                             contract, PROTECTED_SWING_REPLACED, tf, ts,
-                            f"{side}:{old.get('level')}->{lvl}"),
+                            (f"{side}:{old.get('level')}->{lvl}:"
+                             f"{old.get('swing_id')}@{old.get('registered_at')}->"
+                             f"{rec.get('swing_id')}@{rec.get('registered_at')}")),
                         "event_type": PROTECTED_SWING_REPLACED,
                         "contract": contract, "source_tf": tf, "event_time": ts,
                         "side": side, "old_level": old.get("level"),
@@ -260,13 +267,15 @@ def extract_occurrences(snapshot: dict, prior_protected: dict, contract: str) ->
                         "registered_at": rec.get("registered_at"),
                         "old_swing_id": old.get("swing_id"),
                         "old_registered_at": old.get("registered_at"),
+                        **provenance(tf),
                         "observed_at": ts})
             for tf, old in prev.items():
                 if tf not in cur:
                     out.append({
                         "occurrence_id": occurrence_id(
                             contract, PROTECTED_SWING_VIOLATED, tf, ts,
-                            f"{side}@{old.get('level')}"),
+                            (f"{side}@{old.get('level')}:"
+                             f"{old.get('swing_id')}@{old.get('registered_at')}")),
                         "event_type": PROTECTED_SWING_VIOLATED,
                         "contract": contract, "source_tf": tf, "event_time": ts,
                         "side": side, "level": old.get("level"),
@@ -275,6 +284,7 @@ def extract_occurrences(snapshot: dict, prior_protected: dict, contract: str) ->
                         # anonymous and unable to be matched to its own birth.
                         "swing_id": old.get("swing_id"),
                         "registered_at": old.get("registered_at"),
+                        **provenance(tf),
                         "observed_at": ts})
     except Exception:  # noqa: BLE001 - evidence must never break the scan
         return out
@@ -306,8 +316,10 @@ class ActivePath:
         self.origin = None
         self.load_bearing = None
         self.progression_tfs: set = set()
+        self.latest_progression = None
         self.ladder: list = []
         self.adverse_replacements: list = []
+        self.ambiguous_invalidations: list = []
         self.releases: list = []
         self.last_invalidated = None
         #: v2 only. Events whose CAUSAL identity could not be established, and
@@ -437,7 +449,9 @@ class ActivePath:
                 self.forming_direction, self.status = implied, "forming"
                 self.origin = dict(ev)
                 self.progression_tfs, self.ladder = set(), []
+                self.latest_progression = None
                 self.adverse_replacements = []
+                self.ambiguous_invalidations = []
                 return
             if implied and implied != self._leg_direction() and self._leg_direction():
                 # Counter-evidence. A flip requires the incumbent leg to DIE.
@@ -470,7 +484,13 @@ class ActivePath:
                 self.load_bearing = {
                     "level": lvl, "side": ev.get("side"),
                     "timeframe": ev.get("source_tf"), "basis": ev.get("basis"),
-                    "swing_id": ev.get("swing_id"), "at": ev.get("event_time"),
+                    "swing_id": ev.get("swing_id"),
+                    "registered_at": ev.get("registered_at"),
+                    "occurrence_id": ev.get("occurrence_id"),
+                    "source_bar_time": ev.get("source_bar_time"),
+                    "settled_edge_time": ev.get("settled_edge_time"),
+                    "observed_at": ev.get("observed_at") or ev.get("event_time"),
+                    "at": ev.get("event_time"),
                     "intact": True, "producer_backed": True,
                     "last_move_favourable": bool(favourable)}
                 if favourable:
@@ -487,6 +507,16 @@ class ActivePath:
         if et == STRUCTURE_BREAK and self._leg_direction():
             if ev.get("direction") == self._leg_direction():
                 self.progression_tfs.add(ev.get("source_tf"))
+                self.latest_progression = {
+                    "occurrence_id": ev.get("occurrence_id"),
+                    "direction": ev.get("direction"),
+                    "source_tf": ev.get("source_tf"),
+                    "at": ev.get("event_time"),
+                    "source_bar_time": ev.get("source_bar_time"),
+                    "settled_edge_time": ev.get("settled_edge_time"),
+                    "observed_at": ev.get("observed_at") or ev.get("event_time"),
+                    "broken_level": ev.get("broken_level"),
+                }
                 if self.forming_direction:
                     self.owner, self.forming_direction = self.forming_direction, None
                 if self.status in ("forming", "contested"):
@@ -498,18 +528,61 @@ class ActivePath:
         if et == PROTECTED_SWING_VIOLATED and self.load_bearing:
             same_side = ev.get("side") == self._supporting_side()
             try:
-                hit = float(ev.get("level")) == self.load_bearing["level"]
+                hit = float(ev.get("level")) == float(self.load_bearing["level"])
             except (TypeError, ValueError):
                 hit = False
             if same_side and hit:
-                self.last_invalidated = {"owner": self._leg_direction(),
-                                         "at": ev.get("event_time"),
-                                         "level": self.load_bearing["level"]}
+                bearing = self.load_bearing
+                event_tf = ev.get("source_tf")
+                bearing_tf = bearing.get("timeframe")
+                event_swing = ev.get("swing_id")
+                bearing_swing = bearing.get("swing_id")
+                event_registered = ev.get("registered_at")
+                bearing_registered = bearing.get("registered_at")
+                # A different timeframe or swing registration life at the same
+                # price is not the load-bearing structure that owns this path.
+                if event_tf and bearing_tf and event_tf != bearing_tf:
+                    return
+                if event_swing and bearing_swing and event_swing != bearing_swing:
+                    return
+                if (event_registered and bearing_registered
+                        and event_registered != bearing_registered):
+                    return
+                identity_complete = bool(
+                    event_tf and bearing_tf and event_tf == bearing_tf
+                    and event_swing and bearing_swing and event_swing == bearing_swing
+                    and event_registered and bearing_registered
+                    and event_registered == bearing_registered)
+                if not identity_complete:
+                    # Same-side/same-price evidence with incomplete identity
+                    # cannot safely kill this structure or be treated as no
+                    # challenge. Hold the incumbent as contested until a later
+                    # supporting confirmation supersedes this ambiguity.
+                    self.ambiguous_invalidations.append({
+                        "owner": self._leg_direction(), "at": ev.get("event_time"),
+                        "source_tf": event_tf, "level": bearing.get("level"),
+                        "swing_id": event_swing,
+                        "registered_at": event_registered,
+                        "occurrence_id": ev.get("occurrence_id"),
+                    })
+                    return
+                self.last_invalidated = {
+                    "owner": self._leg_direction(),
+                    "at": ev.get("event_time"),
+                    "source_bar_time": ev.get("source_bar_time"),
+                    "settled_edge_time": ev.get("settled_edge_time"),
+                    "observed_at": ev.get("observed_at") or ev.get("event_time"),
+                    "level": bearing.get("level"), "side": ev.get("side"),
+                    "source_tf": event_tf, "swing_id": event_swing,
+                    "registered_at": event_registered,
+                    "occurrence_id": ev.get("occurrence_id"),
+                }
                 self.releases.append(dict(self.last_invalidated))
                 self.owner, self.forming_direction = "none", None
                 self.status = "none"
                 self.origin, self.load_bearing = None, None
                 self.progression_tfs, self.ladder = set(), []
+                self.latest_progression = None
                 self.adverse_replacements = []
 
     # ── derived views ───────────────────────────────────────────────────────
@@ -544,6 +617,8 @@ class ActivePath:
                                          and not self.load_bearing.get("intact", True)),
             "load_bearing_replaced_against_path": any(
                 (a.get("at") or "") > anchor for a in self.adverse_replacements),
+            "ambiguous_load_bearing_invalidation": any(
+                (a.get("at") or "") >= anchor for a in self.ambiguous_invalidations),
             "opposing_raid_rejected": any(e.get("_counter_origin") for e in after),
             # TRUTHFUL NULLS. `false` would be a claim the producer cannot back.
             "opposing_market_structure_shift": None,
@@ -564,7 +639,8 @@ class ActivePath:
         if te.get("load_bearing_failure"):
             return "invalidated"
         if te.get("opposing_structure_break") or \
-                te.get("load_bearing_replaced_against_path"):
+                te.get("load_bearing_replaced_against_path") or \
+                te.get("ambiguous_load_bearing_invalidation"):
             return "contested"
         return "active"
 
@@ -577,6 +653,7 @@ class ActivePath:
         d = self._leg_direction()
         prog = sorted(self.progression_tfs, key=lambda t: TF_RESOLUTION.get(t, 0))
         return {
+            "contract_id": self._contract,
             "state_available": True,
             "unavailable_reason": None,
             "owner": self.owner,
@@ -594,15 +671,21 @@ class ActivePath:
                                  and self.origin.get("reclaimed") is True else None),
                 "direction": d,
                 "at": self.origin.get("event_time"),
+                "source_bar_time": self.origin.get("source_bar_time"),
+                "settled_edge_time": self.origin.get("settled_edge_time"),
+                "observed_at": (self.origin.get("observed_at")
+                                or self.origin.get("event_time")),
                 "source_tf": self.origin.get("source_tf"),
                 "occurrence_id": self.origin.get("occurrence_id")},
             "load_bearing_structure": self.load_bearing,
             "progression": {
                 "supporting_timeframes": prog,
                 "highest_confirmed": prog[-1] if prog else None,
+                "latest_supporting_event": self.latest_progression,
                 "favourable_ladder": list(self.ladder),
                 "successive_favourable": len(self.ladder) > 1},
             "adverse_replacements": list(self.adverse_replacements[-3:]),
+            "ambiguous_invalidations": list(self.ambiguous_invalidations[-3:]),
             "transfer_evidence": self.transfer_evidence(),
             "last_invalidated": self.last_invalidated,
             "ownership_changed_this_scan": self.owner != self._prev_owner,

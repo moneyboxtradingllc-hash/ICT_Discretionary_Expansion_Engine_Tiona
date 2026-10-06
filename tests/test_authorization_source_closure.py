@@ -132,6 +132,10 @@ MUST_BE_BOUND = {
         "settled-chart delivery/progress facts that the campaign lifecycle will consume",
     "market_state/active_path.py":
         "canonical campaign owner/status/invalidation witness that bounds draw episodes",
+    "ai_brain/narrative_continuity.py":
+        "reconciles prior narrative authority with current causal ownership",
+    "ai_brain/stance_memory.py":
+        "carries current versus prior falsifier authority across scans",
     "market_data/campaign_lifecycle.py":
         "current-authority lifecycle projection and additional participation rule",
     "market_data/trade_horizon.py":

@@ -70,15 +70,22 @@ def evidence(when=NOW, relation="above_zone"):
                          "conflicted": False},
     }
     path_at = (when - timedelta(minutes=5)).isoformat()
-    path = {"state_available": True, "owner": "bullish",
+    path = {"contract_id": "CON.TEST", "state_available": True,
+            "owner": "bullish",
             "forming_direction": None, "status": "active",
-            "session": "2026-09-11",
+            "session": "20260911",
             "origin": {"event": "sell_side_raid_rejected", "at": path_at},
             "load_bearing_structure": {"level": 99.0, "side": "low",
                                         "timeframe": "5m", "at": path_at,
                                         "intact": True},
             "progression": {"supporting_timeframes": ["5m"]},
-            "transfer_evidence": {}}
+            "transfer_evidence": {
+                "opposing_structure_break": False,
+                "load_bearing_failure": False,
+                "load_bearing_replaced_against_path": False,
+                "ambiguous_load_bearing_invalidation": False,
+                "opposing_raid_rejected": False,
+            }}
     mtf = {
         "schema_version": "mtf_market_state.v1", "timeframes": {},
         "synthesis": {"context_state": None, "active_leg_state": None,
@@ -594,7 +601,8 @@ def test_fake_candidate_cannot_publish_unbound_conditional_plan(monkeypatch, tmp
     cycle.retrieval_telemetry = SimpleNamespace(record_scan=lambda **_k: {})
     cycle._execution_price = lambda: snapshot["execution_price"]
     cycle._record_sweep_occurrences = lambda _snapshot: []
-    cycle._update_active_path = lambda _snapshot: {}
+    cycle._update_active_path = lambda _snapshot: copy.deepcopy(
+        snapshot["active_path_state"])
     cycle._update_structure_flips = lambda _snapshot: []
     cycle._brain_input = lambda _snapshot: copy.deepcopy(payload)
     cycle._two_brain_after_primary = lambda *_a: None

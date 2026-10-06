@@ -61,7 +61,8 @@ class StanceMemory:
                                   or prior.get("direction") or direction)
             has_load_bearing = (isinstance(path.get("load_bearing_structure"), dict)
                                 and path["load_bearing_structure"].get("level") is not None)
-            falsifier_status = continuity.get("thesis_falsifier_status")
+            falsifier_status = (continuity.get("current_thesis_falsifier_status")
+                                or continuity.get("thesis_falsifier_status"))
             if continuity.get("control_state") == "confirmed_transfer":
                 # The continuity status above describes the PREVIOUS campaign's
                 # falsifier. A newly confirmed owner starts with its own active
@@ -94,6 +95,8 @@ class StanceMemory:
                                      or prior.get("thesis_falsifier")
                                      or path.get("load_bearing_structure")),
                 "thesis_falsifier_status": falsifier_status,
+                "prior_thesis_falsifier_status": continuity.get(
+                    "prior_thesis_falsifier_status"),
                 "active_draw": str(stance.get("active_draw") or "")[:300],
                 "objective_id": stance.get("objective_id"),
                 "control_state": continuity.get("control_state"),

@@ -8,6 +8,8 @@ proof family, not the definition of every possible market reversal.
 """
 from __future__ import annotations
 
+import math
+
 
 DIRECTIONS = ("bullish", "bearish")
 OPPOSITE = {"bullish": "bearish", "bearish": "bullish"}
@@ -41,6 +43,28 @@ def _timestamp_after(left, right):
         return False
 
 
+def _aware_datetime(value):
+    """Parse an explicitly zoned timestamp; naive times are not causal proof."""
+    try:
+        from datetime import datetime, timezone
+
+        dt = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+        if dt.tzinfo is None or dt.utcoffset() is None:
+            return None
+        return dt.astimezone(timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def _finite_price(value):
+    if isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
 def _load_bearing(path):
     value = (path or {}).get("load_bearing_structure")
     if not isinstance(value, dict):
@@ -49,7 +73,9 @@ def _load_bearing(path):
     if level is None:
         return None
     return {key: value.get(key) for key in
-            ("level", "side", "timeframe", "basis", "swing_id", "at", "intact")}
+            ("level", "side", "timeframe", "basis", "swing_id", "registered_at",
+             "occurrence_id", "source_bar_time", "settled_edge_time", "at", "intact",
+             "producer_backed")}
 
 
 def _owner_has_live_structure(path, direction):
@@ -74,6 +100,117 @@ def _authoritative_opposing_origin(origin, to_direction):
         return (origin.get("event") == expected_event
                 and origin.get("direction") == to_direction)
     return False
+
+
+def _same_direction_successor_proof(path, snapshot, direction):
+    """Prove a fresh same-direction ActivePath generation after a real failure.
+
+    This is not a transfer. It requires the current public ActivePath state to
+    carry a new typed raid origin, a current-generation structural confirmation,
+    the exact invalidated swing identity, and intact supporting structure.
+    """
+    if not isinstance(path, dict) or path.get("state_available") is not True:
+        return None
+    if (_direction(direction) is None or path.get("owner") != direction
+            or path.get("status") != "active"):
+        return None
+
+    snapshot_contract = str((snapshot or {}).get("contract_id") or "").strip()
+    path_contract = str(path.get("contract_id") or "").strip()
+    current_session = _session_key((snapshot or {}).get("timestamp"))
+    if (not snapshot_contract or path_contract != snapshot_contract
+            or not current_session or path.get("session") != current_session):
+        return None
+
+    invalidated = path.get("last_invalidated")
+    if not isinstance(invalidated, dict) or invalidated.get("owner") != direction:
+        return None
+    expected_side = "low" if direction == "bullish" else "high"
+    if (invalidated.get("side") != expected_side
+            or not _finite_price(invalidated.get("level"))
+            or not invalidated.get("source_tf")
+            or not invalidated.get("swing_id")
+            or not invalidated.get("registered_at")
+            or not invalidated.get("occurrence_id")):
+        return None
+
+    origin = path.get("origin")
+    if not isinstance(origin, dict):
+        return None
+    expected_event = ("sell_side_raid_rejected" if direction == "bullish"
+                      else "buy_side_raid_rejected")
+    if not (origin.get("proof_family") == "rejected_raid_reclaim"
+            and origin.get("event") == expected_event
+            and origin.get("direction") == direction
+            and origin.get("source_tf")
+            and origin.get("occurrence_id")):
+        return None
+
+    # Use the settled bar that authored each fact for causal ordering. Scan
+    # observation time is checked too, but cannot substitute for source time.
+    invalidated_source = _aware_datetime(invalidated.get("source_bar_time"))
+    origin_source = _aware_datetime(origin.get("source_bar_time"))
+    invalidated_observed = _aware_datetime(invalidated.get("at"))
+    origin_observed = _aware_datetime(origin.get("at"))
+    if not (invalidated_source and origin_source and origin_source > invalidated_source
+            and invalidated_observed and origin_observed
+            and origin_observed > invalidated_observed):
+        return None
+
+    progression = path.get("progression")
+    supporting = (progression.get("supporting_timeframes")
+                  if isinstance(progression, dict) else None)
+    latest = (progression.get("latest_supporting_event")
+              if isinstance(progression, dict) else None)
+    if (not isinstance(supporting, list) or not supporting
+            or not isinstance(latest, dict)
+            or latest.get("direction") != direction
+            or latest.get("source_tf") not in supporting
+            or not latest.get("occurrence_id")
+            or latest.get("occurrence_id") == origin.get("occurrence_id")
+            or not _aware_datetime(latest.get("at"))):
+        return None
+    latest_source = _aware_datetime(latest.get("source_bar_time"))
+    if not (latest_source and latest_source > origin_source
+            and _aware_datetime(latest.get("at")) > origin_observed):
+        return None
+
+    bearing = _load_bearing(path)
+    valid_timeframes = {"1m", "3m", "5m", "15m"}
+    bearing_source = _aware_datetime((bearing or {}).get("source_bar_time"))
+    if not (bearing and _finite_price(bearing.get("level"))
+            and bearing.get("side") == expected_side
+            and bearing.get("timeframe") in valid_timeframes
+            and bearing.get("basis")
+            and bearing.get("swing_id")
+            and bearing.get("registered_at")
+            and bearing.get("occurrence_id")
+            and bearing.get("intact") is True
+            and bearing.get("producer_backed") is True
+            and bearing_source and bearing_source > origin_source):
+        return None
+
+    evidence = path.get("transfer_evidence")
+    if not isinstance(evidence, dict):
+        return None
+    required_flags = ("opposing_structure_break", "load_bearing_failure",
+                      "load_bearing_replaced_against_path",
+                      "ambiguous_load_bearing_invalidation")
+    if any(not isinstance(evidence.get(name), bool) for name in required_flags):
+        return None
+    if any(evidence.get(name) is True for name in required_flags):
+        return None
+
+    return {
+        "status": "verified",
+        "direction": direction,
+        "prior_invalidation": dict(invalidated),
+        "successor_origin": dict(origin),
+        "current_generation_progression": dict(latest),
+        "supporting_structure": bearing,
+        "contract_id": snapshot_contract,
+        "session": current_session,
+    }
 
 
 def _transfer_proof(path, from_direction, to_direction):
@@ -156,6 +293,14 @@ def build_narrative_continuity(snapshot: dict, stance_history: dict) -> dict:
     owner = _direction(path.get("owner"))
     path_available = path.get("state_available") is True
     status = path.get("status")
+    snapshot_contract = str(snap.get("contract_id") or "").strip()
+    path_contract = str(path.get("contract_id") or "").strip()
+    current_session = _session_key(snap.get("timestamp"))
+    path_session = str(path.get("session") or "").strip()
+    path_identity_conflict = bool(
+        path_available and (
+            (snapshot_contract and path_contract != snapshot_contract)
+            or (current_session and path_session != current_session)))
     current_falsifier = _load_bearing(path)
     last_invalidated = path.get("last_invalidated") or {}
     last_invalidated_at = str(last_invalidated.get("at") or "")
@@ -167,15 +312,35 @@ def build_narrative_continuity(snapshot: dict, stance_history: dict) -> dict:
              or prior_falsifier_status == "occurred")
     )
     proof = (_transfer_proof(path, prior_direction, owner)
-             if (prior_established or incumbent_failed) and owner and incumbent_failed
-             else None)
+             if (not path_identity_conflict
+                 and (prior_established or incumbent_failed)
+                 and owner and incumbent_failed) else None)
     confirmed = proof is not None
+
+    successor = (_same_direction_successor_proof(path, snap, prior_direction)
+                 if (not path_identity_conflict and incumbent_failed
+                     and owner == prior_direction) else None)
 
     transfer_flags = ((path.get("transfer_evidence") or {})
                       if isinstance(path.get("transfer_evidence"), dict) else {})
-    opposing_evidence = any(value is True for value in transfer_flags.values())
-    if confirmed:
+    required_transfer_flags = ("opposing_structure_break", "load_bearing_failure",
+                               "load_bearing_replaced_against_path",
+                               "ambiguous_load_bearing_invalidation")
+    transfer_flags_known = all(
+        isinstance(transfer_flags.get(name), bool) for name in required_transfer_flags)
+    substantive_challenge = any(
+        transfer_flags.get(name) is True for name in required_transfer_flags)
+    if path_identity_conflict:
+        control_state = "unresolved"
+        dominant_direction = None
+    elif confirmed:
         control_state = "confirmed_transfer"
+        dominant_direction = owner
+    elif successor:
+        # The old campaign's falsifier remains historical evidence. A new
+        # causal generation in the same direction starts with its own intact
+        # falsifier and does not constitute a directional transfer.
+        control_state = "campaign_established"
         dominant_direction = owner
     elif prior_established:
         dominant_direction = None if incumbent_failed else prior_direction
@@ -184,8 +349,10 @@ def build_narrative_continuity(snapshot: dict, stance_history: dict) -> dict:
         elif incumbent_failed or status in ("none", "invalidated") or (
                 owner and owner != prior_direction):
             control_state = "developing_transfer"
-        elif status == "contested" or opposing_evidence:
+        elif status == "contested" or substantive_challenge:
             control_state = "developing_transfer"
+        elif not transfer_flags_known:
+            control_state = "unresolved"
         elif (owner == prior_direction and status == "active"
               and _owner_has_live_structure(path, owner)):
             control_state = "incumbent_intact"
@@ -200,8 +367,15 @@ def build_narrative_continuity(snapshot: dict, stance_history: dict) -> dict:
           and _owner_has_live_structure(path, owner)):
         # A mechanically established campaign can anchor a new process or a
         # legacy stance whose schema did not preserve causal continuity.
-        control_state = "campaign_established"
-        dominant_direction = owner
+        if substantive_challenge:
+            control_state = "developing_transfer"
+            dominant_direction = owner
+        elif not transfer_flags_known:
+            control_state = "unresolved"
+            dominant_direction = None
+        else:
+            control_state = "campaign_established"
+            dominant_direction = owner
     elif (path_available and owner and status == "contested"
           and _owner_has_live_structure(path, owner)):
         control_state = "developing_transfer"
@@ -227,7 +401,9 @@ def build_narrative_continuity(snapshot: dict, stance_history: dict) -> dict:
         }
 
     falsifier_status = "unknown"
-    if prior_direction:
+    if successor:
+        falsifier_status = "not_occurred"
+    elif prior_direction:
         if incumbent_failed or prior_falsifier_status == "occurred":
             falsifier_status = "occurred"
         elif prior_established and control_state in (
@@ -243,6 +419,8 @@ def build_narrative_continuity(snapshot: dict, stance_history: dict) -> dict:
         "dominant_direction": dominant_direction,
         "prior_thesis": prior_thesis,
         "thesis_falsifier_status": falsifier_status,
+        "prior_thesis_falsifier_status": prior_falsifier_status,
+        "current_thesis_falsifier_status": falsifier_status,
         "current_thesis_falsifier": active_falsifier,
         "active_path": {
             "available": path_available,
@@ -254,9 +432,13 @@ def build_narrative_continuity(snapshot: dict, stance_history: dict) -> dict:
             "progression": path.get("progression"),
             "transfer_evidence": transfer_flags,
             "last_invalidated": last_invalidated or None,
+            "contract_id": path.get("contract_id"),
+            "session": path.get("session"),
+            "identity_conflict": path_identity_conflict,
         },
         "transfer_confirmed": confirmed,
         "transfer_proof": proof,
+        "same_direction_successor_proof": successor,
         "confirmed_from": prior_direction if confirmed else None,
         "confirmed_to": owner if confirmed else None,
         "same_production_session": same_session,

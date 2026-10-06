@@ -34,7 +34,7 @@ def source_bytes(monkeypatch):
 
 @pytest.mark.parametrize("style", ["lf", "crlf", "mixed_files", "mixed_lines"])
 def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
-    assert len(source_bytes) == 42
+    assert len(source_bytes) == 44
     for index, (path, data) in enumerate(source_bytes.items()):
         if style == "crlf" or (style == "mixed_files" and index % 2):
             source_bytes[path] = data.replace(b"\n", b"\r\n")
@@ -78,7 +78,9 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # prior production authorization is stale after this rotation.
     # EXPLICIT-BRAIN-ACTION-AUTHORITY binds prompt/schema/producer enforcement
     # and the safe stand_down emitted by deterministic/fallback assembly.
-    assert PM.brain_contract_fingerprint() == "brain:1711ab180c888aab"
+    # NA-1 CAUSAL CONTINUITY REPAIR binds narrative succession, transfer
+    # evidence classification and cross-scan falsifier memory.
+    assert PM.brain_contract_fingerprint() == "brain:51d892a3f621eda5"
 
 
 @pytest.mark.parametrize("addition", [
@@ -95,6 +97,9 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     "src/data_feed/trade_interval_truth.py",
     "src/market_data/campaign_draw_truth.py",
     "src/market_data/campaign_lifecycle.py",
+    "src/ai_brain/narrative_continuity.py",
+    "src/ai_brain/stance_memory.py",
+    "src/live_scan/production_scan_cycle.py",
     "src/broker/topstepx_production_loop.py",
     "src/market_state/active_path.py",
     "src/ai_brain/narrative_brain.py",

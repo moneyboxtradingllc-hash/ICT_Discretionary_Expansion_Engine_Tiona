@@ -67,6 +67,7 @@ def active_path(direction="bullish", *, status="active", available=True,
         "market_state.active_path", fromlist=["production_session_key"]
     ).production_session_key(stamp(2))
     value = {
+        "contract_id": CONTRACT,
         "state_available": available,
         "owner": direction if available else None,
         "status": status if available else None,
@@ -80,7 +81,14 @@ def active_path(direction="bullish", *, status="active", available=True,
         "load_bearing_structure": {"level": 99.0 if direction == "bullish" else 101.0,
                                    "side": side, "intact": True},
         "progression": {"supporting_timeframes": ["5m"]},
-        "transfer_evidence": {},
+        "transfer_evidence": {
+            "opposing_structure_break": False,
+            "load_bearing_failure": False,
+            "load_bearing_replaced_against_path": False,
+            "ambiguous_load_bearing_invalidation": False,
+            "opposing_raid_rejected": False,
+            "opposing_market_structure_shift": None,
+            "opposing_displacement": None},
         "last_invalidated": None,
     }
     value.update(overrides)
@@ -360,8 +368,10 @@ def test_cached_plan_phase_cannot_survive_current_campaign_truth_changes(
                   reclaimed=True),
             event(STRUCTURE_BREAK, stamp(1), direction="bullish",
                   broken_level=100),
-            event(PROTECTED_SWING_REGISTERED, stamp(2), side="low", level=99),
-            event(PROTECTED_SWING_VIOLATED, stamp(3), side="low", level=99),
+            event(PROTECTED_SWING_REGISTERED, stamp(2), side="low", level=99,
+                  swing_id="bull-low-old", registered_at=stamp(2)),
+            event(PROTECTED_SWING_VIOLATED, stamp(3), side="low", level=99,
+                  swing_id="bull-low-old", registered_at=stamp(2)),
             event(LIQUIDITY_SWEEP, stamp(4), sweep_direction="above_high",
                   reclaimed=True),
             event(STRUCTURE_BREAK, stamp(5), direction="bearish",
@@ -542,7 +552,8 @@ def test_real_active_path_failed_incumbent_plus_new_forming_hypothesis_is_transf
         event(STRUCTURE_BREAK, stamp(1), direction="bullish",
               broken_level=100.0),
         event(PROTECTED_SWING_REGISTERED, stamp(2), side="low", level=99.0,
-              basis="sell_side_raid_rejected"),
+              basis="sell_side_raid_rejected", swing_id="bull-low-old",
+              registered_at=stamp(2)),
     ])
     incumbent = path_machine.state()
     assert (incumbent["owner"], incumbent["status"]) == ("bullish", "active")
@@ -559,7 +570,8 @@ def test_real_active_path_failed_incumbent_plus_new_forming_hypothesis_is_transf
     assert authored_continuity["control_state"] == "incumbent_intact"
 
     path_machine.ingest([
-        event(PROTECTED_SWING_VIOLATED, stamp(3), side="low", level=99.0),
+        event(PROTECTED_SWING_VIOLATED, stamp(3), side="low", level=99.0,
+              swing_id="bull-low-old", registered_at=stamp(2)),
         event(LIQUIDITY_SWEEP, stamp(4), sweep_direction="above_high",
               reclaimed=True),
     ])

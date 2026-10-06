@@ -98,6 +98,7 @@ def _established_narrative(direction):
     from ai_brain.narrative_continuity import build_narrative_continuity
     stamp = "2026-08-05T15:29:00+00:00"
     path = {"state_available": True, "owner": direction, "status": "active",
+            "contract_id": CID,
             "origin": {"event": "sell_side_raid_rejected" if direction == "bullish"
                        else "buy_side_raid_rejected", "at": stamp},
             "load_bearing_structure": {"level": 29875.0 if direction == "bullish"
@@ -105,7 +106,12 @@ def _established_narrative(direction):
                                        "side": "low" if direction == "bullish" else "high",
                                        "timeframe": "5m", "at": stamp, "intact": True},
             "progression": {"supporting_timeframes": ["5m"]},
-            "transfer_evidence": {}, "session": "20260805"}
+            "transfer_evidence": {
+                "opposing_structure_break": False,
+                "load_bearing_failure": False,
+                "load_bearing_replaced_against_path": False,
+                "ambiguous_load_bearing_invalidation": False,
+                "opposing_raid_rejected": False}, "session": "20260805"}
     continuity = build_narrative_continuity(
         {"timestamp": stamp, "active_path_state": path}, {"available": False})
     return path, continuity

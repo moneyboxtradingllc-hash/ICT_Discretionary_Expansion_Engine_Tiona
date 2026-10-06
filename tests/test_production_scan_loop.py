@@ -197,7 +197,13 @@ class Cycle:
                 "side": "low" if direction == "bullish" else "high",
                 "timeframe": "5m", "at": path_at, "intact": True},
             "progression": {"supporting_timeframes": ["5m"]},
-            "transfer_evidence": {}, "session": "20260806"}
+            "transfer_evidence": {
+                "opposing_structure_break": False,
+                "load_bearing_failure": False,
+                "load_bearing_replaced_against_path": False,
+                "ambiguous_load_bearing_invalidation": False,
+                "opposing_raid_rejected": False,
+            }, "session": "20260806"}
         snapshot = {"timestamp": "2026-08-06T14:59:00+00:00",
                     "active_path_state": active_path,
                     # ProductionScanCycle now publishes this additional gate

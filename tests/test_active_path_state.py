@@ -39,6 +39,7 @@ import glob
 import json
 import os
 import sys
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -92,18 +93,24 @@ def brk(direction="bullish", tf="1m", at="T2", level=100.0):
 
 def prot(level, side="low", tf="1m", at="T3", replaced_from=None):
     et = PROTECTED_SWING_REPLACED if replaced_from is not None else PROTECTED_SWING_REGISTERED
+    registered_at = at
+    swing = f"{tf}:{side}:{level}:{registered_at}"
     ev = {"occurrence_id": occurrence_id(CONTRACT, et, tf, at, f"{side}@{level}"),
           "event_type": et, "contract": CONTRACT, "source_tf": tf, "event_time": at,
-          "side": side, "level": level, "basis": f"{'sell' if side == 'low' else 'buy'}_side_raid_rejected"}
+          "side": side, "level": level, "swing_id": swing,
+          "registered_at": registered_at,
+          "basis": f"{'sell' if side == 'low' else 'buy'}_side_raid_rejected"}
     if replaced_from is not None:
         ev["old_level"] = replaced_from
     return ev
 
 
-def violated(level, side="low", tf="1m", at="T9"):
+def violated(level, side="low", tf="1m", at="T9", registered_at="T3"):
+    swing = f"{tf}:{side}:{level}:{registered_at}"
     return {"occurrence_id": occurrence_id(CONTRACT, PROTECTED_SWING_VIOLATED, tf, at, f"{side}@{level}"),
             "event_type": PROTECTED_SWING_VIOLATED, "contract": CONTRACT,
-            "source_tf": tf, "event_time": at, "side": side, "level": level}
+            "source_tf": tf, "event_time": at, "side": side, "level": level,
+            "swing_id": swing, "registered_at": registered_at}
 
 
 def replay(day, mutation=None, upto=None):
@@ -130,6 +137,35 @@ def replay(day, mutation=None, upto=None):
         if upto and st["scan"] == upto:
             break
     return out
+
+
+def _producer_snapshot(timestamp, source_bar_time, protected, *, sweep=False,
+                       structure_break=None, side="low", sweep_direction=None):
+    liquidity = {}
+    if sweep:
+        liquidity = {"1m": {"sweep_detected": True, "reclaim_detected": True,
+                            "sweep_direction": (sweep_direction or
+                                                ("below_low" if side == "low"
+                                                 else "above_high")),
+                            "sweep_fact": {"swept_level": 99.0}}}
+    structure = {}
+    if structure_break:
+        structure = {"1m": {"bos": True,
+                            "bos_direction": structure_break,
+                            "broken_level": 101.0}}
+    return {
+        "timestamp": timestamp,
+        "contract_id": CONTRACT,
+        "liquidity": liquidity,
+        "structure": structure,
+        "settled_source": {
+            tf: {"source_bar_time": source_bar_time,
+                 "settled_edge_time": source_bar_time}
+            for tf in ("1m", "3m", "5m", "15m")},
+        "protected_swings": {"by_timeframe": {
+            "lows": protected if side == "low" else {},
+            "highs": protected if side == "high" else {}}},
+    }
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -199,7 +235,7 @@ class TestGhostReference:
         ap.ingest([sweep("1m", "above_high"), brk("bearish"),
                    prot(29299.0, side="high", at="T4"),
                    prot(29321.0, side="high", at="T5", replaced_from=29299.0),
-                   violated(29321.0, side="high", at="T6")])
+                   violated(29321.0, side="high", at="T6", registered_at="T5")])
         s = ap.state()
         assert s["owner"] == "none"
         assert s["load_bearing_structure"] is None
@@ -215,6 +251,138 @@ class TestGhostReference:
         assert s["load_bearing_structure"]["last_move_favourable"] is True
 
 
+class TestInvalidationIdentity:
+    def test_violation_on_another_timeframe_at_same_price_does_not_kill_owner(self):
+        ap = ActivePath()
+        first = _producer_snapshot(
+            "2026-08-24T15:00:00+00:00", "2026-08-24T14:59:00+00:00",
+            {"5m": {"level": 100.0, "basis": "protected", "swing_id": "low-5m-a",
+                     "registered_at": "2026-08-24T14:45:00+00:00"},
+             "15m": {"level": 100.0, "basis": "protected", "swing_id": "low-15m-b",
+                      "registered_at": "2026-08-24T14:30:00+00:00"}},
+            sweep=True, structure_break="bullish")
+        ap.enforce_lifecycle(first["timestamp"], CONTRACT)
+        prior = {}
+        ap.ingest(extract_occurrences(first, prior, CONTRACT))
+        prior = first["protected_swings"]["by_timeframe"]
+        assert ap.state()["load_bearing_structure"]["swing_id"] == "low-15m-b"
+
+        other_timeframe_removed = _producer_snapshot(
+            "2026-08-24T15:02:00+00:00", "2026-08-24T15:01:00+00:00",
+            {"15m": {"level": 100.0, "basis": "protected", "swing_id": "low-15m-b",
+                      "registered_at": "2026-08-24T14:30:00+00:00"}})
+        ap.enforce_lifecycle(other_timeframe_removed["timestamp"], CONTRACT)
+        occurrences = extract_occurrences(other_timeframe_removed, prior, CONTRACT)
+        violation = next(e for e in occurrences
+                         if e["event_type"] == PROTECTED_SWING_VIOLATED)
+        assert violation["source_tf"] == "5m"
+        assert violation["swing_id"] == "low-5m-a"
+        ap.ingest(occurrences)
+        assert ap.state()["owner"] == "bullish"
+        assert ap.state()["status"] == "active"
+
+        actual_bearing_removed = _producer_snapshot(
+            "2026-08-24T15:03:00+00:00", "2026-08-24T15:02:00+00:00", {})
+        ap.enforce_lifecycle(actual_bearing_removed["timestamp"], CONTRACT)
+        actual = extract_occurrences(actual_bearing_removed,
+                                     other_timeframe_removed["protected_swings"]["by_timeframe"],
+                                     CONTRACT)
+        ap.ingest(actual)
+        state = ap.state()
+        assert state["owner"] == "none"
+        assert state["last_invalidated"]["source_tf"] == "15m"
+        assert state["last_invalidated"]["swing_id"] == "low-15m-b"
+        assert state["last_invalidated"]["registered_at"] == (
+            "2026-08-24T14:30:00+00:00")
+
+    def test_same_price_reregistration_emits_replacement_identity(self):
+        old = {"lows": {"5m": {"level": 100.0, "swing_id": "swing-old",
+                               "registered_at": "2026-08-24T14:40:00+00:00"}},
+               "highs": {}}
+        current = {"lows": {"5m": {"level": 100.0, "swing_id": "swing-new",
+                                   "registered_at": "2026-08-24T14:50:00+00:00"}},
+                   "highs": {}}
+        occurrences = extract_occurrences(
+            _producer_snapshot("2026-08-24T15:00:00+00:00",
+                               "2026-08-24T14:59:00+00:00", current["lows"]),
+            old, CONTRACT)
+        replacement = next(e for e in occurrences
+                           if e["event_type"] == PROTECTED_SWING_REPLACED)
+        assert replacement["old_swing_id"] == "swing-old"
+        assert replacement["swing_id"] == "swing-new"
+        assert replacement["old_registered_at"] == "2026-08-24T14:40:00+00:00"
+        assert replacement["registered_at"] == "2026-08-24T14:50:00+00:00"
+
+        first_life = extract_occurrences(
+            _producer_snapshot("2026-08-24T15:00:00+00:00",
+                               "2026-08-24T14:59:00+00:00",
+                               {"5m": {"level": 100.0, "basis": "protected_swing",
+                                        "swing_id": "swing-old",
+                                        "registered_at": "2026-08-24T14:40:00+00:00"}}),
+            {}, CONTRACT)
+        second_life = extract_occurrences(
+            _producer_snapshot("2026-08-24T15:00:00+00:00",
+                               "2026-08-24T14:59:00+00:00",
+                               {"5m": {"level": 100.0, "basis": "protected_swing",
+                                        "swing_id": "swing-new",
+                                        "registered_at": "2026-08-24T14:50:00+00:00"}}),
+            {}, CONTRACT)
+        assert first_life[0]["occurrence_id"] != second_life[0]["occurrence_id"]
+
+        def removed_life(swing_id, registered_at):
+            return extract_occurrences(
+                _producer_snapshot("2026-08-24T15:00:00+00:00",
+                                   "2026-08-24T14:59:00+00:00", {}),
+                {"lows": {"5m": {"level": 100.0, "swing_id": swing_id,
+                                   "registered_at": registered_at}},
+                 "highs": {}}, CONTRACT)[0]
+
+        assert removed_life("swing-old", "2026-08-24T14:40:00+00:00")[
+            "occurrence_id"] != removed_life(
+                "swing-new", "2026-08-24T14:50:00+00:00")["occurrence_id"]
+
+    def test_same_price_invalidation_without_identity_is_fail_closed(self):
+        ap = ActivePath()
+        ap.enforce_lifecycle("2026-08-24T15:00:00+00:00", CONTRACT)
+        ap.ingest([sweep(at="2026-08-24T14:58:00+00:00"),
+                   brk(at="2026-08-24T14:59:00+00:00"),
+                   prot(100.0, at="2026-08-24T14:59:30+00:00")])
+        event = {"occurrence_id": "ambiguous-violation",
+                 "event_type": PROTECTED_SWING_VIOLATED,
+                 "contract": CONTRACT, "source_tf": "1m",
+                 "event_time": "2026-08-24T15:01:00+00:00",
+                 "side": "low", "level": 100.0}
+        ap.ingest([event])
+        state = ap.state()
+        assert state["owner"] == "bullish"
+        assert state["status"] == "contested"
+        assert state["transfer_evidence"]["ambiguous_load_bearing_invalidation"] is True
+
+    def test_later_supporting_confirmation_supersedes_ambiguous_invalidation(self):
+        ap = ActivePath()
+        ap.enforce_lifecycle("2026-08-24T15:00:00+00:00", CONTRACT)
+        ap.ingest([
+            sweep(at="2026-08-24T14:58:00+00:00"),
+            brk(at="2026-08-24T14:59:00+00:00"),
+            prot(100.0, at="2026-08-24T14:59:30+00:00"),
+            {"occurrence_id": "ambiguous-violation",
+             "event_type": PROTECTED_SWING_VIOLATED,
+             "contract": CONTRACT, "source_tf": "1m",
+             "event_time": "2026-08-24T15:01:00+00:00",
+             "side": "low", "level": 100.0},
+        ])
+        assert ap.state()["status"] == "contested"
+
+        confirmation = brk(at="2026-08-24T15:02:00+00:00")
+        confirmation["source_tf"] = "5m"
+        ap.ingest([confirmation])
+        state = ap.state()
+        assert state["owner"] == "bullish"
+        assert state["status"] == "active"
+        assert state["transfer_evidence"][
+            "ambiguous_load_bearing_invalidation"] is False
+
+
 class TestReleaseAndReestablishment:
     def test_death_releases_ownership(self):
         ap = ActivePath()
@@ -226,10 +394,397 @@ class TestReleaseAndReestablishment:
         ap.ingest([sweep(), brk("bullish"), prot(100.0), violated(100.0)])
         ap.ingest([sweep("1m", "above_high", at="TA"), brk("bearish", at="TB")])
         assert ap.state()["owner"] == "bearish"
-        ap.ingest([prot(200.0, side="high", at="TC"), violated(200.0, side="high", at="TD")])
+        ap.ingest([prot(200.0, side="high", at="TC"),
+                   violated(200.0, side="high", at="TD", registered_at="TC")])
         assert ap.state()["owner"] == "none"
         ap.ingest([sweep("1m", "below_low", at="TE"), brk("bullish", at="TF")])
         assert ap.state()["owner"] == "bullish"
+
+
+@pytest.mark.parametrize(("direction", "side", "raid"), [
+    ("bullish", "low", "below_low"),
+    ("bearish", "high", "above_high"),
+])
+@pytest.mark.parametrize(("phase", "expected_lifecycle"), [
+    ("continuation", "ACTIVE_DELIVERY"),
+    ("distribution", "ACTIVE_DELIVERY"),
+    ("retracement", "RETRACING"),
+])
+def test_real_continuity_accepts_fresh_same_direction_successor_then_rechecks(direction,
+                                                                              side, raid,
+                                                                              phase,
+                                                                              expected_lifecycle):
+    from ai_brain.narrative_continuity import (
+        build_narrative_continuity, candidate_direction_authorized,
+        output_direction_hold)
+    from ai_brain.stance_memory import StanceMemory
+    from market_data.campaign_draw_truth import CampaignDrawTruth
+    from market_data.campaign_lifecycle import evaluate_campaign_lifecycle
+
+    ap = ActivePath()
+    memory = StanceMemory(persist=False)
+    prior_protected = {}
+    draw_session = "causal-successor-session"
+    draw_revision = 3
+    draw_tracker = CampaignDrawTruth(contract_id=CONTRACT,
+                                     session_id=draw_session,
+                                     instrument="MNQ")
+    draw_rows = []
+    objective_identity = ("opposing_external_liquidity:buyside@105" if side == "low"
+                          else "opposing_external_liquidity:sellside@95")
+    objective_price = 105.0 if side == "low" else 95.0
+
+    def accepted_draw_view(scan_id):
+        return {"direction_authorized": True, "direction": direction,
+                "objective": {"identity": objective_identity,
+                              "kind": "opposing_external_liquidity",
+                              "price": objective_price},
+                "brain_lineage": {"source": "llm", "snapshot_id": scan_id}}
+
+    def observe_draw(snap, accepted_view=None):
+        cutoff = snap["settled_source"]["1m"]["source_bar_time"]
+        target = datetime.fromisoformat(cutoff.replace("Z", "+00:00"))
+        if not draw_rows:
+            next_bar = target
+        else:
+            next_bar = datetime.fromisoformat(
+                draw_rows[-1]["timestamp"].replace("Z", "+00:00")) + timedelta(minutes=1)
+        while next_bar <= target:
+            timestamp = next_bar.isoformat()
+            draw_rows.append({"timestamp": timestamp, "open": 100.0,
+                              "high": 100.5, "low": 99.5, "close": 100.0,
+                              "volume": 10, "contract": CONTRACT,
+                              "members": 1, "expected_members": 1,
+                              "complete": True})
+            next_bar += timedelta(minutes=1)
+        return draw_tracker.observe(
+            settled_bars=draw_rows,
+            settled_source={"source_bar_time": cutoff, "temporal_status": "settled",
+                            "settled_edge_basis": "no_member_list_published"},
+            contract_id=CONTRACT, session_id=draw_session,
+            history_revision=draw_revision, derived_state_current=True,
+            accepted_view=accepted_view,
+            ownership_state=snap["active_path_state"])
+
+    def scan(timestamp, source_bar_time, protected, *, sweep=False, bos=None):
+        nonlocal prior_protected
+        snap = _producer_snapshot(timestamp, source_bar_time, protected,
+                                  side=side, sweep=sweep,
+                                  sweep_direction=raid, structure_break=bos)
+        ap.enforce_lifecycle(timestamp, CONTRACT)
+        occurrences = extract_occurrences(snap, prior_protected, CONTRACT)
+        ap.ingest(occurrences)
+        prior_protected = snap["protected_swings"]["by_timeframe"]
+        snap["active_path_state"] = ap.state()
+        snap["derived_state"] = {"current": True,
+                                 "history_revision": draw_revision,
+                                 "derived_revision": draw_revision}
+        return snap
+
+    initial = scan(
+        "2026-08-24T15:00:00+00:00", "2026-08-24T14:59:00+00:00",
+        {"5m": {"level": 100.0, "basis": "protected_swing",
+                 "swing_id": f"{direction}-old",
+                 "registered_at": "2026-08-24T14:55:00+00:00"}},
+        sweep=True, bos=direction)
+    first = build_narrative_continuity(initial, {"available": False})
+    assert first["control_state"] == "campaign_established"
+    assert candidate_direction_authorized(direction, initial, first)[0] is True
+    old_draw = observe_draw(initial, accepted_draw_view("initial-owner"))
+    assert old_draw["authority_status"] == "PROVEN_NOT_DELIVERED"
+    memory.record(initial["timestamp"], {
+        "narrative_direction": direction, "narrative_phase": "continuation",
+        "current_action": "propose_entry"}, first)
+
+    failed = scan("2026-08-24T15:03:00+00:00", "2026-08-24T15:02:00+00:00", {})
+    failure = build_narrative_continuity(failed, memory.history_summary())
+    assert failed["active_path_state"]["owner"] == "none"
+    assert failure["control_state"] == "developing_transfer"
+    assert failure["thesis_falsifier_status"] == "occurred"
+    failed_draw = observe_draw(failed)
+    assert failed_draw["authority_status"] == "UNKNOWN"
+    assert draw_tracker.audit_records[0]["superseded"] is True
+    memory.record(failed["timestamp"], {
+        "narrative_direction": direction, "narrative_phase": "transition",
+        "current_action": "stand_down"}, failure)
+
+    forming = scan("2026-08-24T15:04:00+00:00", "2026-08-24T15:03:00+00:00",
+                   {}, sweep=True)
+    forming_state = build_narrative_continuity(forming, memory.history_summary())
+    assert forming["active_path_state"]["owner"] == "none"
+    assert forming["active_path_state"]["status"] == "forming"
+    assert forming_state["control_state"] == "developing_transfer"
+    assert candidate_direction_authorized(direction, forming, forming_state)[0] is False
+    assert observe_draw(forming)["authority_status"] == "UNKNOWN"
+    memory.record(forming["timestamp"], {
+        "narrative_direction": direction, "narrative_phase": "transition",
+        "current_action": "stand_down"}, forming_state)
+
+    new_level = (101.0 if side == "low" else 99.0)
+    successor = scan(
+        "2026-08-24T15:06:00+00:00", "2026-08-24T15:05:00+00:00",
+        {"5m": {"level": new_level, "basis": "protected_swing",
+                 "swing_id": f"{direction}-new",
+                 "registered_at": "2026-08-24T15:05:00+00:00"}},
+        bos=direction)
+    accepted = build_narrative_continuity(successor, memory.history_summary())
+    new_draw = observe_draw(successor, accepted_draw_view("new-owner-episode"))
+    assert new_draw["authority_status"] == "PROVEN_NOT_DELIVERED"
+    assert old_draw["campaign_episode_id"] != new_draw["campaign_episode_id"]
+    assert old_draw["anchor_bar_time"] != new_draw["anchor_bar_time"]
+    assert new_draw["anchor_bar_time"] == successor["settled_source"]["1m"][
+        "source_bar_time"]
+    assert successor["active_path_state"]["owner"] == direction
+    assert successor["active_path_state"]["status"] == "active"
+    assert accepted["control_state"] == "campaign_established"
+    assert accepted["transfer_confirmed"] is False
+    assert accepted["same_direction_successor_proof"]["status"] == "verified"
+    assert accepted["same_direction_successor_proof"]["prior_invalidation"][
+        "owner"] == direction
+    assert accepted["same_direction_successor_proof"]["supporting_structure"][
+        "swing_id"] == f"{direction}-new"
+    assert accepted["prior_thesis_falsifier_status"] == "occurred"
+    assert accepted["current_thesis_falsifier_status"] == "not_occurred"
+
+    successor_path = successor["active_path_state"]
+    invalidated_source = successor_path["last_invalidated"]["source_bar_time"]
+    malformed_successors = []
+    for label, mutation in (
+        ("old_origin", lambda p: p["origin"].update(
+            source_bar_time=invalidated_source)),
+        ("pre_invalidation_origin", lambda p: p["origin"].update(
+            source_bar_time="2026-08-24T15:01:00+00:00")),
+        ("missing_invalidation_source", lambda p: p["last_invalidated"].pop(
+            "source_bar_time")),
+        ("naive_origin_source", lambda p: p["origin"].update(
+            source_bar_time="2026-08-24T15:05:00")),
+        ("unsupported_origin", lambda p: p["origin"].update(
+            proof_family="local_mss")),
+        ("wrong_origin_event", lambda p: p["origin"].update(
+            event="buy_side_raid_rejected" if direction == "bullish"
+            else "sell_side_raid_rejected")),
+        ("no_progression", lambda p: p["progression"].update(
+            supporting_timeframes=[], latest_supporting_event=None)),
+        ("pre_origin_progression", lambda p: p["progression"][
+            "latest_supporting_event"].update(
+                source_bar_time=p["origin"]["source_bar_time"],
+                at=p["origin"]["at"])),
+        ("progression_is_origin", lambda p: p["progression"][
+            "latest_supporting_event"].update(
+                occurrence_id=p["origin"]["occurrence_id"])),
+        ("wrong_side_structure", lambda p: p["load_bearing_structure"].update(
+            side="high" if side == "low" else "low")),
+        ("pre_origin_structure", lambda p: p["load_bearing_structure"].update(
+            source_bar_time=p["origin"]["source_bar_time"])),
+        ("non_intact_structure", lambda p: p["load_bearing_structure"].update(
+            intact=False)),
+        ("not_producer_backed", lambda p: p["load_bearing_structure"].update(
+            producer_backed=False)),
+        ("substantive_challenge", lambda p: p["transfer_evidence"].update(
+            opposing_structure_break=True)),
+        ("missing_transfer_authority", lambda p: p["transfer_evidence"].pop(
+            "ambiguous_load_bearing_invalidation")),
+        ("wrong_contract", lambda p: p.update(contract_id="CON.OTHER")),
+        ("wrong_session", lambda p: p.update(session="other-session")),
+        ("missing_invalidation_life", lambda p: p["last_invalidated"].pop(
+            "registered_at")),
+    ):
+        candidate_path = copy.deepcopy(successor_path)
+        mutation(candidate_path)
+        malformed_successors.append((label, candidate_path))
+    for label, candidate_path in malformed_successors:
+        candidate_snapshot = {**successor, "active_path_state": candidate_path}
+        refused = build_narrative_continuity(
+            candidate_snapshot, memory.history_summary())
+        assert refused["same_direction_successor_proof"] is None, label
+        assert refused["control_state"] in ("developing_transfer", "unresolved"), label
+        assert candidate_direction_authorized(
+            direction, candidate_snapshot, refused)[0] is False, label
+
+    assert candidate_direction_authorized(direction, successor, accepted) == (
+        True, "narrative_direction_authorized")
+    held, guard = output_direction_hold({
+        "narrative_direction": direction, "current_action": "propose_entry"}, accepted)
+    assert held["current_action"] == "propose_entry"
+    assert guard is None
+
+    lifecycle_snapshot = dict(successor)
+    lifecycle_snapshot["settled_source"] = {
+        **successor["settled_source"],
+        "1m": {"source_bar_time": new_draw["settled_cutoff"],
+               "temporal_status": "settled"}}
+    lifecycle = evaluate_campaign_lifecycle(
+        snapshot=lifecycle_snapshot,
+        brain_output={"narrative_direction": direction,
+                      "narrative_phase": phase},
+        narrative_continuity=accepted, campaign_draw=new_draw,
+        session_id=draw_session, contract_id=CONTRACT,
+        brain_authority_available=True)
+    assert lifecycle["state"] == expected_lifecycle
+    assert lifecycle["campaign_episode_id"] == new_draw["campaign_episode_id"]
+
+    # Exercise the real CandidateProducer after the full ActivePath -> continuity
+    # -> public Draw -> Lifecycle chain. Its other market facts and venue-facing
+    # execution remain in-memory test fixtures; no runner or venue is called.
+    from _step7_fixture import detected
+    from ai_brain.production_model import PRODUCTION_MODEL
+    from broker.luna_candidate_producer import CandidateProducer
+    from broker.topstepx_client import TopstepXContract
+
+    producer = CandidateProducer(
+        account_fingerprint="acct:causal-successor-test",
+        contract=TopstepXContract(id=CONTRACT, name="MNQU6", description="MNQ",
+                                  tick_size=0.25, tick_value=0.5, active=True),
+        allow_prose_objective_fallback=True,
+        allow_numeric_invalidation_fallback=True)
+    scan_timestamp = successor["timestamp"]
+    latest_bar = new_draw["settled_cutoff"]
+    entry = 100.0
+    stop = 99.0 if direction == "bullish" else 101.0
+    brain_input = {
+        "timestamp": scan_timestamp,
+        "market": {"current_price": entry, "settled_price_basis": "settled_close:1m",
+                   "execution_price": {
+                       "schema": "execution_price.v1", "available": True,
+                       "fresh": True, "source": "topstepx_realtime_quote",
+                       "unavailable_reason": None, "best_bid": entry,
+                       "best_ask": entry, "last_trade": entry,
+                       "captured_at": scan_timestamp, "age_seconds": 0.1,
+                       "max_age_seconds": 5.0,
+                       "bullish_executable": entry, "bearish_executable": entry}},
+        "liquidity": {"nearest_buy_side": 105.0, "nearest_sell_side": 95.0},
+        "protected_swings": {
+            "protected_low": {"level": 99.0, "timeframe": "5m",
+                              "timestamp": latest_bar},
+            "protected_high": {"level": 101.0, "timeframe": "5m",
+                               "timestamp": latest_bar}},
+        "narrative_continuity": accepted,
+    }
+    parsed = {
+        "narrative_direction": direction, "narrative_phase": phase,
+        "current_action": "propose_entry", "allowed_direction": direction,
+        # Match the real public legacy summary catalog generated from the
+        # producer's protected_low/protected_high facts.
+        "invalidation_id": "INV_PL_1" if direction == "bullish" else "INV_PH_1",
+        "invalidation_level": stop,
+        "active_draw": ("buy side liquidity above" if direction == "bullish"
+                        else "sell side liquidity below"),
+        "recommended_playbook_family": "continuation",
+        "recommended_tool_family": ["fvg"],
+        "market_story": f"{direction} successor campaign delivery",
+    }
+    brain_result = {"ok": True, "source": "llm", "model": PRODUCTION_MODEL,
+                    "parsed": parsed, "narrative_continuity": accepted,
+                    "fallback_reason": None}
+    candidate_snapshot = {**detected("fvg", direction="both"),
+                          "timestamp": scan_timestamp, "contract_id": CONTRACT,
+                          "active_path_state": successor["active_path_state"],
+                          "derived_state": successor["derived_state"],
+                          "campaign_lifecycle": lifecycle,
+                          "protected_swings": {"by_timeframe": {"lows": {}, "highs": {}}}}
+    for witness in candidate_snapshot["toolbox"]["tool_instances"]:
+        witness["occurrence_id"] = f"FVG:{CONTRACT}:5m:{latest_bar}"
+        witness["tool_id"] = f"{witness['direction']}_fvg@5m#{latest_bar}"
+        witness["zone_low"], witness["zone_high"] = 99.5, 100.5
+    candidate = producer.produce(
+        brain_result=brain_result, brain_input=brain_input,
+        snapshot=candidate_snapshot, qualification={"qualified": True},
+        engine_inventory={"liquidity": "PRESENT_AND_POPULATED"},
+        snapshot_id="same-direction-successor-scan",
+        market_data_timestamp=scan_timestamp,
+        latest_closed_bar_timestamp=latest_bar, now=datetime.fromisoformat(scan_timestamp),
+        require_campaign_lifecycle=True, campaign_draw=new_draw,
+        campaign_session_id=draw_session)
+    assert candidate.direction == direction
+    memory.record(successor["timestamp"], {
+        "narrative_direction": direction, "narrative_phase": phase,
+        "current_action": "propose_entry"}, accepted)
+
+    repeated = scan("2026-08-24T15:07:00+00:00", "2026-08-24T15:06:00+00:00",
+                    successor["protected_swings"]["by_timeframe"][
+                        "lows" if side == "low" else "highs"])
+    stable = build_narrative_continuity(repeated, memory.history_summary())
+    assert stable["control_state"] == "incumbent_intact"
+    assert stable["dominant_direction"] == direction
+    assert stable["thesis_falsifier_status"] == "not_occurred"
+    memory.record(repeated["timestamp"], {
+        "narrative_direction": direction, "narrative_phase": "continuation",
+        "current_action": "propose_entry"}, stable)
+
+    later_failure = scan("2026-08-24T15:09:00+00:00", "2026-08-24T15:08:00+00:00", {})
+    assert later_failure["active_path_state"]["last_invalidated"]["swing_id"] == (
+        f"{direction}-new")
+    failed_again = build_narrative_continuity(
+        later_failure, memory.history_summary())
+    assert failed_again["control_state"] == "developing_transfer"
+    assert failed_again["thesis_falsifier_status"] == "occurred"
+    assert candidate_direction_authorized(direction, later_failure, failed_again)[0] is False
+
+
+@pytest.mark.parametrize(("direction", "side", "raid", "counter_raid"), [
+    ("bullish", "low", "below_low", "above_high"),
+    ("bearish", "high", "above_high", "below_low"),
+])
+def test_real_opposing_rejected_raid_alone_preserves_intact_incumbent(
+        direction, side, raid, counter_raid):
+    from ai_brain.narrative_continuity import (
+        build_narrative_continuity, candidate_direction_authorized,
+        output_direction_hold)
+    from ai_brain.stance_memory import StanceMemory
+
+    ap = ActivePath()
+    memory = StanceMemory(persist=False)
+    prior_protected = {}
+    protected = {"5m": {"level": 100.0 if side == "low" else 110.0,
+                         "basis": "protected_swing", "swing_id": f"{direction}-base",
+                         "registered_at": "2026-08-24T14:55:00+00:00"}}
+
+    def scan(timestamp, source_bar_time, swings, *, sweep_direction=None, bos=None):
+        nonlocal prior_protected
+        snap = _producer_snapshot(timestamp, source_bar_time, swings, side=side,
+                                  sweep=bool(sweep_direction or bos),
+                                  sweep_direction=sweep_direction or raid,
+                                  structure_break=bos)
+        ap.enforce_lifecycle(timestamp, CONTRACT)
+        ap.ingest(extract_occurrences(snap, prior_protected, CONTRACT))
+        prior_protected = snap["protected_swings"]["by_timeframe"]
+        snap["active_path_state"] = ap.state()
+        return snap
+
+    initial = scan("2026-08-24T15:00:00+00:00", "2026-08-24T14:59:00+00:00",
+                   protected, sweep_direction=raid, bos=direction)
+    initial_state = build_narrative_continuity(initial, {"available": False})
+    assert initial_state["control_state"] == "campaign_established"
+    memory.record(initial["timestamp"], {"narrative_direction": direction,
+                                         "narrative_phase": "continuation",
+                                         "current_action": "propose_entry"}, initial_state)
+
+    counter = scan("2026-08-24T15:02:00+00:00", "2026-08-24T15:01:00+00:00",
+                   protected, sweep_direction=counter_raid)
+    counter_path = counter["active_path_state"]
+    assert counter_path["owner"] == direction
+    assert counter_path["status"] == "active"
+    assert counter_path["last_invalidated"] is None
+    assert counter_path["transfer_evidence"]["opposing_raid_rejected"] is True
+    continuity = build_narrative_continuity(counter, memory.history_summary())
+    assert continuity["control_state"] == "incumbent_intact"
+    assert continuity["dominant_direction"] == direction
+    assert candidate_direction_authorized(direction, counter, continuity)[0] is True
+    held, guard = output_direction_hold({
+        "narrative_direction": direction, "current_action": "propose_entry"}, continuity)
+    assert held["current_action"] == "propose_entry"
+    assert guard is None
+    memory.record(counter["timestamp"], {"narrative_direction": direction,
+                                         "narrative_phase": "retracement",
+                                         "current_action": "propose_entry"}, continuity)
+
+    challenged = scan("2026-08-24T15:04:00+00:00", "2026-08-24T15:03:00+00:00",
+                      protected, bos=("bearish" if direction == "bullish" else "bullish"))
+    assert challenged["active_path_state"]["status"] == "contested"
+    challenged_state = build_narrative_continuity(
+        challenged, memory.history_summary())
+    assert challenged_state["control_state"] == "developing_transfer"
+    assert candidate_direction_authorized(direction, challenged, challenged_state)[0] is False
 
 
 class TestContestedRuleA:
@@ -353,15 +908,25 @@ class TestOwnerIsNotAuthorisation:
     def _campaign(direction):
         from ai_brain.narrative_continuity import build_narrative_continuity
         stamp = "2026-08-24T15:00:00+00:00"
-        path = {"state_available": True, "owner": direction, "status": "active",
+        path = {"contract_id": CONTRACT, "state_available": True,
+                "owner": direction, "status": "active",
                 "origin": {"event": ("sell_side_raid_rejected" if direction == "bullish"
                                        else "buy_side_raid_rejected"), "at": stamp},
                 "load_bearing_structure": {"level": 100.0,
                     "side": "low" if direction == "bullish" else "high",
-                    "timeframe": "5m", "at": stamp, "intact": True},
+                    "timeframe": "5m", "basis": "protected_swing",
+                    "swing_id": f"swing-{direction}", "registered_at": stamp,
+                    "occurrence_id": f"bearing-{direction}",
+                    "producer_backed": True, "at": stamp, "intact": True},
                 "progression": {"supporting_timeframes": ["5m"]},
-                "transfer_evidence": {}, "session": "2026-08-24"}
+                "transfer_evidence": {
+                    "opposing_structure_break": False, "load_bearing_failure": False,
+                    "load_bearing_replaced_against_path": False,
+                    "ambiguous_load_bearing_invalidation": False,
+                    "opposing_raid_rejected": False},
+                "session": "20260824"}
         snapshot = {"timestamp": "2026-08-24T15:01:00+00:00",
+                    "contract_id": CONTRACT,
                     "active_path_state": path}
         history = {"available": True, "last": {
             "timestamp": stamp, "direction": direction,
@@ -781,9 +1346,61 @@ class TestRestartRecovery:
         cyc = ProductionScanCycle(symbol="MNQ", contract_id=CONTRACT)
         cyc._active_path = ActivePath()
         cyc._active_path.ingest([sweep(), brk("bullish"), prot(28979.5)])
+        bearing = cyc._active_path.load_bearing
         assert cyc._reconcile_load_bearing({"protected_swings": {
-            "by_timeframe": {"lows": {"1m": {"level": 28979.5}}}}}) is True
+            "by_timeframe": {"lows": {"1m": {
+                "level": 28979.5,
+                "swing_id": bearing["swing_id"],
+                "registered_at": bearing["registered_at"],
+            }}}}}) is True
         assert cyc._active_path.load_bearing["level"] == 28979.5
+
+    @pytest.mark.parametrize(("registry_side", "registry_tf", "swing_change",
+                              "registration_change"), [
+        ("lows", "5m", False, False),
+        ("lows", "1m", True, False),
+        ("lows", "1m", False, True),
+        ("highs", "1m", False, False),
+    ])
+    def test_recovery_rejects_same_price_from_another_structure_life(
+            self, tmp_path, registry_side, registry_tf, swing_change,
+            registration_change):
+        """A price match cannot prove timeframe, side, or registration identity."""
+        os.environ["OCCURRENCE_LEDGER_DIR"] = str(tmp_path / "identity")
+        from live_scan.production_scan_cycle import ProductionScanCycle
+        cyc = ProductionScanCycle(symbol="MNQ", contract_id=CONTRACT)
+        cyc._active_path = ActivePath()
+        cyc._active_path.ingest([sweep(), brk("bullish"), prot(28979.5)])
+        bearing = cyc._active_path.load_bearing
+        row = {
+            "level": bearing["level"],
+            "swing_id": ("different-swing" if swing_change
+                         else bearing["swing_id"]),
+            "registered_at": ("T-later-life" if registration_change
+                              else bearing["registered_at"]),
+        }
+        assert cyc._reconcile_load_bearing({"protected_swings": {
+            "by_timeframe": {registry_side: {registry_tf: row}}}}) is False
+        assert cyc._active_path.load_bearing is None
+
+    @pytest.mark.parametrize("snapshot", [
+        None,
+        [],
+        {},
+        {"protected_swings": None},
+        {"protected_swings": {"by_timeframe": []}},
+        {"protected_swings": {"by_timeframe": {"lows": {
+            "1m": {"level": 28979.5}}}}},
+    ])
+    def test_recovery_drops_bearing_when_current_registry_cannot_prove_identity(
+            self, tmp_path, snapshot):
+        os.environ["OCCURRENCE_LEDGER_DIR"] = str(tmp_path / "malformed")
+        from live_scan.production_scan_cycle import ProductionScanCycle
+        cyc = ProductionScanCycle(symbol="MNQ", contract_id=CONTRACT)
+        cyc._active_path = ActivePath()
+        cyc._active_path.ingest([sweep(), brk("bullish"), prot(28979.5)])
+        assert cyc._reconcile_load_bearing(snapshot) is False
+        assert cyc._active_path.load_bearing is None
 
     def test_recovery_excludes_prior_session_and_foreign_contract_facts(self, tmp_path):
         import inspect

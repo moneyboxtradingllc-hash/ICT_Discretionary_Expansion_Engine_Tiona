@@ -40,7 +40,17 @@ def path_state(owner="bearish", status="active", *, transfer_evidence=None,
     else:
         origin_at = STAMP
         last_invalidated = None
+    evidence = {"opposing_structure_break": False,
+                "load_bearing_failure": False,
+                "load_bearing_replaced_against_path": False,
+                "ambiguous_load_bearing_invalidation": False,
+                "opposing_raid_rejected": False,
+                "opposing_market_structure_shift": None,
+                "opposing_displacement": None}
+    if isinstance(transfer_evidence, dict):
+        evidence.update(transfer_evidence)
     return {
+        "contract_id": CONTRACT.id,
         "state_available": True,
         "owner": owner,
         "status": status,
@@ -52,11 +62,17 @@ def path_state(owner="bearish", status="active", *, transfer_evidence=None,
         "load_bearing_structure": {"level": 100.0,
                                    "side": "low" if owner == "bullish" else "high",
                                    "timeframe": "5m", "basis": "protected_swing",
-                                   "swing_id": f"swing-{owner}", "at": origin_at,
+                                   "swing_id": f"swing-{owner}",
+                                   "registered_at": origin_at,
+                                   "occurrence_id": f"bearing-{owner}",
+                                   "at": origin_at, "producer_backed": True,
                                    "intact": status == "active"},
         "progression": {"supporting_timeframes": ["5m"],
-                        "highest_confirmed": "5m"},
-        "transfer_evidence": transfer_evidence or {},
+                        "highest_confirmed": "5m",
+                        "latest_supporting_event": {
+                            "occurrence_id": f"progression-{owner}",
+                            "direction": owner, "source_tf": "5m", "at": origin_at}},
+        "transfer_evidence": evidence,
         "last_invalidated": last_invalidated,
         "session": "20260824",
     }
@@ -192,26 +208,31 @@ def test_active_path_typed_origin_reaches_transfer_proof_end_to_end():
                 "source_tf": "5m", **facts}
 
     ap = ActivePath()
+    ap.enforce_lifecycle("2026-08-24T15:05:00+00:00", CONTRACT.id)
     ap.ingest([
         occurrence("LIQUIDITY_SWEEP", "2026-08-24T14:58:00+00:00",
                    sweep_direction="below_low", reclaimed=True),
         occurrence("STRUCTURE_BREAK", "2026-08-24T14:58:00+00:00",
                    direction="bullish"),
         occurrence("PROTECTED_SWING_REGISTERED", "2026-08-24T14:59:00+00:00",
-                   side="low", level=100.0),
+                   side="low", level=100.0, swing_id="low-a",
+                   registered_at="2026-08-24T14:59:00+00:00"),
     ])
     ap.ingest([occurrence("PROTECTED_SWING_VIOLATED",
                           "2026-08-24T15:01:00+00:00",
-                          side="low", level=100.0)])
+                          side="low", level=100.0, swing_id="low-a",
+                          registered_at="2026-08-24T14:59:00+00:00")])
     ap.ingest([occurrence("LIQUIDITY_SWEEP", "2026-08-24T15:02:00+00:00",
                           sweep_direction="above_high", reclaimed=True)])
     ap.ingest([
         occurrence("STRUCTURE_BREAK", "2026-08-24T15:03:00+00:00",
                    direction="bearish"),
         occurrence("PROTECTED_SWING_REGISTERED", "2026-08-24T15:04:00+00:00",
-                   side="high", level=110.0),
+                   side="high", level=110.0, swing_id="high-b",
+                   registered_at="2026-08-24T15:04:00+00:00"),
     ])
     snapshot = {"timestamp": "2026-08-24T15:05:00+00:00",
+                "contract_id": CONTRACT.id,
                 "active_path_state": ap.state()}
     history = {"available": True, "last": {
         "timestamp": "2026-08-24T15:00:00+00:00", "direction": "bullish",
@@ -278,7 +299,9 @@ def test_unresolved_or_missing_campaign_stands_down():
 
 
 def test_tool_geometry_without_established_campaign_cannot_manufacture_direction():
-    snapshot = {"timestamp": NOW, "active_path_state": {"state_available": True,
+    snapshot = {"timestamp": NOW, "contract_id": CONTRACT.id,
+                "active_path_state": {"contract_id": CONTRACT.id,
+                "session": "20260824", "state_available": True,
                 "owner": "none", "status": "none"},
                 "toolbox": {"tool_instances": [{"tool": "fvg", "direction": "bullish"}]}}
     unknown = build_narrative_continuity(snapshot, {"available": False})

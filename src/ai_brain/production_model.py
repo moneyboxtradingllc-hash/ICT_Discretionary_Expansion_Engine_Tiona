@@ -277,6 +277,12 @@ _CONTRACT_SOURCES = (
     # draw episode must be retired, so their producer belongs in the same
     # contract closure.
     ("campaign_ownership_state", "market_state/active_path.py"),
+    # NA-1 CAUSAL CONTINUITY REPAIR. These decide how prior narrative authority
+    # is reconciled with the current ActivePath generation and how that
+    # distinction is carried to the next scan. Both sources change whether
+    # direction remains authorized, so both belong in this canonical closure.
+    ("narrative_continuity", "ai_brain/narrative_continuity.py"),
+    ("stance_memory", "ai_brain/stance_memory.py"),
     # CAMPAIGN-LIFECYCLE-1. Lifecycle is an additional permission gate over the
     # current Brain, ActivePath, and Campaign Draw authorities. Binding its
     # projection ensures prior authorizations cannot survive a semantic change

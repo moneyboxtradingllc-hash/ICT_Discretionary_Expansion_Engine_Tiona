@@ -34,6 +34,7 @@ def authorities(*, direction="bullish", campaign_price=29950,
                  "price": campaign_price}
     side = "low" if direction == "bullish" else "high"
     path = {
+        "contract_id": CONTRACT,
         "state_available": True, "owner": direction, "status": "active",
         "session": production_session_key(stamp(2)),
         "origin": {"direction": direction, "at": stamp(0),
@@ -42,7 +43,14 @@ def authorities(*, direction="bullish", campaign_price=29950,
         "load_bearing_structure": {"side": side, "level": 29875 if sign == 1 else 29885,
                                    "intact": True},
         "progression": {"supporting_timeframes": ["1m"]},
-        "transfer_evidence": {}, "last_invalidated": None,
+        "transfer_evidence": {
+            "opposing_structure_break": False,
+            "load_bearing_failure": False,
+            "load_bearing_replaced_against_path": False,
+            "ambiguous_load_bearing_invalidation": False,
+            "opposing_raid_rejected": False,
+        },
+        "last_invalidated": None,
     }
     snapshot = {
         "timestamp": stamp(2), "contract_id": CONTRACT,

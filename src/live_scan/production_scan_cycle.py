@@ -20,6 +20,7 @@ organism being validated.
 """
 from __future__ import annotations
 
+import math
 import os
 from datetime import datetime, timezone
 
@@ -965,22 +966,62 @@ class ProductionScanCycle:
         return out
 
     def _reconcile_load_bearing(self, snapshot: dict) -> bool:
-        """Does the recovered load-bearing level still exist in the producer?
+        """Does the exact recovered protected-swing life still exist?
 
         A durable occurrence proves the level was registered once. It does not
         prove the tracker still holds it -- the ghost-reference defect in a new
-        costume. When the live registry cannot corroborate the level, the
+        costume. Price equality alone also cannot distinguish a different
+        timeframe or a later registration life at the same price. When the
+        current public registry cannot corroborate the full identity, the
         derived structure is dropped rather than published as `producer_backed`.
         """
         ap = self._active_path
         lb = getattr(ap, "load_bearing", None)
         if not lb:
             return None
-        bt = ((snapshot or {}).get("protected_swings") or {}).get("by_timeframe") or {}
-        side = "lows" if ap.owner == "bullish" or ap.forming_direction == "bullish" else "highs"
-        live = {r.get("level") for r in (bt.get(side) or {}).values()}
-        if live and lb.get("level") in live:
-            return True
+        if not isinstance(snapshot, dict):
+            ap.load_bearing = None
+            return False
+        protected = snapshot.get("protected_swings")
+        bt = protected.get("by_timeframe") if isinstance(protected, dict) else None
+        if not isinstance(bt, dict):
+            ap.load_bearing = None
+            return False
+        direction = (ap.owner if ap.owner in ("bullish", "bearish")
+                     else ap.forming_direction)
+        expected_side = ("low" if direction == "bullish" else
+                         "high" if direction == "bearish" else None)
+        side = "lows" if expected_side == "low" else "highs"
+        timeframe = lb.get("timeframe")
+        swing_id = lb.get("swing_id")
+        registered_at = lb.get("registered_at")
+        raw_level = lb.get("level")
+        try:
+            level = (float(raw_level) if not isinstance(raw_level, bool)
+                     else float("nan"))
+        except (OverflowError, TypeError, ValueError):
+            level = float("nan")
+        side_matches = lb.get("side") == expected_side
+        identity_complete = bool(
+            expected_side and isinstance(timeframe, str) and timeframe.strip()
+            and isinstance(swing_id, str) and swing_id.strip()
+            and isinstance(registered_at, str) and registered_at.strip()
+            and math.isfinite(level))
+        if side_matches and identity_complete:
+            side_rows = bt.get(side)
+            rows = side_rows.get(timeframe) if isinstance(side_rows, dict) else None
+            if isinstance(rows, dict):
+                raw_live_level = rows.get("level")
+                try:
+                    live_level = (float(raw_live_level)
+                                  if not isinstance(raw_live_level, bool)
+                                  else float("nan"))
+                except (OverflowError, TypeError, ValueError):
+                    live_level = float("nan")
+                if (math.isfinite(live_level) and live_level == level
+                        and rows.get("swing_id") == swing_id
+                        and rows.get("registered_at") == registered_at):
+                    return True
         ap.load_bearing = None
         return False
 
