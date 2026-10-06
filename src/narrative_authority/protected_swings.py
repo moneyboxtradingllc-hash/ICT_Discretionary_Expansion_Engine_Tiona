@@ -37,6 +37,10 @@ TIMEFRAME_ROLES = {"15m": "context", "5m": "active_leg",
 #: Context first, execution last. Ordering only -- NOT precedence.
 TIMEFRAME_ORDER = ("15m", "5m", "3m", "1m")
 
+_PROVEN_REAFFIRM = "PROVEN_REAFFIRM"
+_PROVEN_REPLACE = "PROVEN_REPLACE"
+_UNKNOWN_NO_REGISTRATION_MUTATION = "UNKNOWN_NO_REGISTRATION_MUTATION"
+
 
 def timeframe_role(tf: str) -> str:
     return TIMEFRAME_ROLES.get(str(tf), "unknown")
@@ -249,6 +253,101 @@ class ProtectedSwingTracker:
             return None
 
     @staticmethod
+    def _current_sweep_evidence(snapshot: dict, liq: dict, *, tf: str,
+                                side: str) -> dict | None:
+        """Validate the one producer sweep that may classify a slot mutation.
+
+        The liquidity block is produced from this build's settled timeframe
+        series. Its event and ordered source-bar witness must terminate at the
+        newest public settled bar, even when a forming HTF candle follows it.
+        A scan timestamp or a membership-only match is not a substitute.
+        """
+        if (not isinstance(snapshot, dict) or not isinstance(liq, dict)
+                or liq.get("sweep_detected") is not True
+                or liq.get("reclaim_detected") is not True):
+            return None
+        fact = liq.get("sweep_fact")
+        if not isinstance(fact, dict):
+            return None
+        direction = "below_low" if side == "low" else "above_high"
+        if (liq.get("sweep_direction") != direction
+                or fact.get("sweep_direction") != direction
+                or fact.get("reclaimed") is not True
+                or fact.get("source_tf") not in (None, tf)):
+            return None
+        contract = str(snapshot.get("contract_id") or "").strip()
+        if not contract:
+            return None
+        try:
+            from market_data.object_identity import canonical_instant
+            from market_state.active_path import production_session_key
+
+            event_at = canonical_instant(fact.get("event_time"), strict=True)
+            reclaimed_at = canonical_instant(
+                fact.get("reclaimed_at"), strict=True)
+            observed_at = canonical_instant(snapshot.get("timestamp"), strict=True)
+            raw_level = fact.get("swept_level")
+            if isinstance(raw_level, bool):
+                return None
+            swept_level = float(raw_level)
+            if (not math.isfinite(swept_level) or reclaimed_at != event_at
+                    or observed_at < event_at
+                    or ProtectedSwingTracker._latest_settled_edge(snapshot, tf)
+                        != event_at):
+                return None
+            source_bars = fact.get("source_bars")
+            if not isinstance(source_bars, list) or not source_bars:
+                return None
+            source_edges = [canonical_instant(value, strict=True)
+                            for value in source_bars]
+            if (any(right <= left for left, right
+                    in zip(source_edges, source_edges[1:]))
+                    or source_edges[-1] != event_at):
+                return None
+            session = production_session_key(str(event_at))
+            if (not session
+                    or production_session_key(snapshot.get("timestamp")) != session):
+                return None
+        except Exception:  # noqa: BLE001 -- malformed producer facts are UNKNOWN
+            return None
+        return {"fact": fact, "event_at": event_at,
+                "observed_at": observed_at, "swept_level": swept_level,
+                "contract": contract, "session": session,
+                "source_edges": source_edges}
+
+    @staticmethod
+    def _occupied_life_matches(snapshot: dict, existing: dict, *, tf: str,
+                               side: str, scope: tuple | None,
+                               evidence: dict) -> bool:
+        """Require the current slot's full identity and process scope."""
+        if not isinstance(existing, dict) or not isinstance(scope, tuple):
+            return False
+        try:
+            from market_data.object_identity import canonical_instant
+            from market_state.active_path import production_session_key
+            level = existing.get("level")
+            if isinstance(level, bool):
+                return False
+            level = float(level)
+            registered_at = canonical_instant(existing.get("registered_at"), strict=True)
+            expected_id = f"{tf}:swing_{side}:{round(level, 4):g}"
+            return bool(
+                math.isfinite(level)
+                and scope == (evidence["contract"], evidence["session"])
+                and existing.get("timeframe") == tf
+                and existing.get("side") in (None, side)
+                and existing.get("role") == timeframe_role(tf)
+                and existing.get("swing_id") == expected_id
+                and existing.get("basis") == (
+                    "sell_side_raid_rejected" if side == "low"
+                    else "buy_side_raid_rejected")
+                and registered_at < evidence["event_at"]
+                and production_session_key(existing.get("registered_at"))
+                    == evidence["session"])
+        except Exception:  # noqa: BLE001 -- absent identity is not a live proof
+            return False
+
+    @staticmethod
     def _reaffirmed_sweep_level(snapshot: dict, liq: dict, *, tf: str,
                                 side: str, existing: dict,
                                 scope: tuple | None) -> float | None:
@@ -261,62 +360,26 @@ class ProtectedSwingTracker:
         can bind the causal association.
         """
         if (not isinstance(snapshot, dict) or not isinstance(liq, dict)
-                or not isinstance(existing, dict) or not isinstance(scope, tuple)):
+                or not isinstance(existing, dict)):
             return None
-        contract = str(snapshot.get("contract_id") or "").strip()
-        if not contract or scope[0] != contract:
-            return None
-        fact = liq.get("sweep_fact")
-        if not isinstance(fact, dict):
-            return None
-        expected_direction = "below_low" if side == "low" else "above_high"
-        if (liq.get("sweep_detected") is not True
-                or liq.get("reclaim_detected") is not True
-                or fact.get("sweep_direction") != expected_direction
-                or fact.get("reclaimed") is not True
-                or fact.get("source_tf") not in (None, tf)):
+        evidence = ProtectedSwingTracker._current_sweep_evidence(
+            snapshot, liq, tf=tf, side=side)
+        if (evidence is None
+                or not ProtectedSwingTracker._occupied_life_matches(
+                    snapshot, existing, tf=tf, side=side, scope=scope,
+                    evidence=evidence)
+                or evidence["swept_level"] != float(existing.get("level"))):
             return None
         try:
             from market_data.object_identity import canonical_instant
-            from market_state.active_path import production_session_key
 
-            event_at = canonical_instant(fact.get("event_time"), strict=True)
+            event_at = evidence["event_at"]
             registered_at = canonical_instant(
                 existing.get("registered_at"), strict=True)
-            observed_at = canonical_instant(snapshot.get("timestamp"), strict=True)
-            swept = fact.get("swept_level")
-            level = existing.get("level")
-            if isinstance(swept, bool) or isinstance(level, bool):
-                return None
-            swept, level = float(swept), float(level)
-            if (not math.isfinite(swept) or not math.isfinite(level)
-                    or swept != level or event_at <= registered_at
-                    or observed_at < event_at):
-                return None
-            event_session = production_session_key(str(event_at))
-            if (not event_session
-                    or scope[1] != event_session
-                    or production_session_key(existing.get("registered_at"))
-                        != event_session
-                    or production_session_key(snapshot.get("timestamp"))
-                        != event_session):
-                return None
-            source_bars = fact.get("source_bars")
-            if (not isinstance(source_bars, list)
-                    or event_at not in [canonical_instant(x, strict=True)
-                                        for x in source_bars]
-                    or ProtectedSwingTracker._latest_settled_edge(snapshot, tf)
-                        != event_at):
+            level = float(existing.get("level"))
+            if event_at <= registered_at:
                 return None
         except Exception:  # noqa: BLE001 -- malformed chronology is not authority
-            return None
-
-        expected_id = f"{tf}:swing_{side}:{round(level, 4):g}"
-        if (existing.get("timeframe") != tf
-                or existing.get("side") not in (None, side)
-                or existing.get("role") != timeframe_role(tf)
-                or existing.get("swing_id") != expected_id
-                or not existing.get("basis")):
             return None
 
         candles = (((snapshot.get("timeframes") or {}).get(tf) or {})
@@ -403,7 +466,8 @@ class ProtectedSwingTracker:
         # timeframe's own prior level, and only that one.
         for tf in _REGISTER_TFS:
             liq = liquidity.get(tf, {}) or {}
-            if not (liq.get("sweep_detected") and liq.get("reclaim_detected")):
+            if (liq.get("sweep_detected") is not True
+                    or liq.get("reclaim_detected") is not True):
                 continue
             st    = structure.get(tf, {}) or {}
             sweep = liq.get("sweep_direction", "")
@@ -419,47 +483,83 @@ class ProtectedSwingTracker:
                 continue
             existing = registry.get(tf)
             fact = liq.get("sweep_fact")
-            if isinstance(fact, dict):
-                try:
-                    from market_data.object_identity import canonical_instant
-                    fact_edge = canonical_instant(fact.get("event_time"), strict=True)
-                    source_bars = fact.get("source_bars")
-                    source_edges = ([canonical_instant(value, strict=True)
-                                     for value in source_bars]
-                                    if isinstance(source_bars, list) else [])
-                    swept_level = fact.get("swept_level")
-                    if isinstance(swept_level, bool):
-                        continue
-                    swept_level = float(swept_level)
-                except Exception:  # noqa: BLE001 -- malformed event is not authority
-                    continue
-                expected_direction = "below_low" if side == "low" else "above_high"
-                if (self._latest_settled_edge(snapshot, tf) != fact_edge
-                        or fact.get("sweep_direction") != expected_direction
-                        or fact.get("reclaimed") is not True
-                        or fact.get("source_tf") not in (None, tf)
-                        or not math.isfinite(swept_level)
-                        or fact_edge not in source_edges):
-                    continue
-            elif fact is not None:
-                continue
-            reaffirmed = self._reaffirmed_sweep_level(
-                snapshot, liq, tf=tf, side=side, existing=existing,
-                scope=self._slot_scopes.get((side, tf)))
+            evidence = self._current_sweep_evidence(
+                snapshot, liq, tf=tf, side=side)
             structural_level = st.get(structure_key)
-            expected_swing_id = (
-                f"{tf}:swing_{side}:{round(float(structural_level), 4):g}"
-                if structural_level is not None else None)
-            if (existing and not isinstance(fact, dict)
-                    and expected_swing_id == existing.get("swing_id")):
-                # Without a current sweep witness, equal geometry cannot renew
-                # the same structural life or preserve its birthday by itself.
+            if fact is not None and evidence is None:
+                # A present but contradictory producer fact cannot authorize
+                # either preservation or replacement of the occupied slot.
                 continue
-            if reaffirmed is not None:
+            if existing is not None and (fact is None or evidence is None):
+                # Legacy fact-less registration remains available only for an
+                # empty slot. UNKNOWN may not destroy a known occupied life.
+                continue
+            classification = _UNKNOWN_NO_REGISTRATION_MUTATION
+            reaffirmed = None
+            if evidence is not None:
+                fact = evidence["fact"]
+                if existing is not None:
+                    scope = self._slot_scopes.get((side, tf))
+                    if not self._occupied_life_matches(
+                            snapshot, existing, tf=tf, side=side, scope=scope,
+                            evidence=evidence):
+                        continue
+                    existing_level = float(existing["level"])
+                    if evidence["swept_level"] == existing_level:
+                        reaffirmed = self._reaffirmed_sweep_level(
+                            snapshot, liq, tf=tf, side=side, existing=existing,
+                            scope=scope)
+                        if reaffirmed is not None:
+                            classification = _PROVEN_REAFFIRM
+                    else:
+                        # A new life may replace this one only when the same
+                        # current producer sweep names the currently published
+                        # structural pivot. A merely newer pivot is UNKNOWN.
+                        try:
+                            structural = float(structural_level)
+                            if (isinstance(structural_level, bool)
+                                    or not math.isfinite(structural)
+                                    or structural != evidence["swept_level"]):
+                                continue
+                            structural_level = structural
+                            classification = _PROVEN_REPLACE
+                        except (TypeError, ValueError, OverflowError):
+                            continue
+                elif structural_level is not None:
+                    try:
+                        structural = float(structural_level)
+                        if isinstance(structural_level, bool) or not math.isfinite(structural):
+                            continue
+                        structural_level = structural
+                        # A valid producer fact authorizes first registration;
+                        # this does not alter which structure price is selected.
+                        classification = _PROVEN_REPLACE
+                    except (TypeError, ValueError, OverflowError):
+                        continue
+            elif existing is not None:
+                # The only fact-less compatibility path is first registration.
+                continue
+            else:
+                # Backward-compatible first-life path for old snapshots that
+                # carry exact producer sweep/reclaim flags but no sweep_fact.
+                # This compatibility is limited to an EMPTY slot: with no
+                # incumbent there is no lifetime to destroy or replace. It is
+                # never used to mutate an occupied slot.
+                if structural_level is not None:
+                    try:
+                        structural = float(structural_level)
+                        if isinstance(structural_level, bool) or not math.isfinite(structural):
+                            continue
+                        structural_level = structural
+                        classification = _PROVEN_REPLACE
+                    except (TypeError, ValueError, OverflowError):
+                        continue
+            if classification == _PROVEN_REAFFIRM:
                 level = reaffirmed
-            elif structural_level is not None:
+            elif classification == _PROVEN_REPLACE:
                 level = float(structural_level)
             else:
+                # UNKNOWN never falls through to a structural fallback.
                 continue
             registry[tf] = self._note_lineage(
                 side, tf, self._register(existing, tf=tf, side=side,

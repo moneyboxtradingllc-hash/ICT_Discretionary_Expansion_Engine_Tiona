@@ -384,6 +384,165 @@ def test_real_lifetime_cannot_be_reaffirmed_without_current_settled_edge(
     assert len(tracker.low_lineage["5m"]) == prior_lineage_count
 
 
+def _real_occupied_snapshot(tmp_path, monkeypatch, direction):
+    cycle = _cycle(tmp_path, monkeypatch)
+    history = list(TAPE_1M)
+    if direction == "bearish":
+        history = [{**bar,
+                    "open": 60000.0 - bar["open"],
+                    "high": 60000.0 - bar["low"],
+                    "low": 60000.0 - bar["high"],
+                    "close": 60000.0 - bar["close"]}
+                   for bar in history]
+    last = None
+    for end in range(5, len(history) + 1, 5):
+        rows = history[:end]
+        last = cycle.scan(rows, now=_now_for(rows), invoke_brain=False)
+    side = "low" if direction == "bullish" else "high"
+    registry = (cycle.swing_tracker.protected_lows if side == "low"
+                else cycle.swing_tracker.protected_highs)
+    assert "5m" in registry
+    return cycle, copy.deepcopy(last["snapshot"]), side
+
+
+@pytest.mark.parametrize("direction", ["bullish", "bearish"])
+def test_defense_only_unknown_lifetime_evidence_cannot_replace_occupied_slot(
+        tmp_path, monkeypatch, direction):
+    """Malformed injected evidence freezes registration, not close invalidation."""
+    cycle, base_snapshot, side = _real_occupied_snapshot(
+        tmp_path, monkeypatch, direction)
+    tracker = cycle.swing_tracker
+    registry = tracker.protected_lows if side == "low" else tracker.protected_highs
+    original = copy.deepcopy(registry["5m"])
+    scope_key = (side, "5m")
+    original_scope = tracker._slot_scopes[scope_key]
+    lineage = (tracker.low_lineage if side == "low"
+               else tracker.high_lineage)["5m"]
+    lineage_count = len(lineage)
+    candles = base_snapshot["timeframes"]["5m"]["recent_candles"]
+    settled = [row for row in candles if row.get("temporal_status") == "settled"]
+    event_time = settled[-1]["timestamp"]
+    previous_time = settled[-2]["timestamp"]
+    future_time = (datetime.fromisoformat(event_time) + timedelta(minutes=5)).isoformat()
+    direction_token = "below_low" if side == "low" else "above_high"
+    target = original["level"] + (10.0 if side == "low" else -10.0)
+
+    # Every case begins with a real occupied producer lifetime. Only the
+    # current edge payload/registry scope is corrupted: these are defense-only
+    # tests, not evidence that production emitters make these shapes.
+    for defect in ("missing_scope", "contradictory_scope", "missing_fact",
+                   "malformed_fact", "nonterminal_source", "unordered_source"):
+        snapshot = copy.deepcopy(base_snapshot)
+        candidate_tracker = copy.deepcopy(tracker)
+        slot_scope = candidate_tracker._slot_scopes
+        if defect == "missing_scope":
+            slot_scope.pop(scope_key)
+        elif defect == "contradictory_scope":
+            slot_scope[scope_key] = ("CONTRADICTORY", "OTHER-SESSION")
+
+        source_bars = [previous_time, event_time]
+        fact = {"source_tf": "5m", "event_time": event_time,
+                "sweep_direction": direction_token, "swept_level": target,
+                "reclaimed": True, "reclaimed_at": event_time,
+                "source_bars": source_bars}
+        if defect == "missing_fact":
+            fact_value = None
+        elif defect == "malformed_fact":
+            fact["swept_level"] = float("nan")
+            fact_value = fact
+        elif defect == "nonterminal_source":
+            fact["source_bars"] = [previous_time, event_time, future_time]
+            fact_value = fact
+        elif defect == "unordered_source":
+            fact["source_bars"] = [event_time, previous_time]
+            fact_value = fact
+        else:
+            fact_value = fact
+
+        block = {"sweep_detected": True, "reclaim_detected": True,
+                 "sweep_direction": direction_token}
+        if fact_value is not None:
+            block["sweep_fact"] = fact_value
+        snapshot["liquidity"]["5m"] = block
+        snapshot["structure"]["5m"][
+            "last_swing_low" if side == "low" else "last_swing_high"] = target
+
+        state = candidate_tracker.update(snapshot)
+        current = state["by_timeframe"]["lows" if side == "low" else "highs"]["5m"]
+        assert current == original, (direction, defect, current, original)
+        assert candidate_tracker._slot_scopes.get(scope_key) == slot_scope.get(scope_key)
+        assert len((candidate_tracker.low_lineage if side == "low"
+                    else candidate_tracker.high_lineage)["5m"]) == lineage_count
+
+
+@pytest.mark.parametrize("direction", ["bullish", "bearish"])
+def test_unknown_registration_does_not_suppress_real_close_invalidation(
+        tmp_path, monkeypatch, direction):
+    cycle, snapshot, side = _real_occupied_snapshot(tmp_path, monkeypatch, direction)
+    tracker = copy.deepcopy(cycle.swing_tracker)
+    registry = tracker.protected_lows if side == "low" else tracker.protected_highs
+    original = copy.deepcopy(registry["5m"])
+    candles = snapshot["timeframes"]["5m"]["recent_candles"]
+    close = original["level"] - 0.25 if side == "low" else original["level"] + 0.25
+    candles[-1]["close"] = close
+    snapshot["liquidity"]["5m"] = {
+        "sweep_detected": True, "reclaim_detected": True,
+        "sweep_direction": "below_low" if side == "low" else "above_high"}
+    snapshot["structure"]["5m"][
+        "last_swing_low" if side == "low" else "last_swing_high"] = (
+            original["level"] + 10 if side == "low" else original["level"] - 10)
+    state = tracker.update(snapshot)
+    assert "5m" not in state["by_timeframe"]["lows" if side == "low" else "highs"]
+
+
+def test_real_htf_resweep_is_stable_across_five_minute_scan_occurrences(
+        tmp_path, monkeypatch):
+    cycle = _cycle(tmp_path, monkeypatch)
+    _scan_prefix(cycle, 80)  # last observed bar is 02:14; resweep settles at 02:15
+    side = "low"
+    original = copy.deepcopy(cycle.swing_tracker.protected_lows["5m"])
+    observed = []
+    for end in range(85, 90):
+        rows = TAPE_1M[:end]
+        result = cycle.scan(rows, now=_now_for(rows), invoke_brain=False)
+        snapshot = result["snapshot"]
+        fact = snapshot["liquidity"]["5m"].get("sweep_fact") or {}
+        assert fact.get("event_time") == "2026-08-19T02:15:00+00:00"
+        observed.append(snapshot["timeframes"]["5m"]["recent_candles"][-1][
+            "temporal_status"])
+        state = cycle.swing_tracker.state()
+        assert state["by_timeframe"]["lows"]["5m"] == original
+        protected_events = [row for row in cycle.last_occurrence_writes
+                            if row.get("event_type") in {
+                                "PROTECTED_SWING_REGISTERED",
+                                "PROTECTED_SWING_REPLACED"}]
+        assert protected_events == []
+    assert observed[0] == "settled"
+    assert observed[1:5] == ["forming"] * 4
+    from market_data.object_identity import market_object_id
+    from market_data.sweep_occurrence import LIQUIDITY_SWEEP
+    physical_id = market_object_id(
+        LIQUIDITY_SWEEP, contract=CONTRACT, timeframe="5m",
+        instant="2026-08-19T02:15:00+00:00")
+    assert sum(row.get("occurrence_id") == physical_id
+               for row in cycle.occurrence_ledger.occurrences(
+                   event_type=LIQUIDITY_SWEEP, source_tf="5m")) == 1
+
+    for end in range(90, len(TAPE_1M) - 5 + 1, 5):
+        rows = TAPE_1M[:end]
+        cycle.scan(rows, now=_now_for(rows), invoke_brain=False)
+
+    # Continue to the established healthy return and prove the retained row
+    # still reaches ECU and the real CandidateProducer after the cadence window.
+    calls = []
+    _mock_current_brain(monkeypatch, calls)
+    scan = cycle.scan(TAPE_1M, now=_now_for(TAPE_1M), invoke_brain=True)
+    assert len(calls) == 1
+    assert any(row.get("tool_family") == "po3_reversal_order_block"
+               for row in calls[0].get("authorized_tool_catalog", []))
+    assert isinstance(_produce_candidate(scan), CandidateSnapshot)
+
+
 @pytest.mark.parametrize("direction", ["bullish", "bearish"])
 def test_real_newer_protected_pivot_replaces_incumbent_lifetime(
         tmp_path, monkeypatch, direction):

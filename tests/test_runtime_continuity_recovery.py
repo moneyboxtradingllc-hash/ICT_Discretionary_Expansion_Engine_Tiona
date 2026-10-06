@@ -359,7 +359,11 @@ class TestTheWholeSequence:
         29,805.0 existed only inside the hole, so a tracker that knows nothing
         above 29,800 was rebuilt from the wrong history.
         """
-        cycle = ProductionScanCycle(symbol="MNQ")
+        # Protected-life mutation now requires exact contract/session scope.
+        # This replay fixture is MNQ synthetic history, so bind its explicit
+        # test contract instead of relying on the intentionally empty default.
+        cycle = ProductionScanCycle(
+            symbol="MNQ", contract_id="CON.F.US.MNQ.U26")
         cycle._rebuild_derived_state(tape(), 1)
         state = cycle.swing_tracker.state()
         levels = [rec.get("level")

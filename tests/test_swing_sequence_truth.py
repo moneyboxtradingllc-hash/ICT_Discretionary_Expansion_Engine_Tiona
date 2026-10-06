@@ -15,6 +15,7 @@ an expectation would be the outcome-fitting this unit exists to avoid.
 """
 import os
 import sys
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -117,13 +118,27 @@ class TestBothDimensionsSurvive:
     def _tracker_with(self, levels, side):
         t = ProtectedSwingTracker()
         for i, lv in enumerate(levels):
-            snap = {"timestamp": "2026-09-01T14:%02d:00+00:00" % (i * 2),
-                    "liquidity": {"1m": {"sweep_detected": True,
-                                         "reclaim_detected": True,
-                                         "sweep_direction": ("above_high" if side == "high"
-                                                             else "below_low")}},
+            ts = (datetime.fromisoformat("2026-09-01T14:00:00+00:00")
+                  + timedelta(minutes=i * 2)).isoformat()
+            previous = (datetime.fromisoformat(ts) - timedelta(minutes=1)).isoformat()
+            direction = "above_high" if side == "high" else "below_low"
+            snap = {"timestamp": ts,
+                    "contract_id": "CON.F.US.MNQ.U26",
+                    "liquidity": {"1m": {
+                        "sweep_detected": True,
+                        "reclaim_detected": True,
+                        "sweep_direction": direction,
+                        "sweep_fact": {"source_tf": None, "event_time": ts,
+                                       "sweep_direction": direction,
+                                       "swept_level": lv, "reclaimed": True,
+                                       "reclaimed_at": ts,
+                                       "source_bars": [previous, ts]}}},
                     "structure": {"1m": {("last_swing_high" if side == "high"
                                           else "last_swing_low"): lv}},
+                    "timeframes": {"1m": {"recent_candles": [{
+                        "timestamp": ts, "close": (lv - 50 if side == "high"
+                                                      else lv + 50),
+                        "complete": True, "temporal_status": "settled"}]}},
                     "price": lv - 50 if side == "high" else lv + 50}
             t.update(snap)
         return t

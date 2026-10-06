@@ -33,7 +33,7 @@ import glob
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -57,20 +57,36 @@ IDENTITY_OR_DERIVED = ("level", "timeframe", "role", "swing_id", "basis")
 
 
 def snap(ts, price, *, low=None, high=None):
-    """A snapshot in the shape the real tracker consumes."""
+    """A synthetic tracker snapshot with a coherent producer-fact witness.
+
+    The production-emitter path is separately proved in
+    test_reversal_foundation_proof_closure.py; these small timelines isolate
+    birthday and lineage semantics without pretending to be provider history.
+    """
     liq, st = {"1m": {}}, {"1m": {}}
     if low is not None or high is not None:
+        direction = "below_low" if low is not None else "above_high"
+        level = low if low is not None else high
+        previous = (datetime.fromisoformat(ts) - timedelta(minutes=1)).isoformat()
         liq["1m"] = {"sweep_detected": True, "reclaim_detected": True,
-                     "sweep_direction": "below_low" if low is not None
-                     else "above_high"}
+                     "sweep_direction": direction,
+                     "sweep_fact": {"source_tf": None, "event_time": ts,
+                                    "sweep_direction": direction,
+                                    "swept_level": level, "reclaimed": True,
+                                    "reclaimed_at": ts,
+                                    "source_bars": [previous, ts]}}
     if low is not None:
         st["1m"]["last_swing_low"] = low
     if high is not None:
         st["1m"]["last_swing_high"] = high
-    return {"timestamp": ts, "liquidity": liq, "structure": st,
+    recent = [{"timestamp": ts, "close": price, "complete": True,
+               "temporal_status": "settled"}]
+    return {"timestamp": ts, "contract_id": CID,
+            "liquidity": liq, "structure": st,
             "market": {"current_price": price},
             "timeframes": {"1m": {"last_candle": {"close": price,
-                                                         "complete": True}}}}
+                                                         "complete": True},
+                                    "recent_candles": recent}}}
 
 
 def drive(steps):
@@ -417,8 +433,9 @@ class TestScopeIsHeld:
     def test_qualification_and_violation_rules_are_untouched(self):
         import inspect
         src = inspect.getsource(ProtectedSwingTracker._update)
-        # registration still requires sweep AND reclaim
-        assert 'liq.get("sweep_detected") and liq.get("reclaim_detected")' in src
+        # registration requires exact producer sweep AND reclaim facts.
+        assert 'liq.get("sweep_detected") is not True' in src
+        assert 'liq.get("reclaim_detected") is not True' in src
         # A completed close on each protected swing's own timeframe owns
         # violation; no percentage or distance buffer participates.
         assert "_completed_close(snapshot, tf)" in src

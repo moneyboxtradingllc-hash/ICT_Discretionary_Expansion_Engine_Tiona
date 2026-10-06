@@ -103,14 +103,18 @@ class TestPerTimeframeProtectedStructure:
                                 "1m": rec(29820.0, "1m")})
         assert len(t.state()["by_timeframe"]["highs"]) == 3
 
-    def test_the_extreme_wins_ratchet_is_gone(self):
-        """A LOWER new 15m registration must replace the old 15m one."""
+    def test_unknown_reaffirmation_cannot_replace_the_occupied_life(self):
+        """Flags without a current sweep fact cannot destroy a live slot.
+
+        Lawful different-pivot replacement is exercised with real production
+        emitters in test_reversal_foundation_proof_closure.py.
+        """
         t = PS.ProtectedSwingTracker()
         base = {"timestamp": "t", "liquidity": {"15m": sweep()},
                 "timeframes": {"1m": {"last_candle": {"close": 29700.0}}}}
         t.update({**base, "structure": {"15m": st(hi=29900.0)}})
         t.update({**base, "structure": {"15m": st(hi=29850.0)}})
-        assert t.state()["by_timeframe"]["highs"]["15m"]["level"] == 29850.0
+        assert t.state()["by_timeframe"]["highs"]["15m"]["level"] == 29900.0
 
     def test_a_violation_clears_only_the_violated_timeframe(self):
         t = tracker_with(highs={"15m": rec(29900.0, "15m"),
