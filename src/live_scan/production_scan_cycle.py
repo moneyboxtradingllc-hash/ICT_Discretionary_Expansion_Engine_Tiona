@@ -147,6 +147,7 @@ class ProductionScanCycle:
         # ACTIVE-PATH-STATE-1 — cross-scan derived state (never persisted).
         self._active_path = None
         self._active_path_prior_protected: dict = {}
+        self.last_active_path_occurrences: list = []
         self.last_occurrence_writes: list = []
         self.last_occurrence_persistence_status = self.occurrence_ledger_status
         self.last_occurrence_persistence_error = self.occurrence_ledger_error
@@ -165,6 +166,11 @@ class ProductionScanCycle:
         self._history = CONT.HistoryRevision()
         self._derived_revision = 0
         self.rebuilds = []
+        # Reversal objects are current-process facts only. A history revision
+        # recreates this custody from canonical replay; saved candidate JSON
+        # cannot restore it.
+        from market_data.reversal_formation import ReversalFormationCustody
+        self.reversal_formation_custody = ReversalFormationCustody()
 
     # ── candle-derived state, re-derived from repaired history ────────────────
     #
@@ -211,6 +217,12 @@ class ProductionScanCycle:
         # is deliberately NOT here: facts stay, conclusions are rebuilt.
         "_active_path",
         "_active_path_prior_protected",
+        # REVERSAL-ENTRY-COMPOSITION. Settled formation custody is rebuilt from
+        # canonical prefixes after history revision; it cannot survive on a
+        # superseded tape. The current scan's extracted lifetime events are
+        # likewise disposable intermediate evidence.
+        "reversal_formation_custody",
+        "last_active_path_occurrences",
     )
 
     #: NOT rebuilt, and why. Recorded so the exclusion is a decision rather than
@@ -355,15 +367,27 @@ class ProductionScanCycle:
             # re-derived from them rather than carried across the seam.
             self._active_path = None
             self._active_path_prior_protected = {}
+            self.last_active_path_occurrences = []
+            from market_data.reversal_formation import ReversalFormationCustody
+            self.reversal_formation_custody = ReversalFormationCustody()
+            try:
+                replay_ledger_rows = (self.occurrence_ledger.occurrences()
+                                      if self.occurrence_ledger is not None
+                                      and self.occurrence_ledger.health().get("status")
+                                      == _OL_HEALTHY else [])
+            except Exception:  # noqa: BLE001 -- unusable history is not authority
+                replay_ledger_rows = []
 
             # Re-derive by replaying the canonical tape through the SAME
             # builder production uses. A private reconstruction would be a
             # second definition of what a swing is.
             derived = 0
+            replay_prior_protected = {}
             for end in range(self.REBUILD_MIN_BARS, len(bars) + 1):
                 window = bars[:end]
+                replay_timeframes = build_timeframes(window)
                 snapshot = build_snapshot(
-                    build_timeframes(window), symbol=self.symbol,
+                    replay_timeframes, symbol=self.symbol,
                     swing_tracker=self.swing_tracker,
                     po3_stability=self.po3_stability,
                     session_po3=self.session_po3,
@@ -374,6 +398,51 @@ class ProductionScanCycle:
                     expansion_stability=self.expansion_stability,
                     contract_id=self.contract_id, invoke_brain=False)
                 self._update_structure_flips(snapshot)
+                from market_state.active_path import extract_occurrences
+                replay_events = extract_occurrences(
+                    snapshot, replay_prior_protected, self.contract_id)
+                replay_prior_protected = (
+                    ((snapshot.get("protected_swings") or {}).get("by_timeframe") or {}))
+                from market_data.object_identity import canonical_instant
+                try:
+                    replay_cutoff = canonical_instant(snapshot.get("timestamp"), strict=True)
+                except Exception:
+                    replay_cutoff = None
+                rows_as_of = []
+                if replay_cutoff is not None:
+                    for row in replay_ledger_rows:
+                        if not isinstance(row, dict) or row.get("contract") != self.contract_id:
+                            continue
+                        try:
+                            observed = canonical_instant(row.get("event_time"), strict=True)
+                            source = canonical_instant(
+                                row.get("source_bar_time") or row.get("event_time"),
+                                strict=True)
+                        except Exception:
+                            continue
+                        if observed <= replay_cutoff and source <= replay_cutoff:
+                            rows_as_of.append(row)
+                snapshot["derived_state"] = {
+                    "history_revision": revision,
+                    "derived_revision": revision,
+                    "current": True,
+                }
+                self.reversal_formation_custody.observe(
+                    snapshot, contract_id=self.contract_id,
+                    history_revision=revision,
+                    canonical_timeframes=replay_timeframes,
+                    sweep_events=[row for row in rows_as_of
+                                  if row.get("event_type") == "LIQUIDITY_SWEEP"],
+                    lifetime_events=(
+                        [row for row in rows_as_of
+                         if row.get("event_type") in {
+                             "PROTECTED_SWING_REGISTERED",
+                             "PROTECTED_SWING_REPLACED",
+                             "PROTECTED_SWING_VIOLATED"}]
+                        + [row for row in replay_events
+                           if str(row.get("event_type", "")).startswith(
+                               "PROTECTED_SWING_")]),
+                    rebuilding=True)
                 derived += 1
             self.htf_engine.update(bars)
             record["cognitive"] = self._reanchor_cognitive_state(revision)
@@ -514,6 +583,7 @@ class ProductionScanCycle:
         # forever; ownership is recomputed here every scan and never read back
         # from disk as a conclusion.
         snapshot["active_path_state"] = self._update_active_path(snapshot)
+        self._attach_reversal_formation(snapshot, raw_data)
 
         cur_qual = (snapshot.get("qualification", {}).get("status") or "no_trade").lower()
         self.bars_in_state = (self.bars_in_state + 1
@@ -1025,6 +1095,67 @@ class ProductionScanCycle:
         ap.load_bearing = None
         return False
 
+    def _attach_reversal_formation(self, snapshot: dict, canonical_timeframes: dict) -> None:
+        """Publish only process-owned, history-revalidated formation facts."""
+        from market_state.active_path import production_session_key
+        snapshot = snapshot if isinstance(snapshot, dict) else {}
+        try:
+            health = (self.occurrence_ledger.health().get("status")
+                      if self.occurrence_ledger is not None else None)
+            session = production_session_key(snapshot.get("timestamp"))
+            if health == _OL_HEALTHY and session and self.contract_id:
+                rows = [row for row in self.occurrence_ledger.occurrences()
+                        if isinstance(row, dict)
+                        and row.get("contract") == self.contract_id
+                        and production_session_key(row.get("event_time")) == session]
+                from market_data.object_identity import canonical_instant
+                try:
+                    scan_cutoff = canonical_instant(snapshot.get("timestamp"), strict=True)
+                except Exception:
+                    scan_cutoff = None
+                if scan_cutoff is not None:
+                    filtered = []
+                    for row in rows:
+                        try:
+                            event_at = canonical_instant(row.get("event_time"), strict=True)
+                            source_at = canonical_instant(
+                                row.get("source_bar_time") or row.get("event_time"),
+                                strict=True)
+                        except Exception:
+                            continue
+                        if event_at <= scan_cutoff and source_at <= scan_cutoff:
+                            filtered.append(row)
+                    rows = filtered
+                sweep_events = [row for row in rows
+                                if row.get("event_type") == "LIQUIDITY_SWEEP"]
+                lifetime_events = [row for row in rows if row.get("event_type") in {
+                    "PROTECTED_SWING_REGISTERED",
+                    "PROTECTED_SWING_REPLACED",
+                    "PROTECTED_SWING_VIOLATED"}]
+                lifetime_events.extend(
+                    row for row in getattr(self, "last_active_path_occurrences", [])
+                    if isinstance(row, dict) and row.get("event_type") in {
+                        "PROTECTED_SWING_REGISTERED",
+                        "PROTECTED_SWING_REPLACED",
+                        "PROTECTED_SWING_VIOLATED"})
+            else:
+                # Empty and unavailable are different; the custody receives no
+                # registration proof when the canonical occurrence authority
+                # cannot vouch for it.
+                sweep_events = None
+                lifetime_events = None
+            snapshot["reversal_formation_view"] = self.reversal_formation_custody.observe(
+                snapshot, contract_id=self.contract_id,
+                history_revision=self._history.revision,
+                canonical_timeframes=canonical_timeframes,
+                sweep_events=sweep_events,
+                lifetime_events=lifetime_events)
+        except Exception as exc:  # noqa: BLE001 -- fail closed within scan
+            snapshot["reversal_formation_view"] = None
+            snapshot["reversal_formation_authority"] = {
+                "available": False,
+                "reason": f"formation_custody_unavailable:{type(exc).__name__}"}
+
     def _update_active_path(self, snapshot: dict) -> dict:
         """Record the structural chronology, then derive current path ownership.
 
@@ -1038,6 +1169,7 @@ class ProductionScanCycle:
         """
         from market_state.active_path import ActivePath, extract_occurrences
         try:
+            self.last_active_path_occurrences = []
             first_use = self._active_path is None
             if first_use:
                 self._active_path = ActivePath()
@@ -1070,6 +1202,7 @@ class ProductionScanCycle:
                 self._recover_active_path(snapshot)
             occurrences = extract_occurrences(
                 snapshot, self._active_path_prior_protected, self.contract_id)
+            self.last_active_path_occurrences = list(occurrences)
             for occ in occurrences:
                 try:
                     self.occurrence_ledger.record(occ)

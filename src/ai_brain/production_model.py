@@ -252,6 +252,10 @@ _CONTRACT_SOURCES = (
     # becomes a trade". Leaving them out would let a detector threshold change
     # silently alter what authorises while an old approval still looked valid.
     ("tool_geometry", "toolbox/price_levels.py"),
+    # ICT REVERSAL ENTRY COMPOSITION. This process-local custody revalidates
+    # settled formation witnesses across healthy later scans; its semantics
+    # affect which reversal objects the production catalog can publish.
+    ("reversal_formation_custody", "market_data/reversal_formation.py"),
     ("tool_inventory", "toolbox/toolbox_engine.py"),
     # MARKET REALITY -- whether the chart exists at all
     ("history_capability", "broker/topstepx_live_session.py"),

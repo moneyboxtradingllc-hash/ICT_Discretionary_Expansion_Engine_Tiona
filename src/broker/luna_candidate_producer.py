@@ -698,6 +698,18 @@ def _po3_reversal_ob_rows(snapshot: dict) -> list:
                 "run_extreme": b.get("run_extreme"),
                 "protected_swing_id": b.get("protected_swing_id"),
                 "protected_swing_role": b.get("protected_swing_role"),
+                "protected_swing_registered_at": b.get(
+                    "protected_swing_registered_at"),
+                "protected_swing_occurrence_id": b.get(
+                    "protected_swing_occurrence_id"),
+                "formation_authority": b.get("formation_authority"),
+                "history_revision": b.get("history_revision", (
+                    (snapshot or {}).get("derived_state") or {}).get(
+                        "history_revision")),
+                "sweep_occurrence_id": ((b.get("sweep_evidence") or {}).get(
+                    "occurrence_id")),
+                "sweep_event_time": ((b.get("sweep_evidence") or {}).get(
+                    "event_time")),
                 # ── the causal birth certificate ──────────────────────────
                 "liquidity_side_taken": b.get("liquidity_side_taken"),
                 "manipulation_sweep_tf": b.get("manipulation_sweep_tf"),
@@ -777,7 +789,11 @@ def _anchored_rejection_rows(snapshot: dict) -> list:
                 "anchor_role": b.get("anchor_role"),
                 "anchor_level": b.get("anchor_level"),
                 "anchor_basis": b.get("anchor_basis"),
+                "anchor_registered_at": b.get("anchor_registered_at"),
+                "anchor_life_identity": b.get("anchor_life_identity"),
                 "creating_candle_timestamp": b.get("creating_candle_timestamp"),
+                "creating_candle_identity": b.get("creating_candle_identity"),
+                "history_revision": b.get("history_revision"),
                 "wick_extreme": b.get("wick_extreme"),
                 "distance_to_anchor": b.get("distance_to_anchor"),
             })

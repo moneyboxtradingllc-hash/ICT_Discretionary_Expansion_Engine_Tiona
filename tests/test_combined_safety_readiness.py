@@ -596,7 +596,7 @@ class TestStrategyUntouched:
         # TRADE-HORIZON-1 adds candidate-scope evidence; its source is also in
         # the canonical contract closure.
         from ai_brain.production_model import brain_contract_fingerprint
-        assert brain_contract_fingerprint() == "brain:51d892a3f621eda5"
+        assert brain_contract_fingerprint() == "brain:ee4190500549d321"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.

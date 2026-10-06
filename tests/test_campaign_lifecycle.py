@@ -478,6 +478,102 @@ def test_confirmed_transfer_needs_new_owner_draw_episode():
     assert "identity_mismatch" in stale["reason"]
 
 
+def test_current_reversal_phase_is_admitted_only_for_verified_new_owner_transfer():
+    path = confirmed_bearish_path()
+    snap = snapshot(direction="bearish", path=path)
+    result = classify(
+        snap=snap, output=brain("bearish", "reversal"),
+        continuity=prior_bullish_thesis(),
+        campaign=real_public_draw(direction="bearish"))
+    assert result["state"] == ACTIVE_DELIVERY
+    assert result["narrative_control_state"] == "confirmed_transfer"
+    assert result["narrative_phase"] == "reversal"
+    assert participation_permission(result, "bearish")[0] is True
+    assert participation_permission(result, "bullish")[0] is False
+
+
+def test_current_confirmed_reversal_phase_reaches_real_candidate_producer():
+    from _step7_fixture import detected
+    from broker.luna_candidate_producer import CandidateProducer
+    from broker.topstepx_client import TopstepXContract
+    from live_scan.production_scan_cycle import ProductionScanCycle
+
+    current = stamp(2)
+    path = confirmed_bearish_path()
+    snap = snapshot(direction="bearish", path=path)
+    snap.update(detected("fvg", direction="bearish"))
+    snap["derived_state"] = {"current": True, "history_revision": REVISION,
+                             "derived_revision": REVISION}
+    continuity = prior_bullish_thesis()
+    public_draw = real_public_draw(direction="bearish")
+    output = brain("bearish", "reversal")
+    output.update({
+        "current_action": "propose_entry",
+        "invalidation_id": "",
+        "invalidation_level": 101.0,
+        "active_draw": "sell side liquidity below",
+        "recommended_playbook_family": "manipulation_to_distribution",
+        "recommended_tool_family": ["fvg"],
+        "market_story": "verified transfer and current bearish delivery",
+    })
+    block = production_block("bearish", "reversal",
+                             narrative_continuity=continuity)
+    block["output"] = output
+    converted = ProductionScanCycle.to_brain_result(block)
+    assessment = evaluate_campaign_lifecycle(
+        snapshot=snap, brain_output=output, narrative_continuity=continuity,
+        campaign_draw=public_draw, session_id=SESSION, contract_id=CONTRACT,
+        brain_authority_available=True)
+    assert assessment["state"] == ACTIVE_DELIVERY
+    snap["campaign_lifecycle"] = assessment
+    executable = {
+        "schema": "execution_price.v1", "available": True, "fresh": True,
+        "source": "test_quote", "best_bid": 100.0, "best_ask": 100.25,
+        "last_trade": 100.0, "captured_at": current, "age_seconds": 0.2,
+        "max_age_seconds": 5.0, "bearish_executable": 100.0,
+        "bullish_executable": 100.25,
+    }
+    brain_input_value = {
+        "timestamp": current,
+        "market": {"current_price": 100.0,
+                   "settled_price_basis": "settled_close:1m",
+                   "execution_price": executable},
+        "liquidity": {"nearest_sell_side": 95.0,
+                      "nearest_buy_side": 105.0},
+        "protected_swings": {
+            "protected_high": {"level": 101.0, "timeframe": "5m",
+                               "timestamp": stamp(1)},
+            "protected_low": {"level": 99.0, "timeframe": "5m",
+                              "timestamp": stamp(1)},
+        },
+        "narrative_continuity": continuity,
+    }
+    producer = CandidateProducer(
+        account_fingerprint="acct:reversal-test",
+        contract=TopstepXContract(
+            id=CONTRACT, name="MNQZ26", description="MNQ",
+            tick_size=0.25, tick_value=0.5, active=True),
+        allow_prose_objective_fallback=True,
+        allow_numeric_invalidation_fallback=True)
+    candidate = producer.produce(
+        brain_result=converted, brain_input=brain_input_value,
+        snapshot=snap, qualification={}, engine_inventory={},
+        snapshot_id="scan-confirmed-reversal",
+        market_data_timestamp=current, latest_closed_bar_timestamp=current,
+        now=START + timedelta(minutes=2, seconds=1),
+        require_campaign_lifecycle=True, campaign_draw=public_draw,
+        campaign_session_id=SESSION)
+    assert candidate.direction == "bearish"
+    assert candidate.invalidation_price == 101.0
+    assert candidate.objective.price == 95.0
+
+
+def test_local_reversal_phase_does_not_admit_intact_incumbent_or_unverified_transfer():
+    result = classify(output=brain("bullish", "reversal"))
+    assert result["state"] == AUTHORITY_UNKNOWN
+    assert result["participation_permitted"] is False
+
+
 def test_proven_delivery_enters_completed_destination_state():
     campaign = draw(
         status="PROVEN_DELIVERED", history_complete=False,

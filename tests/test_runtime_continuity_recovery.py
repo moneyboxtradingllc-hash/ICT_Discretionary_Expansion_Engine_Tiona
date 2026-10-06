@@ -197,10 +197,12 @@ class TestRebuildIsReplacementNotCleaning:
         cycle = ProductionScanCycle(symbol="MNQ")
         before = {n: id(getattr(cycle, n, None))
                   for n in ("memory", "htf_engine", "setup_tracker",
-                            "swing_tracker", "po3_stability", "expansion_stability")}
+                            "swing_tracker", "po3_stability", "expansion_stability",
+                            "reversal_formation_custody")}
         cycle._rebuild_derived_state(tape(), 1)
         for name, was in before.items():
             assert id(getattr(cycle, name)) != was, f"{name} survived the rebuild"
+        assert cycle.last_active_path_occurrences == []
 
     def test_brain_state_is_NOT_replaced(self):
         cycle = ProductionScanCycle(symbol="MNQ")

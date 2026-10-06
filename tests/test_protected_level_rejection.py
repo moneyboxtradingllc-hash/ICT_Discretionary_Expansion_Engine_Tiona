@@ -384,3 +384,119 @@ class TestItReachesLunaWithoutAmbiguity:
         assert row["zone_low"] <= retest_high <= row["zone_high"]
         assert retest_high < row["mean_threshold"]
         assert round(row["mean_threshold"] - retest_high, 3) == 2.125
+
+
+def _lifetime_fixture(*, source_bar_time="2026-09-14T14:10:00+00:00",
+                      registered_at="2026-09-14T14:20:00+00:00",
+                      candle_time="2026-09-14T14:15:00+00:00",
+                      direction="bullish", anchor_tf="5m", candle_tf="3m"):
+    side = "low" if direction == "bullish" else "high"
+    candle = ({"timestamp": candle_time, "open": 101.0, "high": 102.0,
+               "low": 100.0, "close": 101.25, "body_size": 0.25,
+               "upper_wick": 0.0, "lower_wick": 1.0,
+               "temporal_status": "settled"}
+              if direction == "bullish" else
+              {"timestamp": candle_time, "open": 99.0, "high": 100.0,
+               "low": 97.5, "close": 98.75, "body_size": 0.25,
+               "upper_wick": 1.0, "lower_wick": 0.0,
+               "temporal_status": "settled"})
+    swing_id = f"{anchor_tf}:swing_{side}:100"
+    event = {
+        "occurrence_id": f"protected-life:{anchor_tf}:{registered_at}",
+        "event_type": "PROTECTED_SWING_REGISTERED",
+        "contract": "CON.F.US.MNQ.Z26", "source_tf": anchor_tf,
+        "side": side, "level": 100.0, "basis": "raid_rejected",
+        "swing_id": swing_id, "registered_at": registered_at,
+        "source_bar_time": source_bar_time, "event_time": registered_at,
+    }
+    return {
+        "symbol": "MNQ", "contract_id": "CON.F.US.MNQ.Z26",
+        "timestamp": registered_at,
+        "derived_state": {"current": True, "history_revision": 3,
+                          "derived_revision": 3},
+        "protected_swing_lifetime_history": [event],
+        "protected_swings": {"by_timeframe": {
+            "lows": ({anchor_tf: {"level": 100.0, "timeframe": anchor_tf,
+                       "role": "active_leg", "registered_at": registered_at,
+                       "swing_id": swing_id, "basis": "raid_rejected"}}
+                     if direction == "bullish" else {}),
+            "highs": ({anchor_tf: {"level": 100.0, "timeframe": anchor_tf,
+                        "role": "active_leg", "registered_at": registered_at,
+                        "swing_id": swing_id, "basis": "raid_rejected"}}
+                      if direction == "bearish" else {})}},
+        "timeframes": {candle_tf: {"recent_candles": [candle]}},
+    }
+
+
+class TestAnchorLifetimeBinding:
+    def test_delayed_registration_uses_source_bar_chronology_not_registered_at(self):
+        snap = _lifetime_fixture()
+        result = anchored_rejection_block(snap, "bullish", proximity_points=0.0)
+        assert result["available"] is True
+        assert result["anchor_registered_at"] > result["creating_candle_timestamp"]
+        assert result["anchor_life_identity"]["source_bar_time"] == \
+            "2026-09-14T14:10:00+00:00"
+        assert result["anchor_life_identity"]["registration_occurrence_id"] == \
+            "protected-life:5m:2026-09-14T14:20:00+00:00"
+
+    def test_later_same_price_life_cannot_borrow_an_earlier_rejection_candle(self):
+        snap = _lifetime_fixture(
+            source_bar_time="2026-09-14T14:20:00+00:00",
+            registered_at="2026-09-14T14:25:00+00:00")
+        result = anchored_rejection_block(snap, "bullish", proximity_points=0.0)
+        assert result["available"] is False
+        assert result["reason"] == \
+            "NO_CREATING_CANDLE_BOUND_TO_CURRENT_PROTECTED_ANCHOR_LIFE"
+
+    def test_future_settled_rejection_candle_cannot_author_an_earlier_scan(self):
+        snap = _lifetime_fixture()
+        snap["timestamp"] = "2026-09-14T14:14:00+00:00"
+        result = anchored_rejection_block(snap, "bullish", proximity_points=0.0)
+        assert result["available"] is False
+
+    def test_later_exact_anchor_invalidation_withholds_stale_registry_object(self):
+        from market_state.active_path import PROTECTED_SWING_VIOLATED
+        snap = _lifetime_fixture()
+        snap["timestamp"] = "2026-09-14T14:25:00+00:00"
+        event = dict(snap["protected_swing_lifetime_history"][0])
+        event.update({"occurrence_id": "protected-life-violation:one",
+                      "event_type": PROTECTED_SWING_VIOLATED,
+                      "source_bar_time": "2026-09-14T14:25:00+00:00",
+                      "event_time": "2026-09-14T14:25:00+00:00"})
+        snap["protected_swing_lifetime_history"].append(event)
+        result = anchored_rejection_block(snap, "bullish", proximity_points=0.0)
+        assert result["available"] is False
+
+    def test_public_cross_timeframe_association_keeps_both_lives(self):
+        snap = _lifetime_fixture(anchor_tf="5m", candle_tf="3m")
+        result = anchored_rejection_block(snap, "bullish", proximity_points=0.0)
+        assert result["available"] is True
+        assert result["anchor_tf"] == "5m"
+        assert result["rejection_block_tf"] == "3m"
+        assert result["creating_candle_identity"]["timeframe"] == "3m"
+
+    def test_public_catalog_carries_full_anchor_and_candle_lifetime(self):
+        from broker.luna_candidate_producer import _anchored_rejection_rows
+        snap = _lifetime_fixture(anchor_tf="5m", candle_tf="3m")
+        row = _anchored_rejection_rows(snap)[0]
+        assert row["anchor_life_identity"]["timeframe"] == "5m"
+        assert row["anchor_life_identity"]["registered_at"] == \
+            "2026-09-14T14:20:00+00:00"
+        assert row["creating_candle_identity"]["timeframe"] == "3m"
+        assert row["creating_candle_identity"]["timestamp"] == \
+            "2026-09-14T14:15:00+00:00"
+        assert row["history_revision"] == 3
+
+    def test_stale_derived_history_cannot_publish_a_bound_rejection(self):
+        snap = _lifetime_fixture()
+        snap["derived_state"]["derived_revision"] = 2
+        snap["derived_state"]["current"] = False
+        result = anchored_rejection_block(snap, "bullish", proximity_points=0.0)
+        assert result["available"] is False
+
+    def test_missing_lifetime_authority_withholds_the_object(self):
+        snap = _lifetime_fixture()
+        snap.pop("protected_swing_lifetime_history")
+        result = anchored_rejection_block(snap, "bullish", proximity_points=0.0)
+        assert result["available"] is False
+        assert result["reason"] == "PROTECTED_ANCHOR_LIFETIME_AUTHORITY_UNAVAILABLE"

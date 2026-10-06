@@ -79,21 +79,26 @@ def _c(ts, o, h, l, c, settled=True):
             "temporal_status": "settled" if settled else "forming"}
 
 
-#: The manipulation run, its terminal low, then the validating expansion.
+def _ts(hhmm):
+    hour, minute = (int(part) for part in hhmm.split(":"))
+    return f"2026-08-19T{hour:02d}:{minute:02d}:00+00:00"
+
+
+SWEEP_TIME = _ts("02:10")
+REGISTERED_AT = _ts("02:12")  # observed registration follows its source bar
+
+#: Opposing run, protected pivot, settled sweep/reclaim, then confirmation.
 BARS = [
-    # Accumulation is BULLISH here on purpose: a bearish bar would be absorbed
-    # into the unbroken opposing run and inflate the envelope. The run is
-    # "contiguous opposing delivery", so where it STARTS is a market fact.
-    _c("01:30", 29480.00, 29492.00, 29478.00, 29486.00),
-    _c("01:35", 29470.00, 29483.00, 29468.00, 29474.00),
-    _c("01:45", 29472.00, 29474.00, 29462.00, 29464.00),   # run starts
-    _c("01:50", 29464.00, 29466.00, 29452.00, 29454.00),
-    _c("01:55", 29454.00, 29457.00, 29444.00, 29446.00),
-    _c("02:00", 29446.00, 29448.00, 29434.00, 29436.00),
-    _c("02:05", 29436.00, 29438.00, SWING_LOW, 29432.00),  # terminal, sweeps low
-    _c("02:10", 29432.00, 29440.00, 29431.00, 29439.00),   # first bullish
-    _c("02:15", 29439.00, 29478.00, 29438.00, 29476.00),   # EXPANSION: closes
-    _c("02:20", 29476.00, 29488.00, 29470.00, 29484.00),   #   through the run
+    _c(_ts("01:30"), 29480.00, 29492.00, 29478.00, 29486.00),
+    _c(_ts("01:35"), 29470.00, 29483.00, 29468.00, 29474.00),
+    _c(_ts("01:45"), 29472.00, 29474.00, 29462.00, 29464.00),   # run starts
+    _c(_ts("01:50"), 29464.00, 29466.00, 29452.00, 29454.00),
+    _c(_ts("01:55"), 29454.00, 29457.00, 29444.00, 29446.00),
+    _c(_ts("02:00"), 29446.00, 29448.00, 29434.00, 29436.00),
+    _c(_ts("02:05"), 29436.00, 29438.00, SWING_LOW, 29432.00),  # protected pivot
+    _c(_ts("02:10"), 29432.00, 29440.00, 29428.75, 29432.00),   # sweep and reclaim
+    _c(_ts("02:15"), 29432.00, 29440.00, 29431.00, 29439.00),
+    _c(_ts("02:20"), 29439.00, 29478.00, 29438.00, 29476.00),   # first close through
 ]
 
 #: `_ob_block_run` takes the contiguous opposing run BEFORE the swing candle --
@@ -106,19 +111,43 @@ MEAN_THRESHOLD = round((RUN_BODY_LOW + RUN_BODY_HIGH) / 2, 3)
 
 
 def snapshot(**over):
+    sweep = {
+        "occurrence_id": "LIQUIDITY_SWEEP:fixture:5m:2026-08-19T02:10:00+00:00",
+        "event_type": "LIQUIDITY_SWEEP", "contract": "CON.F.US.MNQ.Z26",
+        "source_tf": "5m", "event_time": SWEEP_TIME,
+        "sweep_direction": "below_low", "swept_level": SWING_LOW,
+        "reclaimed": True, "reclaim_basis": "same_bar_close_back_through_level",
+        "source_bars": [_ts("02:05"), SWEEP_TIME],
+    }
+    registration = {
+        "occurrence_id": "PROTECTED_SWING_REGISTERED:fixture:5m:anchor-life-1",
+        "event_type": "PROTECTED_SWING_REGISTERED",
+        "contract": "CON.F.US.MNQ.Z26", "source_tf": "5m",
+        "event_time": REGISTERED_AT, "source_bar_time": SWEEP_TIME,
+        "side": "low", "level": SWING_LOW,
+        "basis": "sell_side_raid_rejected", "swing_id": "5m:swing_low:29429.75",
+        "registered_at": REGISTERED_AT,
+    }
     snap = {
         "symbol": "MNQ",
+        "contract_id": "CON.F.US.MNQ.Z26",
+        "timestamp": BARS[-1]["timestamp"],
+        "derived_state": {"current": True, "history_revision": 1,
+                          "derived_revision": 1},
         "timeframes": {"5m": {"recent_candles": copy.deepcopy(BARS)}},
         "structure": {"5m": {"last_swing_low": SWING_LOW,
                              "last_swing_high": SWING_HIGH}},
-        "liquidity": {"5m": {"sweep_detected": True,
-                             "sweep_direction": "below_low",
-                             "reclaim_detected": True}},
+        "liquidity": {"5m": {"sweep_detected": False,
+                             "sweep_direction": None,
+                             "reclaim_detected": False}},
+        "reversal_sweep_history": [sweep],
+        "protected_swing_lifetime_history": [registration],
         "expansion": {"5m": {"state": "healthy_expansion",
                              "displacement_detected": True}},
         "protected_swings": {"by_timeframe": {"lows": {
             "5m": {"level": SWING_LOW, "role": "active_leg",
                    "swing_id": "5m:swing_low:29429.75",
+                   "timeframe": "5m", "registered_at": REGISTERED_AT,
                    "basis": "sell_side_raid_rejected"}}}},
     }
     snap.update(over)
@@ -128,6 +157,54 @@ def snapshot(**over):
 def block(direction="bullish", snap=None):
     return po3_reversal_order_block(snap if snap is not None else snapshot(),
                                     direction)
+
+
+def bearish_mirror_snapshot():
+    """Price-mirror the synthetic bullish fixture to test the same causal law."""
+    snap = snapshot()
+    center_twice = 60000.0
+
+    def mirror(value):
+        return round(center_twice - value, 4)
+
+    bars = []
+    for source in BARS:
+        bar = copy.deepcopy(source)
+        bar.update({
+            "open": mirror(source["open"]),
+            "high": mirror(source["low"]),
+            "low": mirror(source["high"]),
+            "close": mirror(source["close"]),
+            "direction": ("bearish" if source["close"] > source["open"]
+                          else "bullish" if source["close"] < source["open"]
+                          else "doji"),
+        })
+        bars.append(bar)
+    anchor = mirror(SWING_LOW)
+    snap["timeframes"]["5m"]["recent_candles"] = bars
+    snap["timestamp"] = bars[-1]["timestamp"]
+    snap["structure"]["5m"] = {
+        "last_swing_high": anchor,
+        "last_swing_low": mirror(SWING_HIGH),
+    }
+    snap["reversal_sweep_history"][0].update({
+        "sweep_direction": "above_high", "swept_level": anchor,
+    })
+    snap["protected_swing_lifetime_history"][0].update({
+        "side": "high", "level": anchor,
+        "basis": "buy_side_raid_rejected",
+        "swing_id": f"5m:swing_high:{anchor:g}",
+    })
+    snap["protected_swings"]["by_timeframe"] = {
+        "highs": {"5m": {
+            "level": anchor, "role": "active_leg",
+            "swing_id": f"5m:swing_high:{anchor:g}",
+            "timeframe": "5m", "registered_at": REGISTERED_AT,
+            "basis": "buy_side_raid_rejected",
+        }},
+        "lows": {},
+    }
+    return snap
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -148,6 +225,13 @@ class TestTheObjectIsBuilt:
     def test_the_run_spans_multiple_candles(self):
         """The operator's 'series of down candles', not one candle."""
         assert block()["creating_run_length"] >= 3
+
+    def test_bearish_mirror_requires_and_accepts_its_own_buy_side_reversal(self):
+        result = block("bearish", snap=bearish_mirror_snapshot())
+        assert result["available"] is True, result
+        assert result["liquidity_side_taken"] == "buy_side"
+        assert result["manipulation_sweep_direction"] == "above_high"
+        assert result["invalidation_level"] == round(60000.0 - SWING_LOW, 4)
 
 
 class TestTheCausalBirthCertificate:
@@ -180,8 +264,10 @@ class TestTheManipulationLegIsNotYetAnOrderBlock:
     @staticmethod
     def _before_expansion():
         snap = snapshot()
-        # truncate the tape to the moment the run has just ended
-        snap["timeframes"]["5m"]["recent_candles"] = copy.deepcopy(BARS[:7])
+        # The sweep and first response have happened; the body-envelope close
+        # has not. Transient sweep flags are already expired.
+        snap["timeframes"]["5m"]["recent_candles"] = copy.deepcopy(BARS[:9])
+        snap["timestamp"] = BARS[8]["timestamp"]
         return snap
 
     def test_no_object_exists_before_the_violation(self):
@@ -194,15 +280,16 @@ class TestTheManipulationLegIsNotYetAnOrderBlock:
     def test_bearish_candles_near_a_low_are_not_enough(self):
         """Not 'bearish', not 'near a low', not 'sell-side taken'."""
         snap = self._before_expansion()
-        assert snap["liquidity"]["5m"]["sweep_detected"] is True   # sweep DID happen
+        assert snap["reversal_sweep_history"]                       # sweep DID happen
         assert block(snap=snap)["available"] is False              # still no object
 
     def test_a_wick_through_the_run_is_not_a_violation(self):
         """A probe is not a change in the state of delivery."""
         snap = snapshot()
-        bars = copy.deepcopy(BARS[:8])
-        bars.append(_c("02:15", 29439.00, 29480.00, 29438.00, 29460.00))  # wick only
+        bars = copy.deepcopy(BARS[:9])
+        bars.append(_c(_ts("02:20"), 29439.00, 29480.00, 29438.00, 29460.00))  # wick only
         snap["timeframes"]["5m"]["recent_candles"] = bars
+        snap["timestamp"] = bars[-1]["timestamp"]
         assert block(snap=snap)["reason"] == NOT_YET_VALIDATED
 
     def test_colour_alone_does_not_validate(self):
@@ -216,19 +303,25 @@ class TestTheManipulationLegIsNotYetAnOrderBlock:
 class TestTheManipulationIsRequired:
     def test_no_sweep_means_no_reversal_block(self):
         snap = snapshot()
-        snap["liquidity"]["5m"]["sweep_detected"] = False
+        snap["reversal_sweep_history"] = []
         assert block(snap=snap)["reason"] == NO_MANIPULATION
 
     def test_the_wrong_side_sweep_does_not_qualify_a_bullish_block(self):
         """A buy-side raid does not create a BULLISH reversal block."""
         snap = snapshot()
-        snap["liquidity"]["5m"]["sweep_direction"] = "above_high"
+        snap["reversal_sweep_history"][0]["sweep_direction"] = "above_high"
         assert block(snap=snap)["reason"] == NO_MANIPULATION
+
+    def test_future_settled_validation_bar_cannot_form_an_earlier_object(self):
+        snap = snapshot()
+        snap["timestamp"] = _ts("02:15")
+        result = po3_reversal_order_block(snap, "bullish")
+        assert result["available"] is False
 
     def test_a_bearish_block_needs_the_buy_side_taken(self):
         snap = snapshot()
-        snap["liquidity"]["5m"]["sweep_direction"] = "above_high"
-        assert block("bearish", snap=snap)["reason"] != NO_MANIPULATION
+        snap["reversal_sweep_history"][0]["sweep_direction"] = "above_high"
+        assert block("bearish", snap=snap)["available"] is False
 
     def test_an_unresolved_direction_is_refused(self):
         assert block("conflicted")["reason"] == NO_MANIPULATION
@@ -249,9 +342,35 @@ class TestTwoExtremesStaySeparate:
         snap = snapshot()
         snap["protected_swings"]["by_timeframe"]["lows"]["5m"]["level"] = 29425.00
         b = block(snap=snap)
-        assert b["run_extreme"] == RUN_EXTREME        # geometry unchanged
-        assert b["invalidation_level"] == 29425.00    # authority differs
-        assert b["run_extreme"] != b["invalidation_level"]
+        assert b["available"] is False
+        assert b["reason"] == "SWEEP_NOT_ASSOCIATED_WITH_CURRENT_PROTECTED_ANCHOR_LIFE"
+
+    def test_unrelated_cross_timeframe_anchor_never_supplies_invalidation(self):
+        from broker.luna_candidate_producer import authorized_tool_catalog
+
+        snap = snapshot()
+        snap["protected_swings"]["by_timeframe"]["lows"].pop("5m")
+        unrelated = {
+            "level": SWING_LOW - 8.0, "role": "active_leg",
+            "swing_id": "15m:unrelated-low-life",
+            "timeframe": "15m", "registered_at": REGISTERED_AT,
+            "basis": "sell_side_raid_rejected",
+        }
+        snap["protected_swings"]["by_timeframe"]["lows"]["15m"] = unrelated
+        life = copy.deepcopy(snap["protected_swing_lifetime_history"][0])
+        life.update({
+            "occurrence_id": "PROTECTED_SWING_REGISTERED:fixture:15m:unrelated",
+            "source_tf": "15m", "side": "low", "level": unrelated["level"],
+            "swing_id": unrelated["swing_id"],
+        })
+        snap["protected_swing_lifetime_history"].append(life)
+
+        result = block(snap=snap)
+        assert result["available"] is False
+        assert result["reason"] == \
+            "SWEEP_NOT_ASSOCIATED_WITH_CURRENT_PROTECTED_ANCHOR_LIFE"
+        assert not [row for row in authorized_tool_catalog(snap)
+                    if row.get("tool_family") == "po3_reversal_order_block"]
 
     def test_no_fixed_stop_distance_is_encoded(self):
         import inspect
@@ -281,13 +400,13 @@ class TestTheLegIsCausallyOwned:
     def test_the_leg_high_is_the_validated_expansion_extreme(self):
         leg = block()["retracement_leg"]
         assert leg["high_source"] == "validated_expansion_extreme"
-        assert leg["high"] == max(c["high"] for c in BARS[8:])
+        assert leg["high"] == max(c["high"] for c in BARS[9:])
 
     def test_the_leg_cannot_borrow_a_high_the_reversal_never_made(self):
         """Measured from the validating candle forward, never before it."""
         leg = block()["retracement_leg"]
-        assert leg["high"] <= max(c["high"] for c in BARS[8:])
-        assert leg["expansion_from"] == "02:15"
+        assert leg["high"] <= max(c["high"] for c in BARS[9:])
+        assert leg["expansion_from"] == _ts("02:20")
 
     def test_the_equilibrium_is_the_midpoint_of_THAT_leg(self):
         leg = block()["retracement_leg"]
@@ -408,6 +527,15 @@ class TestItReachesTheCatalog:
         assert r["invalidation_level"] == SWING_LOW
         assert r["run_extreme"] != r["invalidation_level"]
 
+    def test_public_row_carries_the_bound_anchor_sweep_and_revision(self):
+        row = self.rows()[0]
+        assert row["protected_swing_registered_at"] == REGISTERED_AT
+        assert row["protected_swing_occurrence_id"] == (
+            "PROTECTED_SWING_REGISTERED:fixture:5m:anchor-life-1")
+        assert row["sweep_occurrence_id"] == (
+            "LIQUIDITY_SWEEP:fixture:5m:2026-08-19T02:10:00+00:00")
+        assert row["history_revision"] == 1
+
     def test_the_row_carries_the_mean_threshold(self):
         assert self.rows()[0]["mean_threshold"] == MEAN_THRESHOLD
 
@@ -452,7 +580,7 @@ class TestTheThirdFiftyPercentReachesLuna:
             (SWING_LOW, max(c["high"] for c in BARS[8:]))
         assert r["retracement_leg_low_source"] == "protected_manipulation_swing"
         assert r["retracement_leg_high_source"] == "validated_expansion_extreme"
-        assert r["retracement_leg_expansion_from"] == "02:15"
+        assert r["retracement_leg_expansion_from"] == _ts("02:20")
 
     def test_ote_travels_beside_it_undisturbed(self):
         r = self.row()
@@ -490,7 +618,7 @@ class TestTheThirdFiftyPercentReachesLuna:
     def test_removing_the_swing_low_removes_the_block_entirely(self):
         """The converse: without the anchor there is nothing to reclassify."""
         snap = snapshot()
-        snap["structure"]["5m"] = {"last_swing_high": SWING_HIGH}
+        snap["protected_swings"]["by_timeframe"]["lows"] = {}
         from broker.luna_candidate_producer import authorized_tool_catalog
         assert not [x for x in authorized_tool_catalog(snap)
                     if x.get("tool_family") == "po3_reversal_order_block"]
@@ -500,3 +628,235 @@ class TestTheThirdFiftyPercentReachesLuna:
         import inspect
         from broker import luna_candidate_producer as P
         assert "retracement_equilibrium" in inspect.getsource(P._leg_equilibrium_facts)
+
+
+class TestProducerOwnedFormationLifetime:
+    """A proved setup survives later scans, but never outranks revised history."""
+
+    @staticmethod
+    def observe(custody, snap, rows=None, *, revision=1):
+        from market_data.reversal_formation import ReversalFormationCustody
+        assert isinstance(custody, ReversalFormationCustody)
+        return custody.observe(
+            snap, contract_id="CON.F.US.MNQ.Z26", history_revision=revision,
+            canonical_timeframes={"5m": copy.deepcopy(rows or
+                                                        snap["timeframes"]["5m"]["recent_candles"])},
+            sweep_events=snap.get("reversal_sweep_history"),
+            lifetime_events=snap.get("protected_swing_lifetime_history"))
+
+    def test_established_block_survives_expired_flags_and_healthy_retracement(self):
+        from market_data.reversal_formation import (ReversalFormationCustody,
+                                                    current_block)
+        custody = ReversalFormationCustody()
+        formed = snapshot()
+        view = self.observe(custody, formed)
+        formed["reversal_formation_view"] = view
+        first = current_block(formed, "bullish")
+        assert first and first["validation_timestamp"] == _ts("02:20")
+
+        later = snapshot()
+        later["timeframes"]["5m"]["recent_candles"].append(
+            _c(_ts("02:25"), 29470.0, 29472.0, 29452.0, 29458.0))
+        later["timestamp"] = _ts("02:25")
+        later["liquidity"]["5m"].update(
+            sweep_detected=False, sweep_direction=None, reclaim_detected=False)
+        later["expansion"]["5m"].update(
+            state="retracement", displacement_detected=False)
+        later["derived_state"] = {"current": True, "history_revision": 1,
+                                  "derived_revision": 1}
+        later["reversal_formation_view"] = self.observe(custody, later)
+        retained = current_block(later, "bullish")
+        assert retained
+        assert retained["formation_authority"]["status"] == \
+            "CURRENT_PROCESS_REVALIDATED"
+        assert retained["formation_authority"]["occurrence_id"] == \
+            first["formation_authority"]["occurrence_id"]
+        assert retained["validation_timestamp"] == first["validation_timestamp"]
+
+    @pytest.mark.parametrize("mutation", ["changed", "removed"])
+    def test_revised_or_removed_proving_close_retires_prior_authority(self, mutation):
+        from market_data.reversal_formation import (ReversalFormationCustody,
+                                                    current_block)
+        custody = ReversalFormationCustody()
+        original = snapshot()
+        original["reversal_formation_view"] = self.observe(custody, original)
+        assert current_block(original, "bullish")
+
+        revised = snapshot()
+        bars = revised["timeframes"]["5m"]["recent_candles"]
+        if mutation == "changed":
+            bars[-1]["close"] = 29430.0
+        else:
+            bars.pop()
+        revised["timestamp"] = bars[-1]["timestamp"]
+        revised["derived_state"] = {"current": True, "history_revision": 2,
+                                    "derived_revision": 2}
+        revised["reversal_formation_view"] = self.observe(
+            custody, revised, revision=2)
+        assert current_block(revised, "bullish") is None
+
+    def test_identical_repeated_history_keeps_stable_object_identity(self):
+        from market_data.reversal_formation import ReversalFormationCustody, current_block
+        custody = ReversalFormationCustody()
+        snap = snapshot()
+        snap["reversal_formation_view"] = self.observe(custody, snap)
+        first = current_block(snap, "bullish")
+        snap["reversal_formation_view"] = self.observe(custody, snap)
+        second = current_block(snap, "bullish")
+        assert first and second
+        assert first["formation_authority"]["occurrence_id"] == \
+            second["formation_authority"]["occurrence_id"]
+
+    def test_later_exact_anchor_invalidation_retires_retained_object(self):
+        from market_data.reversal_formation import ReversalFormationCustody, current_block
+        custody = ReversalFormationCustody()
+        original = snapshot()
+        original["reversal_formation_view"] = self.observe(custody, original)
+        assert current_block(original, "bullish")
+
+        later = snapshot()
+        later["timestamp"] = _ts("02:25")
+        later["timeframes"]["5m"]["recent_candles"].append(
+            _c(_ts("02:25"), 29470.0, 29472.0, 29452.0, 29458.0))
+        # Keep a stale registry row to prove that canonical retirement of this
+        # exact lifetime independently invalidates cached formation authority.
+        later["protected_swing_lifetime_history"].append({
+            "occurrence_id": "PROTECTED_SWING_VIOLATED:fixture:5m:anchor-life-1",
+            "event_type": "PROTECTED_SWING_VIOLATED",
+            "contract": "CON.F.US.MNQ.Z26", "source_tf": "5m", "side": "low",
+            "level": SWING_LOW, "swing_id": "5m:swing_low:29429.75",
+            "registered_at": REGISTERED_AT, "source_bar_time": _ts("02:25"),
+            "event_time": _ts("02:25"),
+        })
+        later["derived_state"] = {"current": True, "history_revision": 1,
+                                  "derived_revision": 1}
+        later["reversal_formation_view"] = self.observe(custody, later)
+        assert current_block(later, "bullish") is None
+
+    def test_json_restoration_cannot_restore_live_formation_authority(self):
+        import json
+        from market_data.reversal_formation import ReversalFormationCustody, current_block
+        custody = ReversalFormationCustody()
+        formed = snapshot()
+        live_view = self.observe(custody, formed)
+        formed["reversal_formation_view"] = live_view
+        assert current_block(formed, "bullish")
+        restored = snapshot()
+        restored["reversal_formation_view"] = json.loads(json.dumps(live_view))
+        assert current_block(restored, "bullish") is None
+
+    def test_unavailable_or_retracted_public_event_lineage_cannot_use_cache(self):
+        from market_data.reversal_formation import (ReversalFormationCustody,
+                                                    current_block)
+        custody = ReversalFormationCustody()
+        original = snapshot()
+        original["reversal_formation_view"] = self.observe(custody, original)
+        assert current_block(original, "bullish")
+
+        later = snapshot()
+        later["timeframes"]["5m"]["recent_candles"].append(
+            _c(_ts("02:25"), 29470.0, 29472.0, 29452.0, 29458.0))
+        later["timestamp"] = _ts("02:25")
+        later["derived_state"] = {"current": True, "history_revision": 1,
+                                  "derived_revision": 1}
+        unavailable = custody.observe(
+            later, contract_id="CON.F.US.MNQ.Z26", history_revision=1,
+            canonical_timeframes={"5m": copy.deepcopy(
+                later["timeframes"]["5m"]["recent_candles"])},
+            sweep_events=None, lifetime_events=None)
+        later["reversal_formation_view"] = unavailable
+        assert current_block(later, "bullish") is None
+
+        # A healthy but authoritative current ledger view which has omitted
+        # the proving sweep also retires prior process custody.
+        restored = snapshot()
+        restored["timeframes"]["5m"]["recent_candles"].append(
+            _c(_ts("02:25"), 29470.0, 29472.0, 29452.0, 29458.0))
+        restored["timestamp"] = _ts("02:25")
+        restored["derived_state"] = {"current": True, "history_revision": 1,
+                                     "derived_revision": 1}
+        restored["reversal_formation_view"] = custody.observe(
+            restored, contract_id="CON.F.US.MNQ.Z26", history_revision=1,
+            canonical_timeframes={"5m": copy.deepcopy(
+                restored["timeframes"]["5m"]["recent_candles"])},
+            sweep_events=[], lifetime_events=restored[
+                "protected_swing_lifetime_history"])
+        assert current_block(restored, "bullish") is None
+
+    def test_natural_leading_rollout_does_not_call_old_witness_a_deletion(self):
+        from market_data.reversal_formation import ReversalFormationCustody, current_block
+        custody = ReversalFormationCustody()
+        formed = snapshot()
+        formed["reversal_formation_view"] = self.observe(custody, formed)
+        assert current_block(formed, "bullish")
+        rolled = snapshot()
+        rolled["timeframes"]["5m"]["recent_candles"] = \
+            copy.deepcopy(BARS[6:]) + [
+                _c(_ts("02:25"), 29470.0, 29472.0, 29452.0, 29458.0)]
+        rolled["timestamp"] = _ts("02:25")
+        rolled["derived_state"] = {"current": True, "history_revision": 1,
+                                   "derived_revision": 1}
+        rolled["reversal_formation_view"] = self.observe(custody, rolled)
+        assert current_block(rolled, "bullish")
+
+    def test_explicit_cross_timeframe_anchor_life_is_reconstructed_and_retained(self):
+        """A cross-TF anchor is usable only when the sweep names its exact life."""
+        from market_data.reversal_formation import (ReversalFormationCustody,
+                                                    current_block)
+        from toolbox.price_levels import po3_reversal_order_block
+
+        snap = snapshot()
+        sweep = snap["reversal_sweep_history"][0]
+        registration = snap["protected_swing_lifetime_history"][0]
+        registration["occurrence_id"] = (
+            "PROTECTED_SWING_REGISTERED:fixture:15m:anchor-life-1")
+        registration["source_tf"] = "15m"
+        registration["source_bar_time"] = _ts("02:05")
+        # The producer observed/registered this anchor after the source candle;
+        # chronology comes from the source bar, while identity keeps its own
+        # later registered_at value.
+        registration["event_time"] = REGISTERED_AT
+        registration["registered_at"] = REGISTERED_AT
+        sweep["swept_level_id"] = registration["occurrence_id"]
+        protected = snap["protected_swings"]["by_timeframe"]["lows"].pop("5m")
+        protected["timeframe"] = "15m"
+        snap["protected_swings"]["by_timeframe"]["lows"]["15m"] = protected
+
+        detected = po3_reversal_order_block(snap, "bullish")
+        assert detected["available"] is True, detected
+        assert detected["protected_swing_tf"] == "15m"
+
+        custody = ReversalFormationCustody()
+        snap["reversal_formation_view"] = self.observe(custody, snap)
+        retained = current_block(snap, "bullish")
+        assert retained is not None
+        assert retained["protected_swing_tf"] == "15m"
+        assert retained["formation_authority"]["anchor_identity"]["timeframe"] == "15m"
+
+    def test_production_scan_attaches_only_ledger_backed_formation(self, tmp_path):
+        from live_scan.production_scan_cycle import ProductionScanCycle
+        from market_data.occurrence_ledger import HEALTHY, OccurrenceLedger
+        from market_data.reversal_formation import is_producer_owned_view
+
+        snap = snapshot()
+        cycle = ProductionScanCycle(symbol="MNQ")
+        cycle.contract_id = "CON.F.US.MNQ.Z26"
+        cycle.occurrence_ledger = OccurrenceLedger(
+            cycle.contract_id, directory=str(tmp_path))
+        cycle.occurrence_ledger_status = HEALTHY
+        for event in (snap["reversal_sweep_history"]
+                      + snap["protected_swing_lifetime_history"]):
+            assert cycle.occurrence_ledger.record(event)["outcome"] == "recorded"
+
+        revision = cycle._history.revision
+        snap["derived_state"] = {
+            "current": True, "history_revision": revision,
+            "derived_revision": revision,
+        }
+        canonical = {"5m": copy.deepcopy(BARS)}
+        cycle._attach_reversal_formation(snap, canonical)
+        assert is_producer_owned_view(snap["reversal_formation_view"])
+        attached = block(snap=snap)
+        assert attached["available"] is True, attached
+        assert attached["formation_authority"]["status"] == \
+            "CURRENT_PROCESS_REVALIDATED"

@@ -140,6 +140,8 @@ MUST_BE_BOUND = {
         "current-authority lifecycle projection and additional participation rule",
     "market_data/trade_horizon.py":
         "current-candidate campaign relation and published protected-structure/payoff evidence",
+    "market_data/reversal_formation.py":
+        "process-local retained reversal formation revalidated against settled history and exact anchor life",
     "broker/conditional_plan_authority.py":
         "process-local validation that binds historical watching judgment to current causal truth",
     "broker/topstepx_execution_runner.py":

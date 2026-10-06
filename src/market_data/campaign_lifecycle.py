@@ -299,6 +299,14 @@ def evaluate_campaign_lifecycle(*, snapshot, brain_output,
                        "validated_brain_delivery_with_intact_owner",
                        direction=direction, draw=draw, control_state=control,
                        phase=phase)
+    if phase == "reversal" and control == "confirmed_transfer":
+        # A reversal phase can establish delivery only for the already verified
+        # new owner after Narrative Continuity proves transfer. All current
+        # ActivePath, Draw, direction and history checks above still apply.
+        return _result(ACTIVE_DELIVERY,
+                       "validated_brain_reversal_after_verified_transfer",
+                       direction=direction, draw=draw, control_state=control,
+                       phase=phase)
     return _result(AUTHORITY_UNKNOWN,
                    "narrative_phase_does_not_establish_delivery_or_retracement",
                    direction=direction, draw=draw, control_state=control,

@@ -4,6 +4,7 @@ Identifies the price zone connected to each tool candidate using available candl
 No execution, no order routing, no indicator recalculation.
 All inputs are pre-computed snapshot dicts (timeframes, structure, liquidity).
 """
+import math
 import os
 from datetime import datetime
 
@@ -1516,6 +1517,120 @@ def _rejection_zone_from(candle: dict, direction: str) -> tuple:
     return lo, hi, round((lo + hi) / 2, 3)
 
 
+def _instant(value):
+    try:
+        from market_data.object_identity import canonical_instant
+        return canonical_instant(value, strict=True)
+    except Exception:  # noqa: BLE001 -- identity evidence is fail-closed
+        return None
+
+
+def _anchor_lifetime(snapshot, anchor_tf, rec, candle, direction):
+    """Return the exact producer-recorded life that was active at this candle.
+
+    `registered_at` is retained as identity, but it is not used as the market
+    event clock: registration can be observed after its settled source bar.
+    The occurrence ledger's source-bar chronology and same-life retirement
+    events establish the relationship instead.
+    """
+    from market_state.active_path import (PROTECTED_SWING_REGISTERED,
+                                          PROTECTED_SWING_REPLACED,
+                                          PROTECTED_SWING_VIOLATED)
+    contract = str((snapshot or {}).get("contract_id") or "").strip()
+    created = _instant(candle.get("timestamp") or candle.get("time") or candle.get("t"))
+    current_at = _instant((snapshot or {}).get("timestamp"))
+    revision = ((snapshot or {}).get("derived_state") or {}).get("history_revision")
+    derived = (snapshot or {}).get("derived_state") or {}
+    if (not contract or created is None or current_at is None or created > current_at
+            or isinstance(revision, bool)
+            or not isinstance(revision, int)
+            or derived.get("current") is not True
+            or derived.get("derived_revision") != revision):
+        return None
+    side = "high" if direction == "bearish" else "low"
+    level = rec.get("level")
+    if isinstance(level, bool):
+        return None
+    try:
+        level = float(level)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(level):
+        return None
+    life = None
+    history = (snapshot or {}).get("protected_swing_lifetime_history")
+    if not isinstance(history, list):
+        return None
+    for row in history:
+        if not isinstance(row, dict):
+            continue
+        if (row.get("event_type") not in (PROTECTED_SWING_REGISTERED,
+                                           PROTECTED_SWING_REPLACED)
+                or row.get("contract") != contract
+                or row.get("source_tf") != anchor_tf
+                or row.get("side") != side
+                or row.get("swing_id") != rec.get("swing_id")
+                or row.get("registered_at") != rec.get("registered_at")
+                or row.get("basis") != rec.get("basis")):
+            continue
+        try:
+            row_level = float(row.get("level"))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        source_at = _instant(row.get("source_bar_time"))
+        event_at = _instant(row.get("event_time"))
+        if (row_level != level or source_at is None or source_at > created
+                or event_at is None or event_at > current_at):
+            continue
+        if not row.get("occurrence_id"):
+            continue
+        life = row
+        break
+    if life is None:
+        return None
+
+    # A replacement or violation of this exact registration life ends its
+    # authority. Compare producer source bars, not registration/scan stamps, and
+    # include events after the creating candle through this scan so a stale
+    # current-registry row cannot keep a dead anchor authoritative.
+    for row in history:
+        if not isinstance(row, dict) or row.get("contract") != contract:
+            continue
+        event_at = _instant(row.get("source_bar_time"))
+        observed_at = _instant(row.get("event_time"))
+        if row.get("event_type") == PROTECTED_SWING_VIOLATED:
+            same = (row.get("source_tf") == anchor_tf
+                    and row.get("side") == side
+                    and row.get("swing_id") == rec.get("swing_id")
+                    and row.get("registered_at") == rec.get("registered_at")
+                    and row.get("level") == rec.get("level"))
+            if same:
+                if (event_at is None or observed_at is None
+                        or (observed_at <= current_at and event_at <= current_at)):
+                    return None
+        elif row.get("event_type") == PROTECTED_SWING_REPLACED:
+            same = (row.get("source_tf") == anchor_tf
+                    and row.get("side") == side
+                    and row.get("old_swing_id") == rec.get("swing_id")
+                    and row.get("old_registered_at") == rec.get("registered_at")
+                    and row.get("old_level") == rec.get("level"))
+            if same:
+                if (event_at is None or observed_at is None
+                        or (observed_at <= current_at and event_at <= current_at)):
+                    return None
+
+    return {
+        "contract_id": contract, "side": side,
+        "timeframe": anchor_tf, "level": level,
+        "swing_id": rec.get("swing_id"),
+        "registered_at": rec.get("registered_at"),
+        "basis": rec.get("basis"),
+        "registration_occurrence_id": life.get("occurrence_id"),
+        "source_bar_time": life.get("source_bar_time"),
+        "history_revision": revision,
+    }
+
+
 def anchored_rejection_block(snapshot: dict, direction: str, *,
                              proximity_points: float = PROTECTED_LEVEL_PROXIMITY_POINTS
                              ) -> dict:
@@ -1547,6 +1662,11 @@ def anchored_rejection_block(snapshot: dict, direction: str, *,
     # question is "which candle created THIS one", and the highest-resolution
     # canonical occurrence is the truthful answer.
     order = [tf for tf in ("1m", "3m", "5m", "15m") if tf in allowed]
+    cutoff = _instant((snapshot or {}).get("timestamp"))
+    if cutoff is None:
+        return {"available": False,
+                "reason": "CURRENT_SETTLED_CUTOFF_UNAVAILABLE",
+                "direction": direction}
 
     # PRECEDENCE. A candle that PRINTS the extreme is its rejection; the
     # proximity band is a fallback for a wick that came close without printing
@@ -1557,9 +1677,18 @@ def anchored_rejection_block(snapshot: dict, direction: str, *,
     for max_gap in (0.0, float(proximity_points)):
       for anchor_tf, rec in sorted(anchors,
                                    key=lambda a: a[1].get("role") != "active_leg"):
-        level = float(rec["level"])
+        try:
+            level = float(rec["level"])
+            if not math.isfinite(level):
+                continue
+        except (TypeError, ValueError, OverflowError):
+            continue
         for tf in order:
             for candle in _settled_only((tfs.get(tf) or {}).get("recent_candles") or []):
+                candle_at = _instant(candle.get("timestamp") or candle.get("time")
+                                     or candle.get("t"))
+                if candle_at is None or candle_at > cutoff:
+                    continue
                 try:
                     extreme = float(candle["high"] if direction == "bearish"
                                     else candle["low"])
@@ -1570,8 +1699,18 @@ def anchored_rejection_block(snapshot: dict, direction: str, *,
                     continue
                 if not _expresses_rejection(candle, direction):
                     continue          # contains the extreme, does not express it
-                lo, hi, mt = _rejection_zone_from(candle, direction)
+                try:
+                    lo, hi, mt = _rejection_zone_from(candle, direction)
+                    candle_values = {key: float(candle[key])
+                                     for key in ("open", "high", "low", "close")}
+                except (KeyError, TypeError, ValueError, OverflowError):
+                    continue
+                if not all(math.isfinite(value) for value in candle_values.values()):
+                    continue
                 if hi <= lo:
+                    continue
+                life = _anchor_lifetime(snapshot, anchor_tf, rec, candle, direction)
+                if life is None:
                     continue
                 return {
                     "available": True, "reason": None, "direction": direction,
@@ -1580,8 +1719,17 @@ def anchored_rejection_block(snapshot: dict, direction: str, *,
                     "anchor_role": rec.get("role"),
                     "anchor_level": level,
                     "anchor_basis": rec.get("basis"),
+                    "anchor_registered_at": rec.get("registered_at"),
+                    "anchor_life_identity": life,
                     "rejection_block_tf": tf,
                     "creating_candle_timestamp": candle.get("timestamp"),
+                    "creating_candle_identity": {
+                        "contract_id": str((snapshot or {}).get("contract_id") or ""),
+                        "timeframe": tf,
+                        "timestamp": _instant(candle.get("timestamp") or candle.get("time") or candle.get("t")),
+                        **candle_values,
+                    },
+                    "history_revision": ((snapshot or {}).get("derived_state") or {}).get("history_revision"),
                     "zone_low": lo, "zone_high": hi, "mean_threshold": mt,
                     "wick_extreme": round(extreme, 2),
                     "distance_to_anchor": round(gap, 2),
@@ -1590,7 +1738,11 @@ def anchored_rejection_block(snapshot: dict, direction: str, *,
                     # ticks past the candle that rejected from it.
                     "invalidation_level": level,
                 }
-    return {"available": False, "reason": NO_CREATING_CANDLE, "direction": direction}
+    if (snapshot or {}).get("protected_swing_lifetime_history") is None:
+        reason = "PROTECTED_ANCHOR_LIFETIME_AUTHORITY_UNAVAILABLE"
+    else:
+        reason = "NO_CREATING_CANDLE_BOUND_TO_CURRENT_PROTECTED_ANCHOR_LIFE"
+    return {"available": False, "reason": reason, "direction": direction}
 
 
 # ── PO3-REVERSAL-ORDER-BLOCK-1 (2026-08-20) ──────────────────────────────────
@@ -1720,7 +1872,7 @@ def _reversal_leg(candles: list, violator: dict, direction: str,
         return {"retracement_leg": None, "retracement_leg_reason": "leg_unmeasurable"}
 
 
-def po3_reversal_order_block(snapshot: dict, direction: str) -> dict:
+def _detect_current_po3_reversal_order_block(snapshot: dict, direction: str) -> dict:
     """The reversal order block, with its causal birth certificate. Never raises.
 
     Returns an established object, or a refusal naming exactly which part of the
@@ -1743,66 +1895,266 @@ def po3_reversal_order_block(snapshot: dict, direction: str) -> dict:
     allowed = _allowed_source_tfs((snapshot or {}).get("symbol", ""))
 
     worst = {"available": False, "reason": NO_MANIPULATION, "direction": direction}
+    contract = str((snapshot or {}).get("contract_id") or "").strip()
+    derived = (snapshot or {}).get("derived_state") or {}
+    revision = derived.get("history_revision")
+    cutoff = _instant((snapshot or {}).get("timestamp"))
+    if (not contract or cutoff is None or derived.get("current") is not True
+            or isinstance(revision, bool) or not isinstance(revision, int)
+            or derived.get("derived_revision") != revision):
+        return {"available": False,
+                "reason": "CURRENT_DERIVED_HISTORY_OR_SETTLED_CUTOFF_UNAVAILABLE",
+                "direction": direction}
+    event_rows = ((snapshot or {}).get("reversal_sweep_history") or [])
+    life_rows = ((snapshot or {}).get("protected_swing_lifetime_history") or [])
+    if not isinstance(event_rows, list):
+        event_rows = []
+    if not isinstance(life_rows, list):
+        life_rows = []
+    event_rows = [row for row in event_rows if isinstance(row, dict)
+                  and _instant(row.get("event_time")) is not None
+                  and _instant(row.get("event_time")) <= cutoff
+                  and isinstance(row.get("source_bars"), list)
+                  and all(_instant(stamp) is not None and _instant(stamp) <= cutoff
+                          for stamp in row.get("source_bars"))]
+    life_rows = [row for row in life_rows if isinstance(row, dict)
+                 and _instant(row.get("event_time")) is not None
+                 and _instant(row.get("event_time")) <= cutoff
+                 and _instant(row.get("source_bar_time")) is not None
+                 and _instant(row.get("source_bar_time")) <= cutoff]
     for tf in [t for t in ("1m", "3m", "5m", "15m") if t in allowed]:
         liq = liq_all.get(tf) or {}
-        if not (liq.get("sweep_detected") and liq.get("sweep_direction") == want_sweep):
-            continue
-        worst = {"available": False, "reason": NO_TERMINAL_RUN, "direction": direction}
-        settled = _settled_only((tfs.get(tf) or {}).get("recent_candles") or [])
-        run = _ob_block_run(settled, struct_all.get(tf, {}), direction)
-        if not run:
-            continue
-        geometry = _find_ob_block(settled, struct_all.get(tf, {}), direction)
-        if not geometry:
-            continue
-        body_lo, body_hi, run_extreme = geometry
-        worst = {"available": False, "reason": NOT_YET_VALIDATED, "direction": direction}
-        if not _expansion_validates(snapshot, tf):
-            continue
-        violator = _violating_close(settled, run, direction, body_lo, body_hi)
-        if violator is None:
-            continue
-
+        settled = [bar for bar in _settled_only(
+            (tfs.get(tf) or {}).get("recent_candles") or [])
+            if _instant(bar.get("timestamp") or bar.get("t")) is not None
+            and _instant(bar.get("timestamp") or bar.get("t")) <= cutoff]
         prot = (((snapshot or {}).get("protected_swings") or {})
                 .get("by_timeframe") or {}).get(
                     "lows" if direction == "bullish" else "highs") or {}
-        swing = prot.get(tf) or next(iter(prot.values()), None) or {}
-        # THE CAUSAL LEG. The 0.50 must belong to THIS reversal, not to whatever
-        # swing pair the structure engine happens to be holding. Its anchors are
-        # the two facts this object already owns: the protected manipulation
-        # extreme, and the extreme the validating expansion reached.
-        #
-        # Selecting a different recent swing because its midpoint clusters more
-        # prettily with the FVG or the block would be manufacturing confluence.
-        # Confluence is OBSERVED, not manufactured.
-        leg = _reversal_leg(settled, violator, direction,
-                            swing.get("level", run_extreme))
-        return {
-            "available": True, "reason": None, "direction": direction,
-            "level_type": PO3_REVERSAL_OB_LEVEL_TYPE,
-            "source_tf": tf,
-            # ── the causal birth certificate ──────────────────────────────
-            "liquidity_side_taken": ("sell_side" if direction == "bullish"
-                                     else "buy_side"),
-            "manipulation_sweep_tf": tf,
-            "manipulation_sweep_direction": liq.get("sweep_direction"),
-            "manipulation_reclaimed": bool(liq.get("reclaim_detected")),
-            "creating_run_start": run[0].get("timestamp") or run[0].get("t"),
-            "creating_run_end": run[-1].get("timestamp") or run[-1].get("t"),
-            "creating_run_length": len(run),
-            "validation_timestamp": violator.get("timestamp") or violator.get("t"),
-            "validation_basis": direction + "_expansion_close_through_run_envelope",
-            "validation_close": round(float(violator["close"]), 2),
-            # ── geometry ──────────────────────────────────────────────────
-            "zone_low": body_lo, "zone_high": body_hi,
-            "mean_threshold": round((body_lo + body_hi) / 2, 3),
-            # GEOMETRY fact, distinct from the invalidation authority below.
-            "run_extreme": round(float(run_extreme), 2),
-            # ── invalidation authority ────────────────────────────────────
-            "protected_swing_id": swing.get("swing_id"),
-            "protected_swing_role": swing.get("role"),
-            "invalidation_level": swing.get("level", run_extreme),
-            # ── the causal retracement leg, and WHERE ITS ENDS CAME FROM ──
-            **leg,
-        }
+        expected_side = "low" if direction == "bullish" else "high"
+        anchor_options = [(anchor_tf, rec) for anchor_tf, rec in prot.items()
+                          if anchor_tf in allowed and isinstance(rec, dict)]
+        if not anchor_options:
+            continue
+        sweep_rows = [row for row in event_rows if isinstance(row, dict)
+                      and row.get("event_type") == "LIQUIDITY_SWEEP"
+                      and row.get("contract") == contract
+                      and row.get("source_tf") == tf
+                      and row.get("sweep_direction") == want_sweep
+                      and row.get("reclaimed") is True
+                      and row.get("occurrence_id")
+                      and row.get("swept_level") is not None]
+        current_fact = liq.get("sweep_fact") if isinstance(liq, dict) else None
+        if (liq.get("sweep_detected") and liq.get("sweep_direction") == want_sweep
+                and isinstance(current_fact, dict)):
+            try:
+                from market_data.sweep_occurrence import liquidity_sweep_occurrence
+                current_row = liquidity_sweep_occurrence(
+                    current_fact, source_tf=tf, contract=contract)
+                if (current_row is not None
+                        and (_instant(current_row.get("event_time")) is None
+                             or _instant(current_row.get("event_time")) > cutoff
+                             or not isinstance(current_row.get("source_bars"), list)
+                             or any(_instant(stamp) is None
+                                    or _instant(stamp) > cutoff
+                                    for stamp in current_row.get("source_bars")))):
+                    current_row = None
+                if current_row and not any(r.get("occurrence_id") == current_row.get("occurrence_id")
+                                           for r in sweep_rows):
+                    sweep_rows.append(current_row)
+            except Exception:  # noqa: BLE001
+                pass
+        if not sweep_rows:
+            continue
+        matched = []
+        for sweep in sweep_rows:
+            sweep_at = _instant(sweep.get("event_time"))
+            try:
+                swept_level = float(sweep.get("swept_level"))
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if (sweep_at is None
+                    or not isinstance(sweep.get("source_bars"), list)
+                    or sweep_at not in [_instant(x) for x in sweep.get("source_bars")]):
+                continue
+            for anchor_tf, swing in anchor_options:
+                if (swing.get("role") not in REJECTION_ANCHOR_ROLES
+                        or swing.get("side") not in (None, expected_side)
+                        or swing.get("timeframe") not in (None, anchor_tf)
+                        or not swing.get("swing_id") or not swing.get("registered_at")
+                        or not swing.get("basis") or not contract
+                        or isinstance(revision, bool) or not isinstance(revision, int)):
+                    continue
+                try:
+                    anchor_level = float(swing.get("level"))
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                if not math.isfinite(anchor_level) or swept_level != anchor_level:
+                    continue
+                registrations = [row for row in life_rows if isinstance(row, dict)
+                                 and row.get("contract") == contract
+                                 and row.get("source_tf") == anchor_tf
+                                 and row.get("side") == expected_side
+                                 and row.get("event_type") in
+                                     ("PROTECTED_SWING_REGISTERED",
+                                      "PROTECTED_SWING_REPLACED")
+                                 and row.get("level") == swing.get("level")
+                                 and row.get("swing_id") == swing.get("swing_id")
+                                 and row.get("registered_at") == swing.get("registered_at")
+                                 and row.get("basis") == swing.get("basis")
+                                 and row.get("occurrence_id")]
+                for registration in registrations:
+                    registered_source = _instant(registration.get("source_bar_time"))
+                    same_timeframe = (anchor_tf == tf
+                                      and registered_source == sweep_at)
+                    # Cross-timeframe price coincidence is insufficient. The
+                    # sweep occurrence must name this exact canonical anchor
+                    # registration (or its swing identity, while the full
+                    # registration lifetime is independently matched above).
+                    cross_timeframe = (
+                        anchor_tf != tf
+                        and sweep.get("swept_level_id") in (
+                            registration.get("occurrence_id"),
+                            swing.get("swing_id"))
+                        and registered_source is not None
+                        and registered_source <= sweep_at)
+                    if not (same_timeframe or cross_timeframe):
+                        continue
+                    terminated = False
+                    for life_event in life_rows:
+                        if (not isinstance(life_event, dict)
+                                or life_event.get("contract") != contract
+                                or life_event.get("source_tf") != anchor_tf):
+                            continue
+                        life_at = _instant(life_event.get("source_bar_time"))
+                        if (life_at is None or registered_source is None
+                                or not registered_source <= life_at <= sweep_at):
+                            continue
+                        if (life_event.get("event_type") == "PROTECTED_SWING_VIOLATED"
+                                and life_event.get("side") == expected_side
+                                and life_event.get("swing_id") == swing.get("swing_id")
+                                and life_event.get("registered_at")
+                                    == swing.get("registered_at")
+                                and life_event.get("level") == swing.get("level")):
+                            terminated = True
+                            break
+                        if (life_event.get("event_type") == "PROTECTED_SWING_REPLACED"
+                                and life_event.get("side") == expected_side
+                                and life_event.get("old_swing_id") == swing.get("swing_id")
+                                and life_event.get("old_registered_at")
+                                    == swing.get("registered_at")
+                                and life_event.get("old_level") == swing.get("level")):
+                            terminated = True
+                            break
+                    if not terminated:
+                        matched.append((sweep_at, sweep, registration,
+                                        anchor_tf, swing, anchor_level))
+        if not matched:
+            worst = {"available": False,
+                     "reason": "SWEEP_NOT_ASSOCIATED_WITH_CURRENT_PROTECTED_ANCHOR_LIFE",
+                     "direction": direction}
+            continue
+        matched.sort(key=lambda row: row[0])
+        for sweep_at, sweep, registration, anchor_tf, swing, anchor_level in reversed(matched):
+            # Anchor the already-approved opposing run to this exact protected
+            # level and exclude any later candles. This keeps confirmation
+            # causal to the sweep being evaluated.
+            through_sweep = [c for c in settled
+                             if (_instant(c.get("timestamp") or c.get("t")) is not None
+                                 and _instant(c.get("timestamp") or c.get("t")) <= sweep_at)]
+            run_struct = dict(struct_all.get(tf) or {})
+            run_struct["last_swing_low" if direction == "bullish"
+                       else "last_swing_high"] = anchor_level
+            run = _ob_block_run(through_sweep, run_struct, direction)
+            if not run:
+                worst = {"available": False, "reason": NO_TERMINAL_RUN,
+                         "direction": direction}
+                continue
+            geometry = _find_ob_block(through_sweep, run_struct, direction)
+            if not geometry:
+                continue
+            body_lo, body_hi, run_extreme = geometry
+            worst = {"available": False, "reason": NOT_YET_VALIDATED,
+                     "direction": direction}
+            if not _expansion_validates(snapshot, tf):
+                continue
+            violator = _violating_close(settled, run, direction, body_lo, body_hi)
+            if violator is None:
+                continue
+            latest_settled = settled[-1] if settled else {}
+            if ((violator.get("timestamp") or violator.get("t"))
+                    != (latest_settled.get("timestamp") or latest_settled.get("t"))):
+                # Never use a later scan's expansion to validate an earlier
+                # close. Formation is observed on the close that proves it.
+                continue
+            event_candle = next((c for c in settled
+                                 if _instant(c.get("timestamp") or c.get("t")) == sweep_at), None)
+            source_bars = sweep.get("source_bars") or []
+            if not isinstance(source_bars, list) or len(source_bars) < 2:
+                continue
+            prior_sweep_at = _instant(source_bars[-2])
+            prior_sweep_candle = next((c for c in settled
+                                       if _instant(c.get("timestamp") or c.get("t"))
+                                       == prior_sweep_at), None)
+            try:
+                event_extreme = float(event_candle.get(
+                    "low" if direction == "bullish" else "high"))
+                event_close = float(event_candle.get("close"))
+                prior_close = float(prior_sweep_candle.get("close"))
+            except (AttributeError, TypeError, ValueError):
+                continue
+            if (direction == "bullish" and not
+                    (event_extreme < anchor_level and event_close > anchor_level
+                     and prior_close >= anchor_level)):
+                continue
+            if (direction == "bearish" and not
+                    (event_extreme > anchor_level and event_close < anchor_level
+                     and prior_close <= anchor_level)):
+                continue
+            # The measured leg belongs to this reversal's validated close.
+            leg = _reversal_leg(settled, violator, direction, anchor_level)
+            return {
+                "available": True, "reason": None, "direction": direction,
+                "level_type": PO3_REVERSAL_OB_LEVEL_TYPE,
+                "source_tf": tf,
+                "liquidity_side_taken": ("sell_side" if direction == "bullish"
+                                         else "buy_side"),
+                "manipulation_sweep_tf": tf,
+                "manipulation_sweep_direction": want_sweep,
+                "manipulation_reclaimed": True,
+                "creating_run_start": run[0].get("timestamp") or run[0].get("t"),
+                "creating_run_end": run[-1].get("timestamp") or run[-1].get("t"),
+                "creating_run_length": len(run),
+                "validation_timestamp": violator.get("timestamp") or violator.get("t"),
+                "validation_basis": direction + "_expansion_close_through_run_envelope",
+                "validation_close": round(float(violator["close"]), 2),
+                "zone_low": body_lo, "zone_high": body_hi,
+                "mean_threshold": round((body_lo + body_hi) / 2, 3),
+                "run_extreme": round(float(run_extreme), 2),
+                "protected_swing_id": swing.get("swing_id"),
+                "protected_swing_role": swing.get("role"),
+                "protected_swing_tf": anchor_tf,
+                "protected_swing_registered_at": swing.get("registered_at"),
+                "protected_swing_occurrence_id": registration.get("occurrence_id"),
+                "invalidation_level": anchor_level,
+                "sweep_evidence": dict(sweep),
+                **leg,
+            }
     return worst
+
+
+def po3_reversal_order_block(snapshot: dict, direction: str) -> dict:
+    """Return a current detected or producer-revalidated settled block."""
+    try:
+        from market_data.reversal_formation import current_block
+        retained = current_block(snapshot, direction)
+        if retained:
+            return retained
+    except Exception:  # noqa: BLE001 -- unavailable evidence fails closed
+        pass
+    try:
+        return _detect_current_po3_reversal_order_block(snapshot, direction)
+    except Exception as exc:  # noqa: BLE001 -- catalog formation never raises
+        return {"available": False,
+                "reason": f"REVERSAL_FORMATION_AUTHORITY_UNAVAILABLE:{type(exc).__name__}",
+                "direction": direction}

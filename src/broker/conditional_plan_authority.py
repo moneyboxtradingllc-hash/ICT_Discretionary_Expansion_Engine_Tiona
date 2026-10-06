@@ -126,7 +126,8 @@ def _draw_identity(draw):
             "campaign_direction", "objective_identity", "objective_kind",
             "objective_price", "anchor_bar_time", "anchor_bar_close",
             "anchor_price_basis", "history_revision", "history_complete",
-            "coverage_status", "progress_authoritative")
+            "coverage_status", "progress_authoritative",
+            "active_path_last_invalidated")
     result = {key: draw.get(key) for key in keys}
     if (draw.get("process_authority") != "CURRENT_PROCESS_ONLY"
             or draw.get("superseded") is not False
@@ -143,6 +144,41 @@ def _draw_identity(draw):
             or draw.get("progress_authoritative") is not True):
         return None
     return result
+
+
+def _transfer_binding(proof, *, contract_id=None, session=None):
+    """Stable causal identity for the existing verified transfer proof."""
+    if not isinstance(proof, dict) or proof.get("status") != "verified":
+        return None
+    invalidation = proof.get("incumbent_invalidation") or {}
+    origin = proof.get("authoritative_opposing_origin") or {}
+    # ActivePath publishes the invalidated anchor's timeframe as `source_tf`.
+    # Bind that producer field verbatim; a parallel `timeframe` alias would be
+    # synthetic and would reject every real transfer record.
+    required_invalidation = ("owner", "at", "level", "source_tf", "swing_id",
+                            "registered_at", "occurrence_id")
+    required_origin = ("proof_family", "event", "direction", "at", "source_tf",
+                       "occurrence_id")
+    if (any(invalidation.get(key) is None for key in required_invalidation)
+            or any(origin.get(key) is None for key in required_origin)
+            or proof.get("from_direction") not in ("bullish", "bearish")
+            or proof.get("to_direction") not in ("bullish", "bearish")
+            or proof.get("from_direction") == proof.get("to_direction")
+            or not contract_id or not session):
+        return None
+    return {
+        "from_direction": proof.get("from_direction"),
+        "to_direction": proof.get("to_direction"),
+        # Narrative's proof is a compact causal tuple. Contract/session are
+        # public ActivePath lineage, so bind them from that same current path
+        # rather than pretending they are fields emitted by the proof.
+        "contract_id": contract_id,
+        "session": session,
+        "incumbent_invalidation": {key: invalidation.get(key)
+                                   for key in required_invalidation},
+        "authoritative_opposing_origin": {key: origin.get(key)
+                                          for key in required_origin},
+    }
 
 
 def _session_date(now):
@@ -182,13 +218,29 @@ def capture(*, scope, candidate, scan, brain_block, brain_result,
     extras = candidate.extras or {}
     phase = str((parsed or {}).get("narrative_phase") or "").strip().lower()
     direction = str((parsed or {}).get("narrative_direction") or "").strip().lower()
+    authored_continuity = ((brain_result or {}).get("narrative_continuity")
+                           or (brain_block or {}).get("narrative_continuity") or {})
+    transfer_proof = authored_continuity.get("transfer_proof")
+    path_id = _public_path(snapshot)
+    transfer_binding = _transfer_binding(
+        transfer_proof, contract_id=candidate.contract_id,
+        session=(path_id or {}).get("session"))
+    reversal_transfer = bool(
+        phase == "reversal"
+        and authored_continuity.get("control_state") == "confirmed_transfer"
+        and authored_continuity.get("confirmed_from") == (transfer_proof or {}).get(
+            "from_direction")
+        and authored_continuity.get("confirmed_to") == direction
+        and (transfer_proof or {}).get("to_direction") == direction
+        and transfer_binding is not None)
     if (not _aware_datetime(now)
             or not ProductionScanCycle.is_sovereign(brain_block)
             or not ProductionScanCycle.is_validated_brain_result(brain_result)
             or _json(output) != _json(parsed)
             or (parsed or {}).get("current_action") != "watching"
             or direction not in ("bullish", "bearish")
-            or phase not in ("continuation", "distribution", "retracement")
+            or phase not in ("continuation", "distribution", "retracement", "reversal")
+            or (phase == "reversal" and not reversal_transfer)
             or not isinstance(lifecycle, dict)
             or lifecycle.get("state") not in ("ACTIVE_DELIVERY", "RETRACING")
             or lifecycle.get("participation_permitted") is not True
@@ -197,9 +249,6 @@ def capture(*, scope, candidate, scan, brain_block, brain_result,
             or lifecycle.get("campaign_draw_status") != "PROVEN_NOT_DELIVERED"):
         raise ValueError("conditional_plan_authoring_authority_invalid")
     draw_id = _draw_identity(draw)
-    path_id = _public_path(snapshot)
-    authored_continuity = ((brain_result or {}).get("narrative_continuity")
-                           or (brain_block or {}).get("narrative_continuity") or {})
     reproduced_lifecycle = evaluate_campaign_lifecycle(
         snapshot=snapshot, brain_output=parsed,
         narrative_continuity=authored_continuity, campaign_draw=draw,
@@ -218,6 +267,15 @@ def capture(*, scope, candidate, scan, brain_block, brain_result,
             or draw_id.get("contract_id") != candidate.contract_id
             or draw_id.get("campaign_direction") != direction
             or path_id.get("session") != draw_id.get("market_session")
+            or (reversal_transfer and _transfer_binding({
+                "status": "verified",
+                "from_direction": transfer_binding.get("from_direction"),
+                "to_direction": transfer_binding.get("to_direction"),
+                "incumbent_invalidation": draw_id.get("active_path_last_invalidated"),
+                "authoritative_opposing_origin": transfer_binding.get(
+                    "authoritative_opposing_origin"),
+            }, contract_id=draw_id.get("contract_id"),
+                session=path_id.get("session")) != transfer_binding)
             or lifecycle.get("campaign_episode_id") != draw_id.get("campaign_episode_id")
             or lifecycle.get("objective_identity") != draw_id.get("objective_identity")
             or candidate.direction != direction
@@ -275,6 +333,7 @@ def capture(*, scope, candidate, scan, brain_block, brain_result,
         "authorization_fingerprint": auth_fingerprint,
         "brain_fingerprint": brain_contract_fingerprint(),
         "draw": draw_id, "active_path": path_id,
+        "authoring_transfer_proof": transfer_binding,
         "history_revision": revision,
         "activation_zone": extras.get("activation_zone"),
         "tool_family": extras.get("tool_family"),
@@ -399,7 +458,39 @@ def validate(*, authority, scope, candidate, candidate_at_trigger,
             current_continuity=continuity)
     except Exception as exc:  # noqa: BLE001
         return refuse(f"conditional_plan_narrative_recheck_failed:{type(exc).__name__}")
-    if not permitted or continuity.get("control_state") not in (
+    if not permitted:
+        return refuse(f"conditional_plan_narrative_not_authorized:{reason}")
+    if bound.get("authoring_phase") == "reversal":
+        from ai_brain.narrative_continuity import _transfer_proof
+        bound_transfer = bound.get("authoring_transfer_proof")
+        if (not isinstance(bound_transfer, dict)
+                or continuity.get("control_state") not in (
+                    "confirmed_transfer", "campaign_established", "incumbent_intact")
+                or (continuity.get("confirmed_to") if continuity.get("control_state")
+                    == "confirmed_transfer" else continuity.get("dominant_direction"))
+                    != direction):
+            return refuse("conditional_plan_transfer_context_not_current")
+        current_proof = _transfer_proof(
+            snap.get("active_path_state") or {},
+            bound_transfer.get("from_direction"),
+            bound_transfer.get("to_direction"))
+        current_binding = _transfer_binding(
+            current_proof, contract_id=contract_id,
+            session=current_path.get("session"))
+        if current_binding is None or current_binding != bound_transfer:
+            return refuse("conditional_plan_verified_transfer_lineage_changed")
+        if _transfer_binding({
+                "status": "verified",
+                "from_direction": bound_transfer.get("from_direction"),
+                "to_direction": bound_transfer.get("to_direction"),
+                "incumbent_invalidation": (draw_id or {}).get(
+                    "active_path_last_invalidated"),
+                "authoritative_opposing_origin": bound_transfer.get(
+                    "authoritative_opposing_origin"),
+            }, contract_id=(draw_id or {}).get("contract_id"),
+                session=current_path.get("session")) != bound_transfer:
+            return refuse("conditional_plan_draw_not_bound_to_transfer")
+    elif continuity.get("control_state") not in (
             "campaign_established", "incumbent_intact"):
         return refuse(f"conditional_plan_narrative_not_authorized:{reason}")
     extras = candidate.extras or {}
@@ -448,7 +539,8 @@ def validate(*, authority, scope, candidate, candidate_at_trigger,
                     "state": lifecycle.get("state"),
                     "reason": lifecycle.get("reason"),
                     "narrative_phase": lifecycle.get("narrative_phase"),
-                }}
+                },
+                "authoring_transfer_proof": bound.get("authoring_transfer_proof")}
     return True, None, evidence
 
 
