@@ -1152,6 +1152,17 @@ def build_brain_input(snapshot: dict, stance_history: dict) -> dict:
             # the producer's actual revision contract when available; missing
             # authority remains missing rather than being reconstructed here.
             "derived_state": _derived_history_authority(snapshot),
+            # Campaign Draw is a fact-only measurement of the previously
+            # accepted destination, advanced against this scan's settled
+            # history before cognition. It can be absent only when unavailable;
+            # Brain never derives it from prose or private Draw custody.
+            "campaign_draw_context": (
+                snapshot.get("campaign_draw_context")
+                if isinstance(snapshot.get("campaign_draw_context"), dict)
+                else {"authority_status": "UNKNOWN",
+                      "authority_reason": "pre_cognition_campaign_draw_unavailable",
+                      "evidence_basis": "provider_settled_1m_chart",
+                      "claim_scope": "chart_delivery_not_exchange_tick_sequence"}),
             # STRUCTURE-FLIP (2026-08-11) — the SECOND invalidation family,
             # kept beside protected swings rather than merged into them. A
             # broken swing low is not a protected high; conflating them would

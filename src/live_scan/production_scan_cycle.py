@@ -540,7 +540,7 @@ class ProductionScanCycle:
         # locations were never computed from.
         execution_price = self._execution_price()
 
-        ecu_facts = {"prepared": False}
+        ecu_facts = {"prepared": False, "draw_prepared": False}
 
         def _prepare_current_ecu_facts(current_snapshot):
             """Attach this occurrence's path and retained formations before ECU."""
@@ -556,6 +556,10 @@ class ProductionScanCycle:
             current_snapshot["active_path_state"] = self._update_active_path(
                 current_snapshot)
             self._attach_reversal_formation(current_snapshot, raw_data)
+            current_snapshot["campaign_draw_context"] = (
+                self._advance_existing_campaign_draw(
+                    current_snapshot, raw_data.get("1m") or []))
+            ecu_facts["draw_prepared"] = True
             # ECU needs current physical objects before it authors direction
             # and playbook. This pass is descriptive only; snapshot_builder
             # still rebuilds the final toolbox after qualification, playbook
@@ -590,6 +594,16 @@ class ProductionScanCycle:
             self.last_occurrence_writes = self._record_sweep_occurrences(snapshot)
             snapshot["active_path_state"] = self._update_active_path(snapshot)
             self._attach_reversal_formation(snapshot, raw_data)
+
+        # The non-ECU route builds its current producer facts after
+        # build_snapshot. Advance the old accepted Draw now, before the one
+        # canonical narrative call below. ECU already did this in its
+        # pre-cognition hook. No pre-measurement is needed on invoke_brain=False
+        # paths; their existing post-scan fact lane advances once.
+        if invoke_brain and not ecu_facts["draw_prepared"]:
+            snapshot["campaign_draw_context"] = (
+                self._advance_existing_campaign_draw(
+                    snapshot, raw_data.get("1m") or []))
 
         cur_qual = (snapshot.get("qualification", {}).get("status") or "no_trade").lower()
         self.bars_in_state = (self.bars_in_state + 1
@@ -653,14 +667,15 @@ class ProductionScanCycle:
             brain_block = run_narrative_brain(snapshot, self.symbol, self.stance_memory)
         snapshot["ai_brain"] = brain_block
 
-        # A fact-only lane, deliberately outside the snapshot / Brain payload
-        # and candidate input. It binds only a sovereign, Narrative-Authority-
-        # authorized campaign view to an already enumerated deterministic
-        # objective; settled bars then measure provider-chart delivery.
+        # Post-cognition, bind only a sovereign, Narrative-Authority-authorized
+        # current view to an already enumerated deterministic objective. The
+        # prior accepted Draw has already been measured and attached separately
+        # as `campaign_draw_context` before this response was authored.
         brain_input = self._brain_input(snapshot)
         campaign_draw_truth = self._campaign_draw_observation(
             snapshot, raw_data.get("1m") or [], brain_block, brain_input,
             invoke_brain=invoke_brain)
+        snapshot["campaign_draw_truth"] = campaign_draw_truth
         from market_data.campaign_lifecycle import evaluate_campaign_lifecycle
         campaign_lifecycle = evaluate_campaign_lifecycle(
             snapshot=snapshot,
@@ -721,10 +736,26 @@ class ProductionScanCycle:
                 self, "_last_retrieval_telemetry", None),
         }
 
+    def _advance_existing_campaign_draw(self, snapshot: dict,
+                                       settled_bars: list) -> dict:
+        """Measure only prior accepted Draw authority before Brain cognition."""
+        from market_data.campaign_draw_truth import UNKNOWN
+
+        try:
+            return self._campaign_draw_observation(
+                snapshot, settled_bars, {}, {}, invoke_brain=False)
+        except Exception as exc:  # noqa: BLE001 -- unavailable facts fail closed
+            return {"authority_status": UNKNOWN,
+                    "authority_reason": (
+                        f"pre_cognition_campaign_draw_error:{type(exc).__name__}"),
+                    "coverage_status": "UNKNOWN", "history_complete": False,
+                    "evidence_basis": "provider_settled_1m_chart",
+                    "claim_scope": "chart_delivery_not_exchange_tick_sequence"}
+
     def _campaign_draw_observation(self, snapshot: dict, settled_bars: list,
                                    brain_block: dict, brain_input: dict, *,
                                    invoke_brain: bool) -> dict:
-        """Measure settled chart delivery without adding strategy authority."""
+        """Advance Draw facts and, after cognition, accept a lawful current view."""
         from market_data.campaign_draw_truth import UNKNOWN
 
         accepted_view = None

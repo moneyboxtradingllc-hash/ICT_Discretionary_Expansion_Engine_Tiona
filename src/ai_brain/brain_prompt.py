@@ -51,6 +51,20 @@ contradiction_flags. Tool geometry can locate an authorized campaign but cannot
 create or transfer its direction. The phase neither supplies a direction nor
 forces a trade.
 
+CAMPAIGN DRAW CONTEXT is the existing accepted campaign destination, measured
+from canonical settled provider bars through the stated settled cutoff BEFORE
+this narrative judgment. It is historical/current evidence about that accepted
+destination, not an objective selected by this response. UNKNOWN means the
+destination or its delivery could not be established; it does not mean
+untouched. A contextual PDH/PDL, session high/low, equal high/low, external
+liquidity reference, or prose description is not automatically the accepted
+Campaign Draw. If its status is PROVEN_DELIVERED, explain what that changes in
+the continuation question, but do NOT infer reversal or opposing direction from
+delivery alone. Existing Narrative / ActivePath transfer proof remains
+necessary for an opposing campaign. You may propose a new active_draw in this
+response only through the normal objective and direction acceptance rules; it
+cannot be treated as already accepted or as evidence you saw before this call.
+
 DO NOT answer with only a label (e.g. "bearish", "conflicted", "sweep
 detected"). Explain the WHOLE market story. Your dominant_reasoning MUST address,
 in prose: (1) price action, (2) what liquidity was taken, (3) what liquidity

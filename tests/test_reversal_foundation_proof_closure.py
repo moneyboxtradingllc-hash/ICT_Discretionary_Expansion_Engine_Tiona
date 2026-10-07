@@ -310,6 +310,122 @@ def test_real_ecu_input_contains_retained_object_on_later_return_and_consumes_on
     assert candidate.extras["tool_family"] == ["po3_reversal_order_block"]
 
 
+def test_bootstrap_draw_is_unknown_then_prior_draw_is_measured_before_brain(
+        tmp_path, monkeypatch):
+    """The first call sees no invented Draw; a later call sees delivery."""
+    cycle = _cycle(tmp_path, monkeypatch)
+    _scan_prefix(cycle, len(TAPE_1M) - 5)
+    calls = []
+    _mock_current_brain(monkeypatch, calls)
+
+    first = cycle.scan(TAPE_1M, now=_now_for(TAPE_1M), invoke_brain=True)
+    assert len(calls) == 1
+    bootstrap = calls[0].get("campaign_draw_context")
+    assert bootstrap["authority_status"] == "UNKNOWN"
+    assert bootstrap["authority_reason"] == "no_accepted_campaign_draw"
+    accepted = first["campaign_draw_truth"]
+    assert accepted["authority_status"] == "PROVEN_NOT_DELIVERED", accepted
+    assert len(cycle.campaign_draw_truth.audit_records) == 1
+    original = cycle.campaign_draw_truth.audit_records[0]
+    original_id = original["record_id"]
+    original_episode = original["campaign_episode_id"]
+    original_anchor = original["anchor_bar_time"]
+
+    # A later settled candle trades through the accepted objective. The next
+    # cognition must see that delivery before its model request is made.
+    future = TAPE_1M + _expand_5m(
+        ("03:00", 29459.0, 29505.0, 29450.0, 29460.0))
+    second = cycle.scan(future, now=_now_for(future), invoke_brain=True)
+    assert len(calls) == 2
+    delivered_context = calls[1].get("campaign_draw_context")
+    assert delivered_context["authority_status"] == "PROVEN_DELIVERED"
+    assert delivered_context["record_id"] == original_id
+    assert delivered_context["campaign_episode_id"] == original_episode
+    assert delivered_context["anchor_bar_time"] == original_anchor
+    assert delivered_context["delivery_evidence_bar"] is not None
+    assert delivered_context["delivery_evidence_bar"] <= future[-1]["timestamp"]
+    assert "campaign_draw_truth" not in calls[1]
+    assert calls[1]["active_path_state"]["owner"] == "bullish"
+    assert second["brain_block"]["output"]["narrative_direction"] == "bullish"
+
+    # The post-response pass may accept a new objective, but it cannot rewrite
+    # what the current request saw or mutate the delivered record's identity.
+    assert calls[1]["campaign_draw_context"] == delivered_context
+    assert cycle.campaign_draw_truth.audit_records[0]["record_id"] == original_id
+    assert cycle.campaign_draw_truth.audit_records[0]["campaign_episode_id"] == original_episode
+    assert cycle.campaign_draw_truth.audit_records[0]["anchor_bar_time"] == original_anchor
+    assert second["snapshot"]["campaign_draw_context"] == delivered_context
+    assert second["snapshot"]["campaign_draw_truth"]["record_id"] == \
+        second["campaign_draw_truth"]["record_id"]
+
+
+def test_non_ecu_input_receives_pre_cognition_draw_and_rebuild_is_brainless(
+        tmp_path, monkeypatch):
+    """Non-ECU sees the same pre-measurement; no-Brain scans call no model."""
+    cycle = _cycle(tmp_path, monkeypatch)
+    _scan_prefix(cycle, len(TAPE_1M) - 5)
+    calls = []
+    _mock_current_brain(monkeypatch, calls)
+    first = cycle.scan(TAPE_1M, now=_now_for(TAPE_1M), invoke_brain=True)
+    assert len(calls) == 1
+
+    monkeypatch.setenv("BRAIN_ECU_MODE", "false")
+    future = TAPE_1M + _expand_5m(
+        ("03:00", 29459.0, 29505.0, 29450.0, 29460.0))
+    second = cycle.scan(future, now=_now_for(future), invoke_brain=True)
+    assert len(calls) == 2
+    assert calls[1]["campaign_draw_context"]["authority_status"] == \
+        "PROVEN_DELIVERED"
+    assert calls[1]["campaign_draw_context"]["record_id"] == \
+        first["campaign_draw_truth"]["record_id"]
+    assert "campaign_draw_truth" not in calls[1]
+    assert second["brain_block"]["source"] == "llm"
+    assert second["brain_input"]["campaign_draw_context"] == \
+        calls[1]["campaign_draw_context"]
+    assert second["brain_result"]["parsed"] == second["brain_block"]["output"]
+
+    before_calls = len(calls)
+    revision = cycle._history.revision
+    cycle._rebuild_derived_state(future, revision)
+    assert len(calls) == before_calls
+
+    third = future + _expand_5m(
+        ("03:05", 29460.0, 29470.0, 29455.0, 29465.0))
+    no_brain = cycle.scan(third, now=_now_for(third), invoke_brain=False)
+    assert len(calls) == before_calls
+    assert no_brain["brain_block"]["source"] == "preauthorized_plan_trigger"
+
+
+def test_history_revision_retires_old_draw_before_current_brain_request(
+        tmp_path, monkeypatch):
+    """A revised accepted anchor is unavailable to the next cognition."""
+    cycle = _cycle(tmp_path, monkeypatch)
+    _scan_prefix(cycle, len(TAPE_1M) - 5)
+    calls = []
+    _mock_current_brain(monkeypatch, calls)
+    first = cycle.scan(TAPE_1M, now=_now_for(TAPE_1M), invoke_brain=True)
+    old_draw = first["campaign_draw_truth"]
+    assert old_draw["authority_status"] == "PROVEN_NOT_DELIVERED"
+    assert len(calls) == 1
+
+    revised = copy.deepcopy(TAPE_1M)
+    revised[0]["close"] += 0.25
+    revised[0]["high"] = max(revised[0]["high"], revised[0]["close"])
+    revised[0]["low"] = min(revised[0]["low"], revised[0]["close"])
+    scan = cycle.scan(revised, now=_now_for(revised), invoke_brain=True)
+
+    assert len(calls) == 2
+    assert scan["snapshot"]["derived_state"]["history_revision"] == 1
+    context = calls[1]["campaign_draw_context"]
+    assert context["authority_status"] == "UNKNOWN"
+    assert context.get("record_id") != old_draw["record_id"]
+    old_record = next(row for row in cycle.campaign_draw_truth.audit_records
+                      if row["record_id"] == old_draw["record_id"])
+    assert old_record["superseded"] is True
+    assert old_record["superseded_reason"] == \
+        "canonical_history_revision_changed"
+
+
 def test_real_production_sweep_lifetime_and_catalog_survive_later_sweep(
         tmp_path, monkeypatch):
     """No manually minted IDs: production scan emitters build the row."""

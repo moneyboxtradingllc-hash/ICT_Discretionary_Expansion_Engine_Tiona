@@ -445,8 +445,9 @@ def test_authoritative_fact_api_has_no_raw_trade_or_candidate_consumer():
     assert "trade_interval_truth" not in source_text
     assert "current_action" not in source_text
     assert "candidate_direction_authorized" not in source_text
-    # The fact is attached to the scan result only. It is not inserted into the
-    # snapshot that CandidateProducer or Brain receives.
+    # The final fact is attached for Lifecycle/CandidateProducer after
+    # cognition. Brain receives the pre-cognition `campaign_draw_context`
+    # instead; it cannot see a Draw selected by its own current response.
     cycle_source = (root / "src" / "live_scan" / "production_scan_cycle.py").read_text(
         encoding="utf-8")
     tree = ast.parse(cycle_source)
@@ -455,7 +456,10 @@ def test_authoritative_fact_api_has_no_raw_trade_or_candidate_consumer():
                        and k.value == "campaign_draw_truth" for k in n.keys)
                for n in ast.walk(tree))
     assert '"campaign_draw_truth": campaign_draw_truth' in cycle_source
-    assert 'snapshot["campaign_draw_truth"]' not in cycle_source
+    brain_input_source = (root / "src" / "ai_brain" / "brain_input.py").read_text(
+        encoding="utf-8")
+    assert '"campaign_draw_context"' in brain_input_source
+    assert '"campaign_draw_truth":' not in brain_input_source
     from ai_brain.production_model import _CONTRACT_SOURCES
     assert ("campaign_draw_truth", "market_data/campaign_draw_truth.py") in \
         _CONTRACT_SOURCES
