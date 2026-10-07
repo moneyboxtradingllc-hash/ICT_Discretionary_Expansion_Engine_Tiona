@@ -1170,7 +1170,19 @@ class ProductionLoop:
 
         in_window = bool(self._in_window())
         from ai_brain.brain_schema import canonical_action
+        from market_data.campaign_lifecycle import participation_authority_bound
+        participation_draw = scan_participation_authority(scan)
         try:
+            # THE ORDINARY CONSUMER BINDING. CandidateProducer's Lifecycle gate
+            # reads the snapshot's assessment; that assessment may be acted on
+            # only together with the explicit participation authority it was
+            # computed from. Absent, withheld, UNKNOWN or differently-identified
+            # authority refuses here, before any candidate, mission or token.
+            bound, unbound_reason = participation_authority_bound(
+                (scan.get("snapshot") or {}).get("campaign_lifecycle"),
+                participation_draw)
+            if not bound:
+                raise NoCandidate("campaign_lifecycle_refused", unbound_reason)
             candidate = self.producer.produce(
                 brain_result=scan["brain_result"], brain_input=scan["brain_input"],
                 snapshot=scan["snapshot"], qualification=scan["qualification"],
@@ -1180,7 +1192,7 @@ class ProductionLoop:
                 latest_closed_bar_timestamp=scan["latest_closed_bar_timestamp"],
                 in_window=in_window, now=self.clock(),
                 require_campaign_lifecycle=True,
-                campaign_draw=scan_participation_authority(scan),
+                campaign_draw=participation_draw,
                 campaign_session_id=str(getattr(self.cycle, "session_id", "") or ""),
                 conditional_plan=(canonical_action(
                     ((scan.get("brain_result") or {}).get("parsed") or {}).get(

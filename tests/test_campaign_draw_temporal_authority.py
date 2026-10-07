@@ -475,3 +475,148 @@ def test_planning_scan_that_retires_incumbent_captures_no_stale_plan(
             candidate=lawful_candidate, scan=planning,
             authorization=_authorization(lawful_candidate, now),
             process_session_id=RF.SESSION_ID, now=now)
+
+
+# ── Ordinary production consumer: authority and Lifecycle travel together ──
+#
+# DEFENSE-ONLY INJECTIONS. ProductionScanCycle always publishes
+# `campaign_draw_authority`; these tests remove or replace it at the consumer
+# boundary while the scan's permissive Lifecycle stays attached, to prove the
+# ordinary ProductionLoop consumer refuses rather than trusting the Lifecycle
+# assessment alone. They do not represent a normal producer omission.
+class _VenueRecorder:
+    """Any attribute use on the venue session is a recorded mutation attempt."""
+
+    def __init__(self):
+        self.calls = []
+
+    def __getattr__(self, name):
+        self.calls.append(name)
+        raise AssertionError(f"venue touched: {name}")
+
+
+def _ordinary_loop(monkeypatch, scan, producer):
+    from types import SimpleNamespace
+    import broker.topstepx_production_loop as loop_module
+    from broker.topstepx_production_loop import ProductionLoop
+
+    budget_calls, decisions = [], []
+    monkeypatch.setattr(loop_module.LIFECYCLE, "entry_authority_exhausted",
+                        lambda _mission: False)
+    monkeypatch.setattr(loop_module.CONT, "coherent_window",
+                        lambda bars, **_kw: {"sufficient": True, "window": bars})
+
+    def budget(**_kwargs):
+        # The first step after a candidate exists. Stopping here proves the
+        # candidate boundary without opening a mission, minting a token, or
+        # touching the venue.
+        budget_calls.append(True)
+        return {"entry_permitted": False, "state": "TEST_STOP_BEFORE_MISSION",
+                "reason": "positive control stops before any mission"}
+
+    monkeypatch.setattr(loop_module.DLB, "resolve", budget)
+    venue = _VenueRecorder()
+    loop = ProductionLoop.__new__(ProductionLoop)
+    loop.active_conditional_plan = None
+    loop.active_candidate = None
+    loop.symbol = "MNQ"
+    loop.candles = SimpleNamespace(
+        fetch_1m_candles=lambda *_a, **_k: [{"timestamp": "bar"}],
+        wake_registry=None)
+    loop.cycle = SimpleNamespace(session_id=RF.SESSION_ID, contract_id=RF.CONTRACT,
+                                 scan=lambda *_a, **_k: scan)
+    loop.producer = producer
+    loop.mission = SimpleNamespace(authorization=None, candidate_count=0,
+                                   trade_missions=[], active_mission=None)
+    loop.ps = SimpleNamespace(session=venue, contract=RF.MNQ)
+    loop.clock = lambda: datetime.now(timezone.utc)
+    loop.armed = False
+    loop.reconcile_missions = lambda: {}
+    loop.manage_open_position = lambda: {}
+    loop._terminal_contamination_before_cognition = lambda: None
+    loop._repair_history_if_holed = lambda bars: bars
+    loop._in_window = lambda: True
+    loop._volume_profile_evidence = lambda *_a, **_k: None
+    loop._record_volume_profile_evidence = lambda *_a, **_k: None
+    loop._attach_evidence = lambda *_a, **_k: None
+    loop._record_decision = lambda _scan, disposition, reason, detail: \
+        decisions.append((disposition, reason, detail))
+    return loop, budget_calls, decisions, venue
+
+
+def _lawful_prior_generation_scan(tmp_path, monkeypatch, ecu):
+    cycle, calls = _cycle_with_brain(tmp_path, monkeypatch, ecu=ecu)
+    _scan(cycle, RF.TAPE_1M)
+    scan = _scan(cycle, LATER)
+    assert len(calls) == 2
+    assert scan["campaign_lifecycle"]["participation_permitted"] is True
+    assert scan["snapshot"]["campaign_lifecycle"] == scan["campaign_lifecycle"]
+    assert "participation_withheld_reason" not in scan["campaign_draw_authority"]
+    return scan
+
+
+def _run_ordinary(monkeypatch, scan):
+    producer = CandidateProducer(account_fingerprint="acct:ordinary-consumer",
+                                 contract=RF.MNQ)
+    loop, budget_calls, decisions, venue = _ordinary_loop(monkeypatch, scan, producer)
+    outcome = loop._scan_once(observed_at=datetime.now(timezone.utc),
+                              invoke_brain=True)
+    return loop, outcome, budget_calls, decisions, venue
+
+
+@ECU_MODES
+def test_ordinary_loop_positive_control_reaches_retained_po3_candidate(
+        tmp_path, monkeypatch, ecu):
+    scan = _lawful_prior_generation_scan(tmp_path, monkeypatch, ecu)
+    loop, outcome, budget_calls, decisions, venue = _run_ordinary(monkeypatch, scan)
+    assert loop.active_candidate is not None
+    RF._assert_retained_reversal_candidate(loop.active_candidate)
+    assert loop.mission.candidate_count == 1
+    assert ("CANDIDATE", None, "") in decisions
+    # Stopped at the budget step: no mission, no token, no venue mutation.
+    assert budget_calls == [True]
+    assert loop.mission.trade_missions == []
+    assert venue.calls == []
+
+
+def _withheld_unknown(scan):
+    from market_data.campaign_draw_truth import withheld_participation_authority
+    return withheld_participation_authority(
+        PARTICIPATION_WITHHELD_RETIRED, scan["campaign_draw_authority"])
+
+
+@ECU_MODES
+@pytest.mark.parametrize("injection", [
+    "missing", "non_dictionary", "withheld_unknown", "bare_unknown",
+    "mismatched_episode"])
+def test_ordinary_loop_refuses_without_bound_participation_authority(
+        tmp_path, monkeypatch, ecu, injection):
+    scan = _lawful_prior_generation_scan(tmp_path, monkeypatch, ecu)
+    permissive = copy.deepcopy(scan["snapshot"]["campaign_lifecycle"])
+    if injection == "missing":
+        scan.pop("campaign_draw_authority")
+    elif injection == "non_dictionary":
+        scan["campaign_draw_authority"] = "PROVEN_NOT_DELIVERED"
+    elif injection == "withheld_unknown":
+        scan["campaign_draw_authority"] = _withheld_unknown(scan)
+    elif injection == "bare_unknown":
+        scan["campaign_draw_authority"] = {"authority_status": "UNKNOWN"}
+    else:
+        forged = copy.deepcopy(scan["campaign_draw_authority"])
+        forged["campaign_episode_id"] = "another-episode"
+        scan["campaign_draw_authority"] = forged
+    # The permissive Lifecycle assessment is left attached, untouched.
+    assert scan["snapshot"]["campaign_lifecycle"] == permissive
+    assert permissive["participation_permitted"] is True
+
+    loop, outcome, budget_calls, decisions, venue = _run_ordinary(monkeypatch, scan)
+    assert outcome["reason"] == "campaign_lifecycle_refused"
+    assert loop.active_candidate is None
+    assert loop.mission.candidate_count == 0
+    assert decisions and decisions[-1][0] == "REJECTED"
+    assert decisions[-1][1] == "campaign_lifecycle_refused"
+    # Refused before the candidate exists: no budget step, no mission, no token,
+    # no venue mutation.
+    assert budget_calls == []
+    assert loop.mission.trade_missions == []
+    assert venue.calls == []

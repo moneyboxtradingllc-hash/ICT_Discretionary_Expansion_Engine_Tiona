@@ -204,6 +204,16 @@ class Cycle:
                 "ambiguous_load_bearing_invalidation": False,
                 "opposing_raid_rejected": False,
             }, "session": "20260806"}
+        # A real scan's permissive Lifecycle is always the projection of the
+        # Campaign Draw participation authority it publishes beside it, and the
+        # ordinary ProductionLoop consumer now refuses one without the other.
+        # The double therefore carries a bound, prior-generation authority.
+        participation_draw = {
+            "authority_status": "PROVEN_NOT_DELIVERED", "superseded": False,
+            "process_authority": "CURRENT_PROCESS_ONLY",
+            "campaign_episode_id": "fake-cycle-episode",
+            "objective_identity": "opposing_external_liquidity:fake-cycle",
+            "campaign_direction": direction}
         snapshot = {"timestamp": "2026-08-06T14:59:00+00:00",
                     "active_path_state": active_path,
                     # ProductionScanCycle now publishes this additional gate
@@ -214,6 +224,9 @@ class Cycle:
                         "state": "ACTIVE_DELIVERY",
                         "participation_permitted": True,
                         "authorized_direction": direction,
+                        "campaign_episode_id": participation_draw["campaign_episode_id"],
+                        "objective_identity": participation_draw["objective_identity"],
+                        "campaign_draw_status": participation_draw["authority_status"],
                     },
                     "market": {"high_since": 29882.0, "low_since": 29878.0},
                     "qualification": {"qualified": True},
@@ -229,6 +242,7 @@ class Cycle:
                 "brain_block": block,
                 "brain_input": brain_input,
                 "brain_result": ProductionScanCycle.to_brain_result(block),
+                "campaign_draw_authority": participation_draw,
                 "qualification": {"qualified": True},
                 "engine_inventory": {"liquidity": "PRESENT_AND_POPULATED"},
                 "snapshot_id": "snap-1",

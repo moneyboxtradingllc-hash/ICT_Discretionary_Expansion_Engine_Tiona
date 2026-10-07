@@ -390,9 +390,19 @@ def test_production_calls_pass_current_draw_and_projection_is_fingerprinted():
         assert "campaign_draw" in keywords
         # Participation authority only. The truth may contain a Draw born from
         # this scan's own response, so it must never be a fallback.
-        assert ast.unparse(keywords["campaign_draw"]) == \
-            "scan_participation_authority(scan)"
+        assert ast.unparse(keywords["campaign_draw"]) in (
+            "scan_participation_authority(scan)", "participation_draw")
         assert "session_id" in ast.unparse(keywords["campaign_session_id"])
+    # The ordinary consumer binds the permissive Lifecycle to the SAME
+    # participation authority object it hands CandidateProducer.
+    scan_once = next(node for node in ast.walk(tree)
+                     if isinstance(node, ast.FunctionDef)
+                     and node.name == "_scan_once")
+    scan_once_source = ast.unparse(scan_once)
+    assert "participation_draw = scan_participation_authority(scan)" in \
+        scan_once_source
+    assert "participation_authority_bound(" in scan_once_source
+    assert "campaign_draw=participation_draw" in scan_once_source
     lifecycle_calls = [node for node in ast.walk(tree)
                        if isinstance(node, ast.Call)
                        and getattr(node.func, "id", None) == "evaluate_campaign_lifecycle"]

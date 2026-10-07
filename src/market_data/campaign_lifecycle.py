@@ -334,6 +334,37 @@ def evaluate_campaign_lifecycle(*, snapshot, brain_output,
                    phase=phase or None)
 
 
+def participation_authority_bound(assessment: dict, campaign_draw) -> tuple[bool, str | None]:
+    """May a consumer act on this permissive assessment with THIS Draw authority?
+
+    A Lifecycle assessment is a projection of exactly one Campaign Draw
+    participation authority. A consumer holding a permissive assessment but an
+    absent, non-dictionary, withheld, non-positive, or differently-identified
+    authority holds two facts that do not belong together; it must refuse
+    rather than trust the assessment alone. Stateless and refusal-only: a
+    non-permissive assessment passes through, because it already refuses.
+    """
+    result = assessment if isinstance(assessment, dict) else {}
+    if result.get("participation_permitted") is not True:
+        return True, None
+    if not isinstance(campaign_draw, dict):
+        return False, "campaign_draw_participation_authority_unavailable"
+    withheld = str(campaign_draw.get("participation_withheld_reason") or "").strip()
+    if withheld:
+        return False, f"campaign_draw_participation_withheld:{withheld}"
+    if (campaign_draw.get("authority_status") != "PROVEN_NOT_DELIVERED"
+            or campaign_draw.get("superseded") is not False):
+        return False, "campaign_draw_participation_authority_not_positive"
+    episode = str(campaign_draw.get("campaign_episode_id") or "").strip()
+    identity = str(campaign_draw.get("objective_identity") or "").strip()
+    if (not episode or not identity
+            or result.get("campaign_episode_id") != episode
+            or result.get("objective_identity") != identity
+            or result.get("campaign_draw_status") != campaign_draw.get("authority_status")):
+        return False, "campaign_lifecycle_not_bound_to_participation_authority"
+    return True, None
+
+
 def participation_permission(assessment: dict, direction: str) -> tuple[bool, str]:
     """Additional gate only; it can never grant an unrepresented direction."""
     result = assessment if isinstance(assessment, dict) else {}

@@ -925,15 +925,43 @@ def test_campaign_draw_acceptance_api_is_bound_and_economics_sources_are_unchang
     assert drifted == [], drifted
 
 
-def test_economics_guard_detects_a_changed_protected_source(tmp_path):
-    """The pin must actually bite: one changed byte is a detected change."""
+def _line_ending_variants(source_bytes):
+    """Equivalent LF and CRLF renderings of ONE source, whatever its checkout.
+
+    Normalize first, then render. Rendering CRLF straight from bytes that a
+    Windows checkout already stores as CRLF would produce CR CR LF -- different
+    content, not an equivalent line ending -- and falsely fail the guard.
+    """
+    lf = source_bytes.replace(b"\r\n", b"\n")
+    return lf, lf.replace(b"\n", b"\r\n")
+
+
+@pytest.mark.parametrize("checkout", ["lf", "crlf"])
+def test_economics_guard_detects_a_changed_protected_source(tmp_path, checkout):
+    """The pin must bite on real drift and be blind only to line endings."""
     relative = "src/broker/topstepx_combine_risk.py"
+    pinned = _STAGE2_PROTECTED_SOURCE_SHA256[relative]
     root = Path(__file__).resolve().parents[1]
-    copy = tmp_path / "copy.py"
-    copy.write_bytes((root / relative).read_bytes() + b"\n# drift\n")
-    assert _normalized_sha256(root / relative) == \
-        _STAGE2_PROTECTED_SOURCE_SHA256[relative]
-    assert _normalized_sha256(copy) != _STAGE2_PROTECTED_SOURCE_SHA256[relative]
-    crlf = tmp_path / "crlf.py"
-    crlf.write_bytes((root / relative).read_bytes().replace(b"\n", b"\r\n"))
-    assert _normalized_sha256(crlf) == _STAGE2_PROTECTED_SOURCE_SHA256[relative]
+    lf_source, crlf_source = _line_ending_variants((root / relative).read_bytes())
+    assert b"\r" not in lf_source
+    assert b"\r\r\n" not in crlf_source
+    assert crlf_source.count(b"\r\n") == lf_source.count(b"\n")
+    # Simulate either checkout of the real protected source.
+    checked_out = lf_source if checkout == "lf" else crlf_source
+    newline = b"\n" if checkout == "lf" else b"\r\n"
+    source = tmp_path / f"{checkout}.py"
+    source.write_bytes(checked_out)
+    assert _normalized_sha256(source) == pinned
+    # Both equivalent renderings of the same content match the same pin.
+    for variant in (lf_source, crlf_source):
+        rendered = tmp_path / "variant.py"
+        rendered.write_bytes(variant)
+        assert _normalized_sha256(rendered) == pinned
+    # One changed content byte is detected in this checkout's line endings.
+    drifted = tmp_path / f"{checkout}_drift.py"
+    drifted.write_bytes(checked_out + b"# drift" + newline)
+    assert _normalized_sha256(drifted) != pinned
+    edited = tmp_path / f"{checkout}_edit.py"
+    edited.write_bytes(checked_out.replace(b"def ", b"def  ", 1))
+    assert edited.read_bytes() != checked_out
+    assert _normalized_sha256(edited) != pinned

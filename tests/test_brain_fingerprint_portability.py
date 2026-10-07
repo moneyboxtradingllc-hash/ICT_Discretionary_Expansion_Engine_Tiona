@@ -88,7 +88,10 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # CAMPAIGN-DRAW TEMPORAL-AUTHORITY CLOSURE: participation authority is
     # projected after current acceptance and requires settled evidence beyond
     # a Draw's birth anchor; authority consumers no longer fall back to truth.
-    assert PM.brain_contract_fingerprint() == "brain:82b497b9eafb5d23"
+    # STAGE-2 CONSUMER CLOSURE: the ordinary production consumer acts on a
+    # permissive Lifecycle only together with the participation authority it
+    # was computed from.
+    assert PM.brain_contract_fingerprint() == "brain:f2f0ac4680f7d65e"
 
 
 @pytest.mark.parametrize("addition", [
