@@ -237,7 +237,7 @@ def test_trigger_uses_stored_brain_plan_and_current_mechanics_without_recalling_
     scan = {
         "snapshot": snapshot, "brain_block": trigger_block,
         "brain_input": {"market": {"execution_price": {}}},
-        "campaign_draw_truth": public_draw,
+        "campaign_draw_authority": public_draw,
         "brain_result": ProductionScanCycle.to_brain_result(trigger_block),
         "qualification": {}, "engine_inventory": {},
         "snapshot_id": "trigger-scan-12", "market_data_timestamp": current_at,

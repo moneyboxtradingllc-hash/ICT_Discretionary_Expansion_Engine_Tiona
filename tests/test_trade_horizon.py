@@ -388,9 +388,37 @@ def test_production_calls_pass_current_draw_and_projection_is_fingerprinted():
     for call in calls:
         keywords = {kw.arg: kw.value for kw in call.keywords}
         assert "campaign_draw" in keywords
+        # Participation authority only. The truth may contain a Draw born from
+        # this scan's own response, so it must never be a fallback.
         assert ast.unparse(keywords["campaign_draw"]) == \
-            "scan.get('campaign_draw_authority', scan.get('campaign_draw_truth'))"
+            "scan_participation_authority(scan)"
         assert "session_id" in ast.unparse(keywords["campaign_session_id"])
+    lifecycle_calls = [node for node in ast.walk(tree)
+                       if isinstance(node, ast.Call)
+                       and getattr(node.func, "id", None) == "evaluate_campaign_lifecycle"]
+    assert lifecycle_calls
+    for call in lifecycle_calls:
+        keywords = {kw.arg: kw.value for kw in call.keywords}
+        assert ast.unparse(keywords["campaign_draw"]) == \
+            "scan_participation_authority(scan)"
+    from broker import conditional_plan_authority
+    capture_source = inspect.getsource(conditional_plan_authority.capture)
+    assert "scan_participation_authority(scan)" in capture_source
+    # No authority-bearing code reads the truth key. The single permitted
+    # reader is the write-only decision journal, which records it as telemetry
+    # beside the participation authority and is never read back.
+    readers = set()
+    for owner, authority_source in (("ProductionLoop", source),
+                                    ("capture", inspect.cleandoc(
+                                        "\n" + capture_source))):
+        for function in ast.walk(ast.parse(authority_source)):
+            if not isinstance(function, ast.FunctionDef):
+                continue
+            if any(isinstance(node, ast.Constant)
+                   and node.value == "campaign_draw_truth"
+                   for node in ast.walk(function)):
+                readers.add((owner, function.name))
+    assert readers == {("ProductionLoop", "_record_decision")}, readers
     assert ("trade_horizon", "market_data/trade_horizon.py") in _CONTRACT_SOURCES
     assert ("candidate_producer", "broker/luna_candidate_producer.py") in _CONTRACT_SOURCES
     assert ("campaign_lifecycle_gate", "broker/topstepx_production_loop.py") in _CONTRACT_SOURCES

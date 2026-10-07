@@ -214,8 +214,10 @@ def capture(*, scope, candidate, scan, brain_block, brain_result,
     output = (brain_block or {}).get("output")
     parsed = (brain_result or {}).get("parsed")
     lifecycle = snapshot.get("campaign_lifecycle")
-    draw = scan.get("campaign_draw_authority",
-                    scan.get("campaign_draw_truth"))
+    # Participation authority only: the truth object may hold a Draw born from
+    # this scan's own response, so it is never a substitute when absent.
+    from market_data.campaign_draw_truth import scan_participation_authority
+    draw = scan_participation_authority(scan)
     extras = candidate.extras or {}
     phase = str((parsed or {}).get("narrative_phase") or "").strip().lower()
     direction = str((parsed or {}).get("narrative_direction") or "").strip().lower()

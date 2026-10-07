@@ -319,7 +319,7 @@ def test_real_conditional_production_loop_terminalizes_final_zone_refusal(
         "brain_block": {"source": "preauthorized_plan_trigger",
                         "output": None, "fallback_reason": None},
         "brain_input": brain_input,
-        "campaign_draw_truth": draw,
+        "campaign_draw_authority": draw,
         "qualification": {"qualified": True},
         "engine_inventory": {"liquidity": "PRESENT_AND_POPULATED"},
         "snapshot_id": "terminal-refusal-trigger",

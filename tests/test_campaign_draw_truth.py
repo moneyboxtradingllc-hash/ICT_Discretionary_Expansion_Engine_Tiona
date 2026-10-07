@@ -530,3 +530,78 @@ def test_history_revision_owner_detects_campaign_draw_input_rewrites():
     removed = [rows[0], rows[2]]
     assert history.observe(removed) == 1
     assert history.last_removed == [rows[1]["timestamp"]]
+
+
+# ── PARTICIPATION AUTHORITY (Stage 2 temporal-authority closure) ────────────
+from market_data.campaign_draw_truth import (  # noqa: E402
+    PARTICIPATION_AUTHORITY_MISSING, PARTICIPATION_WITHHELD_RETIRED,
+    PARTICIPATION_WITHHELD_UNMEASURED, scan_participation_authority)
+
+
+def test_participation_requires_measurement_beyond_birth_anchor():
+    t = tracker()
+    rows = [bar(0)]
+    born = observe(t, rows, campaign=view())
+    assert born["authority_status"] == PROVEN_NOT_DELIVERED
+    assert born["settled_cutoff"] == born["anchor_bar_time"]
+    withheld = t.participation_authority(born)
+    assert withheld["authority_status"] == UNKNOWN
+    assert withheld["participation_withheld_reason"] == PARTICIPATION_WITHHELD_UNMEASURED
+    assert withheld["withheld_record_id"] == born["record_id"]
+    # Re-measuring the same cutoff is still not newer market evidence.
+    same = observe(t, rows)
+    assert t.participation_authority(same)["participation_withheld_reason"] == \
+        PARTICIPATION_WITHHELD_UNMEASURED
+    rows.append(bar(1))
+    later = observe(t, rows)
+    assert t.participation_authority(later) == later
+    # Withholding never touched the record.
+    assert t.audit_records[0]["superseded"] is False
+
+
+@pytest.mark.parametrize("change", ["identity", "price"])
+def test_measurement_retired_by_later_acceptance_is_withheld(change):
+    t = tracker()
+    rows = [bar(0)]
+    observe(t, rows, campaign=view())
+    rows.append(bar(1))
+    measured = observe(t, rows)
+    assert t.participation_authority(measured) == measured
+    replacement = (view(identity="opposing_external_liquidity:buyside@106",
+                        price=106) if change == "identity" else view(price=106))
+    outcome = {}
+    t.observe(settled_bars=rows, settled_source=source(rows),
+              contract_id=CONTRACT, session_id=SESSION, history_revision=0,
+              derived_state_current=True, accepted_view=replacement,
+              ownership_state=owner(), advance_existing=False,
+              acceptance_outcome=outcome)
+    assert outcome == {"accepted": True, "reason": None}
+    withheld = t.participation_authority(measured)
+    assert withheld["participation_withheld_reason"] == PARTICIPATION_WITHHELD_RETIRED
+    assert withheld["withheld_record_id"] == measured["record_id"]
+    assert t.audit_records[0]["superseded_reason"] == (
+        "campaign_or_draw_identity_changed" if change == "identity"
+        else "objective_price_revised")
+    # The newborn is persisted, live, and itself still unmeasured at birth.
+    newborn = t.audit_records[-1]
+    assert newborn["superseded"] is False
+    assert t.participation_authority(t._public(newborn))[
+        "participation_withheld_reason"] == PARTICIPATION_WITHHELD_UNMEASURED
+
+
+def test_non_positive_measurements_pass_through_and_missing_fails_closed():
+    t = tracker()
+    rows = [bar(0)]
+    observe(t, rows, campaign=view())
+    rows.append(bar(1, high=105.25, close=104))
+    delivered = observe(t, rows)
+    assert delivered["authority_status"] == PROVEN_DELIVERED
+    assert t.participation_authority(delivered) == delivered
+    unknown = {"authority_status": UNKNOWN, "authority_reason": "no_accepted_campaign_draw"}
+    assert t.participation_authority(unknown) == unknown
+    for missing in (None, "not-a-draw"):
+        assert t.participation_authority(missing)["participation_withheld_reason"] \
+            == PARTICIPATION_AUTHORITY_MISSING
+    assert scan_participation_authority({"campaign_draw_truth": delivered})[
+        "participation_withheld_reason"] == PARTICIPATION_AUTHORITY_MISSING
+    assert scan_participation_authority(None)["authority_status"] == UNKNOWN

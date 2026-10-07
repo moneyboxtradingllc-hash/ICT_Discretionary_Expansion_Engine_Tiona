@@ -94,7 +94,7 @@ def context(monkeypatch, phase="continuation", *, prior_thesis=False):
         issued_at=fixtures.NOW.isoformat())
     auth.authorization_fingerprint = auth.fingerprint()
     scan = {"snapshot": snapshot, "snapshot_id": candidate.snapshot_id,
-            "campaign_draw_truth": draw, "brain_block": block,
+            "campaign_draw_authority": draw, "brain_block": block,
             "brain_result": result}
     authority = producer.capture_conditional_plan_authority(
         candidate=candidate, scan=scan, authorization=auth,
@@ -477,7 +477,7 @@ def test_real_production_loop_trigger_passes_sealed_plan_without_brain_call(
         "brain_block": trigger_block,
         "brain_result": ProductionScanCycle.to_brain_result(trigger_block),
         "brain_input": brain_input,
-        "campaign_draw_truth": draw,
+        "campaign_draw_authority": draw,
         "qualification": {"qualified": True},
         "engine_inventory": {"liquidity": "PRESENT_AND_POPULATED"},
         "snapshot_id": "trigger-snapshot-2",

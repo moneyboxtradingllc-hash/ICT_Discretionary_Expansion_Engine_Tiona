@@ -85,7 +85,10 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # amendment. Previous authorization is stale after this change.
     # PROTECTED-LIFETIME-MUTATION-CLASSIFICATION closes the UNKNOWN-to-replacement
     # boundary in the producer-owned protected-swing authority.
-    assert PM.brain_contract_fingerprint() == "brain:17e5413124b3005e"
+    # CAMPAIGN-DRAW TEMPORAL-AUTHORITY CLOSURE: participation authority is
+    # projected after current acceptance and requires settled evidence beyond
+    # a Draw's birth anchor; authority consumers no longer fall back to truth.
+    assert PM.brain_contract_fingerprint() == "brain:82b497b9eafb5d23"
 
 
 @pytest.mark.parametrize("addition", [

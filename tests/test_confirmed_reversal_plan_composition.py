@@ -207,7 +207,7 @@ def test_verified_reversal_watch_plan_reaches_real_no_brain_trigger():
     authority = producer.capture_conditional_plan_authority(
         candidate=candidate,
         scan={"snapshot": snapshot, "snapshot_id": "reversal-plan-scan",
-              "campaign_draw_truth": draw, "brain_block": block,
+              "campaign_draw_authority": draw, "brain_block": block,
               "brain_result": brain_result},
         authorization=authorization, process_session_id=session_id, now=now)
     assert authority.payload()["authoring_phase"] == "reversal"

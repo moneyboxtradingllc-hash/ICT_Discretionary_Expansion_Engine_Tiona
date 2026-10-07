@@ -32,6 +32,7 @@ from broker.topstepx_candidate_freshness import CandidateStale
 from broker.topstepx_combine_risk import RiskRejection
 from broker.luna_candidate_producer import NoCandidate
 from live_scan.production_scan_cycle import ProductionScanCycle
+from market_data.campaign_draw_truth import scan_participation_authority
 
 # outcomes
 NO_CANDLES = "NO_CANDLES"
@@ -211,7 +212,11 @@ class ProductionLoop:
             # CAMPAIGN-DRAW-TRUTH-1 is chart-evidence telemetry only. This
             # journal write preserves the same-scan fact for audit; no reader
             # feeds it back into candidate, risk, or execution authority.
+            # The truth may hold a Draw born from this scan's own response, so
+            # the participation projection that actually gated this decision
+            # is journaled beside it rather than inferred from it later.
             record["campaign_draw_truth"] = scan.get("campaign_draw_truth")
+            record["campaign_draw_authority"] = scan.get("campaign_draw_authority")
             record["invalidation_level"] = parsed.get("invalidation_level")
             # Same-scan descriptive VAP evidence; this writer is best-effort
             # telemetry and is never read by production authority.
@@ -1175,8 +1180,7 @@ class ProductionLoop:
                 latest_closed_bar_timestamp=scan["latest_closed_bar_timestamp"],
                 in_window=in_window, now=self.clock(),
                 require_campaign_lifecycle=True,
-                campaign_draw=scan.get(
-                    "campaign_draw_authority", scan.get("campaign_draw_truth")),
+                campaign_draw=scan_participation_authority(scan),
                 campaign_session_id=str(getattr(self.cycle, "session_id", "") or ""),
                 conditional_plan=(canonical_action(
                     ((scan.get("brain_result") or {}).get("parsed") or {}).get(
@@ -1469,8 +1473,7 @@ class ProductionLoop:
                 snapshot=snap, brain_output={},
                 narrative_continuity=(plan_brain_result.get(
                     "narrative_continuity") or {}),
-                campaign_draw=scan.get(
-                    "campaign_draw_authority", scan.get("campaign_draw_truth")),
+                campaign_draw=scan_participation_authority(scan),
                 session_id=str(getattr(getattr(self, "cycle", None),
                                        "session_id", "") or ""),
                 contract_id=str(getattr(getattr(self, "cycle", None),
@@ -1502,8 +1505,7 @@ class ProductionLoop:
                 latest_closed_bar_timestamp=scan["latest_closed_bar_timestamp"],
                 in_window=in_window, now=now, conditional_trigger=True,
                 require_campaign_lifecycle=True,
-                campaign_draw=scan.get(
-                    "campaign_draw_authority", scan.get("campaign_draw_truth")),
+                campaign_draw=scan_participation_authority(scan),
                 campaign_session_id=str(getattr(getattr(self, "cycle", None),
                                                 "session_id", "") or ""),
                 conditional_plan_authority=plan.get("authority"),

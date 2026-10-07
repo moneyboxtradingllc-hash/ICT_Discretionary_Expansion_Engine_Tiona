@@ -26,6 +26,7 @@ from broker.topstepx_candidate_freshness import CandidateSnapshot  # noqa: E402
 from broker.topstepx_client import TopstepXContract  # noqa: E402
 from broker.topstepx_slippage import QuoteCapture  # noqa: E402
 from live_scan.production_scan_cycle import ProductionScanCycle  # noqa: E402
+from market_data.campaign_draw_truth import scan_participation_authority  # noqa: E402
 from market_data.occurrence_ledger import HEALTHY, OccurrenceLedger  # noqa: E402
 
 
@@ -249,6 +250,16 @@ def _incumbent_return_scan(tmp_path, monkeypatch):
     return cycle, scan, calls
 
 
+def _assert_retained_reversal_candidate(candidate):
+    """The authorized candidate is the retained reversal object, not merely
+    "some bullish candidate": exact objective, invalidation and tool family on
+    this synthetic tape (Stage 1 proof, restored after 8c64ab77 removed it)."""
+    assert candidate.direction == "bullish"
+    assert candidate.objective.price == 29500.0
+    assert candidate.invalidation_price == 29429.75
+    assert candidate.extras["tool_family"] == ["po3_reversal_order_block"]
+
+
 def _produce_candidate(scan, *, snapshot=None, brain_result=None, now=None):
     producer = CandidateProducer(account_fingerprint="acct:reversal-closure",
                                  contract=MNQ)
@@ -264,8 +275,7 @@ def _produce_candidate(scan, *, snapshot=None, brain_result=None, now=None):
         latest_closed_bar_timestamp=current_snapshot["timestamp"],
         now=now or datetime.now(timezone.utc),
         require_campaign_lifecycle=True,
-        campaign_draw=scan.get("campaign_draw_authority")
-        or scan["campaign_draw_truth"],
+        campaign_draw=scan_participation_authority(scan),
         campaign_session_id=SESSION_ID)
 
 
@@ -416,7 +426,7 @@ def test_newborn_draw_waits_until_next_scan_for_positive_candidate_authority(
     assert scan_n1["campaign_lifecycle"]["state"] == "ACTIVE_DELIVERY"
     candidate = _produce_candidate(scan_n1)
     assert isinstance(candidate, CandidateSnapshot)
-    assert candidate.direction == "bullish"
+    _assert_retained_reversal_candidate(candidate)
 
 
 @pytest.mark.parametrize("case", [
@@ -912,7 +922,9 @@ def test_real_htf_resweep_is_stable_across_five_minute_scan_occurrences(
     assert calls[1]["campaign_draw_context"]["record_id"] == \
         first["campaign_draw_truth"]["record_id"]
     assert scan["campaign_lifecycle"]["state"] == "ACTIVE_DELIVERY"
-    assert isinstance(_produce_candidate(scan), CandidateSnapshot)
+    candidate = _produce_candidate(scan)
+    assert isinstance(candidate, CandidateSnapshot)
+    _assert_retained_reversal_candidate(candidate)
 
 
 @pytest.mark.parametrize("direction", ["bullish", "bearish"])

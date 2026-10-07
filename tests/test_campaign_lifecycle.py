@@ -861,18 +861,79 @@ def test_both_production_candidate_paths_remain_visible_to_structural_guard():
         _CONTRACT_SOURCES
 
 
+# Content of every economics / execution / candidate-strategy source this Stage
+# 2 Campaign Draw work must not touch, pinned at the last commit BEFORE Stage 2
+# began (ce84161, "Close protected lifetime mutation classification"). The old
+# guard ran `git diff --name-only HEAD`, which is empty on any clean checkout and
+# therefore proved nothing about parent-to-child change. A content pin needs no
+# git history, so it holds in shallow clones and audit archives too. Line
+# endings are normalized so a CRLF checkout hashes the same bytes.
+#
+# A legitimate later mission that changes one of these files must update its
+# pin deliberately, in its own reviewed commit.
+_STAGE2_PROTECTED_SOURCE_SHA256 = {
+    "src/broker/trailing_protection.py": "a09d50927c073f9b4d802b2af19b201437e231ec1aaaeb8355ad05d715f63856",
+    "src/broker/topstepx_combine_risk.py": "362daae12add6c6c3f95bca15f34435e6d628a3256792559df07826092d4dbf6",
+    "src/broker/daily_loss_budget.py": "b4f82569cfb9e6195d4dea7e7e27aee773714edcbc2c169b143e2db20c800713",
+    "src/data_feed/trade_interval_truth.py": "50b177bdf65ba32848279620d9afbd5c46b7d991c3d1eb469f91c7d4c3e4f5c2",
+    "src/broker/break_even.py": "f288edfeef5aa85b0b3786520993c4d69644c4b4f741d530def718644d2244d4",
+    "src/broker/break_even_actuator.py": "d8897ad5a96e4d9f25709f2d10ede5f22ff9c27dd1442b2310603402c0dfd893",
+    "src/broker/break_even_baseline.py": "a8d75011ed44c6e25b6b512b3e63e590df160a5f2e1d9134e548431abe16609c",
+    "src/broker/break_even_binding.py": "b0f30d9f2efe5f25c56aaed68467900e6c45e080a8bfeb2f2ea30b85d3b8ae53",
+    "src/broker/break_even_journal.py": "a509872d1d0d09d3d23690b4a2923f81197d808eca5339f0cafbff621667342f",
+    "src/broker/protection_state.py": "ddaa18ce2e803fdcd97d78dd0d1e03354c1bdb005e99fa4d08ca058d8005ccac",
+    "src/broker/topstepx_execution_runner.py": "ba652a16b98545636b41f900f249b46f74c5347459632e1598f513717f7cc485",
+    "src/broker/topstepx_execution_price.py": "192d4bf00a3d8d0de78f51f75b367b0e7ac60356651ab504004528b282ac8157",
+    "src/broker/topstepx_emergency_liquidation.py": "9790540d6ea57dd68ed28a96485600ddb91f1f5b9d824b567739366e9fef7495",
+    "src/broker/topstepx_hard_flatten.py": "5a460b6b0c5c7d8ce81196b69833bcb2feb18da3add60bf1c90a2284430b97ec",
+    "src/broker/topstepx_mission_reconciler.py": "ae95d6a38ad80154e6ef8dfdba17167cde8155f2c6161564832fe34cd13d8481",
+    "src/broker/topstepx_mission_recovery.py": "a09d61a11ae9c127912a2561ce96d541717738380709348f0abb134a36536d4c",
+    "src/broker/topstepx_mission_state.py": "dc3b4c2eaee3348aefa63fe94f0ca0f505f4dc674f4215b3601f407938ad2502",
+    "src/broker/topstepx_order_discovery.py": "dd64977d34c8345e26037d11c129884d80b0883bdd0004fa6e2ce7ca3a4c70e1",
+    "src/broker/topstepx_protection_authority.py": "b9d0090b7de65c613105298b14bceedf8a49c9396c68f60de090ae3612bdf4ca",
+    "src/broker/topstepx_quote_provider.py": "8d1495cdcdeb81b1d99b5982416732d713a3bc977d9410cd7d88304900b3322d",
+    "src/broker/topstepx_submission_record.py": "c8c4552a1d0b526a8e448e4a0ff610c0265a791b1f6bd5e6ababdfac2df2e99e",
+    "src/broker/topstepx_adapter.py": "b7f760124b6966ec2682517a45c8062c749d58f7d4540708a76d6b2ed700f8cf",
+    "src/broker/topstepx_slippage.py": "144c614405aba9eabea400dabab3db5058f5870572421191fcb5b143b9c47456",
+    "src/broker/topstepx_session_authorization.py": "b1a5d1b9965575149e87fb7ead76a18c9f562057ffcce6c1f34a2f035f8a5eae",
+    "src/broker/topstepx_session_cognition_lock.py": "ae75b72c75716d5715277907da7de771085ab30cb7c308dff127be174cc00d14",
+    "src/broker/topstepx_session_lifecycle.py": "8932c80892b2299f024cc5c04596a6ab8b6bc9e73c8af4322017558b34f53c2f",
+    "src/broker/topstepx_production_session.py": "79f0bf0dcf81598d3abdbec7d63ebbb7a762d337c401c1a8e4244e42224c41bd",
+    "src/execution_gate/execution_gate.py": "d8c1a0bc997d2c02584845c1c19bead4e7347fd38d3c15a6f684f70da511d5ca",
+    "src/risk/risk_governor.py": "9618cbfdf410d320f7bc4b40935e3de7a08c82a3cc8f9cfc6680f5c58ff809a6",
+    "src/risk/topstep_limits.py": "150c460f96ff46d1f580f4264299d94d6d5533eb27dbb6fe3bc9c05ce0623055",
+    "src/market_data/trade_horizon.py": "9968c7f493a4d7ba43c575cfd30b2e144d0da1c8962a29fe26fd73653389ec52",
+    "src/broker/luna_candidate_producer.py": "207de785bacfbc37b2ff949af87fa0d40246a2c2d0a43121eaa50e1bda58ae4d",
+}
+
+
+def _normalized_sha256(path):
+    import hashlib
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+
+
 def test_campaign_draw_acceptance_api_is_bound_and_economics_sources_are_unchanged():
-    import subprocess
     root = Path(__file__).resolve().parents[1]
-    changed = subprocess.check_output(
-        ["git", "diff", "--name-only", "HEAD"], cwd=root, text=True).splitlines()
     from ai_brain.production_model import _CONTRACT_SOURCES
     assert ("campaign_draw_truth", "market_data/campaign_draw_truth.py") in \
         _CONTRACT_SOURCES
-    for protected in (
-        "src/broker/trailing_protection.py",
-        "src/broker/topstepx_combine_risk.py",
-        "src/broker/daily_loss_budget.py",
-        "src/data_feed/trade_interval_truth.py",
-    ):
-        assert protected not in changed
+    changed = {relative: (_normalized_sha256(root / relative)
+                          if (root / relative).exists() else "<absent>")
+               for relative in _STAGE2_PROTECTED_SOURCE_SHA256}
+    drifted = sorted(relative for relative, digest in changed.items()
+                     if digest != _STAGE2_PROTECTED_SOURCE_SHA256[relative])
+    assert drifted == [], drifted
+
+
+def test_economics_guard_detects_a_changed_protected_source(tmp_path):
+    """The pin must actually bite: one changed byte is a detected change."""
+    relative = "src/broker/topstepx_combine_risk.py"
+    root = Path(__file__).resolve().parents[1]
+    copy = tmp_path / "copy.py"
+    copy.write_bytes((root / relative).read_bytes() + b"\n# drift\n")
+    assert _normalized_sha256(root / relative) == \
+        _STAGE2_PROTECTED_SOURCE_SHA256[relative]
+    assert _normalized_sha256(copy) != _STAGE2_PROTECTED_SOURCE_SHA256[relative]
+    crlf = tmp_path / "crlf.py"
+    crlf.write_bytes((root / relative).read_bytes().replace(b"\n", b"\r\n"))
+    assert _normalized_sha256(crlf) == _STAGE2_PROTECTED_SOURCE_SHA256[relative]

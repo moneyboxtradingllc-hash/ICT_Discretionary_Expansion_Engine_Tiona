@@ -28,6 +28,57 @@ UNKNOWN = "UNKNOWN"
 _CONTIGUOUS = "contiguous"
 _EXPECTED_BREAK = "expected_market_break"
 
+# PARTICIPATION AUTHORITY (STAGE 2 TEMPORAL-AUTHORITY CLOSURE).
+#
+# A scan's measured Draw (`campaign_draw_truth` / `campaign_draw_context`) is a
+# market fact. Its PARTICIPATION authority is narrower: the one Draw projection
+# Lifecycle, CandidateProducer and conditional plans may treat as positive for
+# THIS scan. Two causal facts can withhold a positive measurement:
+#
+#   RETIRED      the scan's own current acceptance superseded/replaced the
+#                record that was measured before cognition. A judgment that
+#                retired a destination may not trade toward it on the same scan.
+#   UNMEASURED   no settled bar exists after the record's birth anchor. A Draw
+#                is born from a Brain judgment at its anchor; until the market
+#                has printed at least one newer settled 1m bar, "not delivered"
+#                is only that judgment restated, so a same-cutoff re-cognition
+#                cannot be authorized by its predecessor's output.
+#
+# Withholding never deletes or rewrites the record: the tracker keeps it and a
+# later healthy scan may use it. Missing authority is the same UNKNOWN shape.
+PARTICIPATION_WITHHELD_RETIRED = (
+    "pre_cognition_campaign_draw_retired_by_current_acceptance")
+PARTICIPATION_WITHHELD_UNMEASURED = (
+    "campaign_draw_not_measured_beyond_birth_anchor")
+PARTICIPATION_AUTHORITY_MISSING = "campaign_draw_participation_authority_missing"
+PARTICIPATION_AUTHORITY_ERROR = "campaign_draw_participation_authority_error"
+
+
+def withheld_participation_authority(reason: str, measured: dict | None = None) -> dict:
+    """The UNKNOWN participation projection, naming why authority is absent."""
+    out = {"authority_status": UNKNOWN, "authority_reason": str(reason),
+           "coverage_status": "UNKNOWN", "history_complete": False,
+           "process_authority": "CURRENT_PROCESS_ONLY",
+           "evidence_basis": "provider_settled_1m_chart",
+           "claim_scope": "chart_delivery_not_exchange_tick_sequence",
+           "participation_withheld_reason": str(reason)}
+    if isinstance(measured, dict) and measured.get("record_id"):
+        out["withheld_record_id"] = measured.get("record_id")
+        out["withheld_authority_status"] = measured.get("authority_status")
+    return out
+
+
+def scan_participation_authority(scan) -> dict:
+    """The only Draw a scan result may lend to a participation decision.
+
+    `campaign_draw_truth` may contain a record born from this scan's own
+    response, so it is never a substitute: an absent authority is UNKNOWN.
+    """
+    authority = scan.get("campaign_draw_authority") if isinstance(scan, dict) else None
+    if isinstance(authority, dict):
+        return authority
+    return withheld_participation_authority(PARTICIPATION_AUTHORITY_MISSING)
+
 
 def _finite(value):
     if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -420,6 +471,37 @@ class CampaignDrawTruth:
             outcome["accepted"] = False
             outcome["reason"] = str(reason)
         return truth, outcome
+
+    def participation_authority(self, measured: dict | None) -> dict:
+        """Project this scan's measured Draw into participation authority.
+
+        Call AFTER the scan's current acceptance (if any) has been processed,
+        so liveness is judged against the tracker as this scan leaves it.
+        Only a PROVEN_NOT_DELIVERED measurement is positive; every other
+        status already refuses and passes through unchanged, preserving its
+        own classification (for example a delivered destination).
+        """
+        if not isinstance(measured, dict):
+            return withheld_participation_authority(PARTICIPATION_AUTHORITY_MISSING)
+        if measured.get("authority_status") != PROVEN_NOT_DELIVERED:
+            return copy.deepcopy(measured)
+        active = self._active
+        if (active is None or active.get("superseded") is not False
+                or not measured.get("record_id")
+                or active.get("record_id") != measured.get("record_id")):
+            return withheld_participation_authority(
+                PARTICIPATION_WITHHELD_RETIRED, measured)
+        try:
+            anchor = canonical_instant(measured.get("anchor_bar_time"), strict=True)
+            cutoff = canonical_instant(measured.get("settled_cutoff"), strict=True)
+            measured_beyond_birth = (
+                datetime.fromisoformat(cutoff) > datetime.fromisoformat(anchor))
+        except Exception:  # noqa: BLE001 -- unprovable chronology is not authority
+            measured_beyond_birth = False
+        if not measured_beyond_birth:
+            return withheld_participation_authority(
+                PARTICIPATION_WITHHELD_UNMEASURED, measured)
+        return copy.deepcopy(measured)
 
     @staticmethod
     def _key(record: dict | None):

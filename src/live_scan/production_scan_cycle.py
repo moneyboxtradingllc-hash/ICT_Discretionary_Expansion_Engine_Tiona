@@ -696,10 +696,20 @@ class ProductionScanCycle:
         else:
             # A no-Brain scan has no current accepted view. Preserve its single
             # established deterministic advancement and do not mint a Draw.
+            # No acceptance occurred, so none is published -- an empty outcome
+            # would read downstream as a refused acceptance that never happened.
             campaign_draw_truth = self._campaign_draw_observation(
                 snapshot, raw_data.get("1m") or [], brain_block, brain_input,
                 invoke_brain=False)
             participation_draw = campaign_draw_truth
+            campaign_draw_acceptance = None
+
+        # ORDER IS THE CONTRACT. Participation authority is projected only now,
+        # after this scan's acceptance has run, so a measurement this scan's own
+        # judgment retired -- or a Draw not yet measured beyond its birth
+        # anchor -- can never lend positive authority to this scan. Every
+        # participation consumer below reads this projection, never the truth.
+        participation_draw = self._participation_authority(participation_draw)
 
         snapshot["campaign_draw_truth"] = campaign_draw_truth
         snapshot["campaign_draw_authority"] = copy.deepcopy(participation_draw)
@@ -768,6 +778,16 @@ class ProductionScanCycle:
             "memory_retrieval_telemetry": getattr(
                 self, "_last_retrieval_telemetry", None),
         }
+
+    def _participation_authority(self, measured: dict) -> dict:
+        """Campaign Draw truth's participation projection; fails closed."""
+        from market_data.campaign_draw_truth import (
+            PARTICIPATION_AUTHORITY_ERROR, withheld_participation_authority)
+        try:
+            return self.campaign_draw_truth.participation_authority(measured)
+        except Exception:  # noqa: BLE001 -- unavailable authority is UNKNOWN
+            return withheld_participation_authority(
+                PARTICIPATION_AUTHORITY_ERROR, measured)
 
     def _advance_existing_campaign_draw(self, snapshot: dict,
                                        settled_bars: list) -> dict:

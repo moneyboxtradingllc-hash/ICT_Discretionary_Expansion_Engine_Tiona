@@ -78,6 +78,12 @@ def _valid_draw(draw, *, snapshot, direction, session_id, contract_id,
     """Validate public Draw authority without consulting audit history."""
     if not isinstance(draw, dict):
         return False, "campaign_draw_unavailable"
+    withheld = str(draw.get("participation_withheld_reason") or "").strip()
+    if withheld:
+        # Campaign Draw truth withheld this scan's participation authority
+        # (retired by the current acceptance, or not yet measured beyond its
+        # birth anchor). Name the cause rather than a generic UNKNOWN.
+        return False, f"campaign_draw_participation_withheld:{withheld}"
     if draw.get("authority_status") not in ("PROVEN_NOT_DELIVERED",
                                                "PROVEN_DELIVERED"):
         return False, "campaign_draw_authority_unknown"
