@@ -147,7 +147,8 @@ def _valid_draw(draw, *, snapshot, direction, session_id, contract_id,
 def evaluate_campaign_lifecycle(*, snapshot, brain_output,
                                 narrative_continuity, campaign_draw,
                                 session_id, contract_id,
-                                brain_authority_available=True) -> dict:
+                                brain_authority_available=True,
+                                current_draw_acceptance=None) -> dict:
     """Project current authorities into one mutually exclusive lifecycle state."""
     snap = snapshot if isinstance(snapshot, dict) else {}
     output = brain_output if isinstance(brain_output, dict) else {}
@@ -276,6 +277,20 @@ def evaluate_campaign_lifecycle(*, snapshot, brain_output,
     if draw.get("authority_status") == "PROVEN_DELIVERED":
         return _result(DESTINATION_SUBSTANTIALLY_DELIVERED,
                        "settled_campaign_objective_touch_proven",
+                       direction=direction, draw=draw, control_state=control,
+                       phase=phase or None)
+
+    # A current response whose accepted Draw view failed deterministic
+    # acceptance may not participate using an otherwise lawful incumbent.
+    # This is a refusal-only condition; it never creates Draw evidence or a
+    # new Lifecycle state.
+    acceptance = (current_draw_acceptance
+                  if isinstance(current_draw_acceptance, dict) else None)
+    if acceptance is not None and acceptance.get("accepted") is not True:
+        reason = str(acceptance.get("reason") or
+                     "campaign_draw_acceptance_refused")
+        return _result(AUTHORITY_UNKNOWN,
+                       f"current_campaign_draw_acceptance_refused:{reason}",
                        direction=direction, draw=draw, control_state=control,
                        phase=phase or None)
 

@@ -164,13 +164,34 @@ class CampaignDrawTruth:
                 contract_id: str, session_id: str, history_revision: int,
                 derived_state_current: bool,
                 accepted_view: dict | None = None,
-                ownership_state: dict | None = None) -> dict:
+                ownership_state: dict | None = None,
+                advance_existing: bool = True,
+                acceptance_outcome: dict | None = None) -> dict:
         """Advance existing facts and optionally bind a fresh accepted view.
 
         `accepted_view` must already contain the canonical objective resolved
         from the deterministic snapshot catalog and a Narrative Authority
         authorization result. This module never interprets Brain prose.
+
+        `advance_existing=False` is reserved for the post-cognition acceptance
+        lane after this same scan has already measured the incumbent. It still
+        validates and persists the current response, but never advances the
+        incumbent through the settled interval a second time.
         """
+        if isinstance(acceptance_outcome, dict):
+            acceptance_outcome.clear()
+            acceptance_outcome.update({
+                "accepted": False,
+                "reason": "campaign_draw_acceptance_unresolved",
+            })
+
+        def note_acceptance(accepted: bool, reason: str | None = None) -> None:
+            if isinstance(acceptance_outcome, dict):
+                acceptance_outcome["accepted"] = bool(accepted)
+                acceptance_outcome["reason"] = (None if accepted else
+                                                 str(reason or
+                                                     "campaign_draw_acceptance_refused"))
+
         contract = str(contract_id or "").strip()
         session = str(session_id or "").strip()
         source = settled_source if isinstance(settled_source, dict) else {}
@@ -182,6 +203,7 @@ class CampaignDrawTruth:
                 or not session or session != self.session_id):
             self._supersede("session_or_contract_identity_changed",
                             close_episode=True)
+            note_acceptance(False, "session_or_contract_identity_unavailable")
             return self._unknown("session_or_contract_identity_unavailable")
 
         # ActivePath is the canonical mechanical owner state. A Campaign Draw
@@ -200,15 +222,18 @@ class CampaignDrawTruth:
                 ownership_state.get("last_invalidated") or {})
         if not derived_state_current:
             self._supersede("derived_history_not_current", close_episode=True)
+            note_acceptance(False, "derived_history_not_current")
             return self._unknown("derived_history_not_current")
         if source.get("temporal_status") != "settled" or cutoff is None:
             self._break_current("settled_source_unavailable")
+            note_acceptance(False, "settled_source_unavailable")
             return self._unknown("settled_source_unavailable", active=self._active)
 
         from market_state.active_path import production_session_key
         market_session = production_session_key(cutoff)
         if not market_session:
             self._supersede("market_session_unavailable", close_episode=True)
+            note_acceptance(False, "anchor_market_session_unavailable")
             return self._unknown("anchor_market_session_unavailable")
 
         rows, error = _canonical_settled_bars(settled_bars, contract)
@@ -218,10 +243,12 @@ class CampaignDrawTruth:
                 self._supersede("campaign_delivery_evidence_superseded:" + error)
             else:
                 self._break_current(error)
+            note_acceptance(False, error)
             return self._unknown(error, active=self._active)
         if not rows or rows[-1]["timestamp"] != cutoff:
             reason = "settled_cutoff_does_not_match_market_source"
             self._break_current(reason)
+            note_acceptance(False, reason)
             return self._unknown(reason, active=self._active)
 
         # A changed revision invalidates every current conclusion that depended
@@ -234,7 +261,7 @@ class CampaignDrawTruth:
         elif (self._active is not None
               and self._active.get("market_session") != market_session):
             self._supersede("market_session_changed", close_episode=True)
-        elif self._active is not None:
+        elif self._active is not None and advance_existing:
             self._advance(self._active, rows, cutoff)
 
         view = accepted_view if isinstance(accepted_view, dict) else None
@@ -243,6 +270,8 @@ class CampaignDrawTruth:
                 return self._public(self._active)
             return self._unknown("no_accepted_campaign_draw")
         if view.get("direction_authorized") is not True:
+            note_acceptance(False, str(view.get("refusal_reason") or
+                                        "campaign_direction_not_authorized"))
             if self._active is not None:
                 return self._public(self._active)
             return self._unknown(str(view.get("refusal_reason") or
@@ -251,15 +280,18 @@ class CampaignDrawTruth:
         direction = str(view.get("direction") or "").strip().lower()
         objective = view.get("objective")
         if direction not in ("bullish", "bearish") or not isinstance(objective, dict):
+            note_acceptance(False, "accepted_campaign_objective_unavailable")
             return self._unknown("accepted_campaign_objective_unavailable",
                                  active=self._active)
         if ownership_state is None:
+            note_acceptance(False, "campaign_owner_state_unavailable")
             return self._unknown("campaign_owner_state_unavailable",
                                  active=self._active)
         named_owner = str(ownership_state.get("owner") or "").strip().lower()
         named_status = str(ownership_state.get("status") or "").strip().lower()
         if (ownership_state.get("state_available") is not True
                 or named_owner != direction or named_status != "active"):
+            note_acceptance(False, "campaign_owner_not_currently_established")
             return self._unknown("campaign_owner_not_currently_established",
                                  active=self._active)
         identity = str(objective.get("identity") or "").strip()
@@ -268,14 +300,18 @@ class CampaignDrawTruth:
         anchor = rows[-1]
         anchor_close = _finite(anchor.get("close"))
         if not identity or not kind or price is None or anchor_close is None:
+            note_acceptance(False, "campaign_objective_or_anchor_incomplete")
             return self._unknown("campaign_objective_or_anchor_incomplete",
                                  active=self._active)
         if ((direction == "bullish" and price <= anchor_close)
                 or (direction == "bearish" and price >= anchor_close)):
+            note_acceptance(False, "campaign_objective_wrong_side_of_anchor")
             return self._unknown("campaign_objective_wrong_side_of_anchor",
                                  active=self._active)
         anchor_ok, anchor_reason = _opportunity_authority(anchor, self.instrument)
         if not anchor_ok:
+            note_acceptance(False, "anchor_bar_lacks_trade_opportunity_authority:" +
+                            str(anchor_reason))
             return self._unknown("anchor_bar_lacks_trade_opportunity_authority:" +
                                  str(anchor_reason), active=self._active)
 
@@ -293,6 +329,7 @@ class CampaignDrawTruth:
         # begins a new record at the current settled source bar.
         if same and self._active.get("objective_price") == price:
             self._active["brain_lineage"] = copy.deepcopy(view.get("brain_lineage") or {})
+            note_acceptance(True)
             return self._public(self._active)
         if same and self._active.get("objective_price") != price:
             self._supersede("objective_price_revised")
@@ -350,7 +387,39 @@ class CampaignDrawTruth:
         }
         self._records.append(record)
         self._active = record
+        note_acceptance(True)
         return self._public(record)
+
+    def accept_current_view(self, *, settled_bars, settled_source: dict,
+                            contract_id: str, session_id: str,
+                            history_revision: int,
+                            derived_state_current: bool,
+                            accepted_view: dict,
+                            ownership_state: dict | None = None) -> tuple[dict, dict]:
+        """Persist a current Brain view without advancing the incumbent.
+
+        Production calls this only after the same scan has measured the
+        pre-cognition incumbent. The returned acceptance status is separate
+        from market measurement so a refused response can veto participation
+        without being mistaken for a new market fact.
+        """
+        outcome: dict = {}
+        truth = self.observe(
+            settled_bars=settled_bars, settled_source=settled_source,
+            contract_id=contract_id, session_id=session_id,
+            history_revision=history_revision,
+            derived_state_current=derived_state_current,
+            accepted_view=accepted_view, ownership_state=ownership_state,
+            advance_existing=False, acceptance_outcome=outcome)
+        if outcome.get("accepted") is not True:
+            reason = outcome.get("reason")
+            if reason in (None, "campaign_draw_acceptance_unresolved"):
+                reason = (truth.get("authority_reason") or
+                          (accepted_view or {}).get("refusal_reason") or
+                          "campaign_draw_acceptance_refused")
+            outcome["accepted"] = False
+            outcome["reason"] = str(reason)
+        return truth, outcome
 
     @staticmethod
     def _key(record: dict | None):

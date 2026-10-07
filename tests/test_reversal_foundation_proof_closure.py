@@ -195,7 +195,7 @@ def _valid_model_reply(brain_input, *, action="propose_entry", direction="bullis
     }
 
 
-def _mock_current_brain(monkeypatch, calls):
+def _mock_current_brain(monkeypatch, calls, output_mutator=None):
     import ai_brain.ecu as ecu
     import ai_brain.narrative_brain as narrative_brain
     from ai_brain.stance_memory import StanceMemory
@@ -210,6 +210,8 @@ def _mock_current_brain(monkeypatch, calls):
     def mocked_transport(payload, repair=None):
         calls.append(copy.deepcopy(payload))
         output = _valid_model_reply(payload)
+        if output_mutator is not None:
+            output = output_mutator(output, len(calls), payload)
         return {"parsed": output, "ok": True, "model": PM.PRODUCTION_MODEL,
                 "prompt": "mocked current Brain transport",
                 "user_content": "current production input",
@@ -229,6 +231,24 @@ def _current_return_scan(tmp_path, monkeypatch):
     return cycle, scan, calls
 
 
+def _incumbent_return_scan(tmp_path, monkeypatch):
+    """Establish a Draw on one Brain call, then return on a healthy scan."""
+    cycle = _cycle(tmp_path, monkeypatch)
+    _scan_prefix(cycle, len(TAPE_1M) - 5)
+    calls = []
+    _mock_current_brain(monkeypatch, calls)
+    first = cycle.scan(TAPE_1M, now=_now_for(TAPE_1M), invoke_brain=True)
+    assert first["campaign_draw_truth"]["authority_status"] == \
+        "PROVEN_NOT_DELIVERED"
+    later = TAPE_1M + _expand_5m(
+        ("03:00", 29459.0, 29490.0, 29450.0, 29460.0))
+    scan = cycle.scan(later, now=_now_for(later), invoke_brain=True)
+    assert scan["campaign_draw_authority"]["record_id"] == \
+        first["campaign_draw_truth"]["record_id"]
+    assert scan["campaign_lifecycle"]["state"] == "ACTIVE_DELIVERY"
+    return cycle, scan, calls
+
+
 def _produce_candidate(scan, *, snapshot=None, brain_result=None, now=None):
     producer = CandidateProducer(account_fingerprint="acct:reversal-closure",
                                  contract=MNQ)
@@ -244,7 +264,8 @@ def _produce_candidate(scan, *, snapshot=None, brain_result=None, now=None):
         latest_closed_bar_timestamp=current_snapshot["timestamp"],
         now=now or datetime.now(timezone.utc),
         require_campaign_lifecycle=True,
-        campaign_draw=scan["campaign_draw_truth"],
+        campaign_draw=scan.get("campaign_draw_authority")
+        or scan["campaign_draw_truth"],
         campaign_session_id=SESSION_ID)
 
 
@@ -296,18 +317,18 @@ def test_real_ecu_input_contains_retained_object_on_later_return_and_consumes_on
         assert calls[0]["derived_state"][key] == snapshot["derived_state"][key]
     assert calls[0]["active_path_state"] == snapshot["active_path_state"]
     assert scan["campaign_draw_truth"]["authority_status"] == "PROVEN_NOT_DELIVERED"
-    assert scan["campaign_lifecycle"]["state"] == "ACTIVE_DELIVERY"
+    assert scan["campaign_draw_authority"]["authority_status"] == "UNKNOWN"
+    assert scan["campaign_draw_acceptance"]["accepted"] is True
+    assert scan["campaign_lifecycle"]["state"] == "AUTHORITY_UNKNOWN"
     assert snapshot["active_path_state"]["owner"] == "bullish"
     assert snapshot["active_path_state"]["status"] == "active"
-    assert scan["campaign_lifecycle"]["authorized_direction"] == "bullish"
 
-    # The same current response and exact public object proceed through the
-    # real candidate boundary. No runner, token, or venue endpoint is involved.
-    candidate = _produce_candidate(scan)
-    assert candidate.direction == "bullish"
-    assert candidate.objective.price == 29500.0
-    assert candidate.invalidation_price == 29429.75
-    assert candidate.extras["tool_family"] == ["po3_reversal_order_block"]
+    # This scan has no pre-cognition Draw. The newly persisted Draw cannot
+    # authorize its own creation scan at the real CandidateProducer boundary.
+    assert scan["campaign_lifecycle"]["state"] == "AUTHORITY_UNKNOWN"
+    with pytest.raises(NoCandidate) as refused:
+        _produce_candidate(scan)
+    assert refused.value.reason == "campaign_lifecycle_refused"
 
 
 def test_bootstrap_draw_is_unknown_then_prior_draw_is_measured_before_brain(
@@ -357,6 +378,232 @@ def test_bootstrap_draw_is_unknown_then_prior_draw_is_measured_before_brain(
     assert second["snapshot"]["campaign_draw_context"] == delivered_context
     assert second["snapshot"]["campaign_draw_truth"]["record_id"] == \
         second["campaign_draw_truth"]["record_id"]
+
+
+def test_newborn_draw_waits_until_next_scan_for_positive_candidate_authority(
+        tmp_path, monkeypatch):
+    """A current response may create a Draw, but only N+1 may use it."""
+    cycle = _cycle(tmp_path, monkeypatch)
+    _scan_prefix(cycle, len(TAPE_1M) - 5)
+    calls = []
+    _mock_current_brain(monkeypatch, calls)
+
+    scan_n = cycle.scan(TAPE_1M, now=_now_for(TAPE_1M), invoke_brain=True)
+    assert len(calls) == 1
+    assert calls[0]["campaign_draw_context"]["authority_status"] == "UNKNOWN"
+    assert calls[0]["campaign_draw_context"]["authority_reason"] == \
+        "no_accepted_campaign_draw"
+    newborn = scan_n["campaign_draw_truth"]
+    assert newborn["authority_status"] == "PROVEN_NOT_DELIVERED"
+    assert newborn["record_id"]
+    assert scan_n["campaign_lifecycle"]["state"] == "AUTHORITY_UNKNOWN"
+    with pytest.raises(NoCandidate) as same_scan:
+        _produce_candidate(scan_n)
+    assert same_scan.value.reason == "campaign_lifecycle_refused"
+
+    # A healthy later settled interval remains below the accepted objective.
+    # On N+1 the same Draw is incumbent before cognition and may authorize.
+    later = TAPE_1M + _expand_5m(
+        ("03:00", 29459.0, 29490.0, 29450.0, 29460.0))
+    scan_n1 = cycle.scan(later, now=_now_for(later), invoke_brain=True)
+    assert len(calls) == 2
+    context = calls[1]["campaign_draw_context"]
+    assert context["record_id"] == newborn["record_id"]
+    assert context["campaign_episode_id"] == newborn["campaign_episode_id"]
+    assert context["anchor_bar_time"] == newborn["anchor_bar_time"]
+    assert context["authority_status"] == "PROVEN_NOT_DELIVERED"
+    assert scan_n1["campaign_draw_authority"]["record_id"] == newborn["record_id"]
+    assert scan_n1["campaign_lifecycle"]["state"] == "ACTIVE_DELIVERY"
+    candidate = _produce_candidate(scan_n1)
+    assert isinstance(candidate, CandidateSnapshot)
+    assert candidate.direction == "bullish"
+
+
+@pytest.mark.parametrize("case", [
+    "unresolved_objective", "unauthorized_direction",
+    "malformed_view", "unlisted_objective",
+])
+def test_invalid_newborn_draw_acceptance_still_refuses_current_scan(
+        tmp_path, monkeypatch, case):
+    """No incumbent means no bootstrap; invalid current views remain refused."""
+    cycle = _cycle(tmp_path, monkeypatch)
+    _scan_prefix(cycle, len(TAPE_1M) - 5)
+    calls = []
+
+    def mutate(output, ordinal, _payload):
+        if ordinal != 1:
+            return output
+        result = dict(output)
+        if case == "unresolved_objective":
+            result["active_draw"] = "unresolvable current objective"
+        elif case == "unauthorized_direction":
+            result.update(narrative_direction="bearish", allowed_direction="bearish",
+                          forbidden_direction="bullish",
+                          active_draw="sell side liquidity below")
+        elif case == "malformed_view":
+            result["active_draw"] = None
+        else:
+            result["active_draw"] = "weekly VWAP objective"
+        return result
+
+    _mock_current_brain(monkeypatch, calls, output_mutator=mutate)
+    scan = cycle.scan(TAPE_1M, now=_now_for(TAPE_1M), invoke_brain=True)
+    assert len(calls) == 1
+    assert calls[0]["campaign_draw_context"]["authority_status"] == "UNKNOWN"
+    assert scan["campaign_lifecycle"]["participation_permitted"] is False
+    with pytest.raises(NoCandidate) as refused:
+        _produce_candidate(scan)
+    assert refused.value.reason == "campaign_lifecycle_refused"
+    assert cycle.campaign_draw_truth.audit_records == []
+    acceptance = scan.get("campaign_draw_acceptance")
+    if acceptance is not None:
+        assert acceptance["accepted"] is False
+
+
+def test_new_objective_cannot_rescue_delivered_incumbent_same_scan(
+        tmp_path, monkeypatch):
+    """A current replacement Draw cannot erase the incumbent's delivery veto."""
+    cycle = _cycle(tmp_path, monkeypatch)
+    _scan_prefix(cycle, len(TAPE_1M) - 5)
+    calls = []
+    _mock_current_brain(
+        monkeypatch, calls,
+        output_mutator=lambda output, ordinal, _payload: (
+            {**output, "active_draw": "protected swing"}
+            if ordinal == 2 else output))
+    first = cycle.scan(TAPE_1M, now=_now_for(TAPE_1M), invoke_brain=True)
+    incumbent = first["campaign_draw_truth"]
+
+    delivered = TAPE_1M + _expand_5m(
+        ("03:00", 29459.0, 29505.0, 29450.0, 29460.0))
+    current = cycle.scan(delivered, now=_now_for(delivered), invoke_brain=True)
+    assert calls[1]["campaign_draw_context"]["record_id"] == incumbent["record_id"]
+    assert calls[1]["campaign_draw_context"]["authority_status"] == \
+        "PROVEN_DELIVERED"
+    assert current["campaign_lifecycle"]["state"] == \
+        "DESTINATION_SUBSTANTIALLY_DELIVERED"
+    assert current["campaign_draw_truth"]["authority_status"] == \
+        "PROVEN_NOT_DELIVERED"
+    assert current["campaign_draw_truth"]["record_id"] != incumbent["record_id"]
+    assert current["campaign_draw_truth"]["objective_identity"] != \
+        incumbent["objective_identity"]
+    assert current["campaign_draw_acceptance"]["accepted"] is True
+    with pytest.raises(NoCandidate) as refused:
+        _produce_candidate(current)
+    assert refused.value.reason == "campaign_lifecycle_refused"
+
+
+@pytest.mark.parametrize("ecu_mode", [True, False], ids=["ecu", "non-ecu"])
+def test_existing_campaign_draw_advances_once_per_normal_scan(
+        tmp_path, monkeypatch, ecu_mode):
+    """Incumbent measurement happens pre-cognition, not again at acceptance."""
+    from market_data.campaign_draw_truth import CampaignDrawTruth
+
+    cycle = _cycle(tmp_path, monkeypatch)
+    _scan_prefix(cycle, len(TAPE_1M) - 5)
+    calls = []
+    _mock_current_brain(monkeypatch, calls)
+    monkeypatch.setenv("BRAIN_ECU_MODE", "true" if ecu_mode else "false")
+    first = cycle.scan(TAPE_1M, now=_now_for(TAPE_1M), invoke_brain=True)
+    assert first["campaign_draw_truth"]["record_id"]
+    assert first["campaign_draw_truth"]["authority_status"] == \
+        "PROVEN_NOT_DELIVERED"
+
+    advances = []
+    original = CampaignDrawTruth._advance
+
+    def counted(instance, record, rows, cutoff):
+        if instance is cycle.campaign_draw_truth:
+            advances.append((record.get("record_id"), cutoff))
+        return original(instance, record, rows, cutoff)
+
+    monkeypatch.setattr(CampaignDrawTruth, "_advance", counted)
+    later = TAPE_1M + _expand_5m(
+        ("03:00", 29459.0, 29490.0, 29450.0, 29460.0))
+    second = cycle.scan(later, now=_now_for(later), invoke_brain=True)
+    assert len(calls) == 2
+    assert len(advances) == 1, advances
+    assert advances[0][0] == first["campaign_draw_truth"]["record_id"]
+    assert second["brain_input"]["campaign_draw_context"]["record_id"] == \
+        advances[0][0]
+    assert second["campaign_lifecycle"]["state"] == "ACTIVE_DELIVERY"
+
+
+def test_invalid_new_draw_view_refuses_even_with_lawful_incumbent(
+        tmp_path, monkeypatch):
+    """A failed current Draw acceptance remains an immediate refusal."""
+    cycle = _cycle(tmp_path, monkeypatch)
+    _scan_prefix(cycle, len(TAPE_1M) - 5)
+    calls = []
+    _mock_current_brain(monkeypatch, calls, output_mutator=lambda output, n, _payload: (
+        {**output, "active_draw": "unresolvable current objective"}
+        if n == 2 else output))
+
+    first = cycle.scan(TAPE_1M, now=_now_for(TAPE_1M), invoke_brain=True)
+    incumbent_id = first["campaign_draw_truth"]["record_id"]
+    assert first["campaign_draw_acceptance"]["accepted"] is True
+
+    later = TAPE_1M + _expand_5m(
+        ("03:00", 29459.0, 29490.0, 29450.0, 29460.0))
+    refused = cycle.scan(later, now=_now_for(later), invoke_brain=True)
+    assert len(calls) == 2
+    assert calls[1]["campaign_draw_context"]["record_id"] == incumbent_id
+    assert refused["campaign_draw_acceptance"]["accepted"] is False
+    assert refused["campaign_lifecycle"]["state"] == "AUTHORITY_UNKNOWN"
+    assert "current_campaign_draw_acceptance_refused" in \
+        refused["campaign_lifecycle"]["reason"]
+    with pytest.raises(NoCandidate) as candidate_refusal:
+        _produce_candidate(refused)
+    assert candidate_refusal.value.reason == "campaign_lifecycle_refused"
+    assert cycle.campaign_draw_truth.audit_records[0]["record_id"] == incumbent_id
+
+
+def test_no_brain_scan_advances_incumbent_once_and_accepts_no_generation(
+        tmp_path, monkeypatch):
+    """No-Brain and rebuild lanes stay brainless and never accept a view."""
+    from market_data.campaign_draw_truth import CampaignDrawTruth
+
+    cycle = _cycle(tmp_path, monkeypatch)
+    _scan_prefix(cycle, len(TAPE_1M) - 5)
+    calls = []
+    _mock_current_brain(monkeypatch, calls)
+    first = cycle.scan(TAPE_1M, now=_now_for(TAPE_1M), invoke_brain=True)
+    incumbent_id = first["campaign_draw_truth"]["record_id"]
+    record_count = len(cycle.campaign_draw_truth.audit_records)
+
+    advances = []
+    accepts = []
+    original_advance = CampaignDrawTruth._advance
+    original_accept = CampaignDrawTruth.accept_current_view
+
+    def counted_advance(instance, record, rows, cutoff):
+        if instance is cycle.campaign_draw_truth:
+            advances.append(record.get("record_id"))
+        return original_advance(instance, record, rows, cutoff)
+
+    def counted_accept(instance, **kwargs):
+        if instance is cycle.campaign_draw_truth:
+            accepts.append(True)
+        return original_accept(instance, **kwargs)
+
+    monkeypatch.setattr(CampaignDrawTruth, "_advance", counted_advance)
+    monkeypatch.setattr(CampaignDrawTruth, "accept_current_view", counted_accept)
+    monkeypatch.setenv("BRAIN_ECU_MODE", "false")
+    later = TAPE_1M + _expand_5m(
+        ("03:00", 29459.0, 29490.0, 29450.0, 29460.0))
+    no_brain = cycle.scan(later, now=_now_for(later), invoke_brain=False)
+    assert len(calls) == 1
+    assert advances == [incumbent_id]
+    assert accepts == []
+    assert len(cycle.campaign_draw_truth.audit_records) == record_count
+    assert no_brain["campaign_draw_truth"]["record_id"] == incumbent_id
+
+    revision = cycle._history.revision
+    cycle._rebuild_derived_state(later, revision)
+    assert len(calls) == 1
+    assert accepts == []
+    assert cycle.campaign_draw_truth.audit_records[0]["superseded"] is True
+    assert cycle.campaign_draw_truth.audit_records[0]["record_id"] == incumbent_id
 
 
 def test_non_ecu_input_receives_pre_cognition_draw_and_rebuild_is_brainless(
@@ -648,14 +895,23 @@ def test_real_htf_resweep_is_stable_across_five_minute_scan_occurrences(
         rows = TAPE_1M[:end]
         cycle.scan(rows, now=_now_for(rows), invoke_brain=False)
 
-    # Continue to the established healthy return and prove the retained row
-    # still reaches ECU and the real CandidateProducer after the cadence window.
+    # First judgment stores a Draw but cannot use it for its own permission.
     calls = []
     _mock_current_brain(monkeypatch, calls)
-    scan = cycle.scan(TAPE_1M, now=_now_for(TAPE_1M), invoke_brain=True)
+    first = cycle.scan(TAPE_1M, now=_now_for(TAPE_1M), invoke_brain=True)
     assert len(calls) == 1
     assert any(row.get("tool_family") == "po3_reversal_order_block"
                for row in calls[0].get("authorized_tool_catalog", []))
+    assert first["campaign_lifecycle"]["state"] == "AUTHORITY_UNKNOWN"
+
+    # The persisted Draw is now pre-existing authority on a later healthy scan.
+    later = TAPE_1M + _expand_5m(
+        ("03:00", 29459.0, 29490.0, 29450.0, 29460.0))
+    scan = cycle.scan(later, now=_now_for(later), invoke_brain=True)
+    assert len(calls) == 2
+    assert calls[1]["campaign_draw_context"]["record_id"] == \
+        first["campaign_draw_truth"]["record_id"]
+    assert scan["campaign_lifecycle"]["state"] == "ACTIVE_DELIVERY"
     assert isinstance(_produce_candidate(scan), CandidateSnapshot)
 
 
@@ -713,7 +969,7 @@ def test_real_newer_protected_pivot_replaces_incumbent_lifetime(
 
 def test_changed_anchor_lifetime_cannot_reuse_retained_formation(
         tmp_path, monkeypatch):
-    _, scan, _ = _current_return_scan(tmp_path, monkeypatch)
+    _, scan, _ = _incumbent_return_scan(tmp_path, monkeypatch)
     changed = copy.deepcopy(scan["snapshot"])
     changed["protected_swings"]["by_timeframe"]["lows"]["5m"][
         "registered_at"] = "2026-08-19T02:00:00+00:00"
@@ -727,7 +983,7 @@ def test_changed_anchor_lifetime_cannot_reuse_retained_formation(
 
 def test_wrong_campaign_direction_and_invalid_action_refuse_at_candidate_boundary(
         tmp_path, monkeypatch):
-    _, scan, _ = _current_return_scan(tmp_path, monkeypatch)
+    _, scan, _ = _incumbent_return_scan(tmp_path, monkeypatch)
     wrong_direction = copy.deepcopy(scan["brain_result"])
     wrong_direction["parsed"]["narrative_direction"] = "bearish"
     wrong_direction["parsed"]["allowed_direction"] = "bearish"

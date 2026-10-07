@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import math
 import os
+import copy
 from datetime import datetime, timezone
 
 from ai_brain.brain_input import build_brain_input
@@ -672,16 +673,46 @@ class ProductionScanCycle:
         # prior accepted Draw has already been measured and attached separately
         # as `campaign_draw_context` before this response was authored.
         brain_input = self._brain_input(snapshot)
-        campaign_draw_truth = self._campaign_draw_observation(
-            snapshot, raw_data.get("1m") or [], brain_block, brain_input,
-            invoke_brain=invoke_brain)
+        campaign_draw_acceptance = {}
+        if invoke_brain:
+            # The pre-cognition measurement is the only Draw generation this
+            # scan may use for positive Lifecycle/CandidateProducer authority.
+            # The current response is persisted separately and never advances
+            # that incumbent through this same settled interval again.
+            participation_draw = snapshot.get("campaign_draw_context")
+            if not isinstance(participation_draw, dict):
+                from market_data.campaign_draw_truth import UNKNOWN
+                participation_draw = {
+                    "authority_status": UNKNOWN,
+                    "authority_reason": "pre_cognition_campaign_draw_unavailable",
+                    "coverage_status": "UNKNOWN", "history_complete": False,
+                }
+            campaign_draw_truth = self._campaign_draw_observation(
+                snapshot, raw_data.get("1m") or [], brain_block, brain_input,
+                invoke_brain=True, advance_existing=False,
+                acceptance_outcome=campaign_draw_acceptance)
+            if not campaign_draw_acceptance:
+                campaign_draw_acceptance = None
+        else:
+            # A no-Brain scan has no current accepted view. Preserve its single
+            # established deterministic advancement and do not mint a Draw.
+            campaign_draw_truth = self._campaign_draw_observation(
+                snapshot, raw_data.get("1m") or [], brain_block, brain_input,
+                invoke_brain=False)
+            participation_draw = campaign_draw_truth
+
         snapshot["campaign_draw_truth"] = campaign_draw_truth
+        snapshot["campaign_draw_authority"] = copy.deepcopy(participation_draw)
+        if campaign_draw_acceptance is not None:
+            snapshot["campaign_draw_acceptance"] = copy.deepcopy(
+                campaign_draw_acceptance)
         from market_data.campaign_lifecycle import evaluate_campaign_lifecycle
         campaign_lifecycle = evaluate_campaign_lifecycle(
             snapshot=snapshot,
             brain_output=((brain_block or {}).get("output") or {}),
             narrative_continuity=(brain_block or {}).get("narrative_continuity") or {},
-            campaign_draw=campaign_draw_truth,
+            campaign_draw=participation_draw,
+            current_draw_acceptance=campaign_draw_acceptance,
             session_id=str(getattr(self, "session_id", "") or ""),
             contract_id=str(snapshot.get("contract_id")
                             or getattr(self, "contract_id", "")),
@@ -706,6 +737,8 @@ class ProductionScanCycle:
             "two_brain_shadow": shadow,
             "brain_input": brain_input,
             "campaign_draw_truth": campaign_draw_truth,
+            "campaign_draw_authority": participation_draw,
+            "campaign_draw_acceptance": campaign_draw_acceptance,
             "campaign_lifecycle": campaign_lifecycle,
             "brain_result": self.to_brain_result(brain_block),
             "qualification": snapshot.get("qualification") or {},
@@ -754,8 +787,10 @@ class ProductionScanCycle:
 
     def _campaign_draw_observation(self, snapshot: dict, settled_bars: list,
                                    brain_block: dict, brain_input: dict, *,
-                                   invoke_brain: bool) -> dict:
-        """Advance Draw facts and, after cognition, accept a lawful current view."""
+                                   invoke_brain: bool,
+                                   advance_existing: bool = True,
+                                   acceptance_outcome: dict | None = None) -> dict:
+        """Advance incumbent facts or persist a post-cognition accepted view."""
         from market_data.campaign_draw_truth import UNKNOWN
 
         accepted_view = None
@@ -814,18 +849,43 @@ class ProductionScanCycle:
                 },
             }
 
+        if not advance_existing and accepted_view is None:
+            # A fallback/no-op judgment cannot change the stored Draw. Its
+            # pre-cognition projection remains current for this scan; avoid a
+            # second call into the stateful tracker.
+            prior = snapshot.get("campaign_draw_context")
+            if isinstance(prior, dict):
+                return copy.deepcopy(prior)
+            return {"authority_status": UNKNOWN,
+                    "authority_reason": "pre_cognition_campaign_draw_unavailable",
+                    "coverage_status": "UNKNOWN", "history_complete": False}
+
         state = snapshot.get("derived_state") or {}
+        args = {
+            "settled_bars": settled_bars,
+            "settled_source": ((snapshot.get("settled_source") or {}).get("1m") or {}),
+            "contract_id": str(snapshot.get("contract_id")
+                                or getattr(self, "contract_id", "")),
+            "session_id": str(getattr(self, "session_id", "") or ""),
+            "history_revision": int(state.get("history_revision", 0)),
+            "derived_state_current": bool(state.get("current")),
+            "accepted_view": accepted_view,
+            "ownership_state": snapshot.get("active_path_state"),
+        }
         try:
+            if not advance_existing and isinstance(accepted_view, dict):
+                truth, outcome = self.campaign_draw_truth.accept_current_view(**args)
+                if isinstance(acceptance_outcome, dict):
+                    acceptance_outcome.update(outcome)
+                return truth
             return self.campaign_draw_truth.observe(
-                settled_bars=settled_bars,
-                settled_source=((snapshot.get("settled_source") or {}).get("1m") or {}),
-                contract_id=str(snapshot.get("contract_id") or self.contract_id),
-                session_id=self.session_id,
-                history_revision=int(state.get("history_revision", 0)),
-                derived_state_current=bool(state.get("current")),
-                accepted_view=accepted_view,
-                ownership_state=snapshot.get("active_path_state"))
+                **args, advance_existing=advance_existing)
         except Exception as exc:  # noqa: BLE001 — facts fail closed, scan continues
+            if isinstance(acceptance_outcome, dict):
+                acceptance_outcome.update({
+                    "accepted": False,
+                    "reason": f"campaign_draw_acceptance_error:{type(exc).__name__}",
+                })
             return {"authority_status": UNKNOWN,
                     "authority_reason": f"campaign_draw_truth_error:{type(exc).__name__}",
                     "coverage_status": "UNKNOWN", "history_complete": False,

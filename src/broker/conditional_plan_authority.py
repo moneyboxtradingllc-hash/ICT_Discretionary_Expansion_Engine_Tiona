@@ -214,7 +214,8 @@ def capture(*, scope, candidate, scan, brain_block, brain_result,
     output = (brain_block or {}).get("output")
     parsed = (brain_result or {}).get("parsed")
     lifecycle = snapshot.get("campaign_lifecycle")
-    draw = scan.get("campaign_draw_truth")
+    draw = scan.get("campaign_draw_authority",
+                    scan.get("campaign_draw_truth"))
     extras = candidate.extras or {}
     phase = str((parsed or {}).get("narrative_phase") or "").strip().lower()
     direction = str((parsed or {}).get("narrative_direction") or "").strip().lower()

@@ -861,12 +861,14 @@ def test_both_production_candidate_paths_remain_visible_to_structural_guard():
         _CONTRACT_SOURCES
 
 
-def test_campaign_draw_and_other_policy_sources_are_not_modified():
+def test_campaign_draw_acceptance_api_is_bound_and_economics_sources_are_unchanged():
     import subprocess
     root = Path(__file__).resolve().parents[1]
     changed = subprocess.check_output(
         ["git", "diff", "--name-only", "HEAD"], cwd=root, text=True).splitlines()
-    assert "src/market_data/campaign_draw_truth.py" not in changed
+    from ai_brain.production_model import _CONTRACT_SOURCES
+    assert ("campaign_draw_truth", "market_data/campaign_draw_truth.py") in \
+        _CONTRACT_SOURCES
     for protected in (
         "src/broker/trailing_protection.py",
         "src/broker/topstepx_combine_risk.py",

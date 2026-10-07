@@ -389,7 +389,7 @@ def test_production_calls_pass_current_draw_and_projection_is_fingerprinted():
         keywords = {kw.arg: kw.value for kw in call.keywords}
         assert "campaign_draw" in keywords
         assert ast.unparse(keywords["campaign_draw"]) == \
-            "scan.get('campaign_draw_truth')"
+            "scan.get('campaign_draw_authority', scan.get('campaign_draw_truth'))"
         assert "session_id" in ast.unparse(keywords["campaign_session_id"])
     assert ("trade_horizon", "market_data/trade_horizon.py") in _CONTRACT_SOURCES
     assert ("candidate_producer", "broker/luna_candidate_producer.py") in _CONTRACT_SOURCES
