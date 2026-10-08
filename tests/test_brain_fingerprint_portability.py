@@ -91,7 +91,10 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # STAGE-2 CONSUMER CLOSURE: the ordinary production consumer acts on a
     # permissive Lifecycle only together with the participation authority it
     # was computed from.
-    assert PM.brain_contract_fingerprint() == "brain:f2f0ac4680f7d65e"
+    # STAGE-2 EXACT DRAW BINDING: permissive Lifecycle, the ordinary consumer
+    # and conditional plans bind the exact Draw record and its current
+    # settled measurement, not matching labels.
+    assert PM.brain_contract_fingerprint() == "brain:3b20b31e41cfcad1"
 
 
 @pytest.mark.parametrize("addition", [

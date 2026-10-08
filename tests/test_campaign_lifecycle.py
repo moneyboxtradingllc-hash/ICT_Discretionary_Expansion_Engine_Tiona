@@ -30,6 +30,8 @@ def draw(*, direction="bullish", status="PROVEN_NOT_DELIVERED", **overrides):
         "market_state.active_path", fromlist=["production_session_key"]
     ).production_session_key(stamp(2))
     value = {
+        # Every public Draw record carries its stable generation identity.
+        "record_id": "record-1",
         "process_authority": "CURRENT_PROCESS_ONLY",
         "session_id": SESSION,
         "market_session": market_session,

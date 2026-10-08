@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import math
 
+from market_data.campaign_draw_truth import (
+    current_participation_measurement, participation_binding)
+
 UNESTABLISHED = "UNESTABLISHED"
 ESTABLISHING = "ESTABLISHING"
 ACTIVE_DELIVERY = "ACTIVE_DELIVERY"
@@ -47,6 +50,10 @@ def _result(state, reason, *, direction=None, draw=None, control_state=None,
         "campaign_episode_id": draw.get("campaign_episode_id"),
         "objective_identity": draw.get("objective_identity"),
         "campaign_draw_status": draw.get("authority_status"),
+        # The exact Draw generation and measurement this assessment was judged
+        # on. A consumer may act on a permissive assessment only with a Draw
+        # whose binding is identical -- never one that merely shares labels.
+        "campaign_draw_binding": participation_binding(draw),
         "narrative_control_state": control_state,
         "narrative_phase": phase,
     }
@@ -286,6 +293,19 @@ def evaluate_campaign_lifecycle(*, snapshot, brain_output,
                        direction=direction, draw=draw, control_state=control,
                        phase=phase or None)
 
+    # A positive Draw may permit participation only as the CURRENT measurement
+    # of its exact generation: settled evidence strictly beyond the birth
+    # anchor, cut off at this snapshot's own settled bar, in this session,
+    # contract and history revision. A birth-scan (or any older) measurement
+    # restates a judgment; it is not current market evidence. Refusal-only.
+    measured, unmeasured_reason = current_participation_measurement(
+        draw, current_cutoff=snap.get("timestamp"), session_id=session_id,
+        contract_id=contract_id, history_revision=history_revision)
+    if not measured:
+        return _result(AUTHORITY_UNKNOWN, unmeasured_reason,
+                       direction=direction, draw=draw, control_state=control,
+                       phase=phase or None)
+
     # A current response whose accepted Draw view failed deterministic
     # acceptance may not participate using an otherwise lawful incumbent.
     # This is a refusal-only condition; it never creates Draw evidence or a
@@ -334,33 +354,38 @@ def evaluate_campaign_lifecycle(*, snapshot, brain_output,
                    phase=phase or None)
 
 
-def participation_authority_bound(assessment: dict, campaign_draw) -> tuple[bool, str | None]:
+def participation_authority_bound(assessment: dict, campaign_draw, *, snapshot,
+                                  session_id, contract_id) -> tuple[bool, str | None]:
     """May a consumer act on this permissive assessment with THIS Draw authority?
 
     A Lifecycle assessment is a projection of exactly one Campaign Draw
-    participation authority. A consumer holding a permissive assessment but an
-    absent, non-dictionary, withheld, non-positive, or differently-identified
-    authority holds two facts that do not belong together; it must refuse
-    rather than trust the assessment alone. Stateless and refusal-only: a
-    non-permissive assessment passes through, because it already refuses.
+    generation measured at one settled cutoff. A consumer holding a permissive
+    assessment may act only when the Draw it will hand onward is (1) the
+    current measurement of a positive generation in the consumer's own session,
+    contract, history revision and settled cutoff, strictly beyond the birth
+    anchor, and (2) byte-for-byte the generation and measurement the assessment
+    was judged on. Matching labels -- episode, objective, status -- are not
+    enough: a different record or a stale birth measurement can carry them.
+    Stateless and refusal-only: a non-permissive assessment passes through,
+    because it already refuses.
     """
     result = assessment if isinstance(assessment, dict) else {}
     if result.get("participation_permitted") is not True:
         return True, None
-    if not isinstance(campaign_draw, dict):
-        return False, "campaign_draw_participation_authority_unavailable"
-    withheld = str(campaign_draw.get("participation_withheld_reason") or "").strip()
-    if withheld:
-        return False, f"campaign_draw_participation_withheld:{withheld}"
-    if (campaign_draw.get("authority_status") != "PROVEN_NOT_DELIVERED"
-            or campaign_draw.get("superseded") is not False):
-        return False, "campaign_draw_participation_authority_not_positive"
-    episode = str(campaign_draw.get("campaign_episode_id") or "").strip()
-    identity = str(campaign_draw.get("objective_identity") or "").strip()
-    if (not episode or not identity
-            or result.get("campaign_episode_id") != episode
-            or result.get("objective_identity") != identity
-            or result.get("campaign_draw_status") != campaign_draw.get("authority_status")):
+    snap = snapshot if isinstance(snapshot, dict) else {}
+    measured, unmeasured_reason = current_participation_measurement(
+        campaign_draw, current_cutoff=snap.get("timestamp"),
+        session_id=session_id, contract_id=contract_id,
+        history_revision=(snap.get("derived_state") or {}).get("history_revision"))
+    if not measured:
+        return False, unmeasured_reason
+    binding = participation_binding(campaign_draw)
+    if (binding is None
+            or result.get("campaign_draw_binding") != binding
+            or result.get("campaign_episode_id") != campaign_draw.get("campaign_episode_id")
+            or result.get("objective_identity") != campaign_draw.get("objective_identity")
+            or result.get("campaign_draw_status") != campaign_draw.get("authority_status")
+            or result.get("authorized_direction") != campaign_draw.get("campaign_direction")):
         return False, "campaign_lifecycle_not_bound_to_participation_authority"
     return True, None
 

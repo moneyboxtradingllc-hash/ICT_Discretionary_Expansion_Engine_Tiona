@@ -141,7 +141,13 @@ def test_verified_reversal_watch_plan_reaches_real_no_brain_trigger():
              "low": 29862.0, "close": 29863.0, "volume": 10,
              "contract": contract, "members": 1, "expected_members": 1,
              "complete": True} for minute in (28, 29, 30)]
+    # The Draw is accepted on the prior scan; this planning scan holds its
+    # measurement one settled minute beyond that birth anchor.
+    born = observe_draw(bars[:-1])
+    assert born["settled_cutoff"] == born["anchor_bar_time"]
     draw = observe_draw(bars)
+    assert draw["record_id"] == born["record_id"]
+    assert draw["settled_cutoff"] == bars[-1]["timestamp"] == now.isoformat()
     assert draw["authority_status"] == "PROVEN_NOT_DELIVERED"
     assert draw["campaign_direction"] == "bearish"
     snapshot["settled_source"] = {"1m": {

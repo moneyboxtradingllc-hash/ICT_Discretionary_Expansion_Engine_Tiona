@@ -176,6 +176,10 @@ class Cycle:
         self.output = parsed() if output is None else output
         self.bi = bi or brain_input()
         self.scans = 0
+        # The real cycle's process scope. The ordinary consumer binds the
+        # Draw it acts on to exactly this session and the loop's contract.
+        self.session_id = "fake-cycle-session"
+        self.contract_id = CID
 
     def scan(self, bars, now=None, deep_1m=None):
         # LUNA-CROSS-SESSION-PO3-CONTEXT-1: the production seam is
@@ -206,15 +210,32 @@ class Cycle:
             }, "session": "20260806"}
         # A real scan's permissive Lifecycle is always the projection of the
         # Campaign Draw participation authority it publishes beside it, and the
-        # ordinary ProductionLoop consumer now refuses one without the other.
-        # The double therefore carries a bound, prior-generation authority.
+        # ordinary ProductionLoop consumer refuses one without the other. The
+        # double therefore carries the exact shape a real scan publishes: a
+        # prior-generation record measured at THIS snapshot's settled cutoff
+        # (strictly after its birth anchor), in this session and contract.
+        from market_data.campaign_draw_truth import participation_binding
+        cutoff = "2026-08-06T14:59:00+00:00"
         participation_draw = {
+            "record_id": "fake-cycle-record",
             "authority_status": "PROVEN_NOT_DELIVERED", "superseded": False,
             "process_authority": "CURRENT_PROCESS_ONLY",
+            "session_id": self.session_id, "market_session": "20260806",
+            "contract_id": self.contract_id,
             "campaign_episode_id": "fake-cycle-episode",
             "objective_identity": "opposing_external_liquidity:fake-cycle",
+            "objective_kind": "opposing_external_liquidity",
+            "objective_price": 29940.0 if direction == "bullish" else 29820.0,
+            "anchor_bar_time": "2026-08-06T14:30:00+00:00",
+            "anchor_bar_close": 29880.0,
+            "anchor_price_basis": "settled_1m_source_bar_close",
+            "history_revision": 0, "settled_cutoff": cutoff,
+            "history_complete": True, "coverage_status": "COMPLETE",
+            "progress_authoritative": True,
             "campaign_direction": direction}
-        snapshot = {"timestamp": "2026-08-06T14:59:00+00:00",
+        snapshot = {"timestamp": cutoff,
+                    "derived_state": {"history_revision": 0, "derived_revision": 0,
+                                      "current": True},
                     "active_path_state": active_path,
                     # ProductionScanCycle now publishes this additional gate
                     # after cognition. This fake scan models an otherwise valid
@@ -227,6 +248,7 @@ class Cycle:
                         "campaign_episode_id": participation_draw["campaign_episode_id"],
                         "objective_identity": participation_draw["objective_identity"],
                         "campaign_draw_status": participation_draw["authority_status"],
+                        "campaign_draw_binding": participation_binding(participation_draw),
                     },
                     "market": {"high_since": 29882.0, "low_since": 29878.0},
                     "qualification": {"qualified": True},

@@ -1175,12 +1175,16 @@ class ProductionLoop:
         try:
             # THE ORDINARY CONSUMER BINDING. CandidateProducer's Lifecycle gate
             # reads the snapshot's assessment; that assessment may be acted on
-            # only together with the explicit participation authority it was
-            # computed from. Absent, withheld, UNKNOWN or differently-identified
-            # authority refuses here, before any candidate, mission or token.
+            # only together with the exact Draw generation and current
+            # measurement it was computed from, in this loop's own session and
+            # contract. Absent, withheld, UNKNOWN, stale (birth-cutoff), other-
+            # record or other-scope authority refuses here, before any
+            # candidate, mission or token.
             bound, unbound_reason = participation_authority_bound(
                 (scan.get("snapshot") or {}).get("campaign_lifecycle"),
-                participation_draw)
+                participation_draw, snapshot=scan.get("snapshot") or {},
+                session_id=str(getattr(self.cycle, "session_id", "") or ""),
+                contract_id=str(self.ps.contract.id))
             if not bound:
                 raise NoCandidate("campaign_lifecycle_refused", unbound_reason)
             candidate = self.producer.produce(

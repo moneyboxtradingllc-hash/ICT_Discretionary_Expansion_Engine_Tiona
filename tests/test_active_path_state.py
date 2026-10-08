@@ -608,20 +608,42 @@ def test_real_continuity_accepts_fresh_same_direction_successor_then_rechecks(di
     assert held["current_action"] == "propose_entry"
     assert guard is None
 
-    lifecycle_snapshot = dict(successor)
-    lifecycle_snapshot["settled_source"] = {
+    def lifecycle_at(measured):
+        # Production snapshots carry the settled cutoff they were built from as
+        # `timestamp`; Lifecycle binds the Draw measurement to exactly that.
+        lifecycle_snapshot = dict(successor)
+        lifecycle_snapshot["timestamp"] = measured["settled_cutoff"]
+        lifecycle_snapshot["settled_source"] = {
+            **successor["settled_source"],
+            "1m": {"source_bar_time": measured["settled_cutoff"],
+                   "temporal_status": "settled"}}
+        return evaluate_campaign_lifecycle(
+            snapshot=lifecycle_snapshot,
+            brain_output={"narrative_direction": direction,
+                          "narrative_phase": phase},
+            narrative_continuity=accepted, campaign_draw=measured,
+            session_id=draw_session, contract_id=CONTRACT,
+            brain_authority_available=True)
+
+    # The newborn's birth measurement restates the judgment that minted it; it
+    # is not settled market evidence and cannot permit participation.
+    assert new_draw["settled_cutoff"] == new_draw["anchor_bar_time"]
+    born = lifecycle_at(new_draw)
+    assert born["state"] == "AUTHORITY_UNKNOWN"
+    assert born["reason"] == "campaign_draw_not_measured_beyond_birth_anchor"
+    # One newer settled minute measures the SAME generation beyond its birth.
+    next_minute = (datetime.fromisoformat(new_draw["settled_cutoff"])
+                   + timedelta(minutes=1)).isoformat()
+    measured_draw = observe_draw({**successor, "settled_source": {
         **successor["settled_source"],
-        "1m": {"source_bar_time": new_draw["settled_cutoff"],
-               "temporal_status": "settled"}}
-    lifecycle = evaluate_campaign_lifecycle(
-        snapshot=lifecycle_snapshot,
-        brain_output={"narrative_direction": direction,
-                      "narrative_phase": phase},
-        narrative_continuity=accepted, campaign_draw=new_draw,
-        session_id=draw_session, contract_id=CONTRACT,
-        brain_authority_available=True)
+        "1m": {"source_bar_time": next_minute, "temporal_status": "settled"}}})
+    assert measured_draw["record_id"] == new_draw["record_id"]
+    assert measured_draw["authority_status"] == "PROVEN_NOT_DELIVERED"
+    assert measured_draw["settled_cutoff"] == next_minute
+    lifecycle = lifecycle_at(measured_draw)
     assert lifecycle["state"] == expected_lifecycle
     assert lifecycle["campaign_episode_id"] == new_draw["campaign_episode_id"]
+    assert lifecycle["campaign_draw_binding"]["record_id"] == new_draw["record_id"]
 
     # Exercise the real CandidateProducer after the full ActivePath -> continuity
     # -> public Draw -> Lifecycle chain. Its other market facts and venue-facing
@@ -638,7 +660,7 @@ def test_real_continuity_accepts_fresh_same_direction_successor_then_rechecks(di
         allow_prose_objective_fallback=True,
         allow_numeric_invalidation_fallback=True)
     scan_timestamp = successor["timestamp"]
-    latest_bar = new_draw["settled_cutoff"]
+    latest_bar = measured_draw["settled_cutoff"]
     entry = 100.0
     stop = 99.0 if direction == "bullish" else 101.0
     brain_input = {
@@ -693,7 +715,7 @@ def test_real_continuity_accepts_fresh_same_direction_successor_then_rechecks(di
         snapshot_id="same-direction-successor-scan",
         market_data_timestamp=scan_timestamp,
         latest_closed_bar_timestamp=latest_bar, now=datetime.fromisoformat(scan_timestamp),
-        require_campaign_lifecycle=True, campaign_draw=new_draw,
+        require_campaign_lifecycle=True, campaign_draw=measured_draw,
         campaign_session_id=draw_session)
     assert candidate.direction == direction
     memory.record(successor["timestamp"], {

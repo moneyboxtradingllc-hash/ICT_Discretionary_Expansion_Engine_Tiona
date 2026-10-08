@@ -119,9 +119,15 @@ def _invalidation(value):
 
 
 def _draw_identity(draw):
+    """The plan's stable Draw GENERATION identity.
+
+    `record_id` names the exact generation; `settled_cutoff` is deliberately
+    absent because a lawful trigger is measured later than its planning scan.
+    Currency of the trigger's own measurement is checked separately.
+    """
     if not isinstance(draw, dict):
         return None
-    keys = ("process_authority", "superseded", "authority_status",
+    keys = ("record_id", "process_authority", "superseded", "authority_status",
             "campaign_episode_id", "session_id", "market_session", "contract_id",
             "campaign_direction", "objective_identity", "objective_kind",
             "objective_price", "anchor_bar_time", "anchor_bar_close",
@@ -129,7 +135,8 @@ def _draw_identity(draw):
             "coverage_status", "progress_authoritative",
             "active_path_last_invalidated")
     result = {key: draw.get(key) for key in keys}
-    if (draw.get("process_authority") != "CURRENT_PROCESS_ONLY"
+    if (not str(draw.get("record_id") or "").strip()
+            or draw.get("process_authority") != "CURRENT_PROCESS_ONLY"
             or draw.get("superseded") is not False
             or draw.get("authority_status") != "PROVEN_NOT_DELIVERED"
             or not draw.get("campaign_episode_id")
@@ -208,6 +215,7 @@ def capture(*, scope, candidate, scan, brain_block, brain_result,
     """Mint only from the real, validated plan-publication boundary."""
     from ai_brain.production_model import brain_contract_fingerprint
     from live_scan.production_scan_cycle import ProductionScanCycle
+    from market_data.campaign_draw_truth import current_participation_measurement
     from market_data.campaign_lifecycle import evaluate_campaign_lifecycle
 
     snapshot = (scan or {}).get("snapshot") or {}
@@ -252,6 +260,13 @@ def capture(*, scope, candidate, scan, brain_block, brain_result,
             or lifecycle.get("campaign_draw_status") != "PROVEN_NOT_DELIVERED"):
         raise ValueError("conditional_plan_authoring_authority_invalid")
     draw_id = _draw_identity(draw)
+    measured, unmeasured_reason = current_participation_measurement(
+        draw, current_cutoff=snapshot.get("timestamp"),
+        session_id=process_session_id, contract_id=candidate.contract_id,
+        history_revision=(snapshot.get("derived_state") or {}).get("history_revision"))
+    if not measured:
+        raise ValueError(
+            f"conditional_plan_draw_measurement_not_current:{unmeasured_reason}")
     reproduced_lifecycle = evaluate_campaign_lifecycle(
         snapshot=snapshot, brain_output=parsed,
         narrative_continuity=authored_continuity, campaign_draw=draw,
@@ -360,6 +375,7 @@ def validate(*, authority, scope, candidate, candidate_at_trigger,
     from ai_brain.production_model import brain_contract_fingerprint
     from broker.topstepx_candidate_freshness import CandidateSnapshot
     from live_scan.production_scan_cycle import ProductionScanCycle
+    from market_data.campaign_draw_truth import current_participation_measurement
     from market_data.campaign_lifecycle import evaluate_campaign_lifecycle
 
     def refuse(reason):
@@ -424,6 +440,15 @@ def validate(*, authority, scope, candidate, candidate_at_trigger,
     draw_id = _draw_identity(draw)
     if draw_id is None or draw_id != bound.get("draw"):
         return refuse("conditional_plan_campaign_draw_changed_or_unavailable")
+    # Same generation is necessary, not sufficient: the trigger must hold that
+    # generation's CURRENT measurement (beyond birth, at this snapshot's own
+    # settled cutoff). It need not equal the planning scan's cutoff.
+    measured, unmeasured_reason = current_participation_measurement(
+        draw, current_cutoff=snap.get("timestamp"), session_id=session_id,
+        contract_id=contract_id, history_revision=revision)
+    if not measured:
+        return refuse(
+            f"conditional_plan_draw_measurement_not_current:{unmeasured_reason}")
     current_path = _public_path(snap)
     if current_path is None or current_path != bound.get("active_path"):
         return refuse("conditional_plan_active_path_lineage_changed")

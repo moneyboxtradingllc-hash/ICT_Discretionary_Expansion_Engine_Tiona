@@ -414,6 +414,8 @@ def test_healthy_cutoff_and_obstacle_evidence_changes_do_not_invalidate_plan(
     draw["settled_cutoff"] = (
         datetime.fromisoformat(draw["settled_cutoff"])
         + timedelta(minutes=1)).isoformat()
+    # A later trigger scan's snapshot is cut at its own settled bar.
+    snapshot["timestamp"] = draw["settled_cutoff"]
     candidate.extras["trade_horizon"]["protected_structure"] = {
         "status": "AVAILABLE", "reason": None,
         "witnesses": [{"timeframe": "5m", "price": 29864.0}],
@@ -470,6 +472,8 @@ def test_real_production_loop_trigger_passes_sealed_plan_without_brain_call(
     draw["settled_cutoff"] = (
         datetime.fromisoformat(draw["settled_cutoff"])
         + timedelta(minutes=1)).isoformat()
+    # A later trigger scan's snapshot is cut at its own settled bar.
+    snapshot["timestamp"] = draw["settled_cutoff"]
     trigger_block = {"source": "preauthorized_plan_trigger", "output": None,
                      "fallback_reason": None}
     scan = {

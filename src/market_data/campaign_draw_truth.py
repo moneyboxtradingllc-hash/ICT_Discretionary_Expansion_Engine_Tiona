@@ -68,6 +68,87 @@ def withheld_participation_authority(reason: str, measured: dict | None = None) 
     return out
 
 
+# EXACT BINDING. A participation decision rests on ONE Draw generation (stable
+# for the record's life) measured at ONE settled cutoff (advances every healthy
+# scan). Matching labels -- episode, objective, status -- is not enough: a
+# different record, or the same record's stale birth measurement, can carry
+# them. Consumers compare these exact fields, never re-derive them.
+_GENERATION_FIELDS = (
+    "record_id", "process_authority", "session_id", "market_session",
+    "contract_id", "campaign_direction", "campaign_episode_id",
+    "objective_identity", "objective_kind", "objective_price",
+    "anchor_bar_time", "anchor_bar_close", "anchor_price_basis",
+    "history_revision")
+_MEASUREMENT_FIELDS = (
+    "settled_cutoff", "authority_status", "superseded", "history_complete",
+    "coverage_status", "progress_authoritative")
+
+
+def participation_binding(draw) -> dict | None:
+    """Exact generation identity plus the measurement it was judged on."""
+    if not isinstance(draw, dict) or not draw.get("record_id"):
+        return None
+    return {key: copy.deepcopy(draw.get(key))
+            for key in _GENERATION_FIELDS + _MEASUREMENT_FIELDS}
+
+
+def _settled_instant(value):
+    try:
+        return datetime.fromisoformat(canonical_instant(value, strict=True))
+    except Exception:  # noqa: BLE001 -- unprovable chronology is not authority
+        return None
+
+
+def current_participation_measurement(draw, *, current_cutoff, session_id,
+                                      contract_id, history_revision) -> tuple[bool, str | None]:
+    """Is this the lawful CURRENT measurement of a positive Draw generation?
+
+    `current_cutoff` is the consumer's own current-scan settled evidence (the
+    snapshot's settled bar time), never the Draw's word for itself. Positive
+    authority requires a complete measurement strictly beyond the birth anchor
+    whose cutoff IS the current scan's, in the consumer's session, contract and
+    history revision. Refusal-only; it never creates or advances a Draw.
+    """
+    if not isinstance(draw, dict):
+        return False, "campaign_draw_participation_authority_unavailable"
+    withheld = str(draw.get("participation_withheld_reason") or "").strip()
+    if withheld:
+        return False, f"campaign_draw_participation_withheld:{withheld}"
+    if (draw.get("authority_status") != PROVEN_NOT_DELIVERED
+            or draw.get("superseded") is not False):
+        return False, "campaign_draw_participation_authority_not_positive"
+    if (draw.get("process_authority") != "CURRENT_PROCESS_ONLY"
+            or not str(draw.get("record_id") or "").strip()
+            or not str(draw.get("campaign_episode_id") or "").strip()
+            or not str(draw.get("objective_identity") or "").strip()):
+        return False, "campaign_draw_generation_identity_incomplete"
+    session = str(session_id or "").strip()
+    contract = str(contract_id or "").strip()
+    if (not session or draw.get("session_id") != session
+            or not contract or draw.get("contract_id") != contract):
+        return False, "campaign_draw_scope_mismatch"
+    revision = draw.get("history_revision")
+    if (isinstance(revision, bool) or not isinstance(revision, int)
+            or isinstance(history_revision, bool)
+            or not isinstance(history_revision, int)
+            or revision != history_revision):
+        return False, "campaign_draw_history_revision_mismatch"
+    if (draw.get("history_complete") is not True
+            or draw.get("coverage_status") != "COMPLETE"
+            or draw.get("progress_authoritative") is not True):
+        return False, "campaign_draw_measurement_coverage_incomplete"
+    anchor = _settled_instant(draw.get("anchor_bar_time"))
+    cutoff = _settled_instant(draw.get("settled_cutoff"))
+    current = _settled_instant(current_cutoff)
+    if anchor is None or cutoff is None or current is None:
+        return False, "campaign_draw_measurement_chronology_unavailable"
+    if not cutoff > anchor:
+        return False, PARTICIPATION_WITHHELD_UNMEASURED
+    if cutoff != current:
+        return False, "campaign_draw_measurement_not_current"
+    return True, None
+
+
 def scan_participation_authority(scan) -> dict:
     """The only Draw a scan result may lend to a participation decision.
 
