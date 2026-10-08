@@ -597,9 +597,10 @@ class TestStrategyUntouched:
         # the canonical contract closure.
         # STAGE-3B-1A changes which stance history may supply the incumbent;
         # 3B-1A-R1 quarantines malformed retained rows one by one; 3B-1B
-        # separates active-leg labels from campaign falsification.
+        # separates active-leg labels from campaign falsification; 3C-1 adds
+        # the authority-free shadow premise facts to the closure.
         from ai_brain.production_model import brain_contract_fingerprint
-        assert brain_contract_fingerprint() == "brain:b9854157c5bae723"
+        assert brain_contract_fingerprint() == "brain:a43d86dae97d71ff"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.

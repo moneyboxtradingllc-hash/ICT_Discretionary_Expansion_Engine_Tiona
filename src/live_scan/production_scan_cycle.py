@@ -172,6 +172,10 @@ class ProductionScanCycle:
         # cannot restore it.
         from market_data.reversal_formation import ReversalFormationCustody
         self.reversal_formation_custody = ReversalFormationCustody()
+        # STAGE 3C-1. Shadow premise facts (authority "none"). Process-local
+        # and candle-derived; no authority consumer reads it.
+        from market_data.campaign_premise import CampaignPremiseShadow
+        self.campaign_premise_shadow = CampaignPremiseShadow()
 
     # ── candle-derived state, re-derived from repaired history ────────────────
     #
@@ -224,6 +228,9 @@ class ProductionScanCycle:
         # likewise disposable intermediate evidence.
         "reversal_formation_custody",
         "last_active_path_occurrences",
+        # STAGE 3C-1. Survival certificates are measured from the exact settled
+        # tape; a revised tape retires them. Production retains no chains.
+        "campaign_premise_shadow",
     )
 
     #: NOT rebuilt, and why. Recorded so the exclusion is a decision rather than
@@ -329,6 +336,10 @@ class ProductionScanCycle:
         self.campaign_draw_truth = CampaignDrawTruth(
             contract_id=self.contract_id, session_id=self.session_id,
             instrument=self.symbol, audit_records=draw_audit)
+        # STAGE 3C-1. Shadow facts from the superseded tape are dropped even if
+        # the rebuild below cannot complete.
+        from market_data.campaign_premise import CampaignPremiseShadow
+        self.campaign_premise_shadow = CampaignPremiseShadow()
         # A rebuild that DERIVES NOTHING must never claim currency. Below the
         # confirmation lookback the replay loop simply does not execute, so
         # without this the method would return ok on an empty tape and open the
@@ -574,6 +585,8 @@ class ProductionScanCycle:
             current_snapshot["active_path_state"] = self._update_active_path(
                 current_snapshot)
             self._attach_reversal_formation(current_snapshot, raw_data)
+            current_snapshot["campaign_premise_shadow"] = (
+                self._advance_campaign_premise_shadow(current_snapshot, raw_data))
             current_snapshot["campaign_draw_context"] = (
                 self._advance_existing_campaign_draw(
                     current_snapshot, raw_data.get("1m") or []))
@@ -613,6 +626,8 @@ class ProductionScanCycle:
             self.last_occurrence_writes = self._record_sweep_occurrences(snapshot)
             snapshot["active_path_state"] = self._update_active_path(snapshot)
             self._attach_reversal_formation(snapshot, raw_data)
+            snapshot["campaign_premise_shadow"] = (
+                self._advance_campaign_premise_shadow(snapshot, raw_data))
 
         # The non-ECU route builds its current producer facts after
         # build_snapshot. Advance the old accepted Draw now, before the one
@@ -1364,6 +1379,41 @@ class ProductionScanCycle:
             from market_state.active_path import ActivePath as _AP
             return _AP().state(available=False,
                                unavailable_reason=f"error:{type(exc).__name__}")
+
+    def _advance_campaign_premise_shadow(self, snapshot: dict, raw_data: dict) -> dict:
+        """STAGE 3C-1: detached shadow premise facts, authority "none".
+
+        Advanced exactly once per scan, before cognition, from this scan's own
+        settled 1m series, ledger rows and protected-swing state. Nothing reads
+        the result: a failure attaches UNAVAILABLE and changes no other verdict.
+        """
+        from market_data import campaign_premise as _CP
+        timestamp = (snapshot or {}).get("timestamp")
+        try:
+            from market_state.active_path import production_session_key
+            session = production_session_key(timestamp)
+            if not self.derived_state_is_current():
+                return _CP.unavailable(
+                    reason="derived_history_not_current", cutoff=timestamp,
+                    history_revision=self._history.revision,
+                    contract_id=self.contract_id, market_session=session)
+            ledger = self.occurrence_ledger
+            status = (ledger.health().get("status") if ledger is not None
+                      else self.occurrence_ledger_status)
+            if ledger is None or status != _OL_HEALTHY:
+                return _CP.unavailable(
+                    reason=f"ledger:{status}", cutoff=timestamp,
+                    history_revision=self._history.revision,
+                    contract_id=self.contract_id, market_session=session)
+            return self.campaign_premise_shadow.advance(
+                snapshot=snapshot, settled_1m=(raw_data or {}).get("1m") or [],
+                ledger_rows=ledger.occurrences(),
+                history_revision=self._history.revision,
+                contract_id=self.contract_id, market_session=session,
+                cutoff=timestamp)
+        except Exception as exc:  # noqa: BLE001 -- shadow facts never cost a scan
+            return _CP.unavailable(reason=f"shadow_error:{type(exc).__name__}",
+                                   cutoff=timestamp, contract_id=self.contract_id)
 
     def _record_sweep_occurrences(self, snapshot: dict) -> list:
         """Persist every sweep this scan observed. THE ONLY PRODUCTION WRITER.

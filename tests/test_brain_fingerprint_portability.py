@@ -34,7 +34,7 @@ def source_bytes(monkeypatch):
 
 @pytest.mark.parametrize("style", ["lf", "crlf", "mixed_files", "mixed_lines"])
 def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
-    assert len(source_bytes) == 46
+    assert len(source_bytes) == 47
     for index, (path, data) in enumerate(source_bytes.items()):
         if style == "crlf" or (style == "mixed_files" and index % 2):
             source_bytes[path] = data.replace(b"\n", b"\r\n")
@@ -100,7 +100,8 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # can no longer suppress the healthy incumbent or revision marking.
     # STAGE-3B-1B: local active-leg evidence is published under leg names and
     # the unbound campaign premise as UNKNOWN; prompt field doctrine updated.
-    assert PM.brain_contract_fingerprint() == "brain:b9854157c5bae723"
+    # STAGE-3C-1: shadow premise facts (authority none) join the closure.
+    assert PM.brain_contract_fingerprint() == "brain:a43d86dae97d71ff"
 
 
 @pytest.mark.parametrize("addition", [

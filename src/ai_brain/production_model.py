@@ -308,6 +308,10 @@ _CONTRACT_SOURCES = (
     # production quote before authorization is minted.
     ("conditional_final_quote", "broker/topstepx_execution_runner.py"),
     ("conditional_runner_context", "broker/topstepx_production_session.py"),
+    # STAGE 3C-1. Shadow premise facts computed inside the bound scan cycle.
+    # Authority "none" today; bound so a later consumer cannot inherit an
+    # unfingerprinted change to how survival is measured.
+    ("campaign_premise", "market_data/campaign_premise.py"),
 )
 
 #: REPO-ROOT-RELATIVE closure. Same contract, different anchor.

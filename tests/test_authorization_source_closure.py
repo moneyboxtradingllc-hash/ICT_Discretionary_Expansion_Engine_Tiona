@@ -146,6 +146,8 @@ MUST_BE_BOUND = {
         "process-local retained reversal formation revalidated against settled history and exact anchor life",
     "broker/conditional_plan_authority.py":
         "process-local validation that binds historical watching judgment to current causal truth",
+    "market_data/campaign_premise.py":
+        "shadow life inventory and survival certificates measured inside the bound scan cycle",
     "broker/topstepx_execution_runner.py":
         "final conditional quote remains inside the exact Brain-authorized zone before minting",
     "broker/topstepx_production_session.py":
