@@ -96,7 +96,9 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # settled measurement, not matching labels.
     # STAGE-3B-1A COGNITIVE HISTORY HYGIENE: only proved stance rows supply the
     # incumbent, and ECU cognition reads the cycle-owned custody (ecu.py bound).
-    assert PM.brain_contract_fingerprint() == "brain:19c187bac48cdada"
+    # STAGE-3B-1A-R1: a malformed retained row is withheld individually and
+    # can no longer suppress the healthy incumbent or revision marking.
+    assert PM.brain_contract_fingerprint() == "brain:10e1919f5c393701"
 
 
 @pytest.mark.parametrize("addition", [

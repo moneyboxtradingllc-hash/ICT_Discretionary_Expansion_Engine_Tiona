@@ -113,13 +113,16 @@ class StanceMemory:
             return LEGACY_SCHEMA
         lineage = row.get("history_lineage")
         cutoff = _settled_instant(row.get("recorded_at_cutoff"))
-        if (not isinstance(lineage, dict) or not lineage.get("custody")
+        if (not isinstance(lineage, dict)
+                or not isinstance(lineage.get("custody"), str)
+                or not lineage.get("custody")
                 or not _is_int(lineage.get("history_revision"))
                 or not _is_int(lineage.get("sequence"))
                 or cutoff is None
                 or not all(isinstance(row.get(k), str) and row.get(k)
                            for k in ("contract_id", "market_session",
-                                     "process_session_id"))):
+                                     "process_session_id"))
+                or not _consumed_fields_well_formed(row, cutoff)):
             return MALFORMED_SCOPE
         if row.get("superseded_by_history_revision") is not None:
             return SUPERSEDED_HISTORY_REVISION
@@ -143,12 +146,19 @@ class StanceMemory:
             return FUTURE_DATED
         return None
 
+    def _safe_withheld_reason(self, row, current) -> "str | None":
+        """One bad row is one withheld row; it never fails the whole read."""
+        try:
+            return self._withheld_reason(row, current)
+        except Exception:  # noqa: BLE001
+            return MALFORMED_SCOPE
+
     def _partition(self, snapshot):
         """(eligible rows in canonical order, withheld [(index, row, reason)])."""
         current = self._current_scope(snapshot)
         eligible, withheld = [], []
         for index, row in enumerate(self._buf):
-            reason = self._withheld_reason(row, current)
+            reason = self._safe_withheld_reason(row, current)
             if reason is None:
                 eligible.append(row)
             else:
@@ -163,7 +173,14 @@ class StanceMemory:
             path = _stance_path()
             if os.path.exists(path):
                 data = json.load(open(path, encoding="utf-8"))
-                self._buf = data.get("buf", [])[-self._max:]
+                # STAGE-3B-1A-R1: a parseable but malformed container is kept
+                # as ONE retained malformed element -- quarantined like any
+                # other bad row, never dropped or reset (the next save writes
+                # it back inside a list).
+                if not isinstance(data, dict):
+                    data = {"buf": [data]}
+                buf = data.get("buf", [])
+                self._buf = (buf if isinstance(buf, list) else [buf])[-self._max:]
                 self._thesis_anchor = data.get("thesis_anchor")
         except Exception:  # noqa: BLE001
             self._buf, self._thesis_anchor = [], None
@@ -253,7 +270,8 @@ class StanceMemory:
                 eligible, _withheld, _current = self._partition(snapshot)
                 prev_dir = eligible[-1]["direction"] if eligible else None
             else:
-                prev_dir = self._buf[-1]["direction"] if self._buf else None
+                prev = self._buf[-1] if self._buf else None
+                prev_dir = prev.get("direction") if isinstance(prev, dict) else None
             # The stored row never aliases the transported input it was built from.
             entry = copy.deepcopy(entry)
             if entry["direction"] != prev_dir:
@@ -371,7 +389,7 @@ class StanceMemory:
         stored = self._thesis_anchor
         if (start == 0 and isinstance(stored, dict)
                 and stored.get("direction") == direction
-                and self._withheld_reason(stored, current) is None
+                and self._safe_withheld_reason(stored, current) is None
                 and (_instant_key(stored["recorded_at_cutoff"]),
                      stored["history_lineage"]["sequence"])
                 <= (_instant_key(run_start["recorded_at_cutoff"]),
@@ -396,25 +414,32 @@ class StanceMemory:
     def supersede(self, revision: int, note: str = "") -> dict:
         """Mark every stance recorded so far as predating `revision`."""
         try:
-            marked = 0
+            marked = not_markable = 0
             for entry in self._buf:
+                # STAGE-3B-1A-R1: a non-object element cannot carry a mark and
+                # is never eligible anyway; it must not stop the valid rows
+                # after it from being marked and persisted.
+                if not isinstance(entry, dict):
+                    not_markable += 1
+                    continue
                 if entry.get("superseded_by_history_revision") is None:
                     entry["superseded_by_history_revision"] = int(revision)
                     marked += 1
-            if self._thesis_anchor is not None:
+            if isinstance(self._thesis_anchor, dict):
                 self._thesis_anchor["superseded_by_history_revision"] = int(revision)
             self._history_revision = int(revision)
             self._supersede_note = str(note or "")
             self._save()
-            return {"marked": marked, "revision": int(revision)}
+            return {"marked": marked, "revision": int(revision),
+                    "not_markable": not_markable}
         except Exception:  # noqa: BLE001 — memory may never cost a scan
             return {"marked": 0, "revision": revision, "error": True}
 
     def superseded_summary(self) -> dict:
         """What the next prompt should be told about its own history."""
         revision = getattr(self, "_history_revision", None)
-        stale = [e for e in self._buf
-                 if e.get("superseded_by_history_revision") is not None]
+        stale = [e for e in self._buf if isinstance(e, dict)
+                 and e.get("superseded_by_history_revision") is not None]
         return {
             "history_revision": revision,
             "stances_formed_before_a_repair": len(stale),
@@ -461,10 +486,60 @@ def _session_key(instant):
         return None
 
 
+def _consumed_fields_well_formed(row, cutoff) -> bool:
+    """STAGE-3B-1A-R1: every field selection, the anchor/change summary and
+    narrative continuity read from an eligible row has the producer's shape.
+
+    Only shape is checked; nothing is repaired or defaulted. `timestamp` must
+    be the same settled instant as `recorded_at_cutoff`, because continuity
+    judges session and causal order from it.
+    """
+    return bool(
+        isinstance(row.get("direction"), str) and row.get("direction")
+        and "phase" in row
+        and (row["phase"] is None or isinstance(row["phase"], str))
+        and _is_int(row.get("narrative_state_version"))
+        and row.get("narrative_state_version") == 1
+        and _settled_instant(row.get("timestamp")) == cutoff
+        and isinstance(row.get("campaign_direction"), str)
+        and isinstance(row.get("campaign_established"), bool)
+        and (row.get("thesis_falsifier_status") is None
+             or isinstance(row.get("thesis_falsifier_status"), str))
+        and (row.get("thesis_falsifier") is None
+             or isinstance(row.get("thesis_falsifier"), dict)))
+
+
+#: Longest rendering of any one withheld field or malformed item.
+CONTEXT_VALUE_LIMIT = 200
+
+
+def _bounded(value):
+    """A detached, size-bounded rendering of untrusted retained content."""
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return value[:CONTEXT_VALUE_LIMIT]
+    try:
+        text = json.dumps(value, default=str, sort_keys=True)
+    except Exception:  # noqa: BLE001
+        text = repr(value)
+    if len(text) <= CONTEXT_VALUE_LIMIT:
+        return copy.deepcopy(value)
+    return {"truncated_preview": text[:CONTEXT_VALUE_LIMIT],
+            "type": type(value).__name__}
+
+
 def _withheld_view(row, reason) -> dict:
     """What an un-proved row may still say: context, never authority."""
-    row = row if isinstance(row, dict) else {}
-    view = {key: row.get(key) for key in (
+    if not isinstance(row, dict):
+        try:
+            preview = json.dumps(row, default=str)
+        except Exception:  # noqa: BLE001
+            preview = repr(row)
+        return {"item_type": type(row).__name__,
+                "item_preview": preview[:CONTEXT_VALUE_LIMIT],
+                "authority_withheld_reason": reason}
+    view = {key: _bounded(row.get(key)) for key in (
         "timestamp", "recorded_at_cutoff", "direction", "campaign_direction",
         "phase", "action", "contract_id", "market_session", "history_lineage",
         "superseded_by_history_revision")}

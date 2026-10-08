@@ -595,9 +595,10 @@ class TestStrategyUntouched:
         # prior production authorization cannot survive the semantic rotation.
         # TRADE-HORIZON-1 adds candidate-scope evidence; its source is also in
         # the canonical contract closure.
-        # STAGE-3B-1A changes which stance history may supply the incumbent.
+        # STAGE-3B-1A changes which stance history may supply the incumbent;
+        # 3B-1A-R1 quarantines malformed retained rows one by one.
         from ai_brain.production_model import brain_contract_fingerprint
-        assert brain_contract_fingerprint() == "brain:19c187bac48cdada"
+        assert brain_contract_fingerprint() == "brain:10e1919f5c393701"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.

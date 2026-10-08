@@ -502,3 +502,227 @@ def test_standalone_memory_keeps_the_legacy_contract():
     assert hist["available"] is True and "withheld_context" not in hist
     hist["last"]["direction"] = "mutated"
     assert memory._buf[-1]["direction"] == "bullish", "summaries are copies"
+
+
+# ── 8. Malformed retained rows are quarantined ONE BY ONE (3B-1A-R1) ───────
+#
+# DEFENSE-ONLY throughout: the producer never writes these shapes. Each must
+# be withheld individually as malformed_scope. None may suppress, replace or
+# reset the healthy incumbent, anchor or change summary, interrupt revision
+# marking, or be repaired by manufactured content.
+MALFORMED_ITEMS = {"null": None, "string": "not-a-stance-row", "list": ["bullish"]}
+
+
+def _runtime_file(tmp_path):
+    return tmp_path / "brain_runtime" / "stance_memory.json"
+
+
+# R1 -- real ProductionScanCycle, exact transported payload, both lanes.
+@TA.ECU_MODES
+@pytest.mark.parametrize("item", list(MALFORMED_ITEMS))
+def test_non_object_row_cannot_suppress_the_healthy_incumbent(tmp_path, monkeypatch,
+                                                              ecu, item):
+    cycle, calls = _lane(tmp_path, monkeypatch, ecu)
+    _brain_scan(cycle, calls, RF.TAPE_1M)
+    _brain_scan(cycle, calls, TA.LATER)
+    # DEFENSE-ONLY: a malformed element retained ahead of healthy cognition.
+    cycle.stance_memory._buf.insert(0, copy.deepcopy(MALFORMED_ITEMS[item]))
+
+    scan, payload = _brain_scan(cycle, calls, TA.LATER2)
+    _assert_healthy_bullish_incumbent(payload, scan, AT_0304)
+    hist = payload["stance_history"]
+    assert hist["eligibility"]["withheld_reasons"] == {"malformed_scope": 1}
+    assert hist["eligibility"]["eligible_count"] == 2
+    [withheld] = hist["withheld_context"]
+    assert withheld["authority_withheld_reason"] == "malformed_scope"
+    assert withheld["item_type"] == type(MALFORMED_ITEMS[item]).__name__
+    assert _instant(hist["thesis_anchor"]["recorded_at_cutoff"]) == _instant(AT_0259)
+    assert hist["changed_since_last"]["direction"] is False
+    # Retained for audit (not deleted), and recording continues normally.
+    assert cycle.stance_memory._buf[0] == MALFORMED_ITEMS[item]
+    assert _instant(_rows(cycle)[-1]["recorded_at_cutoff"]) == _instant(AT_0309)
+
+    scan, payload = _brain_scan(cycle, calls, TA.LATER3)
+    _assert_healthy_bullish_incumbent(payload, scan, AT_0309)
+
+
+# R2 -- a loaded malformed element cannot block fresh in-process cognition.
+@pytest.mark.parametrize("persisted", [
+    {"buf": [None], "thesis_anchor": None},
+    {"buf": ["not-a-stance-row", ["bullish"]], "thesis_anchor": "not-an-anchor"},
+    {"buf": "not-a-buffer", "thesis_anchor": None},          # malformed container
+], ids=["null-row", "scalar-rows-and-anchor", "non-list-buffer"])
+def test_loaded_malformed_row_cannot_block_fresh_cognition(tmp_path, persisted):
+    from ai_brain.stance_memory import StanceMemory
+
+    path = _runtime_file(tmp_path)
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(persisted))        # DEFENSE-ONLY seeded file
+    memory = StanceMemory()
+    memory.bind_production_scope(RF.CONTRACT, RF.SESSION_ID)
+    retained = (persisted["buf"] if isinstance(persisted["buf"], list)
+                else [persisted["buf"]])
+    memory.record(AT_0259, _stance("bullish"), snapshot=_scope_snapshot(AT_0259))
+    assert len(memory.recent()) == len(retained) + 1
+
+    hist = memory.history_summary(snapshot=_scope_snapshot(AT_0304))
+    assert hist["available"] is True
+    assert hist["last"]["direction"] == "bullish"
+    assert _instant(hist["last"]["recorded_at_cutoff"]) == _instant(AT_0259)
+    assert _instant(hist["thesis_anchor"]["recorded_at_cutoff"]) == _instant(AT_0259)
+    assert hist["eligibility"]["withheld_reasons"] == {"malformed_scope": len(retained)}
+    # The malformed content is still persisted, not deleted or reset.
+    on_disk = json.loads(path.read_text())["buf"]
+    assert on_disk[:len(retained)] == retained
+    assert on_disk[-1]["stance_schema_version"] == 2
+
+
+# R3 -- a scoped dictionary of the wrong shape is withheld, never repaired.
+def _missing(key):
+    return lambda row: row.pop(key)
+
+
+def _set(key, value):
+    return lambda row: row.__setitem__(key, value)
+
+
+MALFORMED_SHAPES = {
+    "missing_direction": _missing("direction"),
+    "null_direction": _set("direction", None),
+    "empty_direction": _set("direction", ""),
+    "list_direction": _set("direction", ["bullish"]),
+    "missing_phase": _missing("phase"),
+    "int_phase": _set("phase", 7),
+    "dict_phase": _set("phase", {"name": "continuation"}),
+    "missing_state_version": _missing("narrative_state_version"),
+    "wrong_state_version": _set("narrative_state_version", 2),
+    "missing_timestamp": _missing("timestamp"),
+    "timestamp_not_the_cutoff": _set("timestamp", AT_0259),
+    "missing_campaign_direction": _missing("campaign_direction"),
+    "string_campaign_established": _set("campaign_established", "yes"),
+    "int_falsifier_status": _set("thesis_falsifier_status", 5),
+    "string_falsifier": _set("thesis_falsifier", "29500"),
+    "int_custody": lambda row: row["history_lineage"].__setitem__("custody", 7),
+}
+
+
+@pytest.mark.parametrize("shape", list(MALFORMED_SHAPES))
+def test_malformed_dictionary_cannot_suppress_or_replace_the_incumbent(shape):
+    bound = _bound()
+    bound.record(AT_0259, _stance("bullish"), snapshot=_scope_snapshot(AT_0259))
+    bad = copy.deepcopy(bound.recent()[0])        # DEFENSE-ONLY
+    bad.update(timestamp=AT_0304, recorded_at_cutoff=AT_0304, direction="bearish",
+               campaign_direction="bearish")
+    bad["history_lineage"]["sequence"] = 2
+    MALFORMED_SHAPES[shape](bad)
+    bound._buf.append(bad)
+
+    hist = bound.history_summary(snapshot=_scope_snapshot(AT_0309))
+    assert hist["available"] is True
+    assert hist["last"]["direction"] == "bullish"
+    assert _instant(hist["last"]["recorded_at_cutoff"]) == _instant(AT_0259)
+    assert _instant(hist["thesis_anchor"]["recorded_at_cutoff"]) == _instant(AT_0259)
+    assert hist["eligibility"]["withheld_reasons"] == {"malformed_scope": 1}
+    assert [r["authority_withheld_reason"] for r in hist["withheld_context"]] == [
+        "malformed_scope"]
+    # Nothing was manufactured into the stored row.
+    assert bound._buf[-1] == bad
+    continuity = build_narrative_continuity(
+        {"timestamp": AT_0309, "contract_id": RF.CONTRACT,
+         "active_path_state": {"state_available": False}}, hist)
+    assert continuity["prior_thesis"]["direction"] == "bullish"
+    assert _instant(continuity["prior_thesis"]["timestamp"]) == _instant(AT_0259)
+
+
+def test_withheld_context_is_bounded_and_detached():
+    bound = _bound()
+    bound.record(AT_0259, _stance("bullish"), snapshot=_scope_snapshot(AT_0259))
+    huge = {"stance_schema_version": 2, "direction": ["bullish"] * 2000,
+            "history_lineage": {"custody": "x" * 5000}, "timestamp": "y" * 5000}
+    bound._buf[:0] = ["z" * 20000, huge]            # DEFENSE-ONLY
+    hist = bound.history_summary(snapshot=_scope_snapshot(AT_0304))
+    assert hist["available"] is True and hist["eligibility"]["withheld_count"] == 2
+    assert len(json.dumps(hist["withheld_context"])) < 2000
+    hist["withheld_context"][1]["history_lineage"]["truncated_preview"] = "mutated"
+    hist["last"]["direction"] = "mutated"
+    assert bound._buf[1] == huge and bound._buf[2]["direction"] == "bullish"
+
+
+# R4 -- malformed elements/anchor cannot interrupt revision marking.
+LAYOUTS = {
+    "around_rows": lambda good: [None, good[0], "garbage", good[1], ["x"]],
+    "anchor_only": lambda good: list(good),
+}
+ANCHORS = {
+    "string_anchor": lambda good: "not-an-anchor",
+    "dict_anchor_without_direction": lambda good: {
+        k: v for k, v in copy.deepcopy(good[0]).items() if k != "direction"},
+}
+
+
+@pytest.mark.parametrize("anchor", list(ANCHORS))
+@pytest.mark.parametrize("layout", list(LAYOUTS))
+def test_malformed_items_cannot_interrupt_revision_marking(tmp_path, layout, anchor):
+    from ai_brain.stance_memory import StanceMemory
+
+    memory = StanceMemory()
+    memory.bind_production_scope(RF.CONTRACT, RF.SESSION_ID)
+    memory.record(AT_0259, _stance("bullish"), snapshot=_scope_snapshot(AT_0259))
+    memory.record(AT_0304, _stance("bullish"), snapshot=_scope_snapshot(AT_0304))
+    good = list(memory._buf)
+    memory._buf[:] = LAYOUTS[layout](good)          # DEFENSE-ONLY
+    memory._thesis_anchor = ANCHORS[anchor](good)   # DEFENSE-ONLY
+    bad_count = len(memory._buf) - 2
+    reasons = {"superseded_history_revision": 2}
+    if bad_count:
+        reasons["malformed_scope"] = bad_count
+
+    # Lineage alone already withholds the stale rows, before any marking.
+    hist = memory.history_summary(snapshot=_scope_snapshot(AT_0309, revision=1))
+    assert hist["available"] is False and hist["last"] is None
+    assert hist["eligibility"]["withheld_reasons"] == reasons
+
+    assert memory.supersede(1, note="repaired") == {
+        "marked": 2, "revision": 1, "not_markable": bad_count}
+    assert [row["superseded_by_history_revision"] for row in good] == [1, 1]
+    on_disk = json.loads(_runtime_file(tmp_path).read_text())["buf"]
+    assert on_disk == memory._buf, "marks persisted; malformed items retained"
+
+    hist = memory.history_summary(snapshot=_scope_snapshot(AT_0309, revision=1))
+    assert hist["available"] is False
+    assert hist["eligibility"]["withheld_reasons"] == reasons
+    assert hist["history_revision"]["stances_formed_before_a_repair"] == 2
+    assert len(hist["withheld_context"]) == len(memory._buf)
+
+    memory.record(AT_0309, _stance("bullish"),
+                  snapshot=_scope_snapshot(AT_0309, revision=1))
+    hist = memory.history_summary(snapshot=_scope_snapshot(AT_0314, revision=1))
+    assert hist["available"] is True
+    assert hist["last"]["history_lineage"]["history_revision"] == 1
+    assert _instant(hist["thesis_anchor"]["recorded_at_cutoff"]) == _instant(AT_0309)
+
+
+@TA.ECU_MODES
+def test_malformed_items_do_not_interrupt_a_real_revision(tmp_path, monkeypatch, ecu):
+    cycle, calls = _lane(tmp_path, monkeypatch, ecu)
+    _brain_scan(cycle, calls, RF.TAPE_1M)
+    _brain_scan(cycle, calls, TA.LATER)
+    good = _rows(cycle)
+    # DEFENSE-ONLY: malformed items before/between/after, and a malformed anchor.
+    cycle.stance_memory._buf[:] = [None, good[0], "garbage", good[1], ["x"]]
+    cycle.stance_memory._thesis_anchor = "not-an-anchor"
+
+    scan, payload = _brain_scan(cycle, calls, _revised(TA.LATER))
+    assert cycle.rebuilds[-1]["cognitive"]["stance"] == {
+        "marked": 2, "revision": 1, "not_markable": 3}
+    assert [row["superseded_by_history_revision"] for row in good] == [1, 1]
+    hist = payload["stance_history"]
+    assert hist["available"] is False
+    assert payload["narrative_continuity"]["prior_thesis"] is None
+    assert hist["eligibility"]["withheld_reasons"] == {
+        "superseded_history_revision": 2, "malformed_scope": 3}
+
+    scan, payload = _brain_scan(
+        cycle, calls, _revised(TA.LATER) + TA.LATER2[len(TA.LATER):])
+    assert payload["stance_history"]["last"]["history_lineage"]["history_revision"] == 1
+    assert payload["narrative_continuity"]["prior_thesis"]["direction"] == "bullish"
