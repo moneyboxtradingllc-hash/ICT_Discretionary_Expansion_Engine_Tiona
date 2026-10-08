@@ -346,7 +346,8 @@ def test_stance_memory_preserves_falsified_thesis_until_new_owner_is_confirmed()
     continuity = build_narrative_continuity(snapshot, history)
     assert continuity["control_state"] == "developing_transfer"
     assert continuity["dominant_direction"] is None
-    assert continuity["thesis_falsifier_status"] == "occurred"
+    assert continuity["active_leg_failure_status"] == "occurred"
+    assert continuity["thesis_falsifier_status"] == "unknown"
     memory = StanceMemory(persist=False)
     held, _ = output_direction_hold(
         {"narrative_direction": "bullish", "current_action": "propose_entry",
@@ -358,7 +359,7 @@ def test_stance_memory_preserves_falsified_thesis_until_new_owner_is_confirmed()
     pending = build_narrative_continuity(next_snapshot, memory.history_summary())
     assert pending["control_state"] == "developing_transfer"
     assert pending["prior_thesis"]["direction"] == "bearish"
-    assert pending["thesis_falsifier_status"] == "occurred"
+    assert pending["active_leg_failure_status"] == "occurred"
     assert candidate_direction_authorized("bullish", next_snapshot, pending) == (
         False, "narrative_transfer_unresolved")
 
@@ -375,7 +376,7 @@ def test_stance_memory_preserves_falsified_thesis_until_new_owner_is_confirmed()
     stable = build_narrative_continuity(following, memory.history_summary())
     assert stable["control_state"] == "incumbent_intact"
     assert stable["dominant_direction"] == "bullish"
-    assert stable["thesis_falsifier_status"] == "not_occurred"
+    assert stable["active_leg_failure_status"] == "not_occurred"
 
 
 def test_production_prompt_places_campaign_before_geometry():
@@ -397,8 +398,12 @@ def test_brain_input_carries_prior_thesis_and_current_transfer_state():
     payload = build_brain_input(snapshot, history)
     continuity = payload["narrative_continuity"]
     assert continuity["prior_thesis"]["direction"] == "bearish"
-    assert continuity["prior_thesis"]["thesis_falsifier"]["level"] == 110.0
-    assert continuity["thesis_falsifier_status"] == "not_occurred"
+    # STAGE-3B-1B: the prior row's local leg structure is leg evidence, not a
+    # campaign falsifier (this fixture row predates the leg field names).
+    assert continuity["prior_thesis"]["active_leg_structure"]["level"] == 110.0
+    assert continuity["prior_thesis"]["thesis_falsifier"] is None
+    assert continuity["active_leg_failure_status"] == "not_occurred"
+    assert continuity["thesis_falsifier_status"] == "unknown"
     assert continuity["control_state"] == "developing_transfer"
 
 

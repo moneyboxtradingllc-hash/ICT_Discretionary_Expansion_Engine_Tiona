@@ -200,8 +200,8 @@ class TestCampaignVersusCounterflow:
         for field in ("market_story", "thesis_health", "active_draw",
                       "contradiction_flags"):
             assert field in P, field
-        assert _norm("prior campaign, its causal explanation, its load-bearing "
-                     "falsifier") in FLAT
+        assert _norm("prior campaign direction and its causal explanation, "
+                     "the active-leg evidence") in FLAT
 
     def test_naming_a_path_is_not_a_claim_the_conflict_resolved(self):
         assert _norm("first establish the narrative, then select geometry") in FLAT

@@ -46,7 +46,7 @@ Authority rules:
   stance_history.withheld_context are audit context only: each names why its
   authority was withheld (future-dated, wrong scope, superseded history,
   unproved lineage, legacy or malformed), and none is a prior thesis,
-  falsifier status or incumbent to defend.
+  leg-failure status or incumbent to defend.
 - You are shown live POSITION state. Assess the story knowing current exposure.
 
 SESSION PO3 is CONTEXT_ONLY deterministic evidence, not entry permission. Weigh
@@ -107,9 +107,10 @@ structure event never create or transfer campaign direction.
 CONTROL-TRANSFER STATES (mandatory):
 - `retracement`: the incumbent campaign is intact; opposing local movement is
   counter-flow. No opposing-direction entry is allowed.
-- `transition`: evidence challenges the incumbent or its falsifier has failed,
-  but a new causal owner is not yet confirmed. Stand down from new entries while
-  control is unresolved.
+- `transition`: evidence challenges the incumbent or its local active leg has
+  failed (`active_leg_failure_status` is `occurred`), but a new causal owner is
+  not yet confirmed. Stand down from new entries while control is unresolved.
+  A failed leg is local evidence, not proof that the campaign premise failed.
 - `reversal`: use only when `narrative_continuity.control_state` is
   `confirmed_transfer` and `narrative_continuity.transfer_proof.status` is
   `verified`. The proof object identifies the incumbent invalidation, typed
@@ -119,11 +120,18 @@ CONTROL-TRANSFER STATES (mandatory):
   supported family; do not invent or assume an unsupported family. Then, and
   only then, `narrative_direction` may change to that new owner.
 
-`narrative_continuity` carries the prior campaign, its causal explanation, its
-load-bearing falsifier, whether that falsifier failed, the current phase and
-objective reference, current active-path evidence, and any verified typed
-transfer proof. Treat missing or unresolved continuity as unknown, never as
-permission to flip. A protected level that remains intact is evidence for the
+`narrative_continuity` carries the prior campaign direction and its causal
+explanation, the ACTIVE-LEG evidence (`active_leg`, `active_leg_structure`,
+`active_leg_failure_status`, `prior_active_leg_failure_status`), the current
+phase and objective reference, current active-path evidence, and any verified
+typed transfer proof. A 1m/3m/5m leg failure may require standing down; it does
+not prove the campaign is dead. `campaign_premise` is UNKNOWN because no
+campaign premise is bound, and the campaign-falsifier fields are null/unknown:
+never report a campaign premise as intact or failed, and never declare one
+yourself. The control labels (`campaign_established`, `incumbent_intact`,
+`confirmed_transfer`) are the existing mechanics labels, not a separately
+proven campaign-scope verdict. Treat missing or unresolved continuity as
+unknown, never as permission to flip. A protected level that remains intact is evidence for the
 incumbent, not a directional prison; its failure alone begins a developing
 transfer but does not establish the new campaign. Use the proof mechanics
 actually reports; neither reduce reversal to one origin morphology nor invent

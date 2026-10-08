@@ -500,7 +500,10 @@ def test_real_continuity_accepts_fresh_same_direction_successor_then_rechecks(di
     failure = build_narrative_continuity(failed, memory.history_summary())
     assert failed["active_path_state"]["owner"] == "none"
     assert failure["control_state"] == "developing_transfer"
-    assert failure["thesis_falsifier_status"] == "occurred"
+    # STAGE-3B-1B: the failed LEG is published as leg evidence only.
+    assert failure["active_leg_failure_status"] == "occurred"
+    assert failure["thesis_falsifier_status"] == "unknown"
+    assert failure["campaign_premise"]["status"] == "UNKNOWN"
     failed_draw = observe_draw(failed)
     assert failed_draw["authority_status"] == "UNKNOWN"
     assert draw_tracker.audit_records[0]["superseded"] is True
@@ -543,8 +546,10 @@ def test_real_continuity_accepts_fresh_same_direction_successor_then_rechecks(di
         "owner"] == direction
     assert accepted["same_direction_successor_proof"]["supporting_structure"][
         "swing_id"] == f"{direction}-new"
-    assert accepted["prior_thesis_falsifier_status"] == "occurred"
-    assert accepted["current_thesis_falsifier_status"] == "not_occurred"
+    assert accepted["prior_active_leg_failure_status"] == "occurred"
+    assert accepted["active_leg_failure_status"] == "not_occurred"
+    assert accepted["prior_thesis_falsifier_status"] == "unknown"
+    assert accepted["current_thesis_falsifier_status"] == "unknown"
 
     successor_path = successor["active_path_state"]
     invalidated_source = successor_path["last_invalidated"]["source_bar_time"]
@@ -728,7 +733,7 @@ def test_real_continuity_accepts_fresh_same_direction_successor_then_rechecks(di
     stable = build_narrative_continuity(repeated, memory.history_summary())
     assert stable["control_state"] == "incumbent_intact"
     assert stable["dominant_direction"] == direction
-    assert stable["thesis_falsifier_status"] == "not_occurred"
+    assert stable["active_leg_failure_status"] == "not_occurred"
     memory.record(repeated["timestamp"], {
         "narrative_direction": direction, "narrative_phase": "continuation",
         "current_action": "propose_entry"}, stable)
@@ -739,7 +744,8 @@ def test_real_continuity_accepts_fresh_same_direction_successor_then_rechecks(di
     failed_again = build_narrative_continuity(
         later_failure, memory.history_summary())
     assert failed_again["control_state"] == "developing_transfer"
-    assert failed_again["thesis_falsifier_status"] == "occurred"
+    assert failed_again["active_leg_failure_status"] == "occurred"
+    assert failed_again["current_thesis_falsifier"] is None
     assert candidate_direction_authorized(direction, later_failure, failed_again)[0] is False
 
 

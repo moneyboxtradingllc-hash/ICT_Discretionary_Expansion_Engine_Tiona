@@ -202,7 +202,10 @@ def test_seeded_persisted_rows_supply_no_incumbent(tmp_path, monkeypatch, ecu):
     assert len(hist["withheld_context"]) == 2
     scan, payload = _brain_scan(cycle, calls, TA.LATER)
     _assert_healthy_bullish_incumbent(payload, scan, AT_0259)
-    assert payload["narrative_continuity"]["thesis_falsifier_status"] != "occurred"
+    # STAGE-3B-1B: the seeded rows' "occurred" (a leg status under the old
+    # campaign-falsifier name) supplies no leg failure and no campaign status.
+    assert payload["narrative_continuity"]["active_leg_failure_status"] != "occurred"
+    assert payload["narrative_continuity"]["thesis_falsifier_status"] == "unknown"
 
 
 # ── 3. A real canonical revision is consumed before cognition ──────────────

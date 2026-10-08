@@ -98,7 +98,9 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # incumbent, and ECU cognition reads the cycle-owned custody (ecu.py bound).
     # STAGE-3B-1A-R1: a malformed retained row is withheld individually and
     # can no longer suppress the healthy incumbent or revision marking.
-    assert PM.brain_contract_fingerprint() == "brain:10e1919f5c393701"
+    # STAGE-3B-1B: local active-leg evidence is published under leg names and
+    # the unbound campaign premise as UNKNOWN; prompt field doctrine updated.
+    assert PM.brain_contract_fingerprint() == "brain:b9854157c5bae723"
 
 
 @pytest.mark.parametrize("addition", [

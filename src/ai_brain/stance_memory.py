@@ -20,8 +20,12 @@ callers, tests) keeps the legacy behaviour.
 """
 import copy
 import json
+import math
 import os
 import uuid
+
+from ai_brain.narrative_continuity import (CAMPAIGN_FALSIFIER_STATUS_UNBOUND,
+                                           campaign_premise_unbound, leg_evidence)
 
 #: Rows written by a bound production custody. Anything else is legacy.
 STANCE_SCHEMA_VERSION = 2
@@ -209,20 +213,32 @@ class StanceMemory:
                                   or prior.get("direction") or direction)
             has_load_bearing = (isinstance(path.get("load_bearing_structure"), dict)
                                 and path["load_bearing_structure"].get("level") is not None)
-            falsifier_status = (continuity.get("current_thesis_falsifier_status")
-                                or continuity.get("thesis_falsifier_status"))
+            # STAGE-3B-1B: LOCAL active-leg evidence, recorded under leg names.
+            # (A continuity built before 3B-1B carried the same leg values under
+            # the campaign-falsifier names; they are read here as leg evidence.)
+            continuity_leg_status = (
+                continuity.get("active_leg_failure_status")
+                if "active_leg_failure_status" in continuity
+                else continuity.get("thesis_falsifier_status"))
+            leg_failure_status = (
+                continuity.get("active_leg_failure_status")
+                if "active_leg_failure_status" in continuity
+                else (continuity.get("current_thesis_falsifier_status")
+                      or continuity.get("thesis_falsifier_status")))
             if continuity.get("control_state") == "confirmed_transfer":
-                # The continuity status above describes the PREVIOUS campaign's
-                # falsifier. A newly confirmed owner starts with its own active
-                # load-bearing structure and its own falsifier not yet failed.
-                falsifier_status = "not_occurred"
+                # The continuity status above describes the PREVIOUS owner's
+                # leg. A newly confirmed owner starts with its own active
+                # load-bearing structure and its own leg not yet failed.
+                leg_failure_status = "not_occurred"
             campaign_established = bool(
                 path.get("available") is True
                 and path.get("owner") == campaign_direction
                 and path.get("status") in ("active", "contested")
                 and has_load_bearing)
+            # Unchanged carry rule, now read from the equivalent LEG status. The
+            # campaign premise is UNKNOWN and is deliberately not consulted.
             if (not campaign_established and prior.get("campaign_established") is True
-                    and continuity.get("thesis_falsifier_status") != "occurred"):
+                    and continuity_leg_status != "occurred"):
                 campaign_established = True
             entry = {
                 "timestamp":  ts,
@@ -239,12 +255,22 @@ class StanceMemory:
                 "market_story": str(stance.get("market_story") or "")[:1200],
                 "dominant_reasoning": str(stance.get("dominant_reasoning") or "")[:1200],
                 "invalidation_level": stance.get("invalidation_level"),
-                "thesis_falsifier": (continuity.get("current_thesis_falsifier")
-                                     or prior.get("thesis_falsifier")
-                                     or path.get("load_bearing_structure")),
-                "thesis_falsifier_status": falsifier_status,
-                "prior_thesis_falsifier_status": continuity.get(
+                # STAGE-3B-1B: local leg evidence (formerly stored under the
+                # campaign-falsifier names) ...
+                "active_leg_structure": (
+                    leg_evidence(continuity, "active_leg_structure",
+                                 "current_thesis_falsifier")
+                    or leg_evidence(prior, "active_leg_structure", "thesis_falsifier")
+                    or path.get("load_bearing_structure")),
+                "active_leg_failure_status": leg_failure_status,
+                "prior_active_leg_failure_status": leg_evidence(
+                    continuity, "prior_active_leg_failure_status",
                     "prior_thesis_falsifier_status"),
+                # ... and the campaign premise, which no producer binds yet.
+                "campaign_premise": campaign_premise_unbound(),
+                "thesis_falsifier": None,
+                "thesis_falsifier_status": CAMPAIGN_FALSIFIER_STATUS_UNBOUND,
+                "prior_thesis_falsifier_status": CAMPAIGN_FALSIFIER_STATUS_UNBOUND,
                 "active_draw": str(stance.get("active_draw") or "")[:300],
                 "objective_id": stance.get("objective_id"),
                 "control_state": continuity.get("control_state"),
@@ -506,36 +532,76 @@ def _consumed_fields_well_formed(row, cutoff) -> bool:
         and (row.get("thesis_falsifier_status") is None
              or isinstance(row.get("thesis_falsifier_status"), str))
         and (row.get("thesis_falsifier") is None
-             or isinstance(row.get("thesis_falsifier"), dict)))
+             or isinstance(row.get("thesis_falsifier"), dict))
+        # STAGE-3B-1B: continuity reads the prior row's LEG evidence. A row
+        # without these fields predates 3B-1B (it carried leg values under the
+        # campaign-falsifier names) and is never re-read as current custody.
+        and "active_leg_failure_status" in row
+        and (row["active_leg_failure_status"] is None
+             or isinstance(row["active_leg_failure_status"], str))
+        and "active_leg_structure" in row
+        and (row["active_leg_structure"] is None
+             or isinstance(row["active_leg_structure"], dict)))
 
 
 #: Longest rendering of any one withheld field or malformed item.
 CONTEXT_VALUE_LIMIT = 200
 
 
+def _safe_text(value) -> str:
+    """Text for a preview; never raises (huge ints, cyclic or odd objects)."""
+    try:
+        return repr(value)
+    except Exception:  # noqa: BLE001
+        if isinstance(value, int) and not isinstance(value, bool):
+            return f"<int of {value.bit_length()} bits>"
+        return f"<unrenderable {type(value).__name__}>"
+
+
+def _typed_preview(text, value) -> dict:
+    return {"truncated_preview": text[:CONTEXT_VALUE_LIMIT],
+            "type": type(value).__name__}
+
+
 def _bounded(value):
-    """A detached, size-bounded rendering of untrusted retained content."""
-    if value is None or isinstance(value, (bool, int, float)):
+    """A detached, size-bounded, strict-JSON rendering of retained content.
+
+    Small finite numbers, None and bools pass unchanged. A long number, a
+    non-finite float or a large/non-JSON object becomes a typed preview whose
+    preview text is at most CONTEXT_VALUE_LIMIT characters (plus the fixed
+    wrapper keys); strings are cut to the limit. The stored row is never
+    modified and withholding reasons are unaffected.
+    """
+    if value is None or isinstance(value, bool):
         return value
+    if isinstance(value, int):
+        try:
+            text = repr(value)
+        except ValueError:   # beyond the interpreter's int-to-text limit
+            return _typed_preview(f"<int of {value.bit_length()} bits>", value)
+        return value if len(text) <= CONTEXT_VALUE_LIMIT else _typed_preview(text, value)
+    if isinstance(value, float):
+        if math.isfinite(value):
+            return value
+        return _typed_preview(_safe_text(value), value)
     if isinstance(value, str):
         return value[:CONTEXT_VALUE_LIMIT]
     try:
-        text = json.dumps(value, default=str, sort_keys=True)
-    except Exception:  # noqa: BLE001
-        text = repr(value)
+        text = json.dumps(value, sort_keys=True, allow_nan=False)
+    except Exception:  # noqa: BLE001 -- not strict JSON: preview only
+        return _typed_preview(_safe_text(value), value)
     if len(text) <= CONTEXT_VALUE_LIMIT:
         return copy.deepcopy(value)
-    return {"truncated_preview": text[:CONTEXT_VALUE_LIMIT],
-            "type": type(value).__name__}
+    return _typed_preview(text, value)
 
 
 def _withheld_view(row, reason) -> dict:
     """What an un-proved row may still say: context, never authority."""
     if not isinstance(row, dict):
         try:
-            preview = json.dumps(row, default=str)
+            preview = json.dumps(row, default=str, allow_nan=False)
         except Exception:  # noqa: BLE001
-            preview = repr(row)
+            preview = _safe_text(row)
         return {"item_type": type(row).__name__,
                 "item_preview": preview[:CONTEXT_VALUE_LIMIT],
                 "authority_withheld_reason": reason}

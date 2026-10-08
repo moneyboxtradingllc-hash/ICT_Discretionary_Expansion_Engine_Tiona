@@ -5,6 +5,25 @@ campaign and recognizes a transfer only from an explicit deterministic proof
 family in the active-path ledger. The current producer supports a reclaimed
 opposing-raid origin followed by structural progression; that is one supported
 proof family, not the definition of every possible market reversal.
+
+STAGE-3B-1B FIELD DOCTRINE. Two scopes are published and never merged:
+
+* ACTIVE LEG -- local ActivePath evidence: the leg's owner/status, its live
+  load-bearing structure, whether that leg failed (`active_leg_failure_status`)
+  and the prior row's leg status. A 1m/3m/5m leg failure can require today's
+  stand-down; it is NOT proof that a campaign premise failed.
+* CAMPAIGN PREMISE -- not bound by any producer yet, so it is published as
+  UNKNOWN (`campaign_premise`), and every campaign-falsifier surface
+  (`current_thesis_falsifier`, `thesis_falsifier_status`,
+  `current_thesis_falsifier_status`, `prior_thesis_falsifier_status`, and the
+  prior thesis's `thesis_falsifier`/`falsifier_status`) is null/"unknown".
+
+Control computation is unchanged: incumbent failure, transfer/successor proof
+and control state are derived from the leg evidence exactly as before. The
+legacy control labels (`campaign_established`, `incumbent_intact`,
+`confirmed_transfer`, ...) are retained compatibility values; they are NOT
+newly proven campaign-scoped establishment or transfer. That campaign-scope
+contract is unresolved and not implemented here.
 """
 from __future__ import annotations
 
@@ -19,6 +38,31 @@ STATE_VERSION = 1
 AUTHORING_METADATA = ("stance_schema_version", "recorded_at_cutoff",
                       "history_lineage", "contract_id", "market_session",
                       "process_session_id")
+
+#: STAGE-3B-1B: no producer binds a campaign premise. Missing is UNKNOWN.
+CAMPAIGN_PREMISE_UNBOUND = {"status": "UNKNOWN",
+                            "reason": "campaign_premise_unbound",
+                            "binding": None}
+#: A campaign falsifier exists only for a bound premise; none is bound.
+CAMPAIGN_FALSIFIER_STATUS_UNBOUND = "unknown"
+
+#: Leg-named fields and the pre-3B-1B aliases that carried the SAME local
+#: active-leg evidence under campaign-falsifier names. The aliases are read
+#: only from inputs that predate the leg fields (a sealed plan or row written
+#: before 3B-1B); they are read as LEG evidence, never as campaign authority.
+LEGACY_LEG_STATUS_ALIAS = "thesis_falsifier_status"      # row / synthesized last
+LEGACY_LEG_STRUCTURE_ALIAS = "thesis_falsifier"          # row / prior_thesis
+LEGACY_PRIOR_THESIS_LEG_STATUS_ALIAS = "falsifier_status"  # prior_thesis
+
+
+def campaign_premise_unbound() -> dict:
+    return dict(CAMPAIGN_PREMISE_UNBOUND)
+
+
+def leg_evidence(record, field, legacy_alias):
+    """The leg evidence a row/prior thesis carries; legacy alias if pre-3B-1B."""
+    record = record if isinstance(record, dict) else {}
+    return record.get(field) if field in record else record.get(legacy_alias)
 
 
 def _direction(value):
@@ -290,8 +334,11 @@ def build_narrative_continuity(snapshot: dict, stance_history: dict) -> dict:
     prior_direction = (_direction((last or {}).get("campaign_direction")
                                  or (last or {}).get("direction"))
                        if same_session else None)
-    prior_falsifier_status = ((last or {}).get("thesis_falsifier_status")
-                              if same_session else None)
+    # Local active-leg failure status carried by the prior row (pre-3B-1B rows
+    # carried the same leg evidence under `thesis_falsifier_status`).
+    prior_leg_failure_status = (
+        leg_evidence(last, "active_leg_failure_status", LEGACY_LEG_STATUS_ALIAS)
+        if same_session else None)
     prior_established = bool(same_session and last.get("campaign_established") is True
                              and prior_direction)
 
@@ -306,7 +353,7 @@ def build_narrative_continuity(snapshot: dict, stance_history: dict) -> dict:
         path_available and (
             (snapshot_contract and path_contract != snapshot_contract)
             or (current_session and path_session != current_session)))
-    current_falsifier = _load_bearing(path)
+    current_leg_structure = _load_bearing(path)
     last_invalidated = path.get("last_invalidated") or {}
     last_invalidated_at = str(last_invalidated.get("at") or "")
     prior_at = str((last or {}).get("timestamp") or "") if same_session else ""
@@ -314,7 +361,7 @@ def build_narrative_continuity(snapshot: dict, stance_history: dict) -> dict:
         prior_direction and last_invalidated.get("owner") == prior_direction
         and ((last_invalidated_at and prior_at
               and _timestamp_after(last_invalidated_at, prior_at))
-             or prior_falsifier_status == "occurred")
+             or prior_leg_failure_status == "occurred")
     )
     proof = (_transfer_proof(path, prior_direction, owner)
              if (not path_identity_conflict
@@ -342,9 +389,9 @@ def build_narrative_continuity(snapshot: dict, stance_history: dict) -> dict:
         control_state = "confirmed_transfer"
         dominant_direction = owner
     elif successor:
-        # The old campaign's falsifier remains historical evidence. A new
-        # causal generation in the same direction starts with its own intact
-        # falsifier and does not constitute a directional transfer.
+        # The old leg's failure remains historical evidence. A new causal
+        # generation in the same direction starts with its own intact leg
+        # structure and does not constitute a directional transfer.
         control_state = "campaign_established"
         dominant_direction = owner
     elif prior_established:
@@ -363,7 +410,7 @@ def build_narrative_continuity(snapshot: dict, stance_history: dict) -> dict:
             control_state = "incumbent_intact"
         else:
             control_state = "unresolved"
-    elif prior_direction and (incumbent_failed or prior_falsifier_status == "occurred"):
+    elif prior_direction and (incumbent_failed or prior_leg_failure_status == "occurred"):
         # Keep the falsified campaign as prior thesis until mechanics confirms
         # the new owner; it is no longer the current dominant direction.
         control_state = "developing_transfer"
@@ -389,6 +436,9 @@ def build_narrative_continuity(snapshot: dict, stance_history: dict) -> dict:
         control_state = "unestablished"
         dominant_direction = None
 
+    prior_leg_structure = (
+        leg_evidence(last, "active_leg_structure", LEGACY_LEG_STRUCTURE_ALIAS)
+        if last else None)
     prior_thesis = None
     if same_session:
         prior_thesis = {
@@ -399,10 +449,16 @@ def build_narrative_continuity(snapshot: dict, stance_history: dict) -> dict:
             "market_story": last.get("market_story"),
             "causal_reason": last.get("dominant_reasoning"),
             "invalidation_level": last.get("invalidation_level"),
-            "thesis_falsifier": last.get("thesis_falsifier"),
             "active_draw": last.get("active_draw"),
             "objective_id": last.get("objective_id"),
-            "falsifier_status": prior_falsifier_status,
+            # STAGE-3B-1B: the prior row's LOCAL leg evidence, exactly as
+            # recorded. It is not a campaign falsifier.
+            "active_leg_structure": copy.deepcopy(prior_leg_structure),
+            "active_leg_failure_status": prior_leg_failure_status,
+            # Campaign-falsifier surfaces: no premise is bound.
+            "campaign_premise": campaign_premise_unbound(),
+            "thesis_falsifier": None,
+            "falsifier_status": CAMPAIGN_FALSIFIER_STATUS_UNBOUND,
         }
         # STAGE-3B-1A: the authoring row's own custody metadata, copied as
         # recorded. A legacy row carries None; nothing is inferred from the
@@ -410,35 +466,64 @@ def build_narrative_continuity(snapshot: dict, stance_history: dict) -> dict:
         prior_thesis.update({key: copy.deepcopy(last.get(key))
                              for key in AUTHORING_METADATA})
 
-    falsifier_status = "unknown"
+    # Local active-leg failure status (formerly published under the campaign
+    # falsifier names). Same derivation, now named for what it measures.
+    leg_failure_status = "unknown"
     if successor:
-        falsifier_status = "not_occurred"
+        leg_failure_status = "not_occurred"
     elif prior_direction:
-        if incumbent_failed or prior_falsifier_status == "occurred":
-            falsifier_status = "occurred"
+        if incumbent_failed or prior_leg_failure_status == "occurred":
+            leg_failure_status = "occurred"
         elif prior_established and control_state in (
                 "incumbent_intact", "developing_transfer", "confirmed_transfer"):
-            falsifier_status = "not_occurred"
+            leg_failure_status = "not_occurred"
 
-    prior_falsifier = _load_bearing((last or {}).get("thesis_falsifier") or {})
-    active_falsifier = current_falsifier or prior_falsifier
+    # Exact former derivation: the live leg structure, else whatever the prior
+    # row's recorded leg structure yields through the same projection.
+    retained_leg_structure = _load_bearing(prior_leg_structure or {})
+    active_leg_structure = current_leg_structure or retained_leg_structure
+    origin = path.get("origin") if isinstance(path.get("origin"), dict) else {}
 
     return {
         "state_version": STATE_VERSION,
         "control_state": control_state,
         "dominant_direction": dominant_direction,
         "prior_thesis": prior_thesis,
-        "thesis_falsifier_status": falsifier_status,
-        "prior_thesis_falsifier_status": prior_falsifier_status,
-        "current_thesis_falsifier_status": falsifier_status,
-        "current_thesis_falsifier": active_falsifier,
+        # ACTIVE LEG (local evidence; failure is not campaign falsification).
+        "active_leg": {
+            "scope": "active_leg",
+            "source": "active_path_state",
+            "available": path_available,
+            "owner": owner,
+            "status": status,
+            "load_bearing_structure": current_leg_structure,
+            "last_invalidated": last_invalidated or None,
+            "lineage": {
+                "contract_id": path.get("contract_id"),
+                "session": path.get("session"),
+                "origin_occurrence_id": origin.get("occurrence_id"),
+                "origin_proof_family": origin.get("proof_family"),
+            },
+        },
+        "active_leg_structure": active_leg_structure,
+        "active_leg_structure_source": (
+            "current_active_path" if current_leg_structure
+            else ("retained_prior_leg_row" if retained_leg_structure else None)),
+        "active_leg_failure_status": leg_failure_status,
+        "prior_active_leg_failure_status": prior_leg_failure_status,
+        # CAMPAIGN PREMISE: unbound, so UNKNOWN; no campaign falsifier exists.
+        "campaign_premise": campaign_premise_unbound(),
+        "thesis_falsifier_status": CAMPAIGN_FALSIFIER_STATUS_UNBOUND,
+        "prior_thesis_falsifier_status": CAMPAIGN_FALSIFIER_STATUS_UNBOUND,
+        "current_thesis_falsifier_status": CAMPAIGN_FALSIFIER_STATUS_UNBOUND,
+        "current_thesis_falsifier": None,
         "active_path": {
             "available": path_available,
             "record_present": isinstance(snap.get("active_path_state"), dict),
             "owner": owner,
             "status": status,
             "origin": path.get("origin"),
-            "load_bearing_structure": current_falsifier,
+            "load_bearing_structure": current_leg_structure,
             "progression": path.get("progression"),
             "transfer_evidence": transfer_flags,
             "last_invalidated": last_invalidated or None,
@@ -471,7 +556,12 @@ def recheck_narrative_continuity(snapshot: dict, authored_continuity: dict) -> d
         "direction": prior.get("direction"),
         "campaign_direction": prior.get("direction"),
         "campaign_established": prior.get("campaign_established") is True,
-        "thesis_falsifier_status": prior.get("falsifier_status"),
+        # The authoring LEG evidence; a plan sealed before 3B-1B carried the
+        # same leg values under the prior thesis's falsifier names.
+        "active_leg_failure_status": leg_evidence(
+            prior, "active_leg_failure_status", LEGACY_PRIOR_THESIS_LEG_STATUS_ALIAS),
+        "active_leg_structure": leg_evidence(
+            prior, "active_leg_structure", LEGACY_LEG_STRUCTURE_ALIAS),
         "narrative_state_version": STATE_VERSION,
     }
     return build_narrative_continuity(snapshot, {"available": True, "last": last})
@@ -508,7 +598,10 @@ def output_direction_hold(output: dict, continuity: dict) -> tuple[dict, dict | 
                                       "unestablished"):
         return out, None
 
-    falsifier = context.get("current_thesis_falsifier") or {}
+    # STAGE-3B-1B: the held invalidation level comes from the LOCAL leg
+    # structure (formerly published as `current_thesis_falsifier`).
+    leg_structure = leg_evidence(context, "active_leg_structure",
+                                 "current_thesis_falsifier") or {}
     opposing = OPPOSITE[dominant] if dominant else proposed
     reason = (prior.get("causal_reason") or prior.get("market_story") or
               "prior campaign")
@@ -528,8 +621,8 @@ def output_direction_hold(output: dict, continuity: dict) -> tuple[dict, dict | 
         "active_draw": (prior.get("active_draw") or "") if dominant else "",
         "objective_id": None,
         "invalidation_id": None,
-        "invalidation_level": (falsifier.get("level")
-                               if falsifier.get("level") is not None
+        "invalidation_level": (leg_structure.get("level")
+                               if leg_structure.get("level") is not None
                                else prior.get("invalidation_level")),
         "market_story": ((f"The {dominant} campaign remains the dominant narrative. "
                           f"Opposing {opposing} evidence is {state.replace('_', ' ')}; "
@@ -545,9 +638,12 @@ def output_direction_hold(output: dict, continuity: dict) -> tuple[dict, dict | 
                                 f"{opposing} tool or move cannot change the "
                                 "dominant direction without confirmed active-path transfer.")
                                if dominant else
-                               (f"Prior thesis: {reason}. Its falsifier has occurred "
-                                "or control is unavailable, but a new owner is not "
-                                "confirmed." if state in ("developing_transfer", "unresolved")
+                               (f"Prior thesis: {reason}. Its local active leg has "
+                                "failed or control is unavailable, but a new owner is "
+                                "not confirmed. A leg failure is not proof that a "
+                                "campaign premise failed; the campaign premise is "
+                                "unbound (UNKNOWN)." if state in ("developing_transfer",
+                                                                  "unresolved")
                                 else "No established causal campaign owner is available.")),
         "thesis_health": (f"{state}; prior {dominant} campaign retained" if dominant
                           else ("developing transfer; no current owner confirmed"

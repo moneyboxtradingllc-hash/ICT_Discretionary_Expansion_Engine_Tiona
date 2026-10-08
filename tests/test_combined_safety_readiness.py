@@ -596,9 +596,10 @@ class TestStrategyUntouched:
         # TRADE-HORIZON-1 adds candidate-scope evidence; its source is also in
         # the canonical contract closure.
         # STAGE-3B-1A changes which stance history may supply the incumbent;
-        # 3B-1A-R1 quarantines malformed retained rows one by one.
+        # 3B-1A-R1 quarantines malformed retained rows one by one; 3B-1B
+        # separates active-leg labels from campaign falsification.
         from ai_brain.production_model import brain_contract_fingerprint
-        assert brain_contract_fingerprint() == "brain:10e1919f5c393701"
+        assert brain_contract_fingerprint() == "brain:b9854157c5bae723"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.
