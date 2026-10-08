@@ -343,6 +343,7 @@ def build_snapshot(
     execution_price: dict = None,
     invoke_brain: bool = True,
     pre_cognition_hook=None,
+    stance_memory=None,
 ) -> dict:
     timeframes = {}
     all_normalized = {}
@@ -899,7 +900,10 @@ def build_snapshot(
             if not callable(pre_cognition_hook):
                 raise TypeError("pre_cognition_hook must be callable")
             pre_cognition_hook(snapshot)
-        candidate = produce_thesis(snapshot)
+        # STAGE-3B-1A: the owning cycle's stance custody is passed through
+        # explicitly; without one the standalone ECU default is unchanged.
+        candidate = (produce_thesis(snapshot) if stance_memory is None
+                     else produce_thesis(snapshot, stance_memory=stance_memory))
         snapshot["candidate_thesis"] = candidate
         snapshot["brain_thesis"] = candidate   # shadow default: pipeline bit-for-bit unchanged
 

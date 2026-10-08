@@ -34,7 +34,7 @@ def source_bytes(monkeypatch):
 
 @pytest.mark.parametrize("style", ["lf", "crlf", "mixed_files", "mixed_lines"])
 def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
-    assert len(source_bytes) == 45
+    assert len(source_bytes) == 46
     for index, (path, data) in enumerate(source_bytes.items()):
         if style == "crlf" or (style == "mixed_files" and index % 2):
             source_bytes[path] = data.replace(b"\n", b"\r\n")
@@ -94,7 +94,9 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # STAGE-2 EXACT DRAW BINDING: permissive Lifecycle, the ordinary consumer
     # and conditional plans bind the exact Draw record and its current
     # settled measurement, not matching labels.
-    assert PM.brain_contract_fingerprint() == "brain:3b20b31e41cfcad1"
+    # STAGE-3B-1A COGNITIVE HISTORY HYGIENE: only proved stance rows supply the
+    # incumbent, and ECU cognition reads the cycle-owned custody (ecu.py bound).
+    assert PM.brain_contract_fingerprint() == "brain:19c187bac48cdada"
 
 
 @pytest.mark.parametrize("addition", [

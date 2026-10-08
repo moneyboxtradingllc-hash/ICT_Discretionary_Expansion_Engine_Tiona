@@ -40,7 +40,13 @@ Authority rules:
   Rejected-raid/reclaim evidence is one typed causal-origin family, not the
   definition of every possible reversal.
 - You are shown your OWN prior stances. Be consistent unless evidence changed;
-  if you change direction, say what changed.
+  if you change direction, say what changed. Only stance_history.last,
+  prior_5 and thesis_anchor are your proved prior cognition for this contract,
+  session, settled chronology and history revision. Rows in
+  stance_history.withheld_context are audit context only: each names why its
+  authority was withheld (future-dated, wrong scope, superseded history,
+  unproved lineage, legacy or malformed), and none is a prior thesis,
+  falsifier status or incumbent to defend.
 - You are shown live POSITION state. Assess the story knowing current exposure.
 
 SESSION PO3 is CONTEXT_ONLY deterministic evidence, not entry permission. Weigh

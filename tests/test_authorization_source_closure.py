@@ -136,6 +136,8 @@ MUST_BE_BOUND = {
         "reconciles prior narrative authority with current causal ownership",
     "ai_brain/stance_memory.py":
         "carries current versus prior falsifier authority across scans",
+    "ai_brain/ecu.py":
+        "routes canonical ECU cognition to the owning cycle's stance custody",
     "market_data/campaign_lifecycle.py":
         "current-authority lifecycle projection and additional participation rule",
     "market_data/trade_horizon.py":

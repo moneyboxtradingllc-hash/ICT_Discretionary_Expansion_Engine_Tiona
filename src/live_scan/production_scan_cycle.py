@@ -460,6 +460,22 @@ class ProductionScanCycle:
         self.rebuilds.append(record)
         return record
 
+    def _bind_stance_custody(self) -> None:
+        """STAGE-3B-1A: ONE stance custody per cycle, scoped to this cycle.
+
+        ECU and non-ECU cognition both read and record `self.stance_memory`
+        (passed explicitly, never through the process-global ECU memory), and
+        it is the same object `_reanchor_cognitive_state` supersedes. Binding
+        is idempotent and re-applied each scan so a replaced memory is bound
+        too. Never raises.
+        """
+        bind = getattr(self.stance_memory, "bind_production_scope", None)
+        if callable(bind):
+            try:
+                bind(self.contract_id, self.session_id)
+            except Exception:  # noqa: BLE001 -- an unbound memory proves nothing
+                pass
+
     def _reanchor_cognitive_state(self, revision: int) -> dict:
         """Strip authority from beliefs formed under the superseded tape.
 
@@ -501,6 +517,7 @@ class ProductionScanCycle:
             raise ScanCycleError("no candles: refusing to scan a market it cannot see")
         now = now or datetime.now(timezone.utc)
         self.scan_count += 1
+        self._bind_stance_custody()
 
         raw_data = build_timeframes(candles_1m)
         htf_context = self.htf_engine.update(candles_1m)
@@ -581,7 +598,8 @@ class ProductionScanCycle:
             capital_report=capital_report, htf_context=htf_context,
             contract_id=self.contract_id, execution_price=execution_price,
             invoke_brain=invoke_brain,
-            pre_cognition_hook=_prepare_current_ecu_facts)
+            pre_cognition_hook=_prepare_current_ecu_facts,
+            stance_memory=self.stance_memory)
         if not ecu_facts["prepared"]:
             snapshot["candle_continuity"] = continuity
             # Repaired history is usable only after derived state converges.
@@ -987,8 +1005,13 @@ class ProductionScanCycle:
         market evidence never contained.
         """
         try:
-            history = (self.stance_memory.history_summary()
-                       if self.stance_memory else {"available": False})
+            memory = self.stance_memory
+            if not memory:
+                history = {"available": False}
+            elif getattr(memory, "production_scope", None) is not None:
+                history = memory.history_summary(snapshot=snapshot)
+            else:
+                history = memory.history_summary()
             return build_brain_input(snapshot, history)
         except Exception:  # noqa: BLE001
             return {}

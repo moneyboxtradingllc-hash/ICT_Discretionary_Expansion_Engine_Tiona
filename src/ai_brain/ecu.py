@@ -47,12 +47,17 @@ def _family_token(value, direction):
     return direction if direction in ("bullish", "bearish") else "none"
 
 
-def produce_thesis(snapshot: dict) -> dict:
+def produce_thesis(snapshot: dict, stance_memory=None) -> dict:
     """
     Run the Brain pre-pass and return the canonical thesis. Never raises.
     Returns {owner, source, direction, forbidden_direction, opportunity,
              opportunity_type, playbook_family, tool_family, confidence,
              dominant_reasoning}.
+
+    STAGE-3B-1A: a production cycle passes its OWN stance custody -- the one
+    its history re-anchoring supersedes -- so ECU cognition reads and records
+    exactly that memory. It is never assigned to the process-global `_STANCE`:
+    interleaved cycles stay separate. Standalone callers keep `_stance()`.
     """
     try:
         from ai_brain.narrative_brain import run_narrative_brain, enabled as brain_enabled
@@ -63,7 +68,8 @@ def produce_thesis(snapshot: dict) -> dict:
         # production actually consumes — told Luna it was reading QQQ during an
         # MNQ session, and keyed the symbol-partitioned stance/persistence there.
         symbol = snapshot.get("symbol") or os.getenv("SCAN_SYMBOL") or PRODUCTION_INSTRUMENT
-        res = run_narrative_brain(snapshot, symbol, _stance())
+        memory = stance_memory if stance_memory is not None else _stance()
+        res = run_narrative_brain(snapshot, symbol, memory)
         o = res.get("output") or {}
         direction = (o.get("narrative_direction") or "neutral").lower()
         opportunity = direction in ("bullish", "bearish")

@@ -8,12 +8,17 @@ proof family, not the definition of every possible market reversal.
 """
 from __future__ import annotations
 
+import copy
 import math
 
 
 DIRECTIONS = ("bullish", "bearish")
 OPPOSITE = {"bullish": "bearish", "bearish": "bullish"}
 STATE_VERSION = 1
+#: Stance-custody metadata a prior thesis carries exactly as it was recorded.
+AUTHORING_METADATA = ("stance_schema_version", "recorded_at_cutoff",
+                      "history_lineage", "contract_id", "market_session",
+                      "process_session_id")
 
 
 def _direction(value):
@@ -399,6 +404,11 @@ def build_narrative_continuity(snapshot: dict, stance_history: dict) -> dict:
             "objective_id": last.get("objective_id"),
             "falsifier_status": prior_falsifier_status,
         }
+        # STAGE-3B-1A: the authoring row's own custody metadata, copied as
+        # recorded. A legacy row carries None; nothing is inferred from the
+        # current snapshot, so a plan recheck keeps truthful authoring lineage.
+        prior_thesis.update({key: copy.deepcopy(last.get(key))
+                             for key in AUTHORING_METADATA})
 
     falsifier_status = "unknown"
     if successor:

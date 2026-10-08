@@ -751,7 +751,12 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
     if not enabled():
         return {"enabled": False, "authority": "observe_only", "output": None}
     try:
-        history = stance_memory.history_summary() if stance_memory else {"available": False}
+        # STAGE-3B-1A: a production-bound custody proves each row against THIS
+        # snapshot's scope; standalone memories keep the legacy read.
+        bound = getattr(stance_memory, "production_scope", None) is not None
+        history = ((stance_memory.history_summary(snapshot=snapshot) if bound
+                    else stance_memory.history_summary())
+                   if stance_memory else {"available": False})
         brain_input = build_brain_input(snapshot, history)
 
         # BUILD-CANONICAL-EXTERNAL-BRAIN-EXECUTION-BRIDGE (2026-08-07).
@@ -1247,9 +1252,15 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
                                   "error": f"wake telemetry exception: {exc}"}
 
         if stance_memory:
-            stance_memory.record(
-                snapshot.get("timestamp", ""), output,
-                narrative_continuity=brain_input.get("narrative_continuity"))
+            if bound:
+                stance_memory.record(
+                    snapshot.get("timestamp", ""), output,
+                    narrative_continuity=brain_input.get("narrative_continuity"),
+                    snapshot=snapshot)
+            else:
+                stance_memory.record(
+                    snapshot.get("timestamp", ""), output,
+                    narrative_continuity=brain_input.get("narrative_continuity"))
 
         # ADAPTIVE-1C — telemetry: RECOMMENDED vs APPLIED kept separate; applied is
         # hard-locked 0, final_confidence == base_confidence (no behavioural change).
