@@ -47,6 +47,33 @@ LIVE_STORE = os.path.join("data", "ai_retrieval", "memory_store.jsonl")
 LEDGER_SHA = "a489a36f71f113249e0916e2d003d174d4aa86f95592cf85be087cb302378466"
 EMPTY = {"level": None, "timeframe": None, "basis": None, "registered_at": None}
 
+#: REPAIR-RETRIEVAL-FIXTURE-CLOCK (2026-10-09). Both corpora `live` can seed --
+#: the August 6 archive or the synthetic stand-in -- are 2026-08-06 sessions,
+#: offered through 2026-10-05 and expired from 2026-10-06 under the 60-day
+#: rule. Retrieval measures age on `R._today_et()`. Unpinned, from 2026-10-06
+#: every query here was answered "expired": two tests went red and the rest
+#: kept passing over empty results. `live` now evaluates on the morning after
+#: authoring, and the boundary is tested explicitly in TestRetentionBoundary.
+EVALUATION_DAY = "2026-08-07"           # age 1
+LAST_VALID_DAY = "2026-10-05"           # age 60: still offered
+FIRST_EXPIRED_DAY = "2026-10-06"        # age 61: expired
+FIXTURE_SOURCE_SESSIONS = ["PROD-20260806"]
+
+
+def pin_retrieval_day(monkeypatch, day: str) -> None:
+    """Evaluate retrieval age on `day` for this test only (restored at
+    teardown; monkeypatch raises if the name disappears)."""
+    monkeypatch.setattr(R, "_today_et", lambda: day)
+
+
+def assert_analogs_returned(result: dict) -> None:
+    """The positive path really ran: evaluated in-window, at least one analog,
+    every analog from the seeded August 6 session."""
+    assert result["as_of_session_date"] == EVALUATION_DAY
+    assert result["returned"] >= 1
+    assert sorted({a["session_id"] for a in result["analogs"]}) == \
+        FIXTURE_SOURCE_SESSIONS
+
 
 def record(**over):
     base = dict(
@@ -94,10 +121,11 @@ def snap(session="lunch", regime="range_rotation", vol="toxic",
 @pytest.fixture
 def live(tmp_path, monkeypatch):
     """An isolated corpus seeded from the real ten August 6 records when they
-    are present, else a synthetic stand-in."""
+    are present, else a synthetic stand-in, read on EVALUATION_DAY."""
     monkeypatch.setenv("AI_RETRIEVAL_DIR", str(tmp_path / "r"))
     monkeypatch.setenv("REPLAY_SESSIONS_DIR", str(tmp_path / "sessions"))
     monkeypatch.setenv("AI_RETRIEVAL_ENABLED", "true")
+    pin_retrieval_day(monkeypatch, EVALUATION_DAY)
     src = os.path.join("data", "replay_sessions", "PROD-20260806", "analysis",
                        "proposed_descriptive_memory_v2_1")
     if os.path.isdir(src):
@@ -148,6 +176,7 @@ class TestOneRetrievalPerScan:
 
     def test_the_brain_consumes_the_object_the_scan_produced(self, live):
         result = R.retrieve_for_snapshot(snap(), "MNQ")
+        assert_analogs_returned(result)
         snapshot = {"ai_retrieval": result}
         assert snapshot["ai_retrieval"] is result
 
@@ -192,7 +221,9 @@ class TestRecordShape:
 
     def test_22_23_24_25_returned_analog_metadata(self, live):
         rec, result = self.build(live)
+        assert_analogs_returned(result)
         assert rec["returned_analog_count"] == len(result["analogs"])
+        assert rec["source_sessions"] == FIXTURE_SOURCE_SESSIONS
         for a in rec["returned_analogs"]:
             assert a["authority"] == "CONTEXT_ONLY"
             assert a["outcome_validated"] is False
@@ -202,7 +233,8 @@ class TestRecordShape:
         assert rec["retrieval_authority"] == "CONTEXT_ONLY"
 
     def test_no_unsafe_field_is_logged(self, live):
-        rec, _ = self.build(live)
+        rec, result = self.build(live)
+        assert_analogs_returned(result)     # the analog loop below is not empty
         blob = json.dumps(rec).lower()
         for banned in ("api_key", "account_id", "authorization_fingerprint",
                        "llm_prompt", "llm_raw_response", "jwt"):
@@ -232,6 +264,9 @@ class TestStageAccounting:
                       "below_threshold_count", "recurrence_members_collapsed",
                       "session_cap_excluded_count", "returned_analog_count"):
             assert isinstance(rec[field], int), field
+        # Reconciled through returned analogs, not by everything expiring.
+        assert rec["expired_count"] == 0
+        assert rec["returned_analog_count"] >= 1
         assert rec["stage_accounting_reconciles"] is True, (
             f"{rec['stage_accounting_total']} accounted vs corpus "
             f"{rec['corpus_size']}")
@@ -246,6 +281,10 @@ class TestStageAccounting:
         rec = T.build_record(session_id="S", scan_id="x", instrument="MNQ",
                              contract="C", result=result,
                              startup_state=R.retrieval_startup_state())
+        # In-window, so the records reached the contradiction gate; expiry,
+        # which runs first, excluded none of them.
+        assert result["as_of_session_date"] == EVALUATION_DAY
+        assert rec["expired_count"] == 0
         assert rec["contradiction_gated_count"] > 0
         assert rec["contradiction_reason_occurrences"] >= \
             rec["contradiction_gated_count"]
@@ -420,6 +459,11 @@ class TestSessionSummary:
             r["contradiction_gated_count"] for r in s.records)
         assert summ["incomplete_query_scans"] == 1
         assert summ["authority_values_seen"] in ([], ["CONTEXT_ONLY"])
+        # Non-vacuous: the sums above reconcile real presentations and gating.
+        assert summ["scans_with_analogs"] >= 1
+        assert summ["total_analog_presentations"] >= 1
+        assert summ["total_contradiction_gated_records"] >= 1
+        assert summ["authority_values_seen"] == ["CONTEXT_ONLY"]
 
 
 class TestNoBehaviourChange:
@@ -427,6 +471,7 @@ class TestNoBehaviourChange:
 
     def test_32_a_fixed_snapshot_produces_an_identical_retrieval_result(self, live):
         a = R.retrieve_for_snapshot(snap(), "MNQ")
+        assert_analogs_returned(a)      # identical AND non-empty
         s = T.RetrievalTelemetrySession("PROD-FIXED")
         s.record_scan(scan_id="x", result=a,
                       startup_state=R.retrieval_startup_state())
@@ -439,6 +484,7 @@ class TestNoBehaviourChange:
 
     def test_telemetry_does_not_mutate_the_result_it_describes(self, live):
         result = R.retrieve_for_snapshot(snap(), "MNQ")
+        assert_analogs_returned(result)
         before = json.dumps(result, sort_keys=True, default=str)
         T.build_record(session_id="S", scan_id="x", instrument="MNQ",
                        contract="C", result=result,
@@ -449,6 +495,48 @@ class TestNoBehaviourChange:
         src = open("src/live_scan/production_scan_cycle.py", encoding="utf-8").read()
         assert "memory_retrieval_telemetry_id" in src
         assert "memory_retrieval_telemetry" in src
+
+
+class TestRetentionBoundary:
+    """The 60-day inclusive rule as telemetry counts it. Each test names its
+    own evaluation day; none relies on the fixture's in-window day."""
+
+    @staticmethod
+    def scan_on(monkeypatch, day, context):
+        pin_retrieval_day(monkeypatch, day)
+        result = R.retrieve_for_snapshot(context, "MNQ")
+        assert result["as_of_session_date"] == day
+        return T.build_record(session_id="S", scan_id=day, instrument="MNQ",
+                              contract="C", result=result,
+                              startup_state=R.retrieval_startup_state())
+
+    def test_the_60th_day_is_returned_not_expired(self, live, monkeypatch):
+        rec = self.scan_on(monkeypatch, LAST_VALID_DAY, snap())
+        assert rec["expired_count"] == 0
+        assert rec["returned_analog_count"] >= 1
+        assert rec["source_sessions"] == FIXTURE_SOURCE_SESSIONS
+        assert rec["stage_accounting_reconciles"] is True
+
+    def test_the_61st_day_is_counted_as_expired(self, live, monkeypatch):
+        rec = self.scan_on(monkeypatch, FIRST_EXPIRED_DAY, snap())
+        assert rec["corpus_size"] >= 1
+        assert rec["expired_count"] == rec["corpus_size"]
+        assert rec["returned_analog_count"] == 0
+        assert rec["source_sessions"] == []
+        assert rec["stage_accounting_reconciles"] is True
+
+    def test_expiry_is_accounted_before_the_contradiction_gate(self, live,
+                                                               monkeypatch):
+        contradictory = snap(regime="expansion_up", vol="stable", ndir="bullish",
+                             nphase="continuation",
+                             delivery="full_distribution_alignment")
+        inside = self.scan_on(monkeypatch, EVALUATION_DAY, contradictory)
+        assert inside["expired_count"] == 0
+        assert inside["contradiction_gated_count"] >= 1
+        outside = self.scan_on(monkeypatch, FIRST_EXPIRED_DAY, contradictory)
+        assert outside["expired_count"] == outside["corpus_size"]
+        assert outside["contradiction_gated_count"] == 0
+        assert outside["contradiction_reason_occurrences"] == 0
 
 
 class TestSafetyBoundary:
@@ -471,6 +559,7 @@ class TestSafetyBoundary:
                       "invalidation_level", "objective", "direction_authority"):
             assert field not in rec, field
         assert rec["retrieval_authority"] == "CONTEXT_ONLY"
+        assert rec["returned_analog_count"] >= 1     # proven WITH analogs present
 
     def test_37_38_no_authorization_or_order_path_here(self):
         assert os.environ.get("PRODUCTION_ARMED_SESSION") is None

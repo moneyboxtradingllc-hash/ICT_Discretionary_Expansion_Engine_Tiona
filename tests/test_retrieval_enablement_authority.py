@@ -33,6 +33,30 @@ from broker import topstepx_session_authorization as SA          # noqa: E402
 LIVE_STORE = os.path.join("data", "ai_retrieval", "memory_store.jsonl")
 EMPTY = {"level": None, "timeframe": None, "basis": None, "registered_at": None}
 
+#: REPAIR-RETRIEVAL-FIXTURE-CLOCK (2026-10-09). The fixture record is a
+#: 2026-08-06 session and retention is 60 days inclusive, so retrieval offers it
+#: through 2026-10-05 and expires it from 2026-10-06. `retrieve_for_snapshot`
+#: takes no date: age is measured against `R._today_et()`, the wall-clock ET
+#: session date. Unpinned, test_16 and test_18 went red on 2026-10-06 and
+#: test_17 kept passing over ZERO analogs. The fixture now names the day it
+#: evaluates on -- the authoring next morning these tests describe -- and the
+#: retention boundary is tested on both sides below instead of being hidden.
+FIXTURE_SESSION_DATE = "2026-08-06"
+EVALUATION_DAY = "2026-08-07"           # age 1: the morning after authoring
+LAST_VALID_DAY = "2026-10-05"           # age 60: still offered
+FIRST_EXPIRED_DAY = "2026-10-06"        # age 61: expired
+FIXTURE_SOURCE_SESSIONS = ["PROD-20260806"]
+
+
+def pin_retrieval_day(monkeypatch, day: str) -> None:
+    """Evaluate retrieval age on `day` for this test only.
+
+    Patches the one name retrieval reads its ET session date from. monkeypatch
+    raises if that name ever disappears, and restores it at teardown, so no
+    other test inherits the day.
+    """
+    monkeypatch.setattr(R, "_today_et", lambda: day)
+
 
 def launcher():
     import importlib.util
@@ -90,8 +114,10 @@ def record(**over):
 
 @pytest.fixture
 def corpus(tmp_path, monkeypatch):
-    """An isolated store holding one descriptive record."""
+    """An isolated store holding one descriptive record, read on
+    EVALUATION_DAY -- inside that record's retention window."""
     monkeypatch.setenv("AI_RETRIEVAL_DIR", str(tmp_path / "r"))
+    pin_retrieval_day(monkeypatch, EVALUATION_DAY)
     vector_store.add_record(record())
     return tmp_path
 
@@ -305,6 +331,24 @@ class TestProductionHookConsumesTheCorpus:
         assert out["enabled"] is True
         assert out["corpus_size"] == 1
         assert out["returned"] == 1
+        assert out["as_of_session_date"] == EVALUATION_DAY
+        assert sorted({a["session_id"] for a in out["analogs"]}) == \
+            FIXTURE_SOURCE_SESSIONS
+
+    def test_the_flag_alone_decides_on_the_same_valid_day(self, corpus,
+                                                          monkeypatch):
+        """Same store, same in-window day: enabled returns the record,
+        disabled never reaches the store."""
+        monkeypatch.setenv("AI_RETRIEVAL_ENABLED", "true")
+        on = R.retrieve_for_snapshot(self.snap(), "MNQ")
+        assert on["as_of_session_date"] == EVALUATION_DAY
+        assert on["returned"] == 1
+        assert on["rejected_reasons"] == {}
+        monkeypatch.setenv("AI_RETRIEVAL_ENABLED", "false")
+        off = R.retrieve_for_snapshot(self.snap(), "MNQ")
+        assert off["enabled"] is False
+        assert off["analogs"] == []
+        assert "corpus_size" not in off
 
     def test_the_hook_short_circuits_when_disabled(self, corpus, monkeypatch):
         monkeypatch.setenv("AI_RETRIEVAL_ENABLED", "false")
@@ -315,7 +359,10 @@ class TestProductionHookConsumesTheCorpus:
 
     def test_17_retrieved_analogs_remain_context_only(self, corpus, monkeypatch):
         monkeypatch.setenv("AI_RETRIEVAL_ENABLED", "true")
-        for a in R.retrieve_for_snapshot(self.snap(), "MNQ")["analogs"]:
+        analogs = R.retrieve_for_snapshot(self.snap(), "MNQ")["analogs"]
+        assert len(analogs) == 1     # the loop below must not run over nothing
+        for a in analogs:
+            assert a["session_id"] == FIXTURE_SOURCE_SESSIONS[0]
             assert a["authority"] == "CONTEXT_ONLY"
             assert a["outcome_validated"] is False
             assert a["recommendation_authority"] == "none"
@@ -333,6 +380,8 @@ class TestProductionHookConsumesTheCorpus:
                                active=True)
         snapshot = {"ai_retrieval": R.retrieve_for_snapshot(self.snap(), "MNQ")}
         assert snapshot["ai_retrieval"]["analogs"]      # memory IS present
+        assert [a["session_id"] for a in snapshot["ai_retrieval"]["analogs"]] == \
+            FIXTURE_SOURCE_SESSIONS
         with pytest.raises(NoCandidate):
             CandidateProducer(allow_prose_objective_fallback=True,
                               allow_numeric_invalidation_fallback=True,
@@ -363,6 +412,61 @@ class TestProductionHookConsumesTheCorpus:
                                       for tf in ("15m", "5m", "3m", "1m")},
                 "phase_confidence_summary": {"mean": 60.0, "min": 50.0,
                                              "max": 70.0}}
+
+
+@pytest.fixture
+def dated_store(tmp_path, monkeypatch):
+    """The same one-record store with NO pinned day: each boundary test names
+    the day it evaluates on, so none can inherit the in-window fixture day."""
+    monkeypatch.setenv("AI_RETRIEVAL_DIR", str(tmp_path / "dated"))
+    monkeypatch.setenv("AI_RETRIEVAL_ENABLED", "true")
+    vector_store.add_record(record())
+    return tmp_path
+
+
+class TestRetentionBoundary:
+    """The 60-day inclusive retention rule, through real retrieval gating."""
+
+    @staticmethod
+    def ask_on(monkeypatch, day):
+        pin_retrieval_day(monkeypatch, day)
+        out = R.retrieve_for_snapshot(TestProductionHookConsumesTheCorpus.snap(),
+                                      "MNQ")
+        assert out["as_of_session_date"] == day     # evaluated on the day named
+        return out
+
+    def test_the_fixture_day_lies_inside_the_records_own_window(self):
+        """GUARD, not a retention test. It keeps EVALUATION_DAY inside the
+        fixture record's window, so a date edit fails here instead of silently
+        emptying every corpus test. It cannot tell a 59- or 61-day rule from
+        60; the day tests below do that."""
+        r = record()
+        assert r["session_date"] <= EVALUATION_DAY <= r["expires_at"]
+        assert not DM.is_expired(r, EVALUATION_DAY)
+
+    def test_the_stored_record_expires_after_its_60th_day(self, dated_store):
+        (stored,) = vector_store.load_records()
+        assert stored["session_date"] == FIXTURE_SESSION_DATE
+        assert stored["expires_at"] == LAST_VALID_DAY
+
+    def test_the_authoring_next_day_offers_the_record(self, dated_store,
+                                                      monkeypatch):
+        out = self.ask_on(monkeypatch, EVALUATION_DAY)
+        assert out["returned"] == 1
+        assert out["rejected_reasons"] == {}
+
+    def test_the_60th_day_still_offers_the_record(self, dated_store, monkeypatch):
+        out = self.ask_on(monkeypatch, LAST_VALID_DAY)
+        assert out["returned"] == 1
+        assert [a["session_id"] for a in out["analogs"]] == FIXTURE_SOURCE_SESSIONS
+        assert out["rejected_reasons"] == {}
+
+    def test_the_61st_day_expires_it(self, dated_store, monkeypatch):
+        out = self.ask_on(monkeypatch, FIRST_EXPIRED_DAY)
+        assert out["returned"] == 0
+        assert out["analogs"] == []
+        assert out["corpus_size"] == 1      # kept on disk, no longer offered
+        assert out["rejected_reasons"] == {"expired": 1}
 
 
 class TestNothingElseMoved:
