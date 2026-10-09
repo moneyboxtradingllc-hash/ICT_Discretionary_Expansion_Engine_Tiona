@@ -101,7 +101,9 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # STAGE-3B-1B: local active-leg evidence is published under leg names and
     # the unbound campaign premise as UNKNOWN; prompt field doctrine updated.
     # STAGE-3C-1: shadow premise facts (authority none) join the closure.
-    assert PM.brain_contract_fingerprint() == "brain:a43d86dae97d71ff"
+    # STAGE-3C-1-R1: shadow certificate boundaries repaired (source order,
+    # chain retirement, watched-life context, duplicate canonical facts).
+    assert PM.brain_contract_fingerprint() == "brain:e50a1b36594a6c26"
 
 
 @pytest.mark.parametrize("addition", [

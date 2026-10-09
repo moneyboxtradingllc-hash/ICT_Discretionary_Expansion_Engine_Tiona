@@ -632,3 +632,250 @@ def test_watch_limit_is_refused_not_truncated_and_reasons_are_bounded():
     assert none["retained_chains"] == 0
     long_reason = CP.unavailable(reason="x" * 1000)["reason"]
     assert len(long_reason) <= CP.REASON_CAP
+
+
+# ── Stage 3C-1-R1: source order, chain retirement, watch context, duplicates ─
+FAIL_AT_0909 = {"13:09": {"close": 29480.0, "low": 29479.0}}
+
+
+def _swap(rows, first, second):
+    rows = [dict(r) for r in rows]
+    i = next(k for k, r in enumerate(rows) if r["timestamp"][11:16] == first)
+    j = next(k for k, r in enumerate(rows) if r["timestamp"][11:16] == second)
+    rows[i], rows[j] = rows[j], rows[i]
+    return rows
+
+
+def test_out_of_order_bucket_is_never_sorted_into_intact():
+    cert = _observe(_swap(_settled(15), "13:06", "13:07"), _ref(), "13:14")
+    assert cert["status"] == "UNKNOWN"
+    assert cert["reason"] == ("required_bucket_member_invalid:settled_candles_not_"
+                              "chronological:2026-08-19T13:05:00+00:00")
+
+
+def test_bucket_interleaved_across_its_boundary_is_invalid():
+    cert = _observe(_swap(_settled(20), "13:09", "13:10"), _ref(), "13:19")
+    assert cert["status"] == "UNKNOWN"
+    assert cert["reason"] == ("required_bucket_member_order_interleaved:"
+                              "2026-08-19T13:05:00+00:00")
+
+
+def test_disordered_bucket_proves_nothing_but_a_valid_violation_still_fails():
+    bad = {"close": 29480.0, "low": 29479.0}
+    only = _swap(_settled(20, overrides={"13:09": bad}), "13:06", "13:07")
+    assert _observe(only, _ref(), "13:19")["status"] == "UNKNOWN"
+    both = _swap(_settled(20, overrides={"13:09": bad, "13:19": bad}), "13:06", "13:07")
+    cert = _observe(both, _ref(), "13:19")
+    assert cert["status"] == "FAILED"
+    assert cert["failure_bucket"]["open"] == "2026-08-19T13:15:00+00:00"
+
+
+def test_identical_duplicates_and_equivalent_instants_keep_their_meaning():
+    rows = _settled(15)
+    plain = _observe(rows, _ref(), "13:14")
+    assert plain["status"] == "INTACT"
+    twin = dict(rows[7])                                     # 13:07, identical
+    for variant in (rows[:8] + [twin] + rows[8:], rows + [dict(twin)]):
+        cert = _observe(variant, _ref(), "13:14")
+        assert cert["status"] == "INTACT", cert
+        assert cert["tip_member_digests"] == plain["tip_member_digests"]
+    zulu = [dict(r, timestamp=r["timestamp"].replace("+00:00", "Z")) for r in rows]
+    cert = _observe(zulu, _ref(), "13:14")
+    assert cert["status"] == "INTACT"
+    assert cert["tip_member_digests"] == plain["tip_member_digests"]
+
+
+@pytest.mark.parametrize("status", ["FAILED", "INTACT"])
+def test_retained_chain_rule_is_the_same_for_failed_and_intact(status):
+    life = _ref()
+    overrides = FAIL_AT_0909 if status == "FAILED" else None
+    first = _observe(_settled(30, overrides=overrides), life, "13:29")
+    assert first["status"] == status
+    assert first["tip_bucket_open"] == "2026-08-19T13:25:00+00:00"
+    later = _settled(60, overrides=overrides)[25:60]     # holds the 13:25 tip, not the anchor
+    kept = _observe(later, life, "13:59", retained=first)
+    assert kept["status"] == status
+    # the measurement advances; nothing stays frozen at the retained one
+    assert kept["tip_bucket_open"] == "2026-08-19T13:55:00+00:00"
+    assert kept["settled_through"] == "2026-08-19T13:59:00+00:00"
+    assert kept["cutoff"] == "2026-08-19T13:59:00+00:00"
+    if status == "FAILED":
+        assert kept["reason"] == "failure_witness_retained"
+        assert kept["failure_bucket"] == first["failure_bucket"]
+    # a duplicate cutoff over identical evidence is the identical certificate
+    assert _observe(later, life, "13:59", retained=kept) == kept
+
+
+@pytest.mark.parametrize("status", ["FAILED", "INTACT"])
+@pytest.mark.parametrize("case", ["changed_digest", "missing_tip", "revision",
+                                  "backwards_cutoff", "restart"])
+def test_retained_chain_retires_and_recomputes_from_current_evidence(status, case):
+    life = _ref()
+    full = _settled(60, overrides=FAIL_AT_0909 if status == "FAILED" else None)
+    first = _observe(full[:30], life, "13:29")
+    window, cutoff, kwargs = full[25:60], "13:59", {"retained": first}
+    if case == "changed_digest":
+        window = [dict(r, volume=999) if r["timestamp"][11:16] == "13:27" else r
+                  for r in window]
+    elif case == "missing_tip":
+        window = full[35:60]
+    elif case == "revision":
+        kwargs["rev"] = 1
+    elif case == "backwards_cutoff":
+        mid = _observe(full[25:59], life, "13:58", retained=first)
+        assert mid["status"] == status
+        assert mid["tip_bucket_open"] == "2026-08-19T13:50:00+00:00"
+        # 13:56 still holds that tip, but the cutoff moved backwards
+        window, cutoff, kwargs = full[25:57], "13:56", {"retained": mid}
+    elif case == "restart":
+        kwargs = {}
+    cert = _observe(window, life, cutoff, **kwargs)
+    assert cert["status"] == "UNKNOWN", cert
+    assert cert["reason"] == "registration_anchor_outside_window"
+
+
+@pytest.mark.parametrize("status", ["FAILED", "INTACT"])
+def test_retained_chain_rolls_minute_by_minute_past_its_witness(status):
+    life = _ref()
+    full = _settled(90, overrides=FAIL_AT_0909 if status == "FAILED" else None)
+    cert = _observe(full[:30], life, "13:29")
+    for end in range(31, 91):          # the window's leading edge walks through 13:05..13:09
+        window = full[max(0, end - 30):end]
+        cert = _observe(window, life, window[-1]["timestamp"][11:16], retained=cert)
+        assert cert["status"] == status, (end, cert)
+        if status == "FAILED":
+            assert cert["failure_bucket"]["open"] == "2026-08-19T13:05:00+00:00"
+    assert cert["settled_through"] == "2026-08-19T14:29:00+00:00"
+
+
+def test_fresh_current_failure_still_proves_failed_after_retirement():
+    life = _ref()
+    first = _observe(_settled(30), life, "13:29")
+    later = _settled(60, overrides={"13:49": {"close": 29480.0, "low": 29479.0}})[35:60]
+    cert = _observe(later, life, "13:59", retained=first)      # tip absent: retired
+    assert cert["status"] == "FAILED" and cert["reason"] == "valid_close_beyond_level"
+    assert cert["failure_bucket"]["open"] == "2026-08-19T13:45:00+00:00"
+
+
+def test_failed_chain_survives_an_unrelated_damaged_bucket():
+    failed = _observe(_settled(30, overrides=FAIL_AT_0909), _ref(), "13:29")
+    later = [r for r in _settled(60)[25:60] if r["timestamp"][11:16] != "13:42"]
+    cert = _observe(later, _ref(), "13:59", retained=failed)
+    assert cert["status"] == "FAILED" and cert["reason"] == "failure_witness_retained"
+
+
+def test_contradicted_failure_witness_is_not_retained():
+    failed = _observe(_settled(30, overrides=FAIL_AT_0909), _ref(), "13:29")
+    current = _settled(45)              # the 13:09 close no longer breaks the level
+    cert = _observe(current, _ref(), "13:44", retained=failed)
+    assert cert["reason"] != "failure_witness_retained"
+    assert cert["status"] == "INTACT" and cert["failure_bucket"] is None
+
+
+def _watch(lives, *, rows=None, slots=None, ledger=(), cutoff="13:14", shadow=None):
+    shadow = shadow or CP.CampaignPremiseShadow()
+    block = shadow.advance(snapshot={"protected_swings": {"by_timeframe": slots or {}}},
+                           settled_1m=_settled(15) if rows is None else rows,
+                           ledger_rows=list(ledger), history_revision=0, contract_id=C,
+                           market_session=SESSION, cutoff=f"2026-08-19T{cutoff}:00+00:00",
+                           watched_lives=tuple(lives))
+    return block, shadow
+
+
+@pytest.mark.parametrize("change,reason", [
+    ({"market_session": "20260101"}, "watched_life_foreign_session"),
+    ({"contract_id": "CON.F.US.MNQ.H27"}, "watched_life_foreign_contract"),
+    ({"source_tf": "4m"}, "watched_life_unsupported_timeframe"),
+    ({"side": "middle"}, "watched_life_invalid_side"),
+    ({"level": float("nan")}, "watched_life_invalid_level"),
+    ({"level": True}, "watched_life_invalid_level"),
+    ({"swing_id": ""}, "watched_life_invalid_identity"),
+    ({"registered_at": "2026-08-19T13:00:00Z"}, "watched_life_registered_at_not_canonical"),
+    ({"registered_at": "2026-08-19T13:30:00+00:00"}, "watched_life_registered_after_cutoff"),
+    ({"registered_at": "2026-08-18T13:00:00+00:00"},
+     "watched_life_registered_in_other_session"),
+    ({"registration_bucket_open": "2026-08-19T13:02:00+00:00"},
+     "watched_life_registration_anchor_invalid"),
+])
+def test_foreign_or_malformed_watch_is_refused_and_never_measured(change, reason):
+    from dataclasses import replace
+    block, shadow = _watch([replace(_ref(), **change)])
+    [watched] = block["watched_lives"]
+    assert block["status"] == "AVAILABLE"
+    assert watched["certificate"]["status"] == "UNKNOWN"
+    assert watched["certificate"]["reason"] == reason
+    assert watched["certificate"]["lineage_id"] is None
+    assert watched["certificate"]["covered_buckets"] == 0
+    assert block["retained_chains"] == 0 and shadow.retained_chains == 0
+
+
+def test_watch_contradicting_the_producer_registration_is_refused():
+    from dataclasses import replace
+    ledger = [_registration_row("13:09", source="13:05", oid="REG")]
+    agreeing = replace(_ref(), registered_at="2026-08-19T13:09:00+00:00",
+                       registration_bucket_open="2026-08-19T13:05:00+00:00")
+    block, _ = _watch([agreeing], ledger=ledger)
+    assert block["watched_lives"][0]["certificate"]["status"] == "INTACT"
+    for wrong in (replace(agreeing, registration_bucket_open="2026-08-19T13:00:00+00:00"),
+                  replace(_ref(), registration_occurrence_id="REG")):
+        block, shadow = _watch([wrong], ledger=ledger)
+        certificate = block["watched_lives"][0]["certificate"]
+        assert certificate["status"] == "UNKNOWN"
+        assert certificate["reason"] == "watched_life_registration_mismatch"
+        assert shadow.retained_chains == 0
+
+
+def test_valid_watch_survives_slot_absence_and_never_inherits_another_failure():
+    from dataclasses import replace
+    first = _ref()
+    successor = replace(_ref(), swing_id="5m:swing_low:29490@13:15",
+                        registered_at="2026-08-19T13:15:00+00:00",
+                        registration_bucket_open="2026-08-19T13:15:00+00:00")
+    rows = _settled(30, overrides=FAIL_AT_0909)
+    block, shadow = _watch([first], rows=rows, cutoff="13:29")
+    [watched] = block["watched_lives"]
+    assert watched["tracker_slot_present"] is False
+    assert watched["certificate"]["status"] == "FAILED"
+    block, shadow = _watch([first, successor], rows=rows, cutoff="13:29", shadow=shadow)
+    by_id = {w["swing_id"]: w["certificate"] for w in block["watched_lives"]}
+    assert by_id[first.swing_id]["status"] == "FAILED"
+    assert by_id[successor.swing_id]["status"] == "INTACT"
+    assert by_id[successor.swing_id]["failure_bucket"] is None
+    assert shadow.retained_chains == 2
+
+
+def test_identical_canonical_sweep_copies_are_one_fact():
+    sweep = _sweep_row("13:05")
+    rows = [sweep, copy.deepcopy(sweep), _registration_row()]
+    [life] = _inventory(rows, _slots())
+    assert life["sweep_occurrence_ids"] == [sweep["occurrence_id"]]
+    assert "conflicting_sweep_ids" not in life["join"]
+    assert "excluded_associations_at_cutoff" not in life["join"]
+    verdict = CP.selection_eligibility(life, {"status": "INTACT"},
+                                       protected_by_timeframe=_slots(), ledger_rows=rows,
+                                       cutoff="2026-08-19T13:20:00+00:00")
+    assert verdict == {"eligible": True, "failures": []}
+
+
+def test_conflicting_payloads_under_one_canonical_id_are_refused_not_picked():
+    sweep = _sweep_row("13:05")
+    other = copy.deepcopy(sweep)
+    other["source_bars"] = []
+    resweep = _sweep_row("13:15")
+    rows = [sweep, other, resweep, _registration_row()]
+    [life] = _inventory(rows, _slots())
+    assert life["sweep_occurrence_ids"] == [resweep["occurrence_id"]]
+    assert life["join"]["conflicting_sweep_ids"] == [sweep["occurrence_id"]]
+    assert life["join"]["excluded_associations_at_cutoff"] == 1
+    verdict = CP.selection_eligibility(life, {"status": "INTACT"},
+                                       protected_by_timeframe=_slots(), ledger_rows=rows,
+                                       cutoff="2026-08-19T13:20:00+00:00")
+    assert verdict["failures"] == ["V7"]
+    alone = [sweep, other, _registration_row()]
+    [life] = _inventory(alone, _slots())
+    assert life["sweep_occurrence_ids"] == []
+    assert life["join"]["conflicting_sweep_ids"] == [sweep["occurrence_id"]]
+    verdict = CP.selection_eligibility(life, {"status": "INTACT"},
+                                       protected_by_timeframe=_slots(), ledger_rows=alone,
+                                       cutoff="2026-08-19T13:20:00+00:00")
+    assert verdict["failures"] == ["V1", "V7"]

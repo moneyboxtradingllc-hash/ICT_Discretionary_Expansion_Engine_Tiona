@@ -44,6 +44,29 @@ PRECEDENCE
        FAILED (earliest witness), even beside an unrelated gap or bad row;
     3. otherwise any missing/invalid required evidence is UNKNOWN;
     4. otherwise INTACT through `settled_through`.
+
+SOURCE ORDER IS PROVENANCE
+--------------------------
+A required bucket is evidence only as the provider supplied it: its members
+must form ONE contiguous chronological run of the supplied series (identical
+duplicates aside, exactly as `_canonical_settled_bars` treats them). The
+observer never re-sorts a bucket into a cleaner-looking one. A disordered or
+interleaved bucket is invalid on its own; other buckets keep their own verdict.
+
+RETAINED CHAINS
+---------------
+FAILED and INTACT retention obey the SAME rule: same lineage, a cutoff that
+does not move backwards, and the retained tip bucket present in the current
+window with identical member digests. Anything else retires the chain and the
+certificate is recomputed from current permitted evidence only. A continued
+FAILED chain keeps its earliest witness and still advances its tip.
+
+WATCHED LIVES
+-------------
+An explicit watch names one exact life of THIS contract and production
+session, registered by T, with a coherent registration anchor. A foreign,
+malformed or contradicted ref is refused (UNKNOWN, never measured, never
+retained); the observer never substitutes another life for it.
 """
 from __future__ import annotations
 
@@ -264,10 +287,34 @@ def life_inventory(*, ledger_rows, protected_by_timeframe, contract_id,
     rows = [copy.deepcopy(r) for r in (ledger_rows or ())
             if isinstance(r, dict) and r.get("contract") == contract_id]
 
+    # One canonical id is one fact. Identical copies collapse to the first;
+    # different payloads under one id are conflicting evidence, never a pick.
+    copies: dict = {}
+    for row in rows:
+        if _canonical_sweep(row, contract_id):
+            copies.setdefault(row.get("occurrence_id"), []).append(row)
+    conflicting = {oid for oid, found in copies.items()
+                   if len({json.dumps(r, sort_keys=True, default=str) for r in found}) > 1}
+
     grouped: dict = {}
     excluded: list = []
-    for row in rows:
-        if not _canonical_sweep(row, contract_id):
+    conflicted: dict = {}
+    for oid, found in copies.items():
+        if oid not in conflicting:
+            continue
+        excluded.append((oid, "canonical_payload_conflict"))
+        for row in found:
+            observed = _instant((row.get("protected_swing_lifetime") or {})
+                                .get("observed_at"))
+            if not _available(row, cutoff) or observed is None or observed > cutoff:
+                continue
+            key, _ = _association_key(row, contract_id, market_session)
+            if key is not None:
+                conflicted.setdefault(key, set()).add(oid)
+                grouped.setdefault(key, [])
+    for oid, found in copies.items():
+        row = found[0]
+        if oid in conflicting:
             continue
         if not isinstance(row.get("protected_swing_lifetime"), dict):
             continue
@@ -329,6 +376,8 @@ def life_inventory(*, ledger_rows, protected_by_timeframe, contract_id,
                 "tuple_conflict": len(slot_names.get(key[:6], ())) > 1,
             },
         })
+        if key in conflicted:
+            out[-1]["join"]["conflicting_sweep_ids"] = sorted(conflicted[key])
     if excluded:
         for row in out:
             row["join"]["excluded_associations_at_cutoff"] = len(excluded)
@@ -348,21 +397,28 @@ def _lineage_id(life: LifeRef, history_revision, contract_id) -> str:
 
 
 def _index_rows(settled_1m, cutoff: str):
-    """{instant: [rows]} for rows at or before T, plus unplaceable rows."""
-    index, unplaceable = {}, 0
-    for row in settled_1m or ():
+    """{instant: [(source position, row)]} for rows at or before T, the rank of
+    each instant's FIRST occurrence in the supplied series, and the number of
+    unplaceable rows. Ranks are what `_canonical_settled_bars` orders by."""
+    index, rank, unplaceable = {}, {}, 0
+    for position, row in enumerate(settled_1m or ()):
         stamp = _instant(row.get("timestamp")) if isinstance(row, dict) else None
         if stamp is None:
             unplaceable += 1
             continue
+        rank.setdefault(stamp, len(rank))
         if stamp > cutoff:
             continue
-        index.setdefault(stamp, []).append(row)
-    return index, unplaceable
+        index.setdefault(stamp, []).append((position, row))
+    return index, rank, unplaceable
 
 
-def _bucket(index, *, opening: datetime, minutes: int, contract_id: str) -> dict:
-    """Validate ONE own-timeframe bucket independently of every other bucket."""
+def _bucket(index, rank, *, opening: datetime, minutes: int, contract_id: str) -> dict:
+    """Validate ONE own-timeframe bucket independently of every other bucket.
+
+    Members are validated in the order the provider supplied them and must be
+    one contiguous chronological run of that series; a bucket is never sorted
+    into existence."""
     from market_data.campaign_draw_truth import _bar_digest, _canonical_settled_bars
     expected = [_iso(opening + timedelta(minutes=i)) for i in range(minutes)]
     terminal = expected[-1]
@@ -384,10 +440,16 @@ def _bucket(index, *, opening: datetime, minutes: int, contract_id: str) -> dict
         out["reason"] = ("missing_terminal_member" if terminal in missing
                          else "missing_interior_member")
         return out
-    members = [copy.deepcopy(row) for stamp in expected for row in index[stamp]]
-    normalized, reason = _canonical_settled_bars(members, contract_id)
+    supplied = sorted((pair for stamp in expected for pair in index[stamp]),
+                      key=lambda pair: pair[0])
+    normalized, reason = _canonical_settled_bars(
+        [copy.deepcopy(row) for _, row in supplied], contract_id)
     if reason:
         out["reason"] = _bounded(f"member_invalid:{reason}")
+        return out
+    ranks = [rank[stamp] for stamp in expected]
+    if ranks != list(range(ranks[0], ranks[0] + minutes)):
+        out["reason"] = "member_order_interleaved"
         return out
     if [row.get("timestamp") for row in normalized] != expected:
         out["reason"] = "membership_mismatch"
@@ -409,6 +471,58 @@ def _closure_explained(index, *, opening: datetime, terminal: datetime) -> bool:
     return report.get("continuity_class") == EXPECTED_MARKET_BREAK
 
 
+def _witness_agrees(index, rank, witness: dict, *, minutes: int, contract_id: str) -> bool:
+    """The retained failure witness is not contradicted by the current window.
+
+    Absent (rolled out) agrees. Fully present must validate with identical
+    digests. Partly present is allowed only as the leading edge of the window
+    (a suffix of the bucket), whose members must match the retained digests."""
+    from market_data.campaign_draw_truth import _bar_digest, _canonical_settled_bars
+    opening = _dt(witness["open"])
+    expected = [_iso(opening + timedelta(minutes=i)) for i in range(minutes)]
+    digests = list(witness.get("member_digests") or [])
+    present = [stamp for stamp in expected if stamp in index]
+    if not present:
+        return True
+    if len(present) == minutes:
+        check = _bucket(index, rank, opening=opening, minutes=minutes,
+                        contract_id=contract_id)
+        return check["valid"] and check["member_digests"] == digests
+    first = expected.index(present[0])
+    if (present != expected[first:] or present[0] != min(index)
+            or len(digests) != minutes):
+        return False
+    supplied = sorted((pair for stamp in present for pair in index[stamp]),
+                      key=lambda pair: pair[0])
+    normalized, reason = _canonical_settled_bars(
+        [copy.deepcopy(row) for _, row in supplied], contract_id)
+    return (reason is None
+            and [row.get("timestamp") for row in normalized] == present
+            and [_bar_digest(row) for row in normalized] == digests[first:])
+
+
+def _chain_continues(chain, *, lineage_id, index, rank, cutoff, minutes, contract_id):
+    """(continues, retained failure witness or None) for one retained chain."""
+    if not chain or chain.get("lineage_id") != lineage_id:
+        return False, None
+    if chain.get("status") not in (INTACT, FAILED) or not chain.get("tip_bucket_open"):
+        return False, None
+    previous = _instant(chain.get("cutoff") or chain.get("settled_through"))
+    if previous is None or cutoff < previous:
+        return False, None                      # non-monotonic cutoff
+    tip = _bucket(index, rank, opening=_dt(chain["tip_bucket_open"]), minutes=minutes,
+                  contract_id=contract_id)
+    if not (tip["valid"] and tip["member_digests"] == chain.get("tip_member_digests")):
+        return False, None                      # changed or missing tip
+    if chain.get("status") == INTACT:
+        return True, None
+    witness = chain.get("failure_bucket")
+    if not isinstance(witness, dict) or not witness.get("open") or not _witness_agrees(
+            index, rank, witness, minutes=minutes, contract_id=contract_id):
+        return False, None
+    return True, copy.deepcopy(witness)
+
+
 def observe_life(life, *, settled_1m, history_revision, contract_id, cutoff,
                  retained=None) -> dict:
     """The survival certificate of ONE exact life at cutoff T. Never raises."""
@@ -422,7 +536,7 @@ def observe_life(life, *, settled_1m, history_revision, contract_id, cutoff,
                 "first_covered": None, "last_covered": None, "settled_through": None,
                 "failure_bucket": None, "covered_buckets": 0, "tip_bucket_open": None,
                 "tip_member_digests": [], "history_revision": history_revision,
-                "lineage_id": None}
+                "lineage_id": None, "cutoff": None}
 
 
 def _observe(life, *, settled_1m, history_revision, contract_id, cutoff, retained):
@@ -433,7 +547,7 @@ def _observe(life, *, settled_1m, history_revision, contract_id, cutoff, retaine
             "first_covered": None, "last_covered": None, "settled_through": None,
             "failure_bucket": None, "covered_buckets": 0, "tip_bucket_open": None,
             "tip_member_digests": [], "history_revision": history_revision,
-            "lineage_id": None}
+            "lineage_id": None, "cutoff": None}
     if not isinstance(life, LifeRef):
         cert["reason"] = "life_ref_invalid"
         return cert
@@ -452,28 +566,18 @@ def _observe(life, *, settled_1m, history_revision, contract_id, cutoff, retaine
         cert["reason"] = "registration_anchor_unavailable"
         return cert
 
-    index, unplaceable = _index_rows(settled_1m, cutoff)
+    index, rank, unplaceable = _index_rows(settled_1m, cutoff)
     step = timedelta(minutes=minutes)
     anchor_dt = _dt(anchor)
     cutoff_dt = _dt(cutoff)
 
-    # Retained chain: only inside the SAME lineage, and only with exact overlap.
-    chain_valid = False
+    # Retained chain: FAILED and INTACT obey ONE rule -- same lineage, a cutoff
+    # that never moves backwards, and the retained tip bucket present now with
+    # identical member digests. Anything else retires the chain.
     chain = retained if isinstance(retained, dict) else None
-    if chain and chain.get("lineage_id") == cert["lineage_id"]:
-        if chain.get("status") == FAILED and isinstance(chain.get("failure_bucket"), dict):
-            witness = chain["failure_bucket"]
-            check = _bucket(index, opening=_dt(witness["open"]), minutes=minutes,
-                            contract_id=contract_id)
-            if (not check["present"] or check["member_digests"] == witness.get("member_digests")):
-                kept = copy.deepcopy(chain)
-                kept["reason"] = "failure_witness_retained"
-                return kept
-        elif chain.get("status") == INTACT and chain.get("tip_bucket_open"):
-            tip = _bucket(index, opening=_dt(chain["tip_bucket_open"]), minutes=minutes,
-                          contract_id=contract_id)
-            chain_valid = (tip["valid"]
-                           and tip["member_digests"] == chain.get("tip_member_digests"))
+    chain_valid, retained_failure = _chain_continues(
+        chain, lineage_id=cert["lineage_id"], index=index, rank=rank, cutoff=cutoff,
+        minutes=minutes, contract_id=contract_id)
 
     # Registration anchor: complete source membership (no close-through test).
     if chain_valid:
@@ -485,7 +589,7 @@ def _observe(life, *, settled_1m, history_revision, contract_id, cutoff, retaine
         coverage_ok = True
         coverage_reason = None
     else:
-        anchor_check = _bucket(index, opening=anchor_dt, minutes=minutes,
+        anchor_check = _bucket(index, rank, opening=anchor_dt, minutes=minutes,
                                contract_id=contract_id)
         coverage_ok = anchor_check["valid"]
         coverage_reason = (None if coverage_ok else
@@ -518,7 +622,7 @@ def _observe(life, *, settled_1m, history_revision, contract_id, cutoff, retaine
     while opening + step - timedelta(minutes=1) <= cutoff_dt:
         terminal = opening + step - timedelta(minutes=1)
         last_required = opening
-        bucket = _bucket(index, opening=opening, minutes=minutes, contract_id=contract_id)
+        bucket = _bucket(index, rank, opening=opening, minutes=minutes, contract_id=contract_id)
         if bucket["valid"]:
             close = _finite(bucket["close"])
             beyond = close is not None and (
@@ -551,7 +655,11 @@ def _observe(life, *, settled_1m, history_revision, contract_id, cutoff, retaine
     cert["tip_bucket_open"] = tip_open
     cert["tip_member_digests"] = list(tip_digests)
 
-    if failure is not None:
+    cert["cutoff"] = cutoff
+    if retained_failure is not None:
+        cert.update({"status": FAILED, "reason": "failure_witness_retained",
+                     "failure_bucket": retained_failure})
+    elif failure is not None:
         cert.update({"status": FAILED, "reason": "valid_close_beyond_level",
                      "failure_bucket": failure})
     elif not coverage_ok:
@@ -575,7 +683,10 @@ def apply_tracker_witness(certificate: dict, terminal_event) -> dict:
 # ── eligibility ─────────────────────────────────────────────────────────────
 def selection_eligibility(row, certificate, *, protected_by_timeframe, ledger_rows,
                           cutoff) -> dict:
-    """Factual NEW-selection eligibility: V1-V5, V7. No V6, no K, no choice."""
+    """Factual NEW-selection eligibility: V1-V5, V7. No V6, no K, no choice.
+
+    V7 is conflicting facts for one identity: conflicting level/basis for the
+    same life slot, or different payloads under one canonical sweep id."""
     failures = []
     cutoff = _instant(cutoff)
     try:
@@ -594,12 +705,78 @@ def selection_eligibility(row, certificate, *, protected_by_timeframe, ledger_ro
         failures.append("V4")
     if not isinstance(certificate, dict) or certificate.get("status") != INTACT:
         failures.append("V5")
-    if join.get("tuple_conflict") is not False:
+    if join.get("tuple_conflict") is not False or join.get("conflicting_sweep_ids"):
         failures.append("V7")
     return {"eligible": not failures, "failures": failures}
 
 
 # ── the per-cycle shadow ────────────────────────────────────────────────────
+def _watch_refusal(life: LifeRef, *, contract_id, market_session, cutoff,
+                   rows) -> "str | None":
+    """Why an explicit watched ref is not a life of THIS context, else None.
+
+    Checked before any measurement or retention. A valid life whose slot has
+    gone or that was replaced is still a valid life; only a foreign, malformed
+    or contradicted reference is refused."""
+    if life.contract_id != contract_id:
+        return "watched_life_foreign_contract"
+    if life.market_session != market_session:
+        return "watched_life_foreign_session"
+    minutes = _TF_MINUTES.get(life.source_tf)
+    if minutes is None:
+        return "watched_life_unsupported_timeframe"
+    if life.side not in ("low", "high"):
+        return "watched_life_invalid_side"
+    level = _finite(life.level)
+    if level is None or level != life.level:
+        return "watched_life_invalid_level"
+    if not isinstance(life.swing_id, str) or not life.swing_id \
+            or not isinstance(life.basis, str) or not life.basis:
+        return "watched_life_invalid_identity"
+    registered = _instant(life.registered_at)
+    if registered is None or registered != life.registered_at:
+        return "watched_life_registered_at_not_canonical"
+    if registered > cutoff:
+        return "watched_life_registered_after_cutoff"
+    if _session_of(registered) != market_session:
+        return "watched_life_registered_in_other_session"
+    anchor = life.registration_bucket_open
+    if anchor is not None:
+        anchor = _instant(anchor)
+        if (anchor is None or anchor != life.registration_bucket_open
+                or _iso(_floor(_dt(anchor), minutes)) != anchor or anchor > registered):
+            return "watched_life_registration_anchor_invalid"
+    # The ref may not contradict the producer's own registration record.
+    for row in rows:
+        if row.get("event_type") != _REGISTERED:
+            continue
+        named = (life.registration_occurrence_id is not None
+                 and row.get("occurrence_id") == life.registration_occurrence_id)
+        same_life = (row.get("source_tf") == life.source_tf
+                     and row.get("side") == life.side and _matches_life(row, life)
+                     and row.get("basis") == life.basis)
+        if not (named or same_life):
+            continue
+        if not same_life:
+            return "watched_life_registration_mismatch"
+        if (life.registration_occurrence_id is not None
+                and row.get("occurrence_id") != life.registration_occurrence_id):
+            return "watched_life_registration_mismatch"
+        if anchor is not None and _instant(row.get("source_bar_time")) != anchor:
+            return "watched_life_registration_mismatch"
+    return None
+
+
+def _refused_certificate(life: LifeRef, reason: str, history_revision, cutoff) -> dict:
+    return {"status": UNKNOWN, "reason": _bounded(reason),
+            "own_tf": life.source_tf,
+            "registration_bucket_open": life.registration_bucket_open,
+            "first_covered": None, "last_covered": None, "settled_through": None,
+            "failure_bucket": None, "covered_buckets": 0, "tip_bucket_open": None,
+            "tip_member_digests": [], "history_revision": history_revision,
+            "lineage_id": None, "cutoff": cutoff}
+
+
 def unavailable(*, reason, cutoff=None, history_revision=None, contract_id=None,
                 market_session=None) -> dict:
     return {"schema": SCHEMA, "authority": AUTHORITY, "status": UNAVAILABLE,
@@ -698,12 +875,19 @@ class CampaignPremiseShadow:
         observed, kept = [], {}
         for life in watched:
             key = life.identity()
-            certificate = apply_tracker_witness(
-                observe_life(life, settled_1m=bars, history_revision=history_revision,
-                             contract_id=contract_id, cutoff=stamp,
-                             retained=self._chains.get(key)),
-                _terminal_event(rows, life, stamp))
-            kept[key] = copy.deepcopy(certificate)
+            refusal = _watch_refusal(life, contract_id=contract_id,
+                                     market_session=market_session, cutoff=stamp,
+                                     rows=rows)
+            if refusal is not None:
+                # never measured, never retained, never another life's facts
+                certificate = _refused_certificate(life, refusal, history_revision, stamp)
+            else:
+                certificate = apply_tracker_witness(
+                    observe_life(life, settled_1m=bars, history_revision=history_revision,
+                                 contract_id=contract_id, cutoff=stamp,
+                                 retained=self._chains.get(key)),
+                    _terminal_event(rows, life, stamp))
+                kept[key] = copy.deepcopy(certificate)
             observed.append({**life.as_dict(),
                              "tracker_slot_present": _slot_holds(protected, life),
                              "terminal_event": _terminal_event(rows, life, stamp),
