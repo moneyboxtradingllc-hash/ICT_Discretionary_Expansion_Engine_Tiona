@@ -176,6 +176,11 @@ class ProductionScanCycle:
         # and candle-derived; no authority consumer reads it.
         from market_data.campaign_premise import CampaignPremiseShadow
         self.campaign_premise_shadow = CampaignPremiseShadow()
+        from market_data.campaign_scope import CampaignScopeCustody
+        prior_scope = getattr(self, "campaign_scope_custody", None)
+        if isinstance(prior_scope, CampaignScopeCustody):
+            prior_scope.reset("history_revision")
+        self.campaign_scope_custody = CampaignScopeCustody()
 
     # ── candle-derived state, re-derived from repaired history ────────────────
     #
@@ -231,6 +236,7 @@ class ProductionScanCycle:
         # STAGE 3C-1. Survival certificates are measured from the exact settled
         # tape; a revised tape retires them. Production retains no chains.
         "campaign_premise_shadow",
+        "campaign_scope_custody",
     )
 
     #: NOT rebuilt, and why. Recorded so the exclusion is a decision rather than
@@ -340,6 +346,11 @@ class ProductionScanCycle:
         # the rebuild below cannot complete.
         from market_data.campaign_premise import CampaignPremiseShadow
         self.campaign_premise_shadow = CampaignPremiseShadow()
+        from market_data.campaign_scope import CampaignScopeCustody
+        prior_scope = getattr(self, "campaign_scope_custody", None)
+        if isinstance(prior_scope, CampaignScopeCustody):
+            prior_scope.reset("history_revision")
+        self.campaign_scope_custody = CampaignScopeCustody()
         # A rebuild that DERIVES NOTHING must never claim currency. Below the
         # confirmation lookback the replay loop simply does not execute, so
         # without this the method would return ok on an empty tape and open the
@@ -587,6 +598,7 @@ class ProductionScanCycle:
             self._attach_reversal_formation(current_snapshot, raw_data)
             current_snapshot["campaign_premise_shadow"] = (
                 self._advance_campaign_premise_shadow(current_snapshot, raw_data))
+            self._advance_campaign_scope(current_snapshot, raw_data)
             current_snapshot["campaign_draw_context"] = (
                 self._advance_existing_campaign_draw(
                     current_snapshot, raw_data.get("1m") or []))
@@ -628,6 +640,7 @@ class ProductionScanCycle:
             self._attach_reversal_formation(snapshot, raw_data)
             snapshot["campaign_premise_shadow"] = (
                 self._advance_campaign_premise_shadow(snapshot, raw_data))
+            self._advance_campaign_scope(snapshot, raw_data)
 
         # The non-ECU route builds its current producer facts after
         # build_snapshot. Advance the old accepted Draw now, before the one
@@ -749,6 +762,14 @@ class ProductionScanCycle:
         if campaign_draw_acceptance is not None:
             snapshot["campaign_draw_acceptance"] = copy.deepcopy(
                 campaign_draw_acceptance)
+        if invoke_brain:
+            try:
+                snapshot["campaign_scope_proposal_outcome"] = self.campaign_scope_custody.qualify(
+                    snapshot=snapshot, brain_result=brain_block, brain_input=brain_input)
+            except Exception as exc:  # shadow qualification cannot replace cognition
+                snapshot["campaign_scope_proposal_outcome"] = {
+                    "status": "REFUSED", "reasons": [f"qualification_error:{type(exc).__name__}"],
+                    "proposal_id": None, "cutoff": snapshot.get("timestamp")}
         from market_data.campaign_lifecycle import evaluate_campaign_lifecycle
         campaign_lifecycle = evaluate_campaign_lifecycle(
             snapshot=snapshot,
@@ -1379,6 +1400,31 @@ class ProductionScanCycle:
             from market_state.active_path import ActivePath as _AP
             return _AP().state(available=False,
                                unavailable_reason=f"error:{type(exc).__name__}")
+
+    def _advance_campaign_scope(self, snapshot: dict, raw_data: dict) -> dict:
+        """S1-S5 shadow catalog and custody; never an execution consumer."""
+        from market_state.active_path import production_session_key
+        from market_data.campaign_scope import CampaignScopeCustody
+        facts = snapshot.get("campaign_premise_shadow") or {}
+        try:
+            return self.campaign_scope_custody.advance(
+                owner=self, snapshot=snapshot,
+                settled_1m=(raw_data or {}).get("1m") or [],
+                ledger_rows=(self.occurrence_ledger.occurrences()
+                             if self.occurrence_ledger is not None else []),
+                history_revision=self._history.revision, contract_id=self.contract_id,
+                market_session=production_session_key(snapshot.get("timestamp")),
+                available=facts.get("status") == "AVAILABLE" and self.derived_state_is_current())
+        except Exception as exc:  # shadow failure never changes executable verdicts
+            custody = getattr(self, "campaign_scope_custody", None)
+            if isinstance(custody, CampaignScopeCustody):
+                custody.reset("scope_error")
+            refused = {"schema": "campaign_scope_custody/v1", "authority": "none",
+                       "status": "UNAVAILABLE", "reason": f"scope_error:{type(exc).__name__}",
+                       "campaign": None}
+            snapshot["campaign_scope_custody_shadow"] = refused
+            snapshot.pop("campaign_premise_catalog", None)
+            return refused
 
     def _advance_campaign_premise_shadow(self, snapshot: dict, raw_data: dict) -> dict:
         """STAGE 3C-1: detached shadow premise facts, authority "none".

@@ -602,7 +602,8 @@ class TestStrategyUntouched:
         # repairs that shadow's certificate boundaries; 3C-1-R2 judges canonical
         # sweep copies only as of the cutoff.
         from ai_brain.production_model import brain_contract_fingerprint
-        assert brain_contract_fingerprint() == "brain:8113f384766ab842"
+        # M2 shadow catalog/custody closure; no execution authority.
+        assert brain_contract_fingerprint() == "brain:aa849a69a0c0c860"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.

@@ -40,6 +40,7 @@ SRC = os.path.join(ROOT, "src")
 #: Everything that changes WHAT THE BRAIN RECEIVES or HOW ITS ANSWER BECOMES A
 #: TRADE. Each entry names why it is decision-relevant.
 MUST_BE_BOUND = {
+    "market_data/campaign_scope.py": "pre-cognition premise catalog, proposal qualification and pending/activation custody published to the Brain",
     "ai_brain/brain_prompt.py": "the instructions themselves",
     "ai_brain/brain_schema.py": "the shape of an acceptable answer",
     "ai_brain/brain_validation.py": "which answers are accepted or repaired",

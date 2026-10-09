@@ -34,7 +34,7 @@ def source_bytes(monkeypatch):
 
 @pytest.mark.parametrize("style", ["lf", "crlf", "mixed_files", "mixed_lines"])
 def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
-    assert len(source_bytes) == 47
+    assert len(source_bytes) == 48  # M2 adds campaign_scope to the exact closure.
     for index, (path, data) in enumerate(source_bytes.items()):
         if style == "crlf" or (style == "mixed_files" and index % 2):
             source_bytes[path] = data.replace(b"\n", b"\r\n")
@@ -104,7 +104,8 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # STAGE-3C-1-R1: shadow certificate boundaries repaired (source order,
     # chain retirement, watched-life context, duplicate canonical facts).
     # STAGE-3C-1-R2: canonical sweep copies are judged only as of the cutoff.
-    assert PM.brain_contract_fingerprint() == "brain:8113f384766ab842"
+    # M2 shadow catalog/custody closure; no execution authority.
+    assert PM.brain_contract_fingerprint() == "brain:aa849a69a0c0c860"
 
 
 @pytest.mark.parametrize("addition", [

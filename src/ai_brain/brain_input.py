@@ -1009,8 +1009,12 @@ def build_brain_input(snapshot: dict, stance_history: dict) -> dict:
         _liq_evaluation, _liq_sensors = _liquidity_evaluation(liq)
         from ai_brain.narrative_continuity import build_narrative_continuity
         narrative_continuity = build_narrative_continuity(snapshot, stance_history)
+        from market_data.campaign_scope import current_campaign_catalog
+        campaign_catalog = current_campaign_catalog(snapshot)
 
         return {
+            **({"campaign_premise_catalog": campaign_catalog}
+               if campaign_catalog is not None else {}),
             "timestamp": snapshot.get("timestamp"),
             "session":   snapshot.get("session"),
             "degraded":  degraded,

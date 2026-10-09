@@ -312,6 +312,7 @@ _CONTRACT_SOURCES = (
     # Authority "none" today; bound so a later consumer cannot inherit an
     # unfingerprinted change to how survival is measured.
     ("campaign_premise", "market_data/campaign_premise.py"),
+    ("campaign_scope", "market_data/campaign_scope.py"),
 )
 
 #: REPO-ROOT-RELATIVE closure. Same contract, different anchor.

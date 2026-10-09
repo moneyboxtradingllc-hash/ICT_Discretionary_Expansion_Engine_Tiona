@@ -256,7 +256,11 @@ def test_one_advance_per_scan_and_no_brain_input(tmp_path, monkeypatch, ecu):
     trigger = TA._scan(cycle, TA.NEXT_MINUTE, brain=False)
     assert len(advances) == 3 and len(calls) == 2
     for payload in calls:
-        assert "campaign_premise" not in str(sorted(payload))
+        # M2 adds only its producer-owned frozen catalog; raw M1 facts/custody
+        # still cannot enter cognition or become execution authority.
+        assert set(k for k in payload if "campaign_premise" in k) == {"campaign_premise_catalog"}
+        assert payload["campaign_premise_catalog"]["schema"] == "campaign_premise_catalog/v1"
+        assert "campaign_scope_custody" not in str(payload)
         assert "campaign_premise_shadow" not in str(payload)
     for scan in (first, later, trigger):
         assert _shadow(scan["snapshot"])["status"] == "AVAILABLE"

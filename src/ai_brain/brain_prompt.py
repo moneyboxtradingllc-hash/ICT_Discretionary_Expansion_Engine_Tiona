@@ -240,8 +240,26 @@ Output ONLY valid JSON, exactly this schema, no prose, no markdown:
  "plan_expires_at": "<REQUIRED for current_action=watching: explicit future ISO-8601 timestamp including timezone offset; null otherwise>",
  "objective_id": "<REQUIRED when current_action proposes an entry: an objective_id copied EXACTLY from AUTHORIZED_OBJECTIVES. null for stand_down/wait. Never invent one.>",
  "invalidation_id": "<REQUIRED when current_action proposes an entry AND AUTHORIZED_INVALIDATIONS is non-empty: an invalidation_id copied EXACTLY from that list. null for stand_down/wait.>",
+ "campaign_scope_proposal": null,
  "recommended_tool_occurrence_id": "<PLAIN FVG ONLY. REQUIRED when recommended_tool_family is [\"fvg\"] AND authorized_tool_catalog holds MORE THAN ONE execution-eligible plain-FVG occurrence on your side: the occurrence_id of the exact gap you are trading, copied EXACTLY from that row. A family token alone does not say WHICH gap you mean, and mechanics will not choose among them for you. null when exactly one eligible FVG exists, null for stand_down/wait, and null for every OTHER tool family — this field selects nothing outside plain FVG. Never invent or reconstruct an id.>"
 }
+
+STAGE 3C-2 OPTIONAL SHADOW PREMISE SELECTION:
+campaign_premise_catalog contains deterministic eligible lives, not direction
+instructions or entry permission. You may omit campaign_scope_proposal or use
+null. If proposing, use exactly {"kind":"establish" or "transfer",
+"direction":"bullish" or "bearish","premise_candidate_id":"copied exactly
+from THIS cutoff's catalog","scope_reason":"your reason"}. No invented id,
+amendment, automatic life choice, or second call. Direction must be your own
+pre-hold narrative direction and the selected row must support it. Establish
+only if no bound campaign exists; transfer only to the opposite direction of
+an existing campaign, with deterministic broader scope. If custody status is
+not available in your input, do not assume an incumbent for transfer. This
+optional proposal can be refused or pending at this cutoff, never positive
+authority. Earliest shadow activation is strictly later after revalidation.
+Malformed/unsupported proposals do not repair or invalidate your main response.
+Catalog presence and factual survival never grant participation or override
+any current direction hold, Draw, Lifecycle, candidate or plan gate.
 
 AB-5C: recommended_playbook_family MUST be one of the six canonical playbooks
 (or none). recommended_tool_family MUST be a JSON ARRAY containing exactly ONE
