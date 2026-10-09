@@ -31,6 +31,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
 from ai_retrieval import descriptive_memory as DM                # noqa: E402
+from ai_retrieval import embedding_v2 as EV2                     # noqa: E402
 from ai_retrieval import retrieval as R                          # noqa: E402
 from ai_retrieval import retrieval_telemetry as T                # noqa: E402
 from ai_retrieval import vector_store                            # noqa: E402
@@ -140,6 +141,29 @@ def live(tmp_path, monkeypatch):
 def session(tmp_path):
     return T.RetrievalTelemetrySession("PROD-TEST", instrument="MNQ",
                                        contract="CON.F.US.MNQ.U26")
+
+
+@pytest.fixture
+def telemetry_corpus(tmp_path, monkeypatch):
+    """Real synthetic records, independent of the operator's archive.
+
+    The explicit fixture runs after the suite's runtime-root isolation and
+    pins only the ET date retrieval reads, with normal per-test teardown.
+    """
+    monkeypatch.setenv("AI_RETRIEVAL_DIR", str(tmp_path / "telemetry"))
+    monkeypatch.setenv("AI_RETRIEVAL_ENABLED", "true")
+    pin_retrieval_day(monkeypatch, EVALUATION_DAY)
+
+    def seed(records):
+        ids = {r["memory_id"] for r in records}
+        assert len(ids) == len(records)
+        assert vector_store.add_records(records) == len(records)
+        stored = vector_store.load_records()
+        assert {r["memory_id"] for r in stored} == ids
+        assert len(stored) == len(records)
+        return records
+
+    return seed
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -291,32 +315,104 @@ class TestStageAccounting:
         assert set(rec["contradiction_reason_counts"]) <= \
             set(T.CONTRADICTION_REASON_KEYS)
 
-    def test_18_19_20_recurrence_metadata_is_complete_and_truthful(self, live):
+    @pytest.mark.parametrize("recurrence_type", [
+        "exact_same_session", "semantic_same_session"])
+    def test_18_19_20_recurrence_metadata_is_complete_and_truthful(
+            self, telemetry_corpus, recurrence_type):
+        contextual = ({"structure_evidence": {"bos_count": 2, "mss_count": 0,
+                                              "quiet": False},
+                       "structure_state": "witness_bos_2_mss_0",
+                       "phase_confidence_summary": {"mean": 85.0, "min": 80.0,
+                                                    "max": 90.0}}
+                      if recurrence_type == "semantic_same_session" else {})
+        records = telemetry_corpus([
+            record(segment_start="11:00:00", segment_end="11:20:00",
+                   source_artifact_digest="telemetry-recurrence-1"),
+            record(segment_start="12:00:00", segment_end="12:20:00",
+                   source_artifact_digest="telemetry-recurrence-2", **contextual)])
+        assert EV2.semantic_recurrence_key(records[0]) is not None
+        assert EV2.semantic_recurrence_key(records[0]) == \
+            EV2.semantic_recurrence_key(records[1])
+        same_vector = (records[0]["feature_vector_fingerprint"] ==
+                       records[1]["feature_vector_fingerprint"])
+        assert same_vector == (recurrence_type == "exact_same_session")
         result = R.retrieve_for_snapshot(snap(), "MNQ")
+        assert_analogs_returned(result)
+        assert result["returned"] == 1
         rec = T.build_record(session_id="S", scan_id="x", instrument="MNQ",
                              contract="C", result=result,
                              startup_state=R.retrieval_startup_state())
         groups = rec["recurrence_groups"]
-        if not groups:
-            pytest.skip("no recurrence in this corpus")
+        assert len(groups) == 1     # losing the intended group must FAIL
         g = groups[0]
-        assert g["recurrence_type"] in ("exact_same_session",
-                                        "semantic_same_session")
-        assert g["recurrence_count"] >= 2
+        assert g["recurrence_type"] == recurrence_type
+        assert g["recurrence_count"] == 2
         assert len(g["grouped_memory_id_suffixes"]) == g["recurrence_count"]
         assert len(g["occurrence_spans"]) == g["recurrence_count"]
         assert g["representative_memory_id_suffix"] in g["grouped_memory_id_suffixes"]
+        members = {r["memory_id"][-8:] for r in records}
+        assert len(members) == 2
+        assert set(g["grouped_memory_id_suffixes"]) == members
+        assert g["occurrence_spans"] == sorted(
+            f"{r['segment_start']}-{r['segment_end']}" for r in records)
         analog = next(a for a in rec["returned_analogs"] if a.get("recurrence_count"))
         assert analog["member_representative_similarities"]
+        assert set(analog["member_representative_similarities"]) == members
+        assert set(analog["member_similarities"]) == members
+        assert analog["memory_id_suffix"] == g["representative_memory_id_suffix"]
+        assert analog["recurrence_type"] == recurrence_type
+        assert analog["recurrence_count"] == 2
+        assert analog["source_session_id"] == FIXTURE_SOURCE_SESSIONS[0]
+        assert rec["source_sessions"] == FIXTURE_SOURCE_SESSIONS
+        assert rec["corpus_size"] == 2
+        assert rec["recurrence_members_collapsed"] == 1
+        assert rec["returned_analog_count"] == 1
+        assert rec["session_cap_excluded_count"] == 0
+        assert rec["stage_accounting_total"] == 2
+        assert rec["stage_accounting_reconciles"] is True
+        assert vector_store.count() == 2     # grouping never rewrites the store
 
-    def test_21_session_cap_exclusions_are_recorded(self, live):
+    @pytest.mark.parametrize("record_count", [1, 2, 3],
+                             ids=["below_cap", "at_cap", "above_cap"])
+    def test_21_session_cap_exclusions_are_recorded(
+            self, telemetry_corpus, record_count):
+        phases = ["transition", "exhaustion", "continuation"]
+        records = telemetry_corpus([
+            record(segment_start=f"{11+i}:00:00", segment_end=f"{11+i}:20:00",
+                   source_artifact_digest=f"telemetry-cap-{i}",
+                   narrative_phase=phases[i]) for i in range(record_count)])
+        keys = [EV2.semantic_recurrence_key(r) for r in records]
+        assert all(k is not None for k in keys)
+        assert len(set(keys)) == record_count
         result = R.retrieve_for_snapshot(snap(), "MNQ")
+        assert_analogs_returned(result)
+        assert result["max_analogs_per_source_session"] == 2
+        assert result["min_similarity"] == 0.60
+        assert result["max_analogs"] == 5
+        assert result["returned"] == min(record_count, 2)
+        assert result["recurrence_groups_collapsed"] == []
+        assert result["rejected_reasons"] == {}
         rec = T.build_record(session_id="S", scan_id="x", instrument="MNQ",
                              contract="C", result=result,
                              startup_state=R.retrieval_startup_state())
+        excluded = {r["memory_id"][-8:] for r in records} - {
+            a["memory_id"][-8:] for a in result["analogs"]}
+        expected_count = max(0, record_count - 2)
+        assert len(excluded) == expected_count
+        assert len(rec["session_cap_exclusions"]) == expected_count
+        assert {c["memory_id_suffix"] for c in rec["session_cap_exclusions"]} == excluded
         for c in rec["session_cap_exclusions"]:
             assert c["reason"] == "MAX_ANALOGS_PER_SOURCE_SESSION"
-            assert c["source_session_id"]
+            assert c["source_session_id"] == FIXTURE_SOURCE_SESSIONS[0]
+            assert c["similarity"] >= result["min_similarity"]
+        assert rec["corpus_size"] == record_count
+        assert rec["returned_analog_count"] == min(record_count, 2)
+        assert rec["session_cap_excluded_count"] == expected_count
+        assert rec["recurrence_members_collapsed"] == 0
+        assert rec["recurrence_groups"] == []
+        assert rec["source_sessions"] == FIXTURE_SOURCE_SESSIONS
+        assert rec["stage_accounting_total"] == record_count
+        assert rec["stage_accounting_reconciles"] is True
 
 
 class TestEnablementAndTransitions:
