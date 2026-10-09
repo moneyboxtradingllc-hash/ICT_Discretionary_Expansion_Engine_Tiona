@@ -67,6 +67,22 @@ An explicit watch names one exact life of THIS contract and production
 session, registered by T, with a coherent registration anchor. A foreign,
 malformed or contradicted ref is refused (UNKNOWN, never measured, never
 retained); the observer never substitutes another life for it.
+
+CANONICAL SWEEPS AS OF T
+------------------------
+One canonical sweep id is one fact, judged only from evidence available at T,
+at two levels. The MARKET FACT is the row without its association; it is
+evidence once the row itself is available (event, source and observed <= T).
+The LIFE ASSOCIATION is `protected_swing_lifetime`; it is evidence once its own
+observed_at <= T (a row without one states that absence at row level). A copy
+whose row is not yet available says nothing; a copy whose association is not
+yet available supplies its market fact only. Identical visible copies collapse
+to one; two different visible market facts, or two different visible
+associations, under one id are refused, never picked -- so an available
+contradictory market fact is refused even when its own association is later.
+No observational equivalence is assumed: copies that differ only in observed_at
+differ once both are visible. Later evidence never changes the projection at T,
+its diagnostics included.
 """
 from __future__ import annotations
 
@@ -181,6 +197,18 @@ def _available(row: dict, cutoff: str) -> bool:
                 and event <= cutoff and source <= cutoff and observed <= cutoff)
 
 
+def _association_withheld(row: dict, cutoff: str) -> bool:
+    """A sweep's life association is usable at T only if it was observed by T.
+
+    A row that carries no association states that absence as part of its own
+    (row-level) payload; only a dict association can be withheld."""
+    life = row.get("protected_swing_lifetime")
+    if not isinstance(life, dict):
+        return False
+    observed = _instant(life.get("observed_at"))
+    return observed is None or observed > cutoff
+
+
 def _canonical_sweep(row: dict, contract_id: str) -> bool:
     """The canonical (market_object_id) schema; never a v1 scan-time id."""
     if row.get("event_type") != _SWEEP or not isinstance(row.get("source_bars"), list):
@@ -287,41 +315,41 @@ def life_inventory(*, ledger_rows, protected_by_timeframe, contract_id,
     rows = [copy.deepcopy(r) for r in (ledger_rows or ())
             if isinstance(r, dict) and r.get("contract") == contract_id]
 
-    # One canonical id is one fact. Identical copies collapse to the first;
-    # different payloads under one id are conflicting evidence, never a pick.
+    # One canonical id is one fact, judged only from what each copy makes
+    # available at T: a copy whose row is not available by T says nothing, and
+    # a copy whose association was observed after T supplies its market fact
+    # but not its association. Identical visible copies collapse to one;
+    # different visible payloads under one id are conflicting evidence, never a
+    # pick. Later copies never change the projection at T, not even its counts.
     copies: dict = {}
     for row in rows:
         if _canonical_sweep(row, contract_id):
             copies.setdefault(row.get("occurrence_id"), []).append(row)
-    conflicting = {oid for oid, found in copies.items()
-                   if len({json.dumps(r, sort_keys=True, default=str) for r in found}) > 1}
 
     grouped: dict = {}
     excluded: list = []
     conflicted: dict = {}
     for oid, found in copies.items():
-        if oid not in conflicting:
+        visible = [r for r in found if _available(r, cutoff)]
+        linked = [r for r in visible if not _association_withheld(r, cutoff)]
+        facts = {json.dumps({k: v for k, v in r.items() if k != "protected_swing_lifetime"},
+                            sort_keys=True, default=str) for r in visible}
+        links = {json.dumps(["protected_swing_lifetime" in r,
+                             r.get("protected_swing_lifetime")], sort_keys=True, default=str)
+                 for r in linked}
+        if len(facts) > 1 or len(links) > 1:
+            excluded.append((oid, "canonical_payload_conflict"))
+            for row in linked:
+                key, _ = _association_key(row, contract_id, market_session)
+                if key is not None:
+                    conflicted.setdefault(key, set()).add(oid)
+                    grouped.setdefault(key, [])
             continue
-        excluded.append((oid, "canonical_payload_conflict"))
-        for row in found:
-            observed = _instant((row.get("protected_swing_lifetime") or {})
-                                .get("observed_at"))
-            if not _available(row, cutoff) or observed is None or observed > cutoff:
-                continue
-            key, _ = _association_key(row, contract_id, market_session)
-            if key is not None:
-                conflicted.setdefault(key, set()).add(oid)
-                grouped.setdefault(key, [])
-    for oid, found in copies.items():
-        row = found[0]
-        if oid in conflicting:
-            continue
+        row = (linked or visible or found)[0]
         if not isinstance(row.get("protected_swing_lifetime"), dict):
             continue
-        observed = _instant((row.get("protected_swing_lifetime") or {}).get("observed_at"))
-        if not _available(row, cutoff) or observed is None or observed > cutoff:
-            excluded.append((row.get("occurrence_id"), "association_not_available_at_cutoff"))
-            continue
+        if not linked:
+            continue                      # not evidence at T, so not even counted
         key, reason = _association_key(row, contract_id, market_session)
         if key is None:
             excluded.append((row.get("occurrence_id"), reason))

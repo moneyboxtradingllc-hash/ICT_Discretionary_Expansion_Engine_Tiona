@@ -599,9 +599,10 @@ class TestStrategyUntouched:
         # 3B-1A-R1 quarantines malformed retained rows one by one; 3B-1B
         # separates active-leg labels from campaign falsification; 3C-1 adds
         # the authority-free shadow premise facts to the closure; 3C-1-R1
-        # repairs that shadow's certificate boundaries.
+        # repairs that shadow's certificate boundaries; 3C-1-R2 judges canonical
+        # sweep copies only as of the cutoff.
         from ai_brain.production_model import brain_contract_fingerprint
-        assert brain_contract_fingerprint() == "brain:e50a1b36594a6c26"
+        assert brain_contract_fingerprint() == "brain:8113f384766ab842"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.

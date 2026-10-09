@@ -103,7 +103,8 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # STAGE-3C-1: shadow premise facts (authority none) join the closure.
     # STAGE-3C-1-R1: shadow certificate boundaries repaired (source order,
     # chain retirement, watched-life context, duplicate canonical facts).
-    assert PM.brain_contract_fingerprint() == "brain:e50a1b36594a6c26"
+    # STAGE-3C-1-R2: canonical sweep copies are judged only as of the cutoff.
+    assert PM.brain_contract_fingerprint() == "brain:8113f384766ab842"
 
 
 @pytest.mark.parametrize("addition", [

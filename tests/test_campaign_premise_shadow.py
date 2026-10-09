@@ -879,3 +879,218 @@ def test_conflicting_payloads_under_one_canonical_id_are_refused_not_picked():
                                        protected_by_timeframe=_slots(), ledger_rows=alone,
                                        cutoff="2026-08-19T13:20:00+00:00")
     assert verdict["failures"] == ["V1", "V7"]
+
+
+# ── STAGE 3C-1-R2: canonical copies are judged as of T ─────────────────────
+# The market fact (the row without its association) and the life association
+# become evidence separately; conflicts are resolved only from what is visible
+# at T at each level. Later evidence never changes the projection at T.
+LATER = "2026-08-19T13:25:00+00:00"
+LATENESS = ("row_observed", "row_source", "association_only")
+
+
+def _later_copy(current, lateness):
+    """A copy of `current` whose `lateness` evidence first exists at 13:25.
+
+    A wholly later row (observed or sourced later) carries a contradictory
+    market payload; an association-only copy keeps the market fields identical."""
+    later = copy.deepcopy(current)
+    later["protected_swing_lifetime"]["observed_at"] = LATER
+    if lateness == "row_observed":
+        later["observed_at"] = LATER
+    elif lateness == "row_source":
+        later["source_bar_time"] = LATER
+    if lateness != "association_only":
+        later["source_bars"] = []
+    return later
+
+
+def _orders(current, other):
+    return ([current, other, _registration_row()], [other, current, _registration_row()])
+
+
+def _verdict(life, rows, cutoff):
+    return CP.selection_eligibility(life, {"status": "INTACT"},
+                                    protected_by_timeframe=_slots(), ledger_rows=rows,
+                                    cutoff=f"2026-08-19T{cutoff}:00+00:00")
+
+
+@pytest.mark.parametrize("lateness", LATENESS)
+def test_a_later_copy_never_changes_the_projection_at_t(lateness):
+    current = _sweep_row("13:05")
+    before = _inventory([current, _registration_row()], _slots())
+    for rows in _orders(current, _later_copy(current, lateness)):
+        at = _inventory(rows, _slots())
+        assert at == before
+        assert _verdict(at[0], rows, "13:20") == {"eligible": True, "failures": []}
+
+
+@pytest.mark.parametrize("cutoff", ["13:24", "13:25", "13:26"])
+@pytest.mark.parametrize("lateness", LATENESS)
+def test_a_later_copy_becomes_evidence_exactly_when_it_is_available(lateness, cutoff):
+    current = _sweep_row("13:05")
+    before = _inventory([current, _registration_row()], _slots(), cutoff=cutoff)
+    for rows in _orders(current, _later_copy(current, lateness)):
+        [life] = _inventory(rows, _slots(), cutoff=cutoff)
+        if cutoff < "13:25":
+            assert [life] == before
+            continue
+        # visible now, and it differs (market fact or association): refused
+        assert life["sweep_occurrence_ids"] == []
+        assert life["join"]["conflicting_sweep_ids"] == [current["occurrence_id"]]
+        assert _verdict(life, rows, cutoff)["failures"] == ["V1", "V7"]
+
+
+@pytest.mark.parametrize("cutoff", ["13:20", "13:26"])
+def test_a_current_market_conflict_is_refused_though_its_association_is_later(cutoff):
+    current = _sweep_row("13:05")
+    conflicting = copy.deepcopy(current)
+    conflicting["source_bars"] = []
+    conflicting["protected_swing_lifetime"]["observed_at"] = LATER
+    for rows in _orders(current, conflicting):
+        [life] = _inventory(rows, _slots(), cutoff=cutoff)
+        assert life["sweep_occurrence_ids"] == []
+        assert life["join"]["conflicting_sweep_ids"] == [current["occurrence_id"]]
+        assert _verdict(life, rows, cutoff)["failures"] == ["V1", "V7"]
+
+
+@pytest.mark.parametrize("cutoff", ["13:20", "13:26"])
+def test_identical_copies_stay_one_fact_at_every_cutoff(cutoff):
+    current = _sweep_row("13:05")
+    before = _inventory([current, _registration_row()], _slots(), cutoff=cutoff)
+    for rows in _orders(current, copy.deepcopy(current)):
+        assert _inventory(rows, _slots(), cutoff=cutoff) == before
+
+
+def test_no_observational_equivalence_is_assumed():
+    # identical except the row's own observation time: invisible at 13:20,
+    # a different visible payload from 13:25 on (the current-conflict law)
+    current = _sweep_row("13:05")
+    later = copy.deepcopy(current)
+    later["observed_at"] = LATER
+    rows = [current, later, _registration_row()]
+    assert _inventory(rows, _slots()) == _inventory([current, _registration_row()], _slots())
+    [life] = _inventory(rows, _slots(), cutoff="13:25")
+    assert life["join"]["conflicting_sweep_ids"] == [current["occurrence_id"]]
+
+
+@pytest.mark.parametrize("cutoff", ["13:20", "13:30"])
+def test_a_copy_with_a_later_event_time_is_not_that_canonical_fact(cutoff):
+    # the canonical id binds the event instant, so a row claiming the 13:05 id
+    # with a 13:25 event time is not a copy of that fact at any cutoff
+    current = _sweep_row("13:05")
+    moved = copy.deepcopy(current)
+    moved["event_time"] = LATER
+    moved["source_bars"] = []
+    before = _inventory([current, _registration_row()], _slots(), cutoff=cutoff)
+    for rows in _orders(current, moved):
+        assert _inventory(rows, _slots(), cutoff=cutoff) == before
+
+
+def test_a_later_association_to_another_life_is_not_used_at_t():
+    current = _sweep_row("13:05")
+    later = copy.deepcopy(current)
+    later["protected_swing_lifetime"].update(
+        swing_id="5m:swing_low:29490:later", registered_at="2026-08-19T13:19:00+00:00",
+        observed_at=LATER)
+    rows = [later, current, _registration_row()]
+    assert _inventory(rows, _slots()) == _inventory([current, _registration_row()], _slots())
+    # alone, an association not yet observed is not evidence of any life
+    assert _inventory([later, _registration_row()], _slots()) == []
+    # at 13:25 both associations are evidence: each named life carries the conflict
+    lives = _inventory(rows, _slots(), cutoff="13:25")
+    assert [r["swing_id"] for r in lives] == ["5m:swing_low:29490", "5m:swing_low:29490:later"]
+    for life in lives:
+        assert life["sweep_occurrence_ids"] == []
+        assert life["join"]["conflicting_sweep_ids"] == [current["occurrence_id"]]
+
+
+def test_a_later_separate_sweep_leaves_the_projection_at_t_byte_identical():
+    current, registration = _sweep_row("13:05"), _registration_row()
+    before = _inventory([current, registration], _slots())
+    later = _sweep_row("13:15", registered="13:19", observed="13:25")
+    unseen = _sweep_row("13:15", registered="13:19", observed="13:19")
+    unseen["observed_at"] = LATER
+    for extra in (later, unseen):
+        assert _inventory([current, extra, registration], _slots()) == before
+
+
+def test_shadow_block_at_t_ignores_a_later_copy():
+    current = _sweep_row("13:05")
+    later = _later_copy(current, "row_observed")
+    plain, _ = _watch([], rows=_settled(21), slots=_slots(),
+                      ledger=[current, _registration_row()], cutoff="13:20")
+    mixed, _ = _watch([], rows=_settled(21), slots=_slots(),
+                      ledger=[current, later, _registration_row()], cutoff="13:20")
+    assert mixed == plain
+    [life] = mixed["lives"]
+    assert life["sweep_occurrence_ids"] == [current["occurrence_id"]]
+
+
+# Real-producer shape (synthetic W4 tape, independently replayed at 14:37): the
+# canonical 15m sweep sourced 14:00 and its exact low 29494, registered 14:14
+# from the settled 14:00..14:14 birth bucket, with its slot present.
+W4_STAMP = "2026-08-19T{}:00+00:00".format
+W4_SWEEP = {
+    "occurrence_id": market_object_id("LIQUIDITY_SWEEP", contract=C, timeframe="15m",
+                                      instant=W4_STAMP("14:00")),
+    "event_type": "LIQUIDITY_SWEEP", "contract": C, "source_tf": "15m",
+    "event_time": W4_STAMP("14:00"), "sweep_direction": "below_low",
+    "liquidity_side_taken": "sell_side", "swept_level": 29494.0, "reclaimed": True,
+    "reclaimed_at": W4_STAMP("14:00"), "reclaim_basis": "same_bar_close_back_through_level",
+    "source_bars": [W4_STAMP("13:45"), W4_STAMP("14:00")],
+    "protected_swing_lifetime": {
+        "contract": C, "market_session": SESSION, "source_tf": "15m", "side": "low",
+        "swing_id": "15m:swing_low:29494", "registered_at": W4_STAMP("14:14"),
+        "level": 29494.0, "basis": "sell_side_raid_rejected",
+        "observed_at": W4_STAMP("14:14"),
+        "sweep_occurrence_id": market_object_id("LIQUIDITY_SWEEP", contract=C,
+                                                timeframe="15m", instant=W4_STAMP("14:00"))},
+}
+W4_REGISTRATION = {
+    "occurrence_id": ("PROTECTED_SWING_REGISTERED:" + C + ":15m:2026-08-19T14:14:00+00:00:"
+                      "low@29494.0:15m:swing_low:29494@2026-08-19T14:14:00+00:00"),
+    "event_type": "PROTECTED_SWING_REGISTERED", "contract": C, "source_tf": "15m",
+    "event_time": W4_STAMP("14:14"), "side": "low", "level": 29494.0,
+    "basis": "sell_side_raid_rejected", "swing_id": "15m:swing_low:29494",
+    "registered_at": W4_STAMP("14:14"), "source_bar_time": W4_STAMP("14:00"),
+    "settled_edge_time": W4_STAMP("14:14"), "observed_at": W4_STAMP("14:14")}
+W4_SLOTS = {"lows": {"15m": {"level": 29494.0, "timeframe": "15m", "role": "context",
+                             "registered_at": W4_STAMP("14:14"),
+                             "swing_id": "15m:swing_low:29494",
+                             "basis": "sell_side_raid_rejected"}}, "highs": {}}
+
+
+def _w4(rows):
+    lives = CP.life_inventory(ledger_rows=rows, protected_by_timeframe=W4_SLOTS,
+                              contract_id=C, market_session=SESSION, cutoff=W4_STAMP("14:37"))
+    [life] = lives
+    verdict = CP.selection_eligibility(life, {"status": "INTACT"},
+                                       protected_by_timeframe=W4_SLOTS, ledger_rows=rows,
+                                       cutoff=W4_STAMP("14:37"))
+    return life, verdict
+
+
+@pytest.mark.parametrize("variant", ["row_later", "association_only",
+                                     "current_conflict", "current_conflict_future_association"])
+def test_w4_shaped_life_at_1437_against_a_duplicate_of_its_sweep(variant):
+    current = copy.deepcopy(W4_SWEEP)
+    before, verdict = _w4([current, W4_REGISTRATION])
+    assert before["sweep_occurrence_ids"] == [current["occurrence_id"]]
+    assert verdict == {"eligible": True, "failures": []}
+    dup = copy.deepcopy(current)
+    if variant != "current_conflict":
+        dup["protected_swing_lifetime"]["observed_at"] = W4_STAMP("14:45")
+    if variant == "row_later":
+        dup["observed_at"] = W4_STAMP("14:45")
+    if variant != "association_only":
+        dup["source_bars"] = []
+    for rows in ([current, dup, W4_REGISTRATION], [dup, current, W4_REGISTRATION]):
+        life, verdict = _w4(rows)
+        if variant in ("row_later", "association_only"):
+            assert life == before
+            assert verdict == {"eligible": True, "failures": []}
+        else:
+            assert life["sweep_occurrence_ids"] == []
+            assert life["join"]["conflicting_sweep_ids"] == [current["occurrence_id"]]
+            assert verdict["failures"] == ["V1", "V7"]
