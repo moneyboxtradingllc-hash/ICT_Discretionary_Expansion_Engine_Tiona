@@ -12,18 +12,17 @@ STAGE-3B-1B FIELD DOCTRINE. Two scopes are published and never merged:
   load-bearing structure, whether that leg failed (`active_leg_failure_status`)
   and the prior row's leg status. A 1m/3m/5m leg failure can require today's
   stand-down; it is NOT proof that a campaign premise failed.
-* CAMPAIGN PREMISE -- not bound by any producer yet, so it is published as
-  UNKNOWN (`campaign_premise`), and every campaign-falsifier surface
+* CAMPAIGN PREMISE -- Stage 3C-3 reads current producer-owned scope. A bound
+  campaign publishes its own LifeRef and INTACT certificate; authentic UNBOUND
+  keeps the legacy local control table. Technical ownership failure holds
+  entries. The historical campaign-falsifier aliases remain
   (`current_thesis_falsifier`, `thesis_falsifier_status`,
   `current_thesis_falsifier_status`, `prior_thesis_falsifier_status`, and the
   prior thesis's `thesis_falsifier`/`falsifier_status`) is null/"unknown".
 
-Control computation is unchanged: incumbent failure, transfer/successor proof
-and control state are derived from the leg evidence exactly as before. The
-legacy control labels (`campaign_established`, `incumbent_intact`,
-`confirmed_transfer`, ...) are retained compatibility values; they are NOT
-newly proven campaign-scoped establishment or transfer. That campaign-scope
-contract is unresolved and not implemented here.
+The local leg derivation is unchanged. The control table combines it with
+authenticated custody: local failures cannot change the campaign's identity,
+and surviving campaign scope cannot remove a local entry refusal.
 """
 from __future__ import annotations
 
@@ -484,7 +483,7 @@ def build_narrative_continuity(snapshot: dict, stance_history: dict) -> dict:
     active_leg_structure = current_leg_structure or retained_leg_structure
     origin = path.get("origin") if isinstance(path.get("origin"), dict) else {}
 
-    return {
+    result = {
         "state_version": STATE_VERSION,
         "control_state": control_state,
         "dominant_direction": dominant_direction,
@@ -539,6 +538,117 @@ def build_narrative_continuity(snapshot: dict, stance_history: dict) -> dict:
         "same_production_session": same_session,
         "legacy_or_prior_session_stance_ignored": bool(last and not same_session),
     }
+    return _apply_campaign_scope(snap, result)
+
+
+def _apply_campaign_scope(snapshot, local):
+    """D0=a for authentic UNBOUND; current ownership for every bound decision.
+
+    Local leg records and authoring metadata remain the legacy measurements.
+    A stance row, copied publication or sealed plan is never an authority source.
+    """
+    from market_data.campaign_scope import read_current_campaign_scope
+    from market_data.campaign_premise import _instant
+
+    surfaces = ("campaign_scope_custody", "campaign_scope_custody_shadow",
+                "campaign_premise_catalog", "campaign_premise_shadow")
+    if "derived_state" not in snapshot and not any(k in snapshot for k in surfaces):
+        return local  # Historical local-only fixture, never scope authority.
+    scope = read_current_campaign_scope(snapshot)
+    campaign = scope.get("campaign") or {}
+    path = snapshot.get("active_path_state") or {}
+    local_state = local["control_state"]
+    local["campaign_scope"] = scope
+
+    def held(reason, *, dominant=None, premise=None):
+        local.update(control_state=("developing_transfer" if local.get("transfer_confirmed")
+                                    else "unresolved"), dominant_direction=dominant,
+                     transfer_confirmed=False, transfer_proof=None,
+                     confirmed_from=None, confirmed_to=None,
+                     campaign_premise=premise or {"status": "UNKNOWN", "reason": reason,
+                                                 "binding": None})
+        return local
+
+    if scope.get("status") != "AVAILABLE" or scope.get("authority") != "scope":
+        return held("campaign_scope_unavailable")
+    if scope.get("state") == "UNBOUND" and not campaign:
+        return local  # Entire original D0=a table, exact unbound premise.
+    binding = {k: copy.deepcopy(campaign.get(k)) for k in
+               ("campaign_id", "direction", "premise", "certificate", "scope_proof",
+                "activated_at", "activation_proposal_id")}
+    direction = _direction(campaign.get("direction"))
+    proof = campaign.get("scope_proof") or {}
+    certificate = campaign.get("certificate") or {}
+    if scope.get("state") == "SUSPENDED":
+        return held("campaign_scope_suspended", premise={"status": "UNKNOWN",
+                    "reason": "campaign_scope_suspended", "binding": binding})
+    if (scope.get("state") != "ACTIVE" or campaign.get("status") != "ACTIVE"
+            or not campaign.get("campaign_id") or not direction
+            or certificate.get("status") != "INTACT" or not campaign.get("premise")
+            or not proof.get("proof_id") or proof.get("to") != direction
+            or not campaign.get("activation_proposal_id")):
+        return held("campaign_scope_unavailable")
+    local["campaign_premise"] = {"status": "INTACT", "reason": None,
+                                "binding": binding,
+                                "route": proof.get("route"),
+                                "last_transition": copy.deepcopy(scope.get("last_transition"))}
+    local["dominant_direction"] = direction
+    transition = scope.get("last_transition") or {}
+    cutoff = _instant(snapshot.get("timestamp"))
+    new = transition.get("cutoff") == cutoff and transition.get("kind") in ("establish", "transfer")
+    if new:
+        accepted = proof.get("local_transfer_proof")
+        current = _transfer_proof(path, proof.get("from"), direction)
+        coherent = (
+            transition.get("successor_campaign_id") == campaign["campaign_id"]
+            and transition.get("successor_direction") == direction
+            and transition.get("proposal_id") == campaign["activation_proposal_id"]
+            and transition.get("scope_proof_id") == proof["proof_id"]
+            and campaign.get("activated_at") == cutoff
+            and isinstance(accepted, dict) and current == accepted
+            and not local["active_path"]["identity_conflict"])
+        if transition.get("kind") == "transfer":
+            coherent = bool(coherent and transition.get("predecessor_campaign_id")
+                            and transition.get("predecessor_campaign_id") != campaign["campaign_id"]
+                            and transition.get("predecessor_direction") == proof.get("from")
+                            and transition.get("predecessor_status") == "RETIRED"
+                            and transition.get("predecessor_reason") == "route_b_transfer")
+        else:
+            coherent = bool(coherent and transition.get("predecessor_campaign_id") is None)
+        if not coherent:
+            return held("campaign_scope_unavailable")
+        local.update(control_state=("confirmed_transfer" if transition["kind"] == "transfer"
+                                    else "campaign_established"),
+                     transfer_confirmed=transition["kind"] == "transfer",
+                     transfer_proof=copy.deepcopy(current) if transition["kind"] == "transfer" else None,
+                     confirmed_from=proof.get("from") if transition["kind"] == "transfer" else None,
+                     confirmed_to=direction if transition["kind"] == "transfer" else None)
+        return local
+    # Continuing custody does not replay the accepted activation proof. A local
+    # opposing transfer, failure or challenge cannot replace this campaign.
+    flags = path.get("transfer_evidence") or {}
+    names = ("opposing_structure_break", "load_bearing_failure",
+             "load_bearing_replaced_against_path", "ambiguous_load_bearing_invalidation")
+    known = all(isinstance(flags.get(k), bool) for k in names)
+    challenged = any(flags.get(k) is True for k in names)
+    local.update(transfer_confirmed=False, transfer_proof=None,
+                 confirmed_from=None, confirmed_to=None)
+    if local["active_path"]["identity_conflict"] or path.get("state_available") is not True:
+        local["control_state"] = "unresolved"
+    elif (path.get("status") in ("contested", "invalidated", "none")
+          or _direction(path.get("owner")) not in (None, direction)
+          or challenged or local_state == "developing_transfer"
+          or local["active_leg_failure_status"] == "occurred"):
+        local["control_state"] = "developing_transfer"
+    elif not known:
+        local["control_state"] = "unresolved"
+    elif (path.get("status") == "active" and path.get("owner") == direction
+          and _owner_has_live_structure(path, direction)):
+        local["control_state"] = ("campaign_established" if local.get("same_direction_successor_proof")
+                                  else "incumbent_intact")
+    else:
+        local["control_state"] = "unresolved"
+    return local
 
 
 def recheck_narrative_continuity(snapshot: dict, authored_continuity: dict) -> dict:
@@ -605,6 +715,13 @@ def output_direction_hold(output: dict, continuity: dict) -> tuple[dict, dict | 
     opposing = OPPOSITE[dominant] if dominant else proposed
     reason = (prior.get("causal_reason") or prior.get("market_story") or
               "prior campaign")
+    premise_reason = (context.get("campaign_premise") or {}).get("reason")
+    premise_message = (
+        "UNKNOWN because current scope is unavailable."
+        if premise_reason == "campaign_scope_unavailable" else
+        "UNKNOWN because current scope is suspended."
+        if premise_reason == "campaign_scope_suspended" else
+        "unbound (UNKNOWN).")
     held = dict(out)
     held.update({
         "narrative_direction": dominant or "conflicted",
@@ -642,7 +759,8 @@ def output_direction_hold(output: dict, continuity: dict) -> tuple[dict, dict | 
                                 "failed or control is unavailable, but a new owner is "
                                 "not confirmed. A leg failure is not proof that a "
                                 "campaign premise failed; the campaign premise is "
-                                "unbound (UNKNOWN)." if state in ("developing_transfer",
+                                + premise_message
+                                if state in ("developing_transfer",
                                                                   "unresolved")
                                 else "No established causal campaign owner is available.")),
         "thesis_health": (f"{state}; prior {dominant} campaign retained" if dominant
@@ -687,7 +805,10 @@ def candidate_direction_authorized(direction: str, snapshot: dict,
     requested = _direction(direction)
     if requested is None:
         return False, "narrative_direction_invalid"
-    current = (current_continuity if isinstance(current_continuity, dict)
+    production = isinstance(snapshot, dict) and any(k in snapshot for k in (
+        "derived_state", "campaign_scope_custody", "campaign_scope_custody_shadow",
+        "campaign_premise_catalog", "campaign_premise_shadow"))
+    current = (current_continuity if isinstance(current_continuity, dict) and not production
                else recheck_narrative_continuity(snapshot, authored_continuity))
     state = current.get("control_state")
     if state in ("developing_transfer", "unresolved"):

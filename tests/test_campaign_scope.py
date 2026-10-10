@@ -158,7 +158,7 @@ def test_real_catalog_and_strict_scope(owner, natural):
     payload = build_brain_input(snap, {})
     assert payload["campaign_premise_catalog"] == catalog
     assert scan_payload_taint(payload) == (True, [])
-    assert CS.read_current_campaign_scope(snap)["authority"] == "none"
+    assert CS.read_current_campaign_scope(snap)["authority"] == "scope"
     assert snap["campaign_premise_shadow"]["retained_chains"] == 0
 
 
@@ -175,7 +175,7 @@ def test_pending_is_private_and_activates_only_later(owner, natural):
     assert CS.read_current_campaign_scope(snap)["status"] == "UNAVAILABLE"
     newer = _publish(owner, natural, "14:37")
     current = CS.read_current_campaign_scope(newer)
-    assert current["authority"] == "none" and current["state"] == "ACTIVE"
+    assert current["authority"] == "scope" and current["state"] == "ACTIVE"
     assert current["campaign"]["activated_at"] == newer["timestamp"]
     assert current["last_transition"]["kind"] == "establish"
     assert current["pending"] is None and current["retained_chains"] == 1
@@ -469,7 +469,7 @@ def test_real_primary_transport_proposal_and_brainless_activation(tmp_path, monk
         assert len(calls) == 1
         assert "campaign_scope_proposal_outcome" not in second["snapshot"]
         projection = CS.read_current_campaign_scope(second["snapshot"])
-        assert projection["state"] == "ACTIVE" and projection["authority"] == "none"
+        assert projection["state"] == "ACTIVE" and projection["authority"] == "scope"
         third = cycle.scan(tape[:99], now=datetime.fromisoformat(tape[98]["timestamp"])
                            + timedelta(minutes=1), invoke_brain=True)
         assert len(calls) == 2
@@ -507,7 +507,7 @@ def test_real_scoped_transfer_replaces_an_intact_incumbent(tmp_path, monkeypatch
     tape[159]["close"] = 29519.5
     tape[159]["low"] = min(tape[159]["low"], 29519.25)
     current = CS.read_current_campaign_scope(scan(160))
-    assert current["authority"] == "none" and current["state"] == "ACTIVE"
+    assert current["authority"] == "scope" and current["state"] == "ACTIVE"
     assert current["campaign"]["direction"] == "bullish"
     assert current["campaign"]["campaign_id"] != incumbent["campaign_id"]
     assert current["last_transition"]["kind"] == "transfer"

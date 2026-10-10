@@ -1,8 +1,9 @@
-"""Stage 3C-2: selected campaign custody, published in SHADOW only.
+"""Stage 3C-3: selected custody authenticated at the producer boundary.
 
 The owner-selected initial policy is D1=a, roles5m/15m, K=1,
 D3=B/STRICT/INDEPENDENT_SUPPORTING_LIFE, D5=a, D6=a. Neither a
-catalog row nor pending/active shadow custody grants execution authority.
+catalog row nor pending/shadow custody grants execution authority. Consumers
+read the authenticated current scope; all local execution gates still apply.
 No persistence restores custody; reads authenticate actual process ownership.
 """
 from __future__ import annotations
@@ -169,6 +170,7 @@ def _read_publication(snapshot):
                 or owner.session_id != context["process_session_id"]
                 or _fact_seal(snapshot) != publication["fact_seal"]
                 or snapshot.get("campaign_scope_custody_shadow") != custody._projection
+                or snapshot.get("campaign_scope_custody") != custody._scope_projection
                 or snapshot.get("campaign_premise_catalog") != custody._catalog):
             return None
         return custody
@@ -179,7 +181,7 @@ def read_current_campaign_scope(snapshot):
     try:
         custody = _read_publication(snapshot)
         if custody is not None:
-            return copy.deepcopy(custody._projection)
+            return copy.deepcopy(custody._scope_projection)
     except (TypeError, ValueError, AttributeError):
         pass
     return {"schema": SCHEMA, "authority": "none", "status": "UNAVAILABLE",
@@ -201,6 +203,7 @@ class CampaignScopeCustody:
         self._lineage = uuid.uuid4().hex
         self._chains = {}
         self._context = self._catalog = self._projection = None
+        self._scope_projection = None
         self._campaign = self._pending = self._transition = None
         self._proposal_at = self._proposal_digest = None
         self._conflicted = False
@@ -214,6 +217,7 @@ class CampaignScopeCustody:
         self._pending = None
         self._chains = {}
         self._context = self._catalog = self._projection = None
+        self._scope_projection = None
         self._observation_args = None
         self._cutoff_fact_conflict = False
         self._lineage = uuid.uuid4().hex
@@ -268,10 +272,13 @@ class CampaignScopeCustody:
                     "schema": SCHEMA, "authority": "none", "status": "UNAVAILABLE",
                     "reason": "conflicting_same_cutoff_facts", "campaign": None}
                 snapshot.pop("campaign_premise_catalog", None)
+                snapshot["campaign_scope_custody"] = copy.deepcopy(
+                    snapshot["campaign_scope_custody_shadow"])
                 return copy.deepcopy(snapshot["campaign_scope_custody_shadow"])
             # No new facts/proposal can revise the already-published cutoff.
             snapshot["campaign_premise_catalog"] = copy.deepcopy(self._catalog)
             snapshot["campaign_scope_custody_shadow"] = copy.deepcopy(self._projection)
+            snapshot["campaign_scope_custody"] = copy.deepcopy(self._scope_projection)
             self._register(owner, snapshot)
             return copy.deepcopy(self._projection)
         self._cutoff_fact_conflict = False
@@ -328,8 +335,13 @@ class CampaignScopeCustody:
                             "pending_disposition": copy.deepcopy(self._pending_disposition),
                             "retained_chains": len(self._chains)}
         self._projection["digest"] = _digest(self._projection)
+        self._scope_projection = copy.deepcopy(self._projection)
+        self._scope_projection["authority"] = "scope" if available else "none"
+        self._scope_projection.pop("digest")
+        self._scope_projection["digest"] = _digest(self._scope_projection)
         snapshot["campaign_premise_catalog"] = copy.deepcopy(self._catalog)
         snapshot["campaign_scope_custody_shadow"] = copy.deepcopy(self._projection)
+        snapshot["campaign_scope_custody"] = copy.deepcopy(self._scope_projection)
         self._register(owner, snapshot)
         return copy.deepcopy(self._projection)
 

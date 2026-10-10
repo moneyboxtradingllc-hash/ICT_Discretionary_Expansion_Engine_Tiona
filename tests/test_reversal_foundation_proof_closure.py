@@ -990,7 +990,10 @@ def test_changed_anchor_lifetime_cannot_reuse_retained_formation(
     assert rows == []
     with pytest.raises(NoCandidate) as refused:
         _produce_candidate(scan, snapshot=changed)
-    assert refused.value.reason == "tool_not_detected"
+    # M3 refuses this detached, fact-altered snapshot at current ownership
+    # before reaching tool selection. The exact catalog-abstention assertion
+    # above still independently proves the formation cannot be reused.
+    assert refused.value.reason == "narrative_transfer_unresolved"
 
 
 def test_wrong_campaign_direction_and_invalid_action_refuse_at_candidate_boundary(

@@ -78,6 +78,8 @@ def authorities(*, direction="bullish", campaign_price=29950,
             accepted_view=accepted, ownership_state=path)
     observe(rows[:1])
     campaign_draw = observe(rows)
+    from test_campaign_scope_binding import authenticate_unbound_fixture
+    authenticate_unbound_fixture(snapshot, session_id=SESSION)
     continuity = build_narrative_continuity(snapshot, {"available": False})
     lifecycle = evaluate_campaign_lifecycle(
         snapshot=snapshot,
@@ -271,6 +273,8 @@ def test_real_candidate_producer_keeps_target_and_allows_low_obstacle_payoff():
                                        "history_revision": REVISION,
                                        "derived_revision": REVISION},
                      "active_path_state": path})
+    from test_campaign_scope_binding import authenticate_unbound_fixture
+    authenticate_unbound_fixture(snapshot, session_id="TH-TEST")
     continuity = build_narrative_continuity(snapshot, {"available": False})
     rows = [{"timestamp": stamp(i), "open": 29880, "high": 29880.5,
              "low": 29879.5, "close": 29880, "volume": 10,

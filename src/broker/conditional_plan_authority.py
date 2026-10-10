@@ -10,14 +10,16 @@ from dataclasses import dataclass
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import json
+import weakref
 
 
 AUTHORITY_BASIS = "PREAUTHORIZED_PLAN_JUDGMENT"
 PHASE_UNAVAILABLE_REASON = "current_brain_authority_unavailable"
 _SEAL = object()
+_CURRENT_CHECKS = weakref.WeakKeyDictionary()
 
 
-@dataclass(frozen=True, init=False)
+@dataclass(frozen=True, init=False, eq=False)
 class ConditionalPlanAuthority:
     _payload_json: str
     _scope: object
@@ -219,6 +221,7 @@ def capture(*, scope, candidate, scan, brain_block, brain_result,
     from market_data.campaign_lifecycle import evaluate_campaign_lifecycle
 
     snapshot = (scan or {}).get("snapshot") or {}
+    campaign_scope = _current_scope_binding(snapshot)
     output = (brain_block or {}).get("output")
     parsed = (brain_result or {}).get("parsed")
     lifecycle = snapshot.get("campaign_lifecycle")
@@ -352,6 +355,7 @@ def capture(*, scope, candidate, scan, brain_block, brain_result,
         "brain_fingerprint": brain_contract_fingerprint(),
         "draw": draw_id, "active_path": path_id,
         "authoring_transfer_proof": transfer_binding,
+        "campaign_scope_binding": campaign_scope,
         "history_revision": revision,
         "activation_zone": extras.get("activation_zone"),
         "tool_family": extras.get("tool_family"),
@@ -384,6 +388,7 @@ def validate(*, authority, scope, candidate, candidate_at_trigger,
     if (not isinstance(authority, ConditionalPlanAuthority)
             or authority._seal is not _SEAL or authority._scope is not scope):
         return refuse("conditional_plan_authority_missing_or_unbound")
+    _CURRENT_CHECKS.pop(authority, None)
     try:
         bound = authority.payload()
     except Exception:  # noqa: BLE001
@@ -455,6 +460,12 @@ def validate(*, authority, scope, candidate, candidate_at_trigger,
     direction = bound.get("direction")
     if current_path.get("owner") != direction or current_path.get("status") != "active":
         return refuse("conditional_plan_owner_not_intact")
+    try:
+        current_scope = _current_scope_binding(snap)
+    except ValueError:
+        return refuse("campaign_scope_changed")
+    if current_scope != bound.get("campaign_scope_binding"):
+        return refuse("campaign_scope_changed")
     from broker.topstepx_execution_price import executable_price
     market = (brain_input or {}).get("market") or {}
     executable = executable_price(market.get("execution_price") or {}, direction)
@@ -563,13 +574,38 @@ def validate(*, authority, scope, candidate, candidate_at_trigger,
                                          if candidate_at_trigger is not None else None),
                 "campaign_episode_id": draw_id.get("campaign_episode_id"),
                 "history_revision": revision,
+                "campaign_scope_binding": current_scope,
                 "current_lifecycle": {
                     "state": lifecycle.get("state"),
                     "reason": lifecycle.get("reason"),
                     "narrative_phase": lifecycle.get("narrative_phase"),
                 },
                 "authoring_transfer_proof": bound.get("authoring_transfer_proof")}
+    _CURRENT_CHECKS[authority] = {"snapshot": snap,
+                                "trigger_snapshot_id": evidence["trigger_snapshot_id"]}
     return True, None, evidence
+
+
+def _current_scope_binding(snapshot):
+    """Stable accepted identity; per-cutoff catalog/digest is not plan identity.
+
+    Reads authenticate the actual snapshot. Serialized authority never restores
+    a campaign, and missing ownership is distinct from authenticated UNBOUND.
+    """
+    from market_data.campaign_scope import read_current_campaign_scope
+    scope = read_current_campaign_scope(snapshot)
+    if scope.get("status") != "AVAILABLE" or scope.get("authority") != "scope":
+        raise ValueError("campaign_scope_changed")
+    campaign = scope.get("campaign") or {}
+    if scope.get("state") == "UNBOUND" and not campaign:
+        return None
+    proof = campaign.get("scope_proof") or {}
+    if (scope.get("state") != "ACTIVE" or campaign.get("status") != "ACTIVE"
+            or (campaign.get("certificate") or {}).get("status") != "INTACT"
+            or not campaign.get("campaign_id") or not proof.get("proof_id")):
+        raise ValueError("campaign_scope_changed")
+    return {"campaign_id": campaign["campaign_id"],
+            "scope_proof_id": proof["proof_id"]}
 
 
 def validate_final_quote(*, authority, scope, candidate, contract_id,
@@ -656,6 +692,16 @@ def validate_final_quote(*, authority, scope, candidate, contract_id,
         return refuse("conditional_plan_final_quote_lineage_invalid")
     if not low <= price <= high:
         return refuse("conditional_plan_final_quote_outside_authorized_zone")
+    checked = _CURRENT_CHECKS.get(authority)
+    if (not checked or checked["trigger_snapshot_id"] != candidate.snapshot_id):
+        return refuse("campaign_scope_changed")
+    try:
+        if _current_scope_binding(checked["snapshot"]) != bound.get("campaign_scope_binding"):
+            return refuse("campaign_scope_changed")
+    except ValueError:
+        return refuse("campaign_scope_changed")
+    if authority_evidence.get("campaign_scope_binding") != bound.get("campaign_scope_binding"):
+        return refuse("campaign_scope_changed")
     if not isinstance(bound.get("brain_fingerprint"), str) \
             or not bound.get("brain_fingerprint"):
         return refuse("conditional_plan_brain_fingerprint_missing")

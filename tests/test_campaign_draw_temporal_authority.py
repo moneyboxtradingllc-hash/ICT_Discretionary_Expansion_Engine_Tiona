@@ -546,6 +546,9 @@ def _ordinary_loop(monkeypatch, scan, producer):
 
 def _lawful_prior_generation_scan(tmp_path, monkeypatch, ecu):
     cycle, calls = _cycle_with_brain(tmp_path, monkeypatch, ecu=ecu)
+    # The ordinary-loop harness replaces cycle with a scan stub. Retain the
+    # actual publisher for this test's lifetime, as the real loop does.
+    monkeypatch.setattr(RF, "_scope_fixture_owner", cycle, raising=False)
     _scan(cycle, RF.TAPE_1M)
     scan = _scan(cycle, LATER)
     assert len(calls) == 2

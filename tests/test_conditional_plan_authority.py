@@ -31,6 +31,8 @@ def context(monkeypatch, phase="continuation", *, prior_thesis=False):
     path["load_bearing_structure"].update({
         "timeframe": "5m", "basis": "sell_side_raid_rejected",
         "swing_id": "5m:swing_low:29875", "at": path["origin"]["at"]})
+    from test_campaign_scope_binding import authenticate_unbound_fixture
+    authenticate_unbound_fixture(snapshot, session_id="TRADE-HORIZON-SESSION")
     if prior_thesis:
         from ai_brain.narrative_continuity import STATE_VERSION
         last = {
@@ -230,6 +232,8 @@ def test_forming_hypothesis_cannot_hide_unresolved_transfer(monkeypatch):
         "level": 29875.0}
     draw["authority_status"] = "UNKNOWN"
     draw["superseded"] = True
+    from test_campaign_scope_binding import authenticate_unbound_fixture
+    authenticate_unbound_fixture(snapshot, session_id="TRADE-HORIZON-SESSION")
     bound_result = authority.payload()["brain_result"]
     current = evaluate_campaign_lifecycle(
         snapshot=snapshot, brain_output={},
@@ -423,6 +427,8 @@ def test_healthy_cutoff_and_obstacle_evidence_changes_do_not_invalidate_plan(
     }
     snapshot["active_path_state"]["progression"]["supporting_timeframes"].append(
         "1m")
+    from test_campaign_scope_binding import authenticate_unbound_fixture
+    authenticate_unbound_fixture(snapshot, session_id="TRADE-HORIZON-SESSION")
     bound_result = authority.payload()["brain_result"]
     current = evaluate_campaign_lifecycle(
         snapshot=snapshot, brain_output={},
@@ -476,6 +482,8 @@ def test_real_production_loop_trigger_passes_sealed_plan_without_brain_call(
     snapshot["timestamp"] = draw["settled_cutoff"]
     trigger_block = {"source": "preauthorized_plan_trigger", "output": None,
                      "fallback_reason": None}
+    from test_campaign_scope_binding import authenticate_unbound_fixture
+    authenticate_unbound_fixture(snapshot, session_id="TRADE-HORIZON-SESSION")
     scan = {
         "snapshot": snapshot,
         "brain_block": trigger_block,

@@ -479,6 +479,8 @@ def test_real_continuity_accepts_fresh_same_direction_successor_then_rechecks(di
         snap["derived_state"] = {"current": True,
                                  "history_revision": draw_revision,
                                  "derived_revision": draw_revision}
+        from test_campaign_scope_binding import authenticate_unbound_fixture
+        authenticate_unbound_fixture(snap, session_id=draw_session)
         return snap
 
     initial = scan(
@@ -622,6 +624,8 @@ def test_real_continuity_accepts_fresh_same_direction_successor_then_rechecks(di
             **successor["settled_source"],
             "1m": {"source_bar_time": measured["settled_cutoff"],
                    "temporal_status": "settled"}}
+        from test_campaign_scope_binding import authenticate_unbound_fixture
+        authenticate_unbound_fixture(lifecycle_snapshot, session_id=draw_session)
         return evaluate_campaign_lifecycle(
             snapshot=lifecycle_snapshot,
             brain_output={"narrative_direction": direction,
@@ -713,6 +717,8 @@ def test_real_continuity_accepts_fresh_same_direction_successor_then_rechecks(di
         witness["occurrence_id"] = f"FVG:{CONTRACT}:5m:{latest_bar}"
         witness["tool_id"] = f"{witness['direction']}_fvg@5m#{latest_bar}"
         witness["zone_low"], witness["zone_high"] = 99.5, 100.5
+    from test_campaign_scope_binding import authenticate_unbound_fixture
+    authenticate_unbound_fixture(candidate_snapshot, session_id=draw_session)
     candidate = producer.produce(
         brain_result=brain_result, brain_input=brain_input,
         snapshot=candidate_snapshot, qualification={"qualified": True},

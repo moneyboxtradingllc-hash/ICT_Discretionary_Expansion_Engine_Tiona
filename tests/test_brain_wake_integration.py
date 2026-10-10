@@ -606,6 +606,16 @@ def test_fake_candidate_cannot_publish_unbound_conditional_plan(monkeypatch, tmp
     cycle._update_structure_flips = lambda _snapshot: []
     cycle._brain_input = lambda _snapshot: copy.deepcopy(payload)
     cycle._two_brain_after_primary = lambda *_a: None
+    # This is an explicitly synthetic incomplete-plan fixture, not detector
+    # coverage. Publish only UNBOUND ownership at its declared S5 boundary.
+    from test_campaign_scope_binding import authenticate_unbound_fixture
+    def publish_unbound(snapshot, _raw):
+        authenticate_unbound_fixture(snapshot)
+        from ai_brain.narrative_continuity import build_narrative_continuity
+        payload["narrative_continuity"] = build_narrative_continuity(
+            snapshot, {"available": False})
+        return snapshot["campaign_scope_custody"]
+    cycle._advance_campaign_scope = publish_unbound
     actual_scan = cycle.scan
     scan_results = []
 

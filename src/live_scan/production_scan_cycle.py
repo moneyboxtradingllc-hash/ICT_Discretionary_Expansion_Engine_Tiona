@@ -1402,7 +1402,7 @@ class ProductionScanCycle:
                                unavailable_reason=f"error:{type(exc).__name__}")
 
     def _advance_campaign_scope(self, snapshot: dict, raw_data: dict) -> dict:
-        """S1-S5 shadow catalog and custody; never an execution consumer."""
+        """S1-S5 authenticated current custody, before any cognition."""
         from market_state.active_path import production_session_key
         from market_data.campaign_scope import CampaignScopeCustody
         facts = snapshot.get("campaign_premise_shadow") or {}
@@ -1415,7 +1415,7 @@ class ProductionScanCycle:
                 history_revision=self._history.revision, contract_id=self.contract_id,
                 market_session=production_session_key(snapshot.get("timestamp")),
                 available=facts.get("status") == "AVAILABLE" and self.derived_state_is_current())
-        except Exception as exc:  # shadow failure never changes executable verdicts
+        except Exception as exc:  # Consumer ownership checks fail closed.
             custody = getattr(self, "campaign_scope_custody", None)
             if isinstance(custody, CampaignScopeCustody):
                 custody.reset("scope_error")
@@ -1423,6 +1423,7 @@ class ProductionScanCycle:
                        "status": "UNAVAILABLE", "reason": f"scope_error:{type(exc).__name__}",
                        "campaign": None}
             snapshot["campaign_scope_custody_shadow"] = refused
+            snapshot["campaign_scope_custody"] = dict(refused)
             snapshot.pop("campaign_premise_catalog", None)
             return refused
 

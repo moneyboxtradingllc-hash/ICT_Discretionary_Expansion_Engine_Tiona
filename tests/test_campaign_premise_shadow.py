@@ -253,6 +253,7 @@ def test_one_advance_per_scan_and_no_brain_input(tmp_path, monkeypatch, ecu):
     monkeypatch.setattr(CP.CampaignPremiseShadow, "advance", spy)
     first = TA._scan(cycle, RF.TAPE_1M)
     later = TA._scan(cycle, TA.LATER)
+    RF._assert_retained_reversal_candidate(RF._produce_candidate(later))
     trigger = TA._scan(cycle, TA.NEXT_MINUTE, brain=False)
     assert len(advances) == 3 and len(calls) == 2
     for payload in calls:
@@ -260,16 +261,19 @@ def test_one_advance_per_scan_and_no_brain_input(tmp_path, monkeypatch, ecu):
         # still cannot enter cognition or become execution authority.
         assert set(k for k in payload if "campaign_premise" in k) == {"campaign_premise_catalog"}
         assert payload["campaign_premise_catalog"]["schema"] == "campaign_premise_catalog/v1"
-        assert "campaign_scope_custody" not in str(payload)
+        # M3 carries the authenticated scope projection in continuity. Raw M1
+        # facts remain excluded and the shadow itself stays authority none.
+        scope = payload["narrative_continuity"]["campaign_scope"]
+        assert scope["schema"] == "campaign_scope_custody/v1"
+        assert scope["authority"] == "scope"
         assert "campaign_premise_shadow" not in str(payload)
     for scan in (first, later, trigger):
         assert _shadow(scan["snapshot"])["status"] == "AVAILABLE"
     assert later["campaign_lifecycle"]["state"] == "ACTIVE_DELIVERY"
-    RF._assert_retained_reversal_candidate(RF._produce_candidate(later))
 
 
 @pytest.mark.parametrize("ecu", [True, False], ids=["ecu", "non-ecu"])
-def test_shadow_failure_is_unavailable_and_changes_no_verdict(tmp_path, monkeypatch, ecu):
+def test_shadow_failure_makes_current_scope_unavailable_and_holds_entry(tmp_path, monkeypatch, ecu):
     def outcomes(root, broken):
         cycle, calls = TA._cycle_with_brain(root, monkeypatch, ecu=ecu)
         if broken:
@@ -278,22 +282,35 @@ def test_shadow_failure_is_unavailable_and_changes_no_verdict(tmp_path, monkeypa
             monkeypatch.setattr(CP.CampaignPremiseShadow, "_advance", boom)
         TA._scan(cycle, RF.TAPE_1M)
         later = TA._scan(cycle, TA.LATER)
-        candidate = RF._produce_candidate(later)
+        if broken:
+            from broker.luna_candidate_producer import NoCandidate
+            with pytest.raises(NoCandidate, match="campaign_lifecycle_refused"):
+                RF._produce_candidate(later)
+            assert later["campaign_lifecycle"]["participation_permitted"] is False
+            continuity = later["brain_block"]["narrative_continuity"]
+            assert continuity["campaign_premise"]["reason"] == "campaign_scope_unavailable"
+            assert continuity["dominant_direction"] is None
+            candidate = None
+        else:
+            candidate = RF._produce_candidate(later)
         block = later["snapshot"]["campaign_premise_shadow"]
         return (later["campaign_lifecycle"]["state"],
                 later["campaign_lifecycle"]["reason"],
                 later["campaign_draw_authority"].get("authority_status"),
                 (later["snapshot"].get("ai_brain") or {}).get("output", {}).get(
                     "narrative_direction"),
-                candidate.direction, candidate.invalidation_price,
-                candidate.objective.price, len(calls)), block
+                candidate.direction if candidate else None,
+                candidate.invalidation_price if candidate else None,
+                candidate.objective.price if candidate else None, len(calls)), block
 
     healthy, block_ok = outcomes(tmp_path / "ok", broken=False)
     broken, block_bad = outcomes(tmp_path / "bad", broken=True)
     assert block_ok["status"] == "AVAILABLE"
     assert block_bad["status"] == "UNAVAILABLE"
     assert block_bad["reason"] == "shadow_error:RuntimeError"
-    assert broken == healthy
+    assert healthy[0] == "ACTIVE_DELIVERY" and healthy[4] == "bullish"
+    assert broken[0] == "TRANSFER_UNRESOLVED" and broken[4:7] == (None,None,None)
+    assert healthy[-1] == broken[-1] == 2
 
 
 def test_history_rebuild_recreates_the_shadow(tmp_path, monkeypatch):

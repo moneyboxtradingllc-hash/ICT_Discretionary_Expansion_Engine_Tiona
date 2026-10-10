@@ -254,6 +254,10 @@ class Cycle:
                     "qualification": {"qualified": True},
                     **_detected("ifvg", "fvg")}
         from ai_brain.narrative_continuity import build_narrative_continuity
+        from test_campaign_scope_binding import authenticate_unbound_fixture
+        snapshot["contract_id"] = self.contract_id
+        active_path["contract_id"] = self.contract_id
+        authenticate_unbound_fixture(snapshot, session_id=self.session_id)
         continuity = build_narrative_continuity(snapshot, {"available": False})
         block = {"source": self.source, "output": self.output,
                  "fallback_reason": self.fallback, "llm_model": PRODUCTION_MODEL,

@@ -104,6 +104,8 @@ def test_verified_reversal_watch_plan_reaches_real_no_brain_trigger():
                      "derived_state": {"current": True,
                                        "history_revision": revision,
                                        "derived_revision": revision}})
+    from test_campaign_scope_binding import authenticate_unbound_fixture
+    authenticate_unbound_fixture(snapshot, session_id=session_id)
     continuity = build_narrative_continuity(snapshot, memory.history_summary())
     assert continuity["control_state"] == "confirmed_transfer"
     assert continuity["confirmed_to"] == "bearish"
@@ -166,6 +168,8 @@ def test_verified_reversal_watch_plan_reaches_real_no_brain_trigger():
              "llm_model": PM.PRODUCTION_MODEL,
              "narrative_continuity": continuity}
     brain_result = ProductionScanCycle.to_brain_result(block)
+    from test_campaign_scope_binding import authenticate_unbound_fixture
+    authenticate_unbound_fixture(snapshot, session_id=session_id)
     lifecycle = evaluate_campaign_lifecycle(
         snapshot=snapshot, brain_output=output,
         narrative_continuity=continuity, campaign_draw=draw,
@@ -234,6 +238,7 @@ def test_verified_reversal_watch_plan_reaches_real_no_brain_trigger():
     current_draw = observe_draw(bars)
     trigger_snapshot["settled_source"] = {"1m": {
         "source_bar_time": trigger_time, "temporal_status": "settled"}}
+    authenticate_unbound_fixture(trigger_snapshot, session_id=session_id)
     current_lifecycle = evaluate_campaign_lifecycle(
         snapshot=trigger_snapshot, brain_output={},
         narrative_continuity=continuity, campaign_draw=current_draw,

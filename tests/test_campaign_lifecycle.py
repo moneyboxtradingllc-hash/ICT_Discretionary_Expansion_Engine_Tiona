@@ -99,7 +99,7 @@ def active_path(direction="bullish", *, status="active", available=True,
 
 def snapshot(*, direction="bullish", path=None, revision=REVISION):
     cutoff = stamp(2)
-    return {
+    snap = {
         "timestamp": cutoff,
         "contract_id": CONTRACT,
         "derived_state": {"current": True, "history_revision": revision,
@@ -109,6 +109,9 @@ def snapshot(*, direction="bullish", path=None, revision=REVISION):
         "active_path_state": path if path is not None else active_path(direction),
         "structure": {}, "liquidity": {}, "timeframes": {},
     }
+    from test_campaign_scope_binding import authenticate_unbound_fixture
+    authenticate_unbound_fixture(snap, session_id=SESSION)
+    return snap
 
 
 def brain(direction="bullish", phase="continuation"):
@@ -118,6 +121,12 @@ def brain(direction="bullish", phase="continuation"):
 def classify(*, snap=None, output=None, continuity=None, campaign=None,
              session_id=SESSION, contract_id=CONTRACT, brain_available=True):
     snap = snap if snap is not None else snapshot()
+    # Synthetic local/Draw unit fixture: publish authentic UNBOUND at this
+    # declared scan boundary; the selected-scope cases live in the M3 tests.
+    from test_campaign_scope_binding import authenticate_unbound_fixture
+    from market_data.campaign_scope import read_current_campaign_scope
+    if read_current_campaign_scope(snap).get("status") != "AVAILABLE":
+        authenticate_unbound_fixture(snap, session_id=session_id)
     output = output if output is not None else brain()
     campaign = campaign if campaign is not None else draw()
     return evaluate_campaign_lifecycle(
@@ -522,6 +531,8 @@ def test_current_confirmed_reversal_phase_reaches_real_candidate_producer():
                              narrative_continuity=continuity)
     block["output"] = output
     converted = ProductionScanCycle.to_brain_result(block)
+    from test_campaign_scope_binding import authenticate_unbound_fixture
+    authenticate_unbound_fixture(snap, session_id=SESSION)
     assessment = evaluate_campaign_lifecycle(
         snapshot=snap, brain_output=output, narrative_continuity=continuity,
         campaign_draw=public_draw, session_id=SESSION, contract_id=CONTRACT,
@@ -682,6 +693,8 @@ def test_real_active_path_failed_incumbent_plus_new_forming_hypothesis_is_transf
 
     current_snapshot = snapshot(path=forming)
     current_snapshot["timestamp"] = stamp(4)
+    from test_campaign_scope_binding import authenticate_unbound_fixture
+    authenticate_unbound_fixture(current_snapshot, session_id=SESSION)
     current_continuity = recheck_narrative_continuity(
         current_snapshot, authored_continuity)
     assert current_continuity["control_state"] == "developing_transfer"

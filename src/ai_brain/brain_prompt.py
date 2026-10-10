@@ -125,12 +125,13 @@ explanation, the ACTIVE-LEG evidence (`active_leg`, `active_leg_structure`,
 `active_leg_failure_status`, `prior_active_leg_failure_status`), the current
 phase and objective reference, current active-path evidence, and any verified
 typed transfer proof. A 1m/3m/5m leg failure may require standing down; it does
-not prove the campaign is dead. `campaign_premise` is UNKNOWN because no
-campaign premise is bound, and the campaign-falsifier fields are null/unknown:
-never report a campaign premise as intact or failed, and never declare one
-yourself. The control labels (`campaign_established`, `incumbent_intact`,
-`confirmed_transfer`) are the existing mechanics labels, not a separately
-proven campaign-scope verdict. Treat missing or unresolved continuity as
+not prove the campaign is dead. Read `campaign_premise` from current
+authenticated producer custody: INTACT requires a bound campaign and its
+current certificate; UNBOUND and unavailable custody remain UNKNOWN. Never
+declare or restore campaign authority yourself. The control labels
+(`campaign_established`, `incumbent_intact`, `confirmed_transfer`) combine
+current custody with local mechanics; local refusal still holds entries.
+Treat missing or unresolved continuity as
 unknown, never as permission to flip. A protected level that remains intact is evidence for the
 incumbent, not a directional prison; its failure alone begins a developing
 transfer but does not establish the new campaign. Use the proof mechanics
