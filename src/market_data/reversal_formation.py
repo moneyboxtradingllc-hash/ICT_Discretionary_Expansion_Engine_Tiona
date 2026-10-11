@@ -62,7 +62,7 @@ def _bar_digest(bar):
 class ProducerOwnedFormationView(dict):
     """JSON-readable view that loses its live marker when restored from JSON."""
 
-    def __init__(self, rows, *, scope, seal):
+    def __init__(self, rows, *, scope, seal, custody=None):
         if seal is not _VIEW_SEAL:
             raise ValueError("reversal formation view is producer-minted only")
         super().__init__(copy.deepcopy(rows))
@@ -70,6 +70,7 @@ class ProducerOwnedFormationView(dict):
         self._scope = scope
         self._rows_json = _json(self)
         self._scope_json = _json(scope)
+        self._custody = custody
 
 
 def is_producer_owned_view(value) -> bool:
@@ -92,6 +93,13 @@ class ReversalFormationCustody:
         self._records = {}
         self._sweeps = {}
         self._lives = {}
+
+    def invalidate(self):
+        """Revoke already-published views before this producer is replaced."""
+        self._records.clear()
+        self._sweeps.clear()
+        self._lives.clear()
+        self._contract = self._session = self._revision = None
 
     @staticmethod
     def _session_key(timestamp):
@@ -230,13 +238,37 @@ class ReversalFormationCustody:
                 for row in rows if isinstance(row, dict)
                 and _instant(row.get("timestamp") or row.get("time") or row.get("t"))}
 
+    @staticmethod
+    def _current_generation(record, releases, current_at):
+        """An intact anchor does not carry an object across its leg's death."""
+        validation = _instant(record.get("validation_timestamp"))
+        if not isinstance(releases, list) or validation is None or current_at is None:
+            return False
+        for release in releases:
+            if not isinstance(release, dict):
+                return False
+            if release.get("owner") != record.get("direction"):
+                continue
+            event_at = _instant(release.get("at"))
+            source_at = _instant(release.get("source_bar_time"))
+            if (event_at is None or source_at is None
+                    or not all(release.get(k) for k in
+                               ("source_tf", "swing_id", "registered_at", "occurrence_id"))):
+                return False
+            if event_at <= current_at and validation <= source_at <= current_at:
+                return False
+        return True
+
     def _still_current(self, snapshot, record, revision, contract, session,
-                       canonical_timeframes):
+                       canonical_timeframes, releases=None):
         from market_state.active_path import (PROTECTED_SWING_REPLACED,
                                               PROTECTED_SWING_VIOLATED)
         if (record.get("contract_id") != contract
                 or record.get("market_session") != session
                 or record.get("history_revision") != revision):
+            return False
+        if not self._current_generation(record, releases,
+                                        _instant((snapshot or {}).get("timestamp"))):
             return False
         anchor = record.get("anchor_identity") or {}
         direction, tf = record.get("direction"), record.get("source_tf")
@@ -344,7 +376,7 @@ class ReversalFormationCustody:
 
     def observe(self, snapshot, *, contract_id, history_revision,
                 canonical_timeframes, sweep_events=None, lifetime_events=None,
-                rebuilding=False):
+                rebuilding=False, active_path=None):
         """Capture current formation, then expose only revalidated records."""
         from toolbox.price_levels import _detect_current_po3_reversal_order_block
 
@@ -362,6 +394,17 @@ class ReversalFormationCustody:
             self._sweeps.clear()
             self._lives.clear()
             self._contract, self._session, self._revision = contract, session, revision
+
+        # Read the actual current-session producer, not its model-facing summary
+        # or last_invalidated (which loses earlier same-direction releases).
+        from market_state.active_path import ActivePath
+        if (not isinstance(active_path, ActivePath)
+                or active_path._contract != contract
+                or active_path._session_key != session
+                or not isinstance(active_path.releases, list)):
+            self._records.clear()
+            return ProducerOwnedFormationView({}, scope=None, seal=_VIEW_SEAL)
+        releases = copy.deepcopy(active_path.releases)
 
         # Normal production scans must rebind event support to the current
         # authoritative occurrence-store view. Retained process memory is not
@@ -410,7 +453,7 @@ class ReversalFormationCustody:
         current_records = {}
         for key, record in list(self._records.items()):
             if self._still_current(snap, record, revision, contract, session,
-                                   canonical_timeframes):
+                                   canonical_timeframes, releases):
                 current_records[key] = record
             else:
                 del self._records[key]
@@ -424,8 +467,8 @@ class ReversalFormationCustody:
                                if d == direction}
         scope = {"contract_id": contract, "market_session": session,
                  "history_revision": revision,
-                 "rebuilding": bool(rebuilding)}
-        return ProducerOwnedFormationView(rows, scope=scope, seal=_VIEW_SEAL)
+                 "rebuilding": bool(rebuilding), "release_history": releases}
+        return ProducerOwnedFormationView(rows, scope=scope, seal=_VIEW_SEAL, custody=self)
 
 
 def current_block(snapshot, direction):
@@ -434,6 +477,7 @@ def current_block(snapshot, direction):
     if not is_producer_owned_view(view):
         return None
     scope = getattr(view, "_scope", None)
+    custody = getattr(view, "_custody", None)
     derived = (snapshot or {}).get("derived_state") or {}
     contract = str((snapshot or {}).get("contract_id") or "").strip()
     session = ReversalFormationCustody._session_key(
@@ -465,6 +509,13 @@ def current_block(snapshot, direction):
             break
     if valid is None:
         return None
+    # A previously published snapshot cannot retain live authority after its
+    # producer retires the object on a later scan or rebuild.
+    if (not isinstance(custody, ReversalFormationCustody)
+            or custody._contract != contract or custody._session != session
+            or custody._revision != derived.get("history_revision")
+            or _json(custody._records.get((direction, valid.get("source_tf")))) != _json(valid)):
+        return None
     current_at = _instant((snapshot or {}).get("timestamp"))
     validation_at = _instant(valid.get("validation_timestamp"))
     if current_at is None or validation_at is None or validation_at > current_at:
@@ -486,7 +537,7 @@ def current_block(snapshot, direction):
         timeframe_rows[timeframe] = bars
     if not checker._still_current(
             snapshot, valid, derived.get("history_revision"), contract, session,
-            timeframe_rows):
+            timeframe_rows, scope.get("release_history")):
         return None
     block = copy.deepcopy(valid.get("block") or {})
     if not block.get("available"):

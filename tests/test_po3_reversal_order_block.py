@@ -638,12 +638,16 @@ class TestProducerOwnedFormationLifetime:
     def observe(custody, snap, rows=None, *, revision=1):
         from market_data.reversal_formation import ReversalFormationCustody
         assert isinstance(custody, ReversalFormationCustody)
+        from market_state.active_path import ActivePath
+        path = ActivePath()
+        path.enforce_lifecycle(snap.get("timestamp"), "CON.F.US.MNQ.Z26")
         return custody.observe(
             snap, contract_id="CON.F.US.MNQ.Z26", history_revision=revision,
             canonical_timeframes={"5m": copy.deepcopy(rows or
                                                         snap["timeframes"]["5m"]["recent_candles"])},
             sweep_events=snap.get("reversal_sweep_history"),
-            lifetime_events=snap.get("protected_swing_lifetime_history"))
+            lifetime_events=snap.get("protected_swing_lifetime_history"),
+            active_path=path)
 
     def test_established_block_survives_expired_flags_and_healthy_retracement(self):
         from market_data.reversal_formation import (ReversalFormationCustody,
@@ -855,6 +859,11 @@ class TestProducerOwnedFormationLifetime:
             "derived_revision": revision,
         }
         canonical = {"5m": copy.deepcopy(BARS)}
+        # This attachment boundary now also requires its real process owner.
+        from market_state.active_path import ActivePath
+        cycle._active_path = ActivePath()
+        cycle._active_path.enforce_lifecycle(snap["timestamp"], cycle.contract_id)
+        snap["active_path_state"] = cycle._active_path.state()
         cycle._attach_reversal_formation(snap, canonical)
         assert is_producer_owned_view(snap["reversal_formation_view"])
         attached = block(snap=snap)

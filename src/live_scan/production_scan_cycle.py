@@ -351,6 +351,11 @@ class ProductionScanCycle:
         if isinstance(prior_scope, CampaignScopeCustody):
             prior_scope.reset("history_revision")
         self.campaign_scope_custody = CampaignScopeCustody()
+        from market_data.reversal_formation import ReversalFormationCustody
+        prior_formation = getattr(self, "reversal_formation_custody", None)
+        if isinstance(prior_formation, ReversalFormationCustody):
+            prior_formation.invalidate()
+        # Formation views also lose authority when replay is too short or fails.
         # A rebuild that DERIVES NOTHING must never claim currency. Below the
         # confirmation lookback the replay loop simply does not execute, so
         # without this the method would return ok on an empty tape and open the
@@ -406,6 +411,8 @@ class ProductionScanCycle:
             # second definition of what a swing is.
             derived = 0
             replay_prior_protected = {}
+            from market_state.active_path import ActivePath
+            replay_path = ActivePath()
             for end in range(self.REBUILD_MIN_BARS, len(bars) + 1):
                 window = bars[:end]
                 replay_timeframes = build_timeframes(window)
@@ -424,6 +431,8 @@ class ProductionScanCycle:
                 from market_state.active_path import extract_occurrences
                 replay_events = extract_occurrences(
                     snapshot, replay_prior_protected, self.contract_id)
+                replay_path.enforce_lifecycle(snapshot.get("timestamp"), self.contract_id)
+                replay_path.ingest(replay_events)
                 replay_prior_protected = (
                     ((snapshot.get("protected_swings") or {}).get("by_timeframe") or {}))
                 from market_data.object_identity import canonical_instant
@@ -465,7 +474,7 @@ class ProductionScanCycle:
                         + [row for row in replay_events
                            if str(row.get("event_type", "")).startswith(
                                "PROTECTED_SWING_")]),
-                    rebuilding=True)
+                    rebuilding=True, active_path=replay_path)
                 derived += 1
             self.htf_engine.update(bars)
             record["cognitive"] = self._reanchor_cognitive_state(revision)
@@ -1325,7 +1334,10 @@ class ProductionScanCycle:
                 history_revision=self._history.revision,
                 canonical_timeframes=canonical_timeframes,
                 sweep_events=sweep_events,
-                lifetime_events=lifetime_events)
+                lifetime_events=lifetime_events,
+                active_path=(self._active_path if
+                             (snapshot.get("active_path_state") or {}).get("state_available") is True
+                             else None))
         except Exception as exc:  # noqa: BLE001 -- fail closed within scan
             snapshot["reversal_formation_view"] = None
             snapshot["reversal_formation_authority"] = {
