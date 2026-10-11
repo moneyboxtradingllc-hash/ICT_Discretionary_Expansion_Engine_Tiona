@@ -703,6 +703,9 @@ def _po3_reversal_ob_rows(snapshot: dict) -> list:
                 "protected_swing_occurrence_id": b.get(
                     "protected_swing_occurrence_id"),
                 "formation_authority": b.get("formation_authority"),
+                # The retained producer object owns this identity. Publishing
+                # it here lets the same object author a conditional plan.
+                "occurrence_id": (b.get("formation_authority") or {}).get("occurrence_id"),
                 "history_revision": b.get("history_revision", (
                     (snapshot or {}).get("derived_state") or {}).get(
                         "history_revision")),
@@ -2020,9 +2023,9 @@ class CandidateProducer:
             # is EXTRACTION. When it resolves to several, mechanics refuses --
             # it does not rank, sort, prefer the newest, or take the first.
             #
-            # Scoped to plain FVG by exact family equality: no other family's
-            # instance contract is touched, and `ifvg`/`opening_fvg` are not
-            # matched by a substring of their names.
+            # The original join was scoped to plain FVG. Stage 4 adds the
+            # producer-owned PO3 reversal object to that exact family list;
+            # `ifvg`/`opening_fvg` are never matched by a substring.
             # TOOL-OCCURRENCE-SELECTION-1 — THE JOIN KEY, NOT A RANKING.
             #
             # `eligible` is already filtered to this family, this direction and
@@ -2035,23 +2038,11 @@ class CandidateProducer:
             # another, never falls back to the first row, and never ranks the
             # alternatives -- the refusal below already states that doctrine and
             # a silent fallback here would contradict it.
-            # SCOPED TO PLAIN FVG BY EXACT FAMILY EQUALITY. Two defects lived in
-            # an ungated version of this branch, both proven behaviourally:
-            #
-            #   non-FVG family + any non-null id  -> no row could match (every
-            #     non-FVG catalog row carries occurrence_id None), so a lawful
-            #     rejection_block/breaker trade was REFUSED. A prompt violation
-            #     must not kill a family this field has no authority over.
-            #
-            #   non-FVG family + the literal "None" -> `str(None) == "None"`
-            #     matched every such row, and with one eligible row it SELECTED
-            #     it. A hallucinated value acquiring selection authority is the
-            #     precise opposite of fail-closed.
-            #
-            # Outside plain FVG the field is now observationally irrelevant and
-            # those families keep their exact pre-unit resolution semantics.
+            # Exact occurrence selection applies only to plain FVG and the
+            # producer-owned PO3 reversal object. Other families retain their
+            # existing semantics; an invented id is never a wildcard.
             wanted = str(occurrence_id or "").strip()
-            if family == "fvg" and wanted:
+            if family in ("fvg", "po3_reversal_order_block") and wanted:
                 # A row with NO identity may never be selected. `None` is not a
                 # name, and it must never be normalised into a selectable one.
                 named = [e for e in eligible
@@ -2080,7 +2071,7 @@ class CandidateProducer:
                     trace["tool_rejection_reason"] = None
                 return match
 
-            if family == "fvg" and len(eligible) > 1:
+            if family in ("fvg", "po3_reversal_order_block") and len(eligible) > 1:
                 ids = sorted(str(e.get("occurrence_id")) for e in eligible)
                 if trace is not None:
                     trace["tool_detected"] = True

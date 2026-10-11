@@ -242,7 +242,7 @@ Output ONLY valid JSON, exactly this schema, no prose, no markdown:
  "objective_id": "<REQUIRED when current_action proposes an entry: an objective_id copied EXACTLY from AUTHORIZED_OBJECTIVES. null for stand_down/wait. Never invent one.>",
  "invalidation_id": "<REQUIRED when current_action proposes an entry AND AUTHORIZED_INVALIDATIONS is non-empty: an invalidation_id copied EXACTLY from that list. null for stand_down/wait.>",
  "campaign_scope_proposal": null,
- "recommended_tool_occurrence_id": "<PLAIN FVG ONLY. REQUIRED when recommended_tool_family is [\"fvg\"] AND authorized_tool_catalog holds MORE THAN ONE execution-eligible plain-FVG occurrence on your side: the occurrence_id of the exact gap you are trading, copied EXACTLY from that row. A family token alone does not say WHICH gap you mean, and mechanics will not choose among them for you. null when exactly one eligible FVG exists, null for stand_down/wait, and null for every OTHER tool family — this field selects nothing outside plain FVG. Never invent or reconstruct an id.>"
+ "recommended_tool_occurrence_id": "<For fvg or po3_reversal_order_block: copy the occurrence_id EXACTLY from the selected execution-eligible catalog row on your side. REQUIRED if more than one eligible occurrence of that family exists; optional when exactly one exists. A family token alone does not identify which object you mean. null for stand_down/wait and for other tool families. A PO3 identity names the producer's validated reversal formation, not its nearby raid or protected swing. Never invent or reconstruct an id.>"
 }
 
 STAGE 3C-2 OPTIONAL SHADOW PREMISE SELECTION:

@@ -337,6 +337,13 @@ def capture(*, scope, candidate, scan, brain_block, brain_result,
             or not objective.get("identity") or not objective.get("kind")
             or _finite(objective.get("price")) is None):
         raise ValueError("conditional_plan_selected_geometry_incomplete")
+    participation_object = None
+    if extras.get("tool_family") == ["po3_reversal_order_block"]:
+        participation_object = _current_po3_binding(snapshot, direction, zone.get("occurrence_id"))
+        if (participation_object is None
+                or participation_object.get("zone_low") != zone.get("low")
+                or participation_object.get("zone_high") != zone.get("high")):
+            raise ValueError("conditional_plan_participation_object_unavailable")
     payload = {
         "schema_version": 1, "authority_basis": AUTHORITY_BASIS,
         "plan_id": candidate.candidate_id,
@@ -360,6 +367,7 @@ def capture(*, scope, candidate, scan, brain_block, brain_result,
         "activation_zone": extras.get("activation_zone"),
         "tool_family": extras.get("tool_family"),
         "occurrence_id": extras.get("selected_tool_occurrence_id"),
+        "participation_object": participation_object,
         "playbook": extras.get("playbook"),
         "invalidation": invalidation,
         "invalidation_price": candidate.invalidation_price,
@@ -466,6 +474,11 @@ def validate(*, authority, scope, candidate, candidate_at_trigger,
         return refuse("campaign_scope_changed")
     if current_scope != bound.get("campaign_scope_binding"):
         return refuse("campaign_scope_changed")
+    if (bound.get("tool_family") == ["po3_reversal_order_block"]
+            and (not bound.get("participation_object")
+                 or _current_po3_binding(snap, direction, bound.get("occurrence_id"))
+                    != bound["participation_object"])):
+        return refuse("conditional_plan_participation_object_changed")
     from broker.topstepx_execution_price import executable_price
     market = (brain_input or {}).get("market") or {}
     executable = executable_price(market.get("execution_price") or {}, direction)
@@ -586,6 +599,27 @@ def validate(*, authority, scope, candidate, candidate_at_trigger,
     return True, None, evidence
 
 
+def _current_po3_binding(snapshot, direction, occurrence_id):
+    """Exact current producer object; a zone or restored plan is not custody."""
+    try:
+        from broker.luna_candidate_producer import authorized_tool_catalog
+        rows = [row for row in authorized_tool_catalog(snapshot)
+                if row.get("tool_family") == "po3_reversal_order_block"
+                and row.get("direction") == direction
+                and row.get("execution_eligible") is True
+                and occurrence_id and row.get("occurrence_id") == occurrence_id]
+        if len(rows) != 1:
+            return None
+        row = rows[0]
+        authority = row.get("formation_authority") or {}
+        if (authority.get("status") != "CURRENT_PROCESS_REVALIDATED"
+                or authority.get("occurrence_id") != occurrence_id):
+            return None
+        return json.loads(_json(row))
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
 def _current_scope_binding(snapshot):
     """Stable accepted identity; per-cutoff catalog/digest is not plan identity.
 
@@ -702,6 +736,12 @@ def validate_final_quote(*, authority, scope, candidate, contract_id,
         return refuse("campaign_scope_changed")
     if authority_evidence.get("campaign_scope_binding") != bound.get("campaign_scope_binding"):
         return refuse("campaign_scope_changed")
+    if (bound.get("tool_family") == ["po3_reversal_order_block"]
+            and (not bound.get("participation_object")
+                 or _current_po3_binding(checked["snapshot"], bound.get("direction"),
+                                         bound.get("occurrence_id"))
+                    != bound["participation_object"])):
+        return refuse("conditional_plan_participation_object_changed")
     if not isinstance(bound.get("brain_fingerprint"), str) \
             or not bound.get("brain_fingerprint"):
         return refuse("conditional_plan_brain_fingerprint_missing")

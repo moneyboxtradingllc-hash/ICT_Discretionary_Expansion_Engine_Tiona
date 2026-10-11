@@ -1081,9 +1081,29 @@ class TestNothingElseMoved:
         from toolbox.price_levels import po3_reversal_order_block, NO_MANIPULATION
         assert po3_reversal_order_block(snap(), "bullish")["reason"] == NO_MANIPULATION
 
-    def test_fvg_selection_semantics_are_untouched(self):
-        import inspect
-        from broker.luna_candidate_producer import CandidateProducer
-        src = inspect.getsource(CandidateProducer._assert_tool_detected)
-        assert 'if family == "fvg" and wanted:' in src
-        assert "TOOL_OCCURRENCE_AMBIGUOUS" in src
+    def test_fvg_selection_semantics_are_untouched(self, monkeypatch):
+        from broker import luna_candidate_producer as producer
+
+        # Resolver unit control: both eligible rows are deliberately supplied
+        # by a controlled catalog. This checks behavior, not source spelling.
+        rows = [dict(tool="bullish_fvg", tool_family="fvg", direction="bullish",
+                     execution_eligible=True, occurrence_id=f"FVG:control:{n}",
+                     source_tf="1m", zone_low=100 + n, zone_high=101 + n)
+                for n in range(2)]
+        monkeypatch.setattr(producer, "authorized_tool_catalog", lambda snapshot: rows)
+        resolve = producer.CandidateProducer._assert_tool_detected
+        trace = {}
+        assert resolve(["fvg"], "bullish", {}, trace,
+                       occurrence_id=rows[1]["occurrence_id"]) == rows[1]
+        assert trace["tool_matched_occurrence_id"] == rows[1]["occurrence_id"]
+        with pytest.raises(producer.NoCandidate) as ambiguous:
+            resolve(["fvg"], "bullish", {})
+        assert ambiguous.value.reason == "tool_occurrence_ambiguous"
+        with pytest.raises(producer.NoCandidate) as unknown:
+            resolve(["fvg"], "bullish", {}, occurrence_id="FVG:foreign")
+        assert unknown.value.reason == "tool_occurrence_unknown"
+        rows.pop(0)
+        assert resolve(["fvg"], "bullish", {}) == rows[0]
+        with pytest.raises(producer.NoCandidate) as no_fallback:
+            resolve(["fvg"], "bullish", {}, occurrence_id="FVG:foreign")
+        assert no_fallback.value.reason == "tool_occurrence_unknown"

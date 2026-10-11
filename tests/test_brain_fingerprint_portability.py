@@ -104,8 +104,8 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # STAGE-3C-1-R1: shadow certificate boundaries repaired (source order,
     # chain retirement, watched-life context, duplicate canonical facts).
     # STAGE-3C-1-R2: canonical sweep copies are judged only as of the cutoff.
-    # M3 authenticated campaign scope consumer binding.
-    assert PM.brain_contract_fingerprint() == "brain:a908d46588aa3349"
+    # Stage 4 PO3 participation identity and current formation custody.
+    assert PM.brain_contract_fingerprint() == "brain:c2d99ac061bfaacb"
 
 
 @pytest.mark.parametrize("addition", [

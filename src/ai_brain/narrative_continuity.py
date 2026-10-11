@@ -558,7 +558,9 @@ def _apply_campaign_scope(snapshot, local):
     campaign = scope.get("campaign") or {}
     path = snapshot.get("active_path_state") or {}
     local_state = local["control_state"]
-    local["campaign_scope"] = scope
+    # Raw custody context is execution provenance, not model context. The
+    # authenticated snapshot remains the authority source; campaign_premise
+    # below carries the model-relevant bound facts.
 
     def held(reason, *, dominant=None, premise=None):
         local.update(control_state=("developing_transfer" if local.get("transfer_confirmed")

@@ -68,11 +68,18 @@ class ProducerOwnedFormationView(dict):
         super().__init__(copy.deepcopy(rows))
         self._seal = seal
         self._scope = scope
+        self._rows_json = _json(self)
+        self._scope_json = _json(scope)
 
 
 def is_producer_owned_view(value) -> bool:
-    return (isinstance(value, ProducerOwnedFormationView)
-            and getattr(value, "_seal", None) is _VIEW_SEAL)
+    try:
+        return (isinstance(value, ProducerOwnedFormationView)
+                and getattr(value, "_seal", None) is _VIEW_SEAL
+                and _json(value) == getattr(value, "_rows_json", None)
+                and _json(getattr(value, "_scope", None)) == getattr(value, "_scope_json", None))
+    except (TypeError, ValueError, RecursionError):
+        return False
 
 
 class ReversalFormationCustody:

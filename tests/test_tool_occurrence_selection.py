@@ -105,8 +105,8 @@ class TestTheMeasuredDefect:
     def test_the_prompt_tells_her_the_field_exists(self):
         from ai_brain.brain_prompt import BRAIN_SYSTEM_PROMPT
         assert "recommended_tool_occurrence_id" in BRAIN_SYSTEM_PROMPT
-        assert "PLAIN FVG ONLY" in BRAIN_SYSTEM_PROMPT
-        assert "selects nothing outside plain FVG" in BRAIN_SYSTEM_PROMPT
+        assert "For fvg or po3_reversal_order_block" in BRAIN_SYSTEM_PROMPT
+        assert "null for stand_down/wait and for other tool families" in BRAIN_SYSTEM_PROMPT
 
     def test_she_can_already_see_the_ids_she_must_name(self):
         for row in eligible("bearish"):
@@ -282,7 +282,7 @@ class TestNonFvgIsolation:
     def test_the_branch_is_gated_by_exact_family_equality(self):
         import inspect
         src = inspect.getsource(CandidateProducer._assert_tool_detected)
-        assert 'if family == "fvg" and wanted:' in src
+        assert 'if family in ("fvg", "po3_reversal_order_block") and wanted:' in src
         assert 'e.get("occurrence_id") is not None' in src
 
 
@@ -415,7 +415,7 @@ class TestNothingElseMoved:
     def test_the_ambiguity_guard_was_not_weakened(self):
         import inspect
         src = inspect.getsource(CandidateProducer._assert_tool_detected)
-        assert 'if family == "fvg" and len(eligible) > 1:' in src
+        assert 'if family in ("fvg", "po3_reversal_order_block") and len(eligible) > 1:' in src
         assert "TOOL_OCCURRENCE_AMBIGUOUS" in src
 
     def test_eligibility_filtering_is_untouched(self):

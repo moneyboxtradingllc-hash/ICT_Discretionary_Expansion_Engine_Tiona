@@ -602,8 +602,8 @@ class TestStrategyUntouched:
         # repairs that shadow's certificate boundaries; 3C-1-R2 judges canonical
         # sweep copies only as of the cutoff.
         from ai_brain.production_model import brain_contract_fingerprint
-        # M3 authenticated campaign scope consumer binding.
-        assert brain_contract_fingerprint() == "brain:a908d46588aa3349"
+        # Stage 4 PO3 participation identity and current formation custody.
+        assert brain_contract_fingerprint() == "brain:c2d99ac061bfaacb"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.

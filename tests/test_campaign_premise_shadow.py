@@ -261,11 +261,9 @@ def test_one_advance_per_scan_and_no_brain_input(tmp_path, monkeypatch, ecu):
         # still cannot enter cognition or become execution authority.
         assert set(k for k in payload if "campaign_premise" in k) == {"campaign_premise_catalog"}
         assert payload["campaign_premise_catalog"]["schema"] == "campaign_premise_catalog/v1"
-        # M3 carries the authenticated scope projection in continuity. Raw M1
-        # facts remain excluded and the shadow itself stays authority none.
-        scope = payload["narrative_continuity"]["campaign_scope"]
-        assert scope["schema"] == "campaign_scope_custody/v1"
-        assert scope["authority"] == "scope"
+        # Custody remains on the actual snapshot; raw process/lineage metadata
+        # is not model context. The premise conveys the relevant scope facts.
+        assert "campaign_scope" not in payload["narrative_continuity"]
         assert "campaign_premise_shadow" not in str(payload)
     for scan in (first, later, trigger):
         assert _shadow(scan["snapshot"])["status"] == "AVAILABLE"
