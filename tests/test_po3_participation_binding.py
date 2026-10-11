@@ -70,6 +70,32 @@ def test_po3_lost_formation_after_successful_trigger_refuses_final_quote(tmp_pat
     assert validate_final_quote(**args)==(False,'conditional_plan_participation_object_changed')
     assert len(calls)==2
 
+@pytest.mark.parametrize('change',['zone_edit','deepcopy_view'])
+@T.ECU_MODES
+def test_po3_changed_before_trigger_is_refused_by_participation_guard(tmp_path,monkeypatch,ecu,change):
+    cycle,calls,planning,producer,plan,auth,authority,now=_plan(tmp_path,monkeypatch,ecu)
+    trigger=T._scan(cycle,T.NEXT_MINUTE,brain=False)
+    snapshot=trigger['snapshot']
+    bound=authority.payload()
+    assert _current_po3_binding(snapshot,'bullish',bound['occurrence_id'])==bound['participation_object']
+    view=snapshot['reversal_formation_view']
+    assert is_producer_owned_view(view)
+    if change=='zone_edit':
+        view['bullish']['5m']['block']['zone_low']+=.25
+    else:
+        snapshot['reversal_formation_view']=copy.deepcopy(view)
+    from market_data.campaign_scope import read_current_campaign_scope
+    scope=read_current_campaign_scope(snapshot)
+    assert (scope['status'],scope['state'])==('AVAILABLE','UNBOUND')
+    assert len(calls)==2
+    with pytest.raises(RF.NoCandidate) as error:
+        T._trigger(producer,trigger,plan_candidate=plan,authority=authority,auth=auth,now=now)
+    # A generic refusal can be masked by the later tool_not_detected gate.
+    # Pin both the Lifecycle wrapper and the participation guard's reason.
+    assert error.value.reason=='campaign_lifecycle_refused'
+    assert 'conditional_plan_participation_object_changed' in str(error.value)
+    assert len(calls)==2
+
 @pytest.mark.parametrize('defect',['occurrence','zone','sweep','scope'])
 def test_mutated_current_producer_view_cannot_relabel_a_formation(tmp_path,monkeypatch,defect):
     cycle,scan,calls=RF._incumbent_return_scan(tmp_path,monkeypatch)
