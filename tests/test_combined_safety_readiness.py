@@ -608,7 +608,9 @@ class TestStrategyUntouched:
         # the contract rotates; no prior authorization survives the change.
         # S4F hardens that helper's level/timeframe validation (malformed
         # evidence is withheld, never raised), so it rotates again.
-        assert brain_contract_fingerprint() == "brain:12f8834f18ab419b"
+        # S4G applies the same timeframe boundary to the closure-bound
+        # same-direction successor proof, so it rotates once more.
+        assert brain_contract_fingerprint() == "brain:f94e695838ffb79b"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.

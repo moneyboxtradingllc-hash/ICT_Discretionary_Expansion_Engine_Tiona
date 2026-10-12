@@ -238,13 +238,19 @@ def _same_direction_successor_proof(path, snapshot, direction):
             or not current_session or path.get("session") != current_session):
         return None
 
+    def known_timeframe(value):
+        # The producer publishes one of the four registered timeframe strings.
+        # The type is checked first: a list or dict is unhashable and would
+        # raise in the set lookup instead of withholding the proof.
+        return isinstance(value, str) and value in _LEG_TIMEFRAMES
+
     invalidated = path.get("last_invalidated")
     if not isinstance(invalidated, dict) or invalidated.get("owner") != direction:
         return None
     expected_side = "low" if direction == "bullish" else "high"
     if (invalidated.get("side") != expected_side
             or not _finite_price(invalidated.get("level"))
-            or not invalidated.get("source_tf")
+            or not known_timeframe(invalidated.get("source_tf"))
             or not invalidated.get("swing_id")
             or not invalidated.get("registered_at")
             or not invalidated.get("occurrence_id")):
@@ -258,7 +264,7 @@ def _same_direction_successor_proof(path, snapshot, direction):
     if not (origin.get("proof_family") == "rejected_raid_reclaim"
             and origin.get("event") == expected_event
             and origin.get("direction") == direction
-            and origin.get("source_tf")
+            and known_timeframe(origin.get("source_tf"))
             and origin.get("occurrence_id")):
         return None
 
@@ -279,8 +285,10 @@ def _same_direction_successor_proof(path, snapshot, direction):
     latest = (progression.get("latest_supporting_event")
               if isinstance(progression, dict) else None)
     if (not isinstance(supporting, list) or not supporting
+            or not all(known_timeframe(tf) for tf in supporting)
             or not isinstance(latest, dict)
             or latest.get("direction") != direction
+            or not known_timeframe(latest.get("source_tf"))
             or latest.get("source_tf") not in supporting
             or not latest.get("occurrence_id")
             or latest.get("occurrence_id") == origin.get("occurrence_id")
@@ -292,11 +300,10 @@ def _same_direction_successor_proof(path, snapshot, direction):
         return None
 
     bearing = _load_bearing(path)
-    valid_timeframes = {"1m", "3m", "5m", "15m"}
     bearing_source = _aware_datetime((bearing or {}).get("source_bar_time"))
     if not (bearing and _finite_price(bearing.get("level"))
             and bearing.get("side") == expected_side
-            and bearing.get("timeframe") in valid_timeframes
+            and known_timeframe(bearing.get("timeframe"))
             and bearing.get("basis")
             and bearing.get("swing_id")
             and bearing.get("registered_at")

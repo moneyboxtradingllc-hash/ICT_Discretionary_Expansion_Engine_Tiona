@@ -109,7 +109,9 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # only when the current producer release names that exact recorded life.
     # S4F: its numeric/timeframe validation withholds oversized integers and
     # non-string timeframes instead of raising.
-    assert PM.brain_contract_fingerprint() == "brain:12f8834f18ab419b"
+    # S4G: the same-direction successor proof withholds malformed or unknown
+    # timeframes instead of raising or accepting them.
+    assert PM.brain_contract_fingerprint() == "brain:f94e695838ffb79b"
 
 
 @pytest.mark.parametrize("addition", [
