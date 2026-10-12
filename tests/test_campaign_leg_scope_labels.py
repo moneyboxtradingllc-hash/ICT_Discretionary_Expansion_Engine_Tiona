@@ -55,60 +55,97 @@ def bar(hhmm, o, h, l, c):
             "low": l, "close": c, "volume": 10, "contract": C}
 
 
-_SWEEP = [bar("03:05", 29460, 29462, 29455, 29458), bar("03:06", 29458, 29459, 29450, 29452),
-          bar("03:07", 29452, 29453, 29445, 29447), bar("03:08", 29447, 29455, 29446, 29454),
-          bar("03:09", 29454, 29458, 29452, 29456), bar("03:10", 29456, 29457, 29449, 29451)]
+# STAGE-4 CHRONOLOGY (703a417 refounded tape, every settled minute processed):
+# the 02:56 bar (low 29456, close 29460) rejects a raid of the 02:51 low, so
+# the producer registers a 1m protected low 29457 at 02:56 and the bullish
+# path rests on it (PROTECTED_SWING_REPLACED 29428.75@01:41 -> 29457@02:56).
+# The Stage 3B-1B scenarios were drawn between 29438 and 29462 under 5m-only
+# prewarm scheduling, where no protected structure sat above 29429.75; on
+# this tape their first decline (03:06 close 29452) kills the 1m 29457 leg in
+# all three, erasing the healthy controls and C4's no-death contrast.
+#
+# C1 and C4 are therefore REFOUNDED: the identical bar shapes, 25 points
+# higher and 2 minutes later, after a three-bar rally from the LATER close
+# (03:05-03:07). The preamble keeps the scenario's own 03:09 1m pivot a real
+# three-bar pivot, and every scenario low stays above the live 1m 29457, so
+# each scenario again tests its own structure above an intact leg. C2 keeps its
+# original bars verbatim: it is the deep break, and its first close below
+# 29457 is the real leg failure on this tape.
+_PREAMBLE = [bar("03:05", 29460, 29476, 29460, 29475), bar("03:06", 29475, 29482, 29474, 29481),
+             bar("03:07", 29481, 29487, 29480, 29483)]
+_SWEEP = _PREAMBLE + [bar("03:08", 29483, 29484, 29475, 29477),
+                      bar("03:09", 29477, 29478, 29470, 29472),
+                      bar("03:10", 29472, 29480, 29471, 29479),
+                      bar("03:11", 29479, 29483, 29477, 29481),
+                      bar("03:12", 29481, 29482, 29474, 29476)]
 SCENARIOS = {
-    # C1: 1m protected low 29445 registers at 03:11; the 03:13 close 29440
-    # breaks it, far above the 3m/5m protected low 29429.75.
-    "C1": _SWEEP + [bar("03:11", 29451, 29452, 29443, 29450),
-                    bar("03:12", 29450, 29456, 29449, 29455),
-                    bar("03:13", 29455, 29455, 29438, 29440),
-                    bar("03:14", 29440, 29452, 29439, 29451)],
-    # C2: the 3m bucket 03:09-03:11 closes 29422 below 29429.75 while the
-    # containing 5m bucket recovers; a later 15m structure appears at 03:14.
+    # C1: the 03:13 bar raids the 03:09 1m low 29470 and closes back above it,
+    # so the producer registers 1m protected low 29470 at 03:13 (replacing
+    # 29457); the 03:15 close 29465 breaks it, far above the 3m/5m protected
+    # low 29429.75 and above the superseded 1m 29457.
+    "C1": _SWEEP + [bar("03:13", 29476, 29477, 29468, 29475),
+                    bar("03:14", 29475, 29481, 29474, 29480),
+                    bar("03:15", 29480, 29480, 29463, 29465),
+                    bar("03:16", 29465, 29477, 29464, 29476)],
+    # C2 (original bars): the 03:06 close 29456 is the first close below the
+    # live 1m 29457, so the leg dies there; the deeper 3m bucket 03:09-03:11
+    # then closes 29422 below the 3m 29429.75 and a 15m raid rejection
+    # registers at 03:14, both after the leg is already dead.
     "C2": [bar("03:05", 29460, 29461, 29458, 29460), bar("03:06", 29460, 29461, 29455, 29456),
            bar("03:07", 29456, 29457, 29450, 29451), bar("03:08", 29451, 29452, 29446, 29447),
            bar("03:09", 29447, 29448, 29440, 29445), bar("03:10", 29445, 29446, 29420, 29425),
            bar("03:11", 29425, 29428, 29418, 29422), bar("03:12", 29422, 29440, 29421, 29438),
            bar("03:13", 29438, 29450, 29437, 29448), bar("03:14", 29448, 29452, 29446, 29450)],
-    # C4: a single opposing 1m break at 03:11 (close 29441 below 29445)
-    # contests the path.
-    "C4": _SWEEP + [bar("03:11", 29451, 29452, 29440, 29441),
-                    bar("03:12", 29441, 29450, 29440, 29449),
-                    bar("03:13", 29449, 29455, 29448, 29454),
-                    bar("03:14", 29454, 29458, 29453, 29457)],
+    # C4: a single opposing 1m break at 03:13 (close 29466 below the 03:09 low
+    # 29470, which was never protected) contests the path; the load-bearing 1m
+    # 29457 stays intact, so the leg does not die.
+    "C4": _SWEEP + [bar("03:13", 29476, 29477, 29465, 29466),
+                    bar("03:14", 29466, 29475, 29465, 29474),
+                    bar("03:15", 29474, 29480, 29473, 29479),
+                    bar("03:16", 29479, 29483, 29478, 29482)],
 }
 
 TRANSFER_UNRESOLVED = ["TRANSFER_UNRESOLVED", "narrative_control_transfer_not_yet_confirmed"]
 ACTIVE = ["ACTIVE_DELIVERY", "validated_brain_delivery_with_intact_owner"]
 
-# Outcomes measured on the parent 77d5149 (both lanes) with the same mocked
+# Outcomes measured on 703a417 (both lanes, identical) with the same mocked
 # response: (control, dominant, lifecycle, candidate, brain action, held
 # invalidation level, leg failure status, recorded leg structure (tf, level)).
+# A propose_entry carries the mocked model's own stop (the 5m protected low
+# 29429.75). A held stand_down takes the CURRENT leg structure when the path
+# publishes one, else the prior thesis's authored invalidation: on the first
+# scan after a leg dies the dead path publishes none, so the held level is the
+# incumbent's authored 29429.75 while the row records the failed leg.
 PINNED = {
-    ("C1", "03:11"): ("incumbent_intact", "bullish", ACTIVE, None, "propose_entry",
-                      29445.0, "not_occurred", ("1m", 29445.0)),
-    ("C1", "03:13"): ("developing_transfer", None, TRANSFER_UNRESOLVED,
-                      "campaign_lifecycle_refused", "stand_down", 29445.0, "occurred",
-                      ("1m", 29445.0)),
-    ("C1", "03:14"): ("developing_transfer", None, TRANSFER_UNRESOLVED,
-                      "campaign_lifecycle_refused", "stand_down", 29445.0, "occurred",
-                      ("1m", 29445.0)),
+    ("C1", "03:14"): ("incumbent_intact", "bullish", ACTIVE, None, "propose_entry",
+                      29429.75, "not_occurred", ("1m", 29470.0)),
+    ("C1", "03:15"): ("developing_transfer", None, TRANSFER_UNRESOLVED,
+                      "campaign_lifecycle_refused", "stand_down", 29429.75, "occurred",
+                      ("1m", 29470.0)),
+    # The 03:16 reclaim registers a new FORMING 1m 29470 life; the failure
+    # stays occurred and the held level follows the current structure.
+    ("C1", "03:16"): ("developing_transfer", None, TRANSFER_UNRESOLVED,
+                      "campaign_lifecycle_refused", "stand_down", 29470.0, "occurred",
+                      ("1m", 29470.0)),
+    ("C2", "03:05"): ("incumbent_intact", "bullish", ACTIVE, None, "propose_entry",
+                      29429.75, "not_occurred", ("1m", 29457.0)),
+    ("C2", "03:06"): ("developing_transfer", None, TRANSFER_UNRESOLVED,
+                      "campaign_lifecycle_refused", "stand_down", 29429.75, "occurred",
+                      ("1m", 29457.0)),
     ("C2", "03:11"): ("developing_transfer", None, TRANSFER_UNRESOLVED,
                       "campaign_lifecycle_refused", "stand_down", 29429.75, "occurred",
-                      ("3m", 29429.75)),
+                      ("1m", 29457.0)),
     ("C2", "03:14"): ("developing_transfer", None, TRANSFER_UNRESOLVED,
-                      "campaign_lifecycle_refused", "stand_down", 29429.0, "occurred",
-                      ("15m", 29429.0)),
-    ("C4", "03:10"): ("incumbent_intact", "bullish", ACTIVE, None, "propose_entry",
-                      29429.75, "not_occurred", ("3m", 29429.75)),
-    ("C4", "03:11"): ("developing_transfer", "bullish", TRANSFER_UNRESOLVED,
-                      "campaign_lifecycle_refused", "stand_down", 29429.75,
-                      "not_occurred", ("3m", 29429.75)),
-    ("C4", "03:14"): ("developing_transfer", "bullish", TRANSFER_UNRESOLVED,
-                      "campaign_lifecycle_refused", "stand_down", 29429.75,
-                      "not_occurred", ("3m", 29429.75)),
+                      "campaign_lifecycle_refused", "stand_down", 29429.75, "occurred",
+                      ("1m", 29457.0)),
+    ("C4", "03:12"): ("incumbent_intact", "bullish", ACTIVE, None, "propose_entry",
+                      29429.75, "not_occurred", ("1m", 29457.0)),
+    ("C4", "03:13"): ("developing_transfer", "bullish", TRANSFER_UNRESOLVED,
+                      "campaign_lifecycle_refused", "stand_down", 29457.0,
+                      "not_occurred", ("1m", 29457.0)),
+    ("C4", "03:16"): ("developing_transfer", "bullish", TRANSFER_UNRESOLVED,
+                      "campaign_lifecycle_refused", "stand_down", 29457.0,
+                      "not_occurred", ("1m", 29457.0)),
 }
 
 
@@ -213,13 +250,24 @@ def test_local_leg_failure_is_never_published_as_campaign_falsification(
 
 
 # ── 2. Sticky local failure still refuses on every later scan ──────────────
-# After C1, three more 1m closes stay below 29445. Measured on the parent in
-# both lanes: every scan 03:13-03:17 is developing_transfer / TRANSFER_UNRESOLVED
-# / campaign_lifecycle_refused / held stand_down at 29445, and the Draw retires
-# exactly once (campaign_ownership_lost) with no later advance or retirement.
-STICKY_TAIL = [bar("03:15", 29451, 29452, 29440, 29442),
-               bar("03:16", 29442, 29444, 29439, 29441),
-               bar("03:17", 29441, 29443, 29438, 29440)]
+# After C1, three more 1m closes stay below the failed 29470 (the original
+# tail, refounded with C1). Measured on 703a417 in both lanes: every scan
+# 03:15-03:19 is developing_transfer / TRANSFER_UNRESOLVED /
+# campaign_lifecycle_refused / held stand_down, and the Draw retires exactly
+# once (campaign_ownership_lost) with no later advance or retirement. The 03:16
+# and 03:18 bars register NEW forming 1m lives (29470@03:16, 29463@03:18); the
+# held level follows them while the failure stays occurred.
+STICKY_TAIL = [bar("03:17", 29476, 29477, 29465, 29467),
+               bar("03:18", 29467, 29469, 29464, 29466),
+               bar("03:19", 29466, 29468, 29463, 29465)]
+# hhmm -> (held invalidation level, recorded leg (tf, level, registered_at)).
+STICKY_PINNED = {
+    "03:15": (29429.75, ("1m", 29470.0, "2026-08-19T03:13:00+00:00")),
+    "03:16": (29470.0, ("1m", 29470.0, "2026-08-19T03:16:00+00:00")),
+    "03:17": (29470.0, ("1m", 29470.0, "2026-08-19T03:16:00+00:00")),
+    "03:18": (29463.0, ("1m", 29463.0, "2026-08-19T03:18:00+00:00")),
+    "03:19": (29463.0, ("1m", 29463.0, "2026-08-19T03:18:00+00:00")),
+}
 
 
 @TA.ECU_MODES
@@ -233,25 +281,27 @@ def test_sticky_leg_failure_keeps_identical_refusals_across_scans(tmp_path,
         rows = rows + [b]
         scan, payload = H._brain_scan(cycle, calls, rows)
         hhmm = b["timestamp"][11:16]
-        if hhmm < "03:13":
+        if hhmm < "03:15":
             continue
         nc = payload["narrative_continuity"]
         assert nc["control_state"] == "developing_transfer"
         assert nc["dominant_direction"] is None
         assert nc["active_leg_failure_status"] == "occurred"
         assert nc["prior_active_leg_failure_status"] == (
-            "not_occurred" if hhmm == "03:13" else "occurred")
+            "not_occurred" if hhmm == "03:15" else "occurred")
         _assert_campaign_unbound(nc)
         assert [scan["campaign_lifecycle"]["state"],
                 scan["campaign_lifecycle"]["reason"]] == TRANSFER_UNRESOLVED
         assert _candidate(scan) == "campaign_lifecycle_refused"
         output = scan["brain_block"]["output"]
+        held_level, leg = STICKY_PINNED[hhmm]
         assert (output["current_action"], output["invalidation_level"]) == (
-            "stand_down", 29445.0)
+            "stand_down", held_level)
         row = cycle.stance_memory.recent(1)[-1]
         assert row["active_leg_failure_status"] == "occurred"
         assert (row["active_leg_structure"]["timeframe"],
-                row["active_leg_structure"]["level"]) == ("1m", 29445.0)
+                row["active_leg_structure"]["level"],
+                row["active_leg_structure"]["registered_at"]) == leg
         _assert_row_unbound(row)
         records = cycle.campaign_draw_truth.audit_records
         assert len(records) == 1
@@ -276,7 +326,9 @@ def test_sealed_plan_carries_leg_evidence_and_refuses_identically(tmp_path,
     authored = plan.payload()["brain_result"]["narrative_continuity"]
     _assert_campaign_unbound(authored)
     prior = authored["prior_thesis"]
-    assert prior["active_leg_structure"]["level"] == 29429.75
+    # The authoring row (02:59) rests on the 1m 29457 registered at 02:56.
+    assert (prior["active_leg_structure"]["timeframe"],
+            prior["active_leg_structure"]["level"]) == ("1m", 29457.0)
     assert prior["active_leg_failure_status"] == "unknown"
     assert authored["active_leg_failure_status"] == "not_occurred"
 
@@ -291,9 +343,10 @@ def test_sealed_plan_carries_leg_evidence_and_refuses_identically(tmp_path,
     for key in H.AUTHORING:
         assert rechecked["prior_thesis"][key] == prior[key], key
 
-    # Measured on the parent: C1's 03:13 local failure refuses the trigger
+    # Measured on 703a417: C1's 03:15 local failure refuses the trigger
     # through the same Lifecycle boundary.
-    rows = list(TA.LATER) + SCENARIOS["C1"][:9]
+    rows = list(TA.LATER) + SCENARIOS["C1"][:11]
+    assert rows[-1]["timestamp"] == "2026-08-19T03:15:00+00:00"
     trigger = TA._scan(cycle, rows, brain=False)
     with pytest.raises(NoCandidate) as refused:
         TA._trigger(producer, trigger, plan_candidate=plan_candidate,
