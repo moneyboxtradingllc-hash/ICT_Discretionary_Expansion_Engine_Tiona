@@ -107,7 +107,9 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # Stage 4 PO3 participation identity and current formation custody.
     # S4E: narrative_continuity's retained prior-leg projection is reachable
     # only when the current producer release names that exact recorded life.
-    assert PM.brain_contract_fingerprint() == "brain:662b10e5df3ea38c"
+    # S4F: its numeric/timeframe validation withholds oversized integers and
+    # non-string timeframes instead of raising.
+    assert PM.brain_contract_fingerprint() == "brain:12f8834f18ab419b"
 
 
 @pytest.mark.parametrize("addition", [

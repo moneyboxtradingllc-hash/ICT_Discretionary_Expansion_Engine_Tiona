@@ -393,6 +393,83 @@ def test_uncorroborated_by_producer_release_is_withheld(captured, shape):
     _assert_no_campaign_authority(nc)
 
 
+# S4F: malformed evidence must be withheld, never raise. On d618df6 an integer
+# too large for a float raised OverflowError in the level check and an
+# unhashable timeframe raised TypeError in the timeframe membership check.
+def _row_leg(snapshot, row):
+    return row["active_leg_structure"]
+
+
+def _release(snapshot, row):
+    return snapshot["active_path_state"]["last_invalidated"]
+
+
+# DEFENSE-ONLY: (target records, field, value) applied to captured evidence.
+EXTREME_EVIDENCE = {
+    "row_level_oversized_int": ((_row_leg,), "level", 10 ** 1000),
+    "release_level_oversized_int": ((_release,), "level", 10 ** 1000),
+    "row_and_release_level_same_oversized_int": ((_row_leg, _release), "level",
+                                                 10 ** 1000),
+    "row_level_negative_oversized_int": ((_row_leg,), "level", -(10 ** 1000)),
+    "row_timeframe_list": ((_row_leg,), "timeframe", ["1m"]),
+    "row_timeframe_dict": ((_row_leg,), "timeframe", {"timeframe": "1m"}),
+    "row_timeframe_set": ((_row_leg,), "timeframe", {"1m"}),
+    "row_timeframe_tuple_holding_list": ((_row_leg,), "timeframe", (["1m"],)),
+}
+
+# Valid finite producer-backed lives that must still be retained.
+FINITE_CONTROLS = {
+    "row_and_release_level_int": ((_row_leg, _release), "level", 29470),
+    "row_level_int_release_level_float": ((_row_leg,), "level", 29470),
+}
+
+
+def _apply(snapshot, row, targets, field, value):
+    snapshot, row = copy.deepcopy(snapshot), copy.deepcopy(row)
+    for target in targets:
+        target(snapshot, row)[field] = copy.deepcopy(value)
+    return snapshot, row
+
+
+@pytest.mark.parametrize("shape", list(EXTREME_EVIDENCE))
+def test_extreme_evidence_is_withheld_without_raising(captured, shape):
+    snapshot, row = captured
+    positive = _continuity(snapshot, row)
+    bad_snapshot, bad_row = _apply(snapshot, row, *EXTREME_EVIDENCE[shape])
+    nc = _continuity(bad_snapshot, bad_row)          # must not raise
+    assert nc["active_leg_structure"] is None
+    assert nc["active_leg_structure_source"] is None
+    assert _authority(nc) == _authority(positive)
+    _assert_no_campaign_authority(nc)
+    for direction in ("bullish", "bearish"):
+        assert candidate_direction_authorized(direction, bad_snapshot, nc, nc) == (
+            False, "narrative_transfer_unresolved"), direction
+    held, guard = output_direction_hold({"narrative_direction": "bullish",
+                                         "current_action": "propose_entry"}, nc)
+    assert held["current_action"] == "stand_down"
+    assert guard["status"] == "entry_held_for_control_state"
+    # Withheld retained evidence falls back to the authored stop.
+    assert held["invalidation_level"] == nc["prior_thesis"]["invalidation_level"]
+    assert held["invalidation_level"] == L.PINNED[("C1", "03:14")][5]
+
+
+@pytest.mark.parametrize("shape", list(FINITE_CONTROLS))
+def test_finite_integer_evidence_is_still_retained(captured, shape):
+    snapshot, row = captured
+    positive = _continuity(snapshot, row)
+    ok_snapshot, ok_row = _apply(snapshot, row, *FINITE_CONTROLS[shape])
+    nc = _continuity(ok_snapshot, ok_row)
+    assert nc["active_leg_structure_source"] == "retained_prior_leg_row"
+    assert _life(nc["active_leg_structure"]) == C1_LIFE
+    assert nc["active_leg_structure"]["intact"] is False
+    _assert_matches_release(nc["active_leg_structure"],
+                            ok_snapshot["active_path_state"]["last_invalidated"])
+    assert _authority(nc) == _authority(positive)
+    held, _ = output_direction_hold({"narrative_direction": "bullish",
+                                     "current_action": "propose_entry"}, nc)
+    assert (held["current_action"], held["invalidation_level"]) == ("stand_down", 29470.0)
+
+
 def test_live_producer_structure_takes_precedence(captured):
     snapshot, row = captured
     bad = copy.deepcopy(snapshot)                                # DEFENSE-ONLY

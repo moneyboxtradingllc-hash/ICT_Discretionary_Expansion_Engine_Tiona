@@ -166,12 +166,16 @@ def _retained_leg_projection(leg, last, snapshot, path, prior_direction):
             or (row_contract and row_contract != snapshot_contract)):
         return None
     def real(value):
+        # A built-in real number that converts to a finite float. The float
+        # conversion happens inside `_finite_price`, so an integer too large
+        # for a float is rejected there instead of raising OverflowError.
         return (isinstance(value, (int, float)) and not isinstance(value, bool)
-                and math.isfinite(value))
+                and _finite_price(value))
 
     side = "low" if prior_direction == "bullish" else "high"
+    timeframe = leg.get("timeframe")
     if not (real(leg.get("level")) and leg.get("side") == side
-            and leg.get("timeframe") in _LEG_TIMEFRAMES
+            and isinstance(timeframe, str) and timeframe in _LEG_TIMEFRAMES
             and isinstance(leg.get("swing_id"), str) and leg.get("swing_id")
             and _aware_datetime(leg.get("registered_at"))
             and leg.get("producer_backed") is True):

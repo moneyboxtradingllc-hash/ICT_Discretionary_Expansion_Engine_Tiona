@@ -606,7 +606,9 @@ class TestStrategyUntouched:
         # S4E repairs the closure-bound retained prior-leg projection in
         # narrative_continuity (producer-corroborated failed-leg evidence), so
         # the contract rotates; no prior authorization survives the change.
-        assert brain_contract_fingerprint() == "brain:662b10e5df3ea38c"
+        # S4F hardens that helper's level/timeframe validation (malformed
+        # evidence is withheld, never raised), so it rotates again.
+        assert brain_contract_fingerprint() == "brain:12f8834f18ab419b"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.
