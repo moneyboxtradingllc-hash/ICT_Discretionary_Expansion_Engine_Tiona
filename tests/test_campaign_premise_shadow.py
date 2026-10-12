@@ -140,18 +140,17 @@ def test_trailing_forming_bucket_is_not_required(tmp_path, monkeypatch, cadence)
 
 
 def test_missed_three_minute_close_is_failed_by_certificate(tmp_path, monkeypatch):
-    """Stage 3C 2B: scans at 03:08 then 03:14 never see 03:09 as the newest
-    3m bucket, so the tracker keeps the 3m life. The certificate does not."""
+    """Catch-up consumes the missed 3m close and retires its exact life.
+    A frozen-life certificate independently retains the same failure."""
     cycle = _warm(tmp_path, monkeypatch)
+    ref = _registration_ref(cycle, "3m")
     rows = list(TA.LATER) + C2_BARS[:4]
     _scan(cycle, rows)
     rows = list(TA.LATER) + C2_BARS
     snapshot = _scan(cycle, rows)["snapshot"]
-    three = snapshot["protected_swings"]["by_timeframe"]["lows"]["3m"]
-    assert three["level"] == 29429.75                     # slot still occupied
+    assert "3m" not in snapshot["protected_swings"]["by_timeframe"]["lows"]
     block = _shadow(snapshot)
     assert _life(block, "3m") is None                     # no 3m association
-    ref = _registration_ref(cycle, "3m")
     settled = build_timeframes(rows)["1m"]
     cert = CP.observe_life(ref, settled_1m=settled, history_revision=0,
                            contract_id=C, cutoff=snapshot["timestamp"])
@@ -167,7 +166,7 @@ def test_missed_three_minute_close_is_failed_by_certificate(tmp_path, monkeypatc
         contract_id=C, market_session=ref.market_session,
         cutoff=snapshot["timestamp"], watched_lives=(ref,))
     [watched] = observed["watched_lives"]
-    assert watched["tracker_slot_present"] is True
+    assert watched["tracker_slot_present"] is False
     assert watched["certificate"]["status"] == "FAILED"
     assert observed["retained_chains"] == 1
 
@@ -255,7 +254,10 @@ def test_one_advance_per_scan_and_no_brain_input(tmp_path, monkeypatch, ecu):
     later = TA._scan(cycle, TA.LATER)
     RF._assert_retained_reversal_candidate(RF._produce_candidate(later))
     trigger = TA._scan(cycle, TA.NEXT_MINUTE, brain=False)
-    assert len(advances) == 3 and len(calls) == 2
+    expected_cutoffs = [bar["timestamp"] for bar in TA.NEXT_MINUTE
+                        if bar["timestamp"] > RF.TAPE_1M[-6]["timestamp"]]
+    assert advances == expected_cutoffs
+    assert len(calls) == 2
     for payload in calls:
         # M2 adds only its producer-owned frozen catalog; raw M1 facts/custody
         # still cannot enter cognition or become execution authority.

@@ -36,7 +36,7 @@ from market_data.campaign_lifecycle import (AUTHORITY_UNKNOWN,
 # One later healthy 5m interval (high 29490 stays below the 29500 objective),
 # then quiet healthy intervals: the objective stays undelivered and the plan's
 # selected execution object stays physically present for its trigger.
-LATER = RF.TAPE_1M + RF._expand_5m(("03:00", 29459.0, 29490.0, 29450.0, 29460.0))
+LATER = RF.TAPE_1M + RF._expand_5m(("03:00", 29459.0, 29490.0, 29458.0, 29460.0))
 LATER2 = LATER + RF._expand_5m(("03:05", 29460.0, 29461.0, 29459.0, 29460.0))
 LATER3 = LATER2 + RF._expand_5m(("03:10", 29460.0, 29461.0, 29459.0, 29460.0))
 # The very next settled minute after LATER (a strict prefix of LATER2, so no
@@ -263,26 +263,23 @@ def test_no_brain_scan_publishes_no_acceptance_and_stays_brainless(
 def _watching(now):
     """A watching plan on an execution object with an exact occurrence identity.
 
-    Plan publication requires a top-level `occurrence_id` on the selected tool.
-    The retained po3 reversal row carries its identity only inside
-    `formation_authority`, so it cannot be published as a watching plan today
-    (a pre-existing Stage 4 participation-object limit, not changed here). The
-    plan lineage is therefore proven on the same real tape with the bullish
-    execution-eligible FVG the producer itself published, selected by its id.
+    Select the retained PO3 the real producer publishes with its top-level
+    occurrence identity. The refounded minute tape has no bullish executable
+    FVG at this cutoff; a model mock cannot manufacture one for plan coverage.
     """
     def mutate(output, _ordinal, payload):
         if output.get("current_action") != "propose_entry":
             return output
-        fvg = next((row for row in payload.get("authorized_tool_catalog") or []
-                    if row.get("tool_family") == "fvg"
+        tool = next((row for row in payload.get("authorized_tool_catalog") or []
+                    if row.get("tool_family") == "po3_reversal_order_block"
                     and row.get("direction") == output.get("narrative_direction")
                     and row.get("execution_eligible") is True
                     and row.get("occurrence_id")), None)
-        if fvg is None:
+        if tool is None:
             return output
         return {**output, "current_action": "watching",
-                "recommended_tool_family": ["fvg"],
-                "recommended_tool_occurrence_id": fvg["occurrence_id"],
+                "recommended_tool_family": ["po3_reversal_order_block"],
+                "recommended_tool_occurrence_id": tool["occurrence_id"],
                 "plan_expires_at": (now + timedelta(minutes=30)).isoformat()}
     return mutate
 
@@ -389,7 +386,12 @@ def test_conditional_plan_temporal_lineage_end_to_end(tmp_path, monkeypatch, ecu
     assert planning["campaign_lifecycle"]["state"] == "ACTIVE_DELIVERY"
     plan_candidate = _plan_candidate(producer, planning, now)
     assert plan_candidate.extras["conditional_plan"] is True
-    assert plan_candidate.extras["tool_family"] == ["fvg"]
+    assert plan_candidate.extras["tool_family"] == ["po3_reversal_order_block"]
+    from broker.luna_candidate_producer import authorized_tool_catalog
+    selected_id = plan_candidate.extras["conditional_plan_brain_output"]["recommended_tool_occurrence_id"]
+    selected = [row for row in authorized_tool_catalog(planning["snapshot"])
+                if row.get("occurrence_id") == selected_id]
+    assert len(selected) == 1 and selected[0]["execution_eligible"] is True
     assert plan_candidate.extras["activation_zone"]["occurrence_id"]
     auth = _authorization(plan_candidate, now)
     plan = producer.capture_conditional_plan_authority(

@@ -101,6 +101,12 @@ def test_released_leg_object_cannot_serve_later_same_direction_generation(tmp_pa
     for end in range(len(RF.TAPE_1M)+1,len(tape)+1):
         minute=tape[end-1]['timestamp'][11:16]
         scan=T._scan(cycle,tape[:end],brain=minute>='03:50')
+        if minute=='03:09':
+            released=True
+            path=scan['snapshot']['active_path_state']
+            assert path['owner']=='none' and path['last_invalidated']['owner']=='bullish'
+            assert path['last_invalidated']['source_bar_time']=='2026-08-19T03:09:00+00:00'
+            assert path['last_invalidated']['source_tf']=='1m'
         if minute=='03:29':
             released=True
             snap=scan['snapshot'];path=snap['active_path_state']
@@ -163,7 +169,10 @@ def _release(owner,source,*,at=None):
                 source_tf='3m',swing_id='unit-life',registered_at='2026-08-19T01:39:00+00:00',occurrence_id='unit-release')
 
 @pytest.mark.parametrize('direction,history,expected',[
-    ('bullish',[_release('bullish','2026-08-19T02:19:00+00:00')],True),
+    ('bullish',[_release('bullish','2026-08-19T02:14:00+00:00')],True),
+    ('bullish',[_release('bullish','2026-08-19T02:15:00+00:00')],False),
+    ('bullish',[_release('bullish','2026-08-19T02:17:00+00:00')],False),
+    ('bullish',[_release('bullish','2026-08-19T02:19:00+00:00')],False),
     ('bullish',[_release('bullish','2026-08-19T02:20:00+00:00')],False),
     ('bullish',[_release('bullish','2026-08-19T03:27:00+00:00')],False),
     ('bullish',[_release('bearish','2026-08-19T03:27:00+00:00')],True),
@@ -175,5 +184,6 @@ def _release(owner,source,*,at=None):
     ('bullish',[dict(owner='bullish')],False),
 ])
 def test_release_chronology_and_direction_are_distinct_from_anchor_geometry(direction,history,expected):
-    record=dict(direction=direction,validation_timestamp='2026-08-19T02:20:00+00:00')
+    record=dict(direction=direction,validation_timestamp='2026-08-19T02:20:00+00:00',
+                sweep_evidence={'event_time':'2026-08-19T02:15:00+00:00'})
     assert ReversalFormationCustody._current_generation(record,history,'2026-08-19T03:52:00+00:00') is expected

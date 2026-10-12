@@ -593,6 +593,19 @@ def test_fake_candidate_cannot_publish_unbound_conditional_plan(monkeypatch, tmp
     cycle.expansion_stability = None
     cycle._history = SimpleNamespace(observe=lambda _bars: 1, revision=1)
     cycle._derived_revision = 1
+    # This manually constructed transport fixture still owns the scan's
+    # chronology fields; the one mocked settled bar has no catch-up prefixes.
+    cycle._processed_tip = None
+    cycle._chronology_owned = False
+    cycle._chronology_rows = {}
+    cycle._chronology_window = []
+    cycle._chronology_pre_trackers = {}
+    cycle._chronology_state_cache = None
+    cycle._chronology_rebuilding = False
+    cycle._chronology_observed_at = None
+    cycle._chronology_coverage = {"processed_from": None, "processed_to": None,
+                                  "catch_up_bars": 0, "complete": True}
+    cycle.occurrence_ledger = None
     cycle.rebuilds = []
     cycle.scan_count = 0
     cycle.previous_snapshot = cycle.previous_qual_state = None
@@ -653,7 +666,7 @@ def test_fake_candidate_cannot_publish_unbound_conditional_plan(monkeypatch, tmp
     loop.clock = lambda: NOW
     loop.candles = SimpleNamespace(
         wake_registry=registry,
-        fetch_1m_candles=lambda *_a, **_k: [{"timestamp": "bar"}],
+        fetch_1m_candles=lambda *_a, **_k: [{"timestamp": NOW.isoformat()}],
     )
     loop.cycle = cycle
     loop.symbol = "MNQ"
@@ -717,6 +730,6 @@ def test_fake_candidate_cannot_publish_unbound_conditional_plan(monkeypatch, tmp
 
     # The following mechanics-only scan uses the cycle's real trigger branch;
     # there must be no second provider/Brain invocation.
-    trigger = cycle.scan([{"timestamp": "bar"}], now=NOW, invoke_brain=False)
+    trigger = cycle.scan([{"timestamp": NOW.isoformat()}], now=NOW, invoke_brain=False)
     assert trigger["brain_block"]["source"] == "preauthorized_plan_trigger"
     assert provider.call_count == 1

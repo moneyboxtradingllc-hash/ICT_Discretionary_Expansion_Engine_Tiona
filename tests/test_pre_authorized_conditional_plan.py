@@ -358,6 +358,17 @@ def test_production_scan_cycle_invocation_counter_is_zero_on_trigger_scan(monkey
     cycle.expansion_stability = None
     cycle._history = SimpleNamespace(observe=lambda _bars: 1, revision=1)
     cycle._derived_revision = 1
+    cycle._processed_tip = None
+    cycle._chronology_owned = False
+    cycle._chronology_rows = {}
+    cycle._chronology_window = []
+    cycle._chronology_pre_trackers = {}
+    cycle._chronology_state_cache = None
+    cycle._chronology_rebuilding = False
+    cycle._chronology_observed_at = None
+    cycle._chronology_coverage = {"processed_from": None, "processed_to": None,
+                                  "catch_up_bars": 0, "complete": True}
+    cycle.occurrence_ledger = None
     cycle.rebuilds = []
     cycle.scan_count = 0
     cycle.previous_snapshot = cycle.previous_qual_state = None
@@ -372,12 +383,12 @@ def test_production_scan_cycle_invocation_counter_is_zero_on_trigger_scan(monkey
     shadow_calls = []
     cycle._two_brain_after_primary = lambda *_a: shadow_calls.append("shadow")
 
-    authoring = cycle.scan([{"timestamp": "bar"}], now=NOW,
+    authoring = cycle.scan([{"timestamp": NOW.isoformat()}], now=NOW,
                            invoke_brain=True)
     assert calls == ["brain"]
     assert shadow_calls == ["shadow"]
     assert authoring["brain_block"]["output"]["current_action"] == "watching"
-    trigger = cycle.scan([{"timestamp": "bar"}], now=NOW,
+    trigger = cycle.scan([{"timestamp": NOW.isoformat()}], now=NOW,
                          invoke_brain=False)
     trigger_brain_call_count = len(calls) - 1
     assert trigger_brain_call_count == 0

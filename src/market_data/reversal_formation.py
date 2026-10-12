@@ -242,7 +242,9 @@ class ReversalFormationCustody:
     def _current_generation(record, releases, current_at):
         """An intact anchor does not carry an object across its leg's death."""
         validation = _instant(record.get("validation_timestamp"))
-        if not isinstance(releases, list) or validation is None or current_at is None:
+        raid = _instant((record.get("sweep_evidence") or {}).get("event_time"))
+        if (not isinstance(releases, list) or raid is None or validation is None
+                or current_at is None or not raid <= validation <= current_at):
             return False
         for release in releases:
             if not isinstance(release, dict):
@@ -255,7 +257,7 @@ class ReversalFormationCustody:
                     or not all(release.get(k) for k in
                                ("source_tf", "swing_id", "registered_at", "occurrence_id"))):
                 return False
-            if event_at <= current_at and validation <= source_at <= current_at:
+            if event_at <= current_at and raid <= source_at <= current_at:
                 return False
         return True
 

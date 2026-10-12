@@ -59,8 +59,8 @@ def test_real_production_scan_attaches_current_facts_before_one_ecu_call(
     original_record = cycle._record_sweep_occurrences
     cycle._update_active_path = lambda snap: (
         path_calls.append(id(snap)) or original_path(snap))
-    cycle._record_sweep_occurrences = lambda snap: (
-        occurrence_calls.append(id(snap)) or original_record(snap))
+    cycle._record_sweep_occurrences = lambda snap, **kwargs: (
+        occurrence_calls.append(id(snap)) or original_record(snap, **kwargs))
 
     result = cycle.scan(
         tape(), now=datetime(2026, 8, 11, 15, 0, tzinfo=timezone.utc))
@@ -79,7 +79,10 @@ def test_real_production_scan_attaches_current_facts_before_one_ecu_call(
     assert isinstance(snapshot["reversal_formation_view"], dict)
     assert payload["authorized_tool_catalog"] == observed[0]["catalog"]
     assert payload["authorized_tool_catalog"]
-    assert len(path_calls) == len(occurrence_calls) == 1
+    # Every settled prefix owns one mechanical update; cognition sees only
+    # the final snapshot and still makes exactly one canonical call.
+    assert len(path_calls) == len(occurrence_calls) == len(tape())
+    assert path_calls[-1] == occurrence_calls[-1] == id(snapshot)
     assert snapshot["ai_brain"] is snapshot["candidate_thesis"]["brain_block"]
 
 

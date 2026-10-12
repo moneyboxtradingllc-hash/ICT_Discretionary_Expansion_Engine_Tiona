@@ -509,7 +509,7 @@ class TestStrategyUntouched:
             test_authorization_source_closure.py::
             test_a_semantic_edit_to_the_loss_governor_moves_the_fingerprint.
 
-            brain:e37834d754056f12  ->  brain:e37834d754056f12
+            brain:0646739ca3f68560  ->  brain:0646739ca3f68560
             LUNA-DAILY-GOVERNOR-TRADE-ATTRIBUTION-1 (2026-09-02). The governor
             decoded venue trade rows in the NORMALISED dialect only
             (`order_id`, `created`), but `TopstepXLiveSession.recent_trades()`
@@ -523,7 +523,7 @@ class TestStrategyUntouched:
             above says must invalidate a minted authorization, so the
             fingerprint moving here is the binding working, not a regression.
 
-            brain:e37834d754056f12  ->  brain:e37834d754056f12
+            brain:0646739ca3f68560  ->  brain:0646739ca3f68560
             LUNA-OBJECTIVE-CATALOG-REFERENCE-SEMANTICS-1 (2026-09-02). Every
             Brain-visible objective row now names the reference its `side`,
             `valid_for`, distance and intervening-structure fields were measured
@@ -538,8 +538,8 @@ class TestStrategyUntouched:
             revalidates against the executable quote.
         """
         # LOCAL RECERTIFICATION (2026-09-10), with source history audited first.
-        # 0f972d3's brain:e37834d754056f12 is reproduced EXACTLY using CRLF;
-        # its identical LF sources hash to brain:e37834d754056f12. Raw-byte
+        # 0f972d3's brain:0646739ca3f68560 is reproduced EXACTLY using CRLF;
+        # its identical LF sources hash to brain:0646739ca3f68560. Raw-byte
         # hashing made the old certification platform-dependent.
         #
         # Since then only tools/topstepx_production_session.py changed among
@@ -547,8 +547,8 @@ class TestStrategyUntouched:
         # b1fff43 distinguishes configured, signed and effective limits. Both
         # are documented display corrections, not Brain strategy changes.
         # The other 29 sources and resolved retrieval policy are unchanged.
-        # Their LF contract through ce95a26 was brain:e37834d754056f12; the
-        # former raw CRLF result was brain:e37834d754056f12. ce95a26 changed no
+        # Their LF contract through ce95a26 was brain:0646739ca3f68560; the
+        # former raw CRLF result was brain:0646739ca3f68560. ce95a26 changed no
         # member.
         #
         # EVIDENCE-PLUMBING-MAINTENANCE (2026-09-10). Two closure members moved
@@ -556,7 +556,7 @@ class TestStrategyUntouched:
         # has its missing deepcopy fallback import, and production_scan_cycle
         # retains the session/scan identity already supplied to shadow
         # accounting. The resulting maintenance contract was
-        # brain:e37834d754056f12. The event-driven Brain wake boundary on this
+        # brain:0646739ca3f68560. The event-driven Brain wake boundary on this
         # feature branch produces a new fingerprint. Structural-risk evidence
         # transport and finite invalidation coherence rotate it again; neither
         # rotation migrates any historical authorization record.
@@ -603,7 +603,7 @@ class TestStrategyUntouched:
         # sweep copies only as of the cutoff.
         from ai_brain.production_model import brain_contract_fingerprint
         # Stage 4 PO3 participation identity and current formation custody.
-        assert brain_contract_fingerprint() == "brain:e37834d754056f12"
+        assert brain_contract_fingerprint() == "brain:0646739ca3f68560"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.

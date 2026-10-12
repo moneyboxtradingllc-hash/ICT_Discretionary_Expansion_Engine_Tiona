@@ -77,8 +77,10 @@ def _expand_5m(row):
     middle = (low + close) / 2
     values = [
         (open_, high, min(open_, close), open_),
-        (open_, max(open_, close), low, low),
-        (low, max(low, middle), min(low, middle), middle),
+        # The raid is rejected on its real 1m bar. Closing at the low here
+        # manufactured a different path under 5m-only fixture scheduling.
+        (open_, max(open_, close), low, open_),
+        (open_, max(open_, middle), min(open_, middle), middle),
         (middle, max(middle, close), min(middle, close), close),
         (close, close, close, close),
     ]
@@ -117,7 +119,7 @@ def _cycle(tmp_path, monkeypatch):
 
 
 def _scan_prefix(cycle, end_index):
-    """Advance the real scan exactly once for each complete 5m occurrence."""
+    """Batch scans still process every settled minute through production catch-up."""
     last = None
     for end in range(5, end_index + 1, 5):
         rows = TAPE_1M[:end]
@@ -154,7 +156,8 @@ def _valid_model_reply(brain_input, *, action="propose_entry", direction="bullis
                               profitable[0] if profitable else None)
     stop_type = "protected_low" if direction == "bullish" else "protected_high"
     selected_stop = next((row for row in protective
-                          if row.get("type") == stop_type), None)
+                          if row.get("type") == stop_type and row.get("timeframe") == "5m"),
+                         next((row for row in protective if row.get("type") == stop_type), None))
     if selected_objective is None or selected_stop is None:
         # A failed or unresolved authority case is still a successful mocked
         # provider response: the synthetic model stands down when the current
@@ -242,7 +245,7 @@ def _incumbent_return_scan(tmp_path, monkeypatch):
     assert first["campaign_draw_truth"]["authority_status"] == \
         "PROVEN_NOT_DELIVERED"
     later = TAPE_1M + _expand_5m(
-        ("03:00", 29459.0, 29490.0, 29450.0, 29460.0))
+        ("03:00", 29459.0, 29490.0, 29458.0, 29460.0))
     scan = cycle.scan(later, now=_now_for(later), invoke_brain=True)
     assert scan["campaign_draw_authority"]["record_id"] == \
         first["campaign_draw_truth"]["record_id"]
@@ -365,7 +368,7 @@ def test_bootstrap_draw_is_unknown_then_prior_draw_is_measured_before_brain(
     # A later settled candle trades through the accepted objective. The next
     # cognition must see that delivery before its model request is made.
     future = TAPE_1M + _expand_5m(
-        ("03:00", 29459.0, 29505.0, 29450.0, 29460.0))
+        ("03:00", 29459.0, 29505.0, 29458.0, 29460.0))
     second = cycle.scan(future, now=_now_for(future), invoke_brain=True)
     assert len(calls) == 2
     delivered_context = calls[1].get("campaign_draw_context")
@@ -414,7 +417,7 @@ def test_newborn_draw_waits_until_next_scan_for_positive_candidate_authority(
     # A healthy later settled interval remains below the accepted objective.
     # On N+1 the same Draw is incumbent before cognition and may authorize.
     later = TAPE_1M + _expand_5m(
-        ("03:00", 29459.0, 29490.0, 29450.0, 29460.0))
+        ("03:00", 29459.0, 29490.0, 29458.0, 29460.0))
     scan_n1 = cycle.scan(later, now=_now_for(later), invoke_brain=True)
     assert len(calls) == 2
     context = calls[1]["campaign_draw_context"]
@@ -485,7 +488,7 @@ def test_new_objective_cannot_rescue_delivered_incumbent_same_scan(
     incumbent = first["campaign_draw_truth"]
 
     delivered = TAPE_1M + _expand_5m(
-        ("03:00", 29459.0, 29505.0, 29450.0, 29460.0))
+        ("03:00", 29459.0, 29505.0, 29458.0, 29460.0))
     current = cycle.scan(delivered, now=_now_for(delivered), invoke_brain=True)
     assert calls[1]["campaign_draw_context"]["record_id"] == incumbent["record_id"]
     assert calls[1]["campaign_draw_context"]["authority_status"] == \
@@ -504,7 +507,7 @@ def test_new_objective_cannot_rescue_delivered_incumbent_same_scan(
 
 
 @pytest.mark.parametrize("ecu_mode", [True, False], ids=["ecu", "non-ecu"])
-def test_existing_campaign_draw_advances_once_per_normal_scan(
+def test_existing_campaign_draw_advances_once_per_settled_prefix(
         tmp_path, monkeypatch, ecu_mode):
     """Incumbent measurement happens pre-cognition, not again at acceptance."""
     from market_data.campaign_draw_truth import CampaignDrawTruth
@@ -529,10 +532,12 @@ def test_existing_campaign_draw_advances_once_per_normal_scan(
 
     monkeypatch.setattr(CampaignDrawTruth, "_advance", counted)
     later = TAPE_1M + _expand_5m(
-        ("03:00", 29459.0, 29490.0, 29450.0, 29460.0))
+        ("03:00", 29459.0, 29490.0, 29458.0, 29460.0))
     second = cycle.scan(later, now=_now_for(later), invoke_brain=True)
     assert len(calls) == 2
-    assert len(advances) == 1, advances
+    assert len(advances) == 5, advances
+    assert [cutoff for _, cutoff in advances] == [bar["timestamp"] for bar in later[-5:]]
+    assert {record_id for record_id, _ in advances} == {first["campaign_draw_truth"]["record_id"]}
     assert advances[0][0] == first["campaign_draw_truth"]["record_id"]
     assert second["brain_input"]["campaign_draw_context"]["record_id"] == \
         advances[0][0]
@@ -554,7 +559,7 @@ def test_invalid_new_draw_view_refuses_even_with_lawful_incumbent(
     assert first["campaign_draw_acceptance"]["accepted"] is True
 
     later = TAPE_1M + _expand_5m(
-        ("03:00", 29459.0, 29490.0, 29450.0, 29460.0))
+        ("03:00", 29459.0, 29490.0, 29458.0, 29460.0))
     refused = cycle.scan(later, now=_now_for(later), invoke_brain=True)
     assert len(calls) == 2
     assert calls[1]["campaign_draw_context"]["record_id"] == incumbent_id
@@ -568,7 +573,7 @@ def test_invalid_new_draw_view_refuses_even_with_lawful_incumbent(
     assert cycle.campaign_draw_truth.audit_records[0]["record_id"] == incumbent_id
 
 
-def test_no_brain_scan_advances_incumbent_once_and_accepts_no_generation(
+def test_no_brain_scan_advances_each_prefix_and_accepts_no_generation(
         tmp_path, monkeypatch):
     """No-Brain and rebuild lanes stay brainless and never accept a view."""
     from market_data.campaign_draw_truth import CampaignDrawTruth
@@ -600,10 +605,10 @@ def test_no_brain_scan_advances_incumbent_once_and_accepts_no_generation(
     monkeypatch.setattr(CampaignDrawTruth, "accept_current_view", counted_accept)
     monkeypatch.setenv("BRAIN_ECU_MODE", "false")
     later = TAPE_1M + _expand_5m(
-        ("03:00", 29459.0, 29490.0, 29450.0, 29460.0))
+        ("03:00", 29459.0, 29490.0, 29458.0, 29460.0))
     no_brain = cycle.scan(later, now=_now_for(later), invoke_brain=False)
     assert len(calls) == 1
-    assert advances == [incumbent_id]
+    assert advances == [incumbent_id] * 5
     assert accepts == []
     assert len(cycle.campaign_draw_truth.audit_records) == record_count
     assert no_brain["campaign_draw_truth"]["record_id"] == incumbent_id
@@ -628,7 +633,7 @@ def test_non_ecu_input_receives_pre_cognition_draw_and_rebuild_is_brainless(
 
     monkeypatch.setenv("BRAIN_ECU_MODE", "false")
     future = TAPE_1M + _expand_5m(
-        ("03:00", 29459.0, 29505.0, 29450.0, 29460.0))
+        ("03:00", 29459.0, 29505.0, 29458.0, 29460.0))
     second = cycle.scan(future, now=_now_for(future), invoke_brain=True)
     assert len(calls) == 2
     assert calls[1]["campaign_draw_context"]["authority_status"] == \
@@ -916,7 +921,7 @@ def test_real_htf_resweep_is_stable_across_five_minute_scan_occurrences(
 
     # The persisted Draw is now pre-existing authority on a later healthy scan.
     later = TAPE_1M + _expand_5m(
-        ("03:00", 29459.0, 29490.0, 29450.0, 29460.0))
+        ("03:00", 29459.0, 29490.0, 29458.0, 29460.0))
     scan = cycle.scan(later, now=_now_for(later), invoke_brain=True)
     assert len(calls) == 2
     assert calls[1]["campaign_draw_context"]["record_id"] == \

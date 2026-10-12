@@ -167,6 +167,16 @@ class ProductionScanCycle:
         self._history = CONT.HistoryRevision()
         self._derived_revision = 0
         self.rebuilds = []
+        self._processed_tip = None
+        self._chronology_owned = False
+        self._chronology_rows = {}
+        self._chronology_window = []
+        self._chronology_pre_trackers = {}
+        self._chronology_state_cache = None
+        self._chronology_rebuilding = False
+        self._chronology_observed_at = None
+        self._chronology_coverage = {"processed_from": None, "processed_to": None,
+                                     "catch_up_bars": 0, "complete": True}
         # Reversal objects are current-process facts only. A history revision
         # recreates this custody from canonical replay; saved candidate JSON
         # cannot restore it.
@@ -237,6 +247,10 @@ class ProductionScanCycle:
         # tape; a revised tape retires them. Production retains no chains.
         "campaign_premise_shadow",
         "campaign_scope_custody",
+        "_processed_tip", "_chronology_owned", "_chronology_rows", "_chronology_window",
+        "_chronology_pre_trackers",
+        "_chronology_state_cache", "_chronology_coverage",
+        "_chronology_rebuilding", "_chronology_observed_at",
     )
 
     #: NOT rebuilt, and why. Recorded so the exclusion is a decision rather than
@@ -297,20 +311,18 @@ class ProductionScanCycle:
     #: knowledge is invalidated or explicitly re-anchored.
     COGNITIVE_STATE_RE_ANCHORED = ("stance_memory", "thesis_engine")
 
-    def _rebuild_derived_state(self, candles_1m: list, revision: int) -> dict:
+    def _rebuild_derived_state(self, candles_1m: list, revision: int, *, deep_1m=None) -> dict:
         """Discard every candle-derived fact and re-derive it from the repaired
         tape. REPLACEMENT, not cleaning.
 
         Surgically removing the swings a hole fabricated would mean knowing
         which ones it fabricated. Re-deriving cannot leave a stale object
-        behind, because the objects do not survive. Measured cost: ~6 ms per
-        `build_snapshot` and 1.33 s for a 240-bar warmup, with NO model call --
-        `build_snapshot` only reaches the Brain under BRAIN_ECU_MODE, which is
-        off. Against a 60-second cadence that is ~2% of one tick.
+        behind, because the objects do not survive. Replay invokes no model.
+        The rebuild records elapsed time with the revision and the number of
+        settled prefixes processed.
 
-        Never raises. A rebuild that failed leaves `_derived_revision` behind
-        the history revision, so the mismatch persists and the producer keeps
-        refusing -- failing closed rather than resuming on unproven state.
+        Never raises. Failure clears the derived revision, forcing the next
+        scan to reconstruct covered canonical history before authority resumes.
         """
         import time
         from adaptive_learning.meta_awareness_engine import MetaAwarenessEngine  # noqa: F401
@@ -327,6 +339,9 @@ class ProductionScanCycle:
         record = {"revision": revision, "from_revision": self._derived_revision,
                   "bars": len(bars), "ok": False, "derived": 0,
                   "inserted": list(self._history.last_inserted)}
+        # Failure, including a same-revision retry, must force a fresh rebuild.
+        # Keeping the previous revision could reopen coverage on the next scan.
+        self._derived_revision = None
         # A draw conclusion formed from the previous tape cannot survive even
         # when the replay below is too short or fails. Preserve its record as
         # audit history, then replace the tracker with an empty-authority
@@ -355,6 +370,9 @@ class ProductionScanCycle:
         prior_formation = getattr(self, "reversal_formation_custody", None)
         if isinstance(prior_formation, ReversalFormationCustody):
             prior_formation.invalidate()
+        self._chronology_coverage = {"processed_from": None, "processed_to": None,
+                                     "catch_up_bars": 0, "complete": False}
+        self._chronology_observed_at = None
         # Formation views also lose authority when replay is too short or fails.
         # A rebuild that DERIVES NOTHING must never claim currency. Below the
         # confirmation lookback the replay loop simply does not execute, so
@@ -368,6 +386,24 @@ class ProductionScanCycle:
             self.rebuilds.append(record)
             return record
         try:
+            from datetime import timedelta
+            from market_data.object_identity import canonical_instant
+            instants = [datetime.fromisoformat(canonical_instant(
+                b.get("timestamp"), strict=True)) for b in bars]
+            if any(b-a != timedelta(minutes=1) for a,b in zip(instants, instants[1:])):
+                raise ValueError("canonical_tape_not_contiguous")
+            if any(b.get("contract") and b["contract"] != self.contract_id for b in bars):
+                raise ValueError("foreign_contract_in_canonical_tape")
+            from market_state.active_path import production_session_key
+            session = production_session_key(bars[-1].get("timestamp"))
+            witnessed = [datetime.fromisoformat(canonical_instant(
+                row.get("event_time"), strict=True))
+                for row in (self.occurrence_ledger.occurrences()
+                            if self.occurrence_ledger else [])
+                if row.get("contract") == self.contract_id
+                and production_session_key(row.get("event_time")) == session]
+            if witnessed and (min(witnessed) < instants[0] or max(witnessed) > instants[-1]):
+                raise ValueError("rebuild_ledger_coverage_incomplete")
             self.memory = MarketMemory(max_snapshots=20)
             self.htf_engine = HtfMemoryEngine(symbol=self.symbol)
             self.setup_tracker = SetupTracker()
@@ -398,83 +434,21 @@ class ProductionScanCycle:
             self.last_active_path_occurrences = []
             from market_data.reversal_formation import ReversalFormationCustody
             self.reversal_formation_custody = ReversalFormationCustody()
-            try:
-                replay_ledger_rows = (self.occurrence_ledger.occurrences()
-                                      if self.occurrence_ledger is not None
-                                      and self.occurrence_ledger.health().get("status")
-                                      == _OL_HEALTHY else [])
-            except Exception:  # noqa: BLE001 -- unusable history is not authority
-                replay_ledger_rows = []
-
-            # Re-derive by replaying the canonical tape through the SAME
-            # builder production uses. A private reconstruction would be a
-            # second definition of what a swing is.
-            derived = 0
-            replay_prior_protected = {}
+            self._chronology_owned = True
+            self._chronology_rows = {}
+            self._chronology_window = []
+            self._chronology_pre_trackers = {}
+            self._chronology_state_cache = None
+            self._processed_tip = None
+            self._chronology_coverage = {
+                "processed_from": bars[0].get("timestamp"), "processed_to": None,
+                "catch_up_bars": 0, "complete": True, "basis": "canonical_rebuild"}
             from market_state.active_path import ActivePath
-            replay_path = ActivePath()
-            for end in range(self.REBUILD_MIN_BARS, len(bars) + 1):
-                window = bars[:end]
-                replay_timeframes = build_timeframes(window)
-                snapshot = build_snapshot(
-                    replay_timeframes, symbol=self.symbol,
-                    swing_tracker=self.swing_tracker,
-                    po3_stability=self.po3_stability,
-                    session_po3=self.session_po3,
-                    # The growing replay window IS the deep series here: the
-                    # rebuild already holds the whole canonical tape, so context
-                    # reconstructs from exactly the bars the phase does.
-                    deep_1m=window,
-                    expansion_stability=self.expansion_stability,
-                    contract_id=self.contract_id, invoke_brain=False)
-                self._update_structure_flips(snapshot)
-                from market_state.active_path import extract_occurrences
-                replay_events = extract_occurrences(
-                    snapshot, replay_prior_protected, self.contract_id)
-                replay_path.enforce_lifecycle(snapshot.get("timestamp"), self.contract_id)
-                replay_path.ingest(replay_events)
-                replay_prior_protected = (
-                    ((snapshot.get("protected_swings") or {}).get("by_timeframe") or {}))
-                from market_data.object_identity import canonical_instant
-                try:
-                    replay_cutoff = canonical_instant(snapshot.get("timestamp"), strict=True)
-                except Exception:
-                    replay_cutoff = None
-                rows_as_of = []
-                if replay_cutoff is not None:
-                    for row in replay_ledger_rows:
-                        if not isinstance(row, dict) or row.get("contract") != self.contract_id:
-                            continue
-                        try:
-                            observed = canonical_instant(row.get("event_time"), strict=True)
-                            source = canonical_instant(
-                                row.get("source_bar_time") or row.get("event_time"),
-                                strict=True)
-                        except Exception:
-                            continue
-                        if observed <= replay_cutoff and source <= replay_cutoff:
-                            rows_as_of.append(row)
-                snapshot["derived_state"] = {
-                    "history_revision": revision,
-                    "derived_revision": revision,
-                    "current": True,
-                }
-                self.reversal_formation_custody.observe(
-                    snapshot, contract_id=self.contract_id,
-                    history_revision=revision,
-                    canonical_timeframes=replay_timeframes,
-                    sweep_events=[row for row in rows_as_of
-                                  if row.get("event_type") == "LIQUIDITY_SWEEP"],
-                    lifetime_events=(
-                        [row for row in rows_as_of
-                         if row.get("event_type") in {
-                             "PROTECTED_SWING_REGISTERED",
-                             "PROTECTED_SWING_REPLACED",
-                             "PROTECTED_SWING_VIOLATED"}]
-                        + [row for row in replay_events
-                           if str(row.get("event_type", "")).startswith(
-                               "PROTECTED_SWING_")]),
-                    rebuilding=True, active_path=replay_path)
+            self._active_path = ActivePath()
+            self._derived_revision = revision
+            derived = 0
+            for end in range(1, len(bars) + 1):
+                self._producer_prefix(bars[:end], rebuilding=True, deep_1m=deep_1m)
                 derived += 1
             self.htf_engine.update(bars)
             record["cognitive"] = self._reanchor_cognitive_state(revision)
@@ -487,6 +461,9 @@ class ProductionScanCycle:
             record["ok"] = True
         except Exception as exc:  # noqa: BLE001 — a failed rebuild stays refused
             record["error"] = f"{type(exc).__name__}: {exc}"
+            self._derived_revision = None
+            self._chronology_coverage["complete"] = False
+            self._chronology_coverage["reason"] = "canonical_rebuild_failed"
         record["seconds"] = round(time.time() - started, 3)
         self.rebuilds.append(record)
         return record
@@ -534,7 +511,195 @@ class ProductionScanCycle:
 
     def derived_state_is_current(self) -> bool:
         """Authoritative cognition is permitted only while these agree."""
-        return self._derived_revision == self._history.revision
+        return (self._derived_revision is not None
+                and self._derived_revision == self._history.revision
+                and self._chronology_coverage.get("complete") is True)
+
+    def _derived_state_projection(self):
+        import copy
+        return {"history_revision": self._history.revision,
+                "derived_revision": self._derived_revision,
+                "current": self.derived_state_is_current(),
+                "coverage": copy.deepcopy(self._chronology_coverage),
+                "last_rebuild": self.rebuilds[-1] if self.rebuilds else None}
+
+    def _retain_chronology_occurrences(self, rows):
+        """Private current-revision derivation; never rewrites witnessed history."""
+        import copy
+        if self._chronology_owned and self.derived_state_is_current():
+            for row in rows:
+                if isinstance(row, dict) and row.get("occurrence_id"):
+                    derived = copy.deepcopy(row)
+                    derived["canonical_history_revision"] = self._history.revision
+                    derived["derivation_basis"] = "canonical_settled_prefix"
+                    self._chronology_rows.setdefault(row["occurrence_id"], derived)
+
+    def _record_observed_occurrence(self, row):
+        import copy
+        observed = copy.deepcopy(row)
+        if self._chronology_owned and not self.derived_state_is_current():
+            observed["observation_basis"] = "chronology_incomplete"
+        if self._chronology_observed_at is not None:
+            observed["observation_basis"] = "catch_up_canonical_prefix"
+            observed["catch_up_observed_at"] = self._chronology_observed_at
+        return self.occurrence_ledger.record(observed)
+
+    def _current_chronology_occurrences(self):
+        if self._chronology_owned:
+            if not self.derived_state_is_current():
+                return []
+            return list(self._chronology_rows.values())
+        return self.occurrence_ledger.occurrences() if self.occurrence_ledger else []
+
+    def _producer_prefix(self, window, *, rebuilding=False, deep_1m=None):
+        """One settled prefix, using the production detectors without cognition."""
+        import copy
+        from market_data.object_identity import canonical_instant
+        cutoff = canonical_instant(window[-1].get("timestamp"), strict=True)
+        context = self._settled_context_input(deep_1m, cutoff)
+        data = build_timeframes(window)
+        self.htf_engine.update(window)
+        mechanical = self._snapshot_trackers(cutoff, derive=True)
+        snapshot = build_snapshot(
+            data, symbol=self.symbol, swing_tracker=mechanical["swing_tracker"],
+            po3_stability=mechanical["po3_stability"], session_po3=mechanical["session_po3"],
+            deep_1m=context, expansion_stability=mechanical["expansion_stability"],
+            contract_id=self.contract_id, invoke_brain=False)
+        self._update_structure_flips(snapshot)
+        snapshot["derived_state"] = self._derived_state_projection()
+        self._record_sweep_occurrences(snapshot, persist=not rebuilding)
+        self._chronology_rebuilding = rebuilding
+        try:
+            snapshot["active_path_state"] = self._update_active_path(snapshot)
+        finally:
+            self._chronology_rebuilding = False
+        path = snapshot["active_path_state"]
+        if str(path.get("unavailable_reason") or "").startswith("error:"):
+            raise RuntimeError(path["unavailable_reason"])
+        self._attach_reversal_formation(snapshot, data)
+        if not rebuilding:
+            snapshot["campaign_premise_shadow"] = self._advance_campaign_premise_shadow(snapshot, data)
+            self._advance_campaign_scope(snapshot, data)
+            self._advance_existing_campaign_draw(snapshot, data.get("1m") or [])
+        sp3 = snapshot.get("session_po3") or {}
+        rng = sp3.get("range") or {}
+        self._prior_po3_range = dict(rng) if rng.get("established") else None
+        self._prior_po3_session_date = str(sp3.get("session_date") or "") or str(snapshot.get("timestamp") or "")[:10]
+        if self._processed_tip == cutoff:
+            self._chronology_window = copy.deepcopy(window)
+        return snapshot
+
+    def _snapshot_trackers(self, cutoff, *, derive=False):
+        """Advance live mechanics once; same-cutoff assembly replays a copy.
+
+        The saved state precedes this exact prefix. Rebuilding the current
+        presentation from that state reproduces its facts without counting a
+        retry as another settled bar or modifying live detector custody.
+        """
+        import copy
+        names = ("swing_tracker", "po3_stability", "session_po3", "expansion_stability")
+        actual = {name: getattr(self, name) for name in names}
+        if not derive and not self.derived_state_is_current():
+            return copy.deepcopy(actual)
+        if not derive and self._chronology_owned and self._processed_tip == cutoff:
+            if set(self._chronology_pre_trackers) != set(actual):
+                self._chronology_coverage["complete"] = False
+                self._chronology_coverage["reason"] = "current_prefix_prestate_unavailable"
+                return copy.deepcopy(actual)
+            return copy.deepcopy(self._chronology_pre_trackers)
+        self._chronology_pre_trackers = copy.deepcopy(actual)
+        return actual
+
+    @staticmethod
+    def _settled_context_input(deep_1m, cutoff):
+        """Optional session context cannot expose bars beyond this prefix."""
+        from market_data.object_identity import canonical_instant
+        if deep_1m is None:
+            return None
+        try:
+            at = canonical_instant(cutoff, strict=True)
+            return [bar for bar in deep_1m
+                    if canonical_instant(bar.get("timestamp"), strict=True) <= at]
+        except Exception:
+            # This secondary fetch supplies context only. A malformed input
+            # remains unavailable; the canonical scan still owns chronology.
+            return None
+
+    def _prepare_chronology(self, bars, *, deep_1m=None):
+        """Catch up every missing settled prefix before the current Brain call."""
+        from datetime import timedelta
+        from market_data.object_identity import canonical_instant
+        from market_state.active_path import ActivePath
+        old_tip = self._processed_tip
+        previous_coverage = self._chronology_coverage
+        self._chronology_owned = True
+        coverage = {"processed_from": old_tip, "processed_to": old_tip,
+                    "catch_up_bars": 0, "complete": True}
+        self._chronology_coverage = coverage
+        try:
+            if self._derived_revision != self._history.revision:
+                raise ValueError("canonical_rebuild_unavailable")
+            stamps = [canonical_instant(b.get("timestamp"), strict=True) for b in bars]
+            instants = [datetime.fromisoformat(s) for s in stamps]
+            if any(b.get("contract") and b["contract"] != self.contract_id for b in bars):
+                raise ValueError("foreign_contract_in_canonical_tape")
+            if any(b-a != timedelta(minutes=1) for a,b in zip(instants,instants[1:])):
+                raise ValueError("canonical_tape_not_contiguous")
+            if old_tip is not None:
+                prior = datetime.fromisoformat(old_tip)
+                if instants[-1] < prior:
+                    raise ValueError("canonical_cutoff_before_processed_tip")
+                ends = [i+1 for i,x in enumerate(instants) if x > prior]
+                if ends and instants[ends[0]-1] != prior+timedelta(minutes=1):
+                    raise ValueError("missing_prefix_after_processed_tip")
+                if not ends and previous_coverage.get("complete") is True:
+                    # Coverage belongs to the processed prefix, not the retry
+                    # schedule. Changing it would revoke the same sealed facts.
+                    self._chronology_coverage = previous_coverage
+                    return
+            else:
+                # Detectors own their lookback. Early settled bars may still
+                # establish a life, so chronology never skips them.
+                from market_state.active_path import production_session_key
+                session = production_session_key(stamps[-1])
+                witnessed = [canonical_instant(row.get("event_time"), strict=True)
+                             for row in (self.occurrence_ledger.occurrences()
+                                         if self.occurrence_ledger else [])
+                             if row.get("contract") == self.contract_id
+                             and production_session_key(row.get("event_time")) == session]
+                if witnessed and (min(witnessed) < stamps[0] or max(witnessed) > stamps[-1]):
+                    raise ValueError("restart_ledger_coverage_incomplete")
+                ends = list(range(1,len(bars)+1))
+                coverage["processed_from"] = stamps[0]
+                self._active_path = ActivePath()
+                self._active_path_prior_protected = {}
+                self._chronology_state_cache = None
+            prior_window = self._chronology_window
+            rolling = bool(old_tip and prior_window and stamps[0] > canonical_instant(
+                prior_window[0].get("timestamp"), strict=True))
+            if rolling:
+                if (len(bars) < len(prior_window)
+                        or canonical_instant(prior_window[-1].get("timestamp"), strict=True) != old_tip):
+                    raise ValueError("rolling_context_unavailable")
+                joined = {canonical_instant(b.get("timestamp"), strict=True): b
+                          for b in prior_window}
+                joined.update(zip(stamps, bars))
+            for end in ends:
+                if end == len(bars):
+                    continue  # the normal scan handles the final prefix once
+                self._chronology_observed_at = stamps[-1] if old_tip is not None else None
+                try:
+                    window = bars[:end]
+                    if rolling:
+                        window = [joined[key] for key in sorted(joined) if key <= stamps[end-1]][-len(bars):]
+                    self._producer_prefix(window, rebuilding=old_tip is None, deep_1m=deep_1m)
+                finally:
+                    self._chronology_observed_at = None
+                coverage["catch_up_bars"] += 1
+            coverage["processed_to"] = self._processed_tip
+        except Exception as exc:
+            coverage["complete"] = False
+            coverage["reason"] = f"{type(exc).__name__}:{exc}"
 
     # ── one scan ──────────────────────────────────────────────────────────────
     def scan(self, candles_1m: list, *, now: datetime = None,
@@ -549,6 +714,7 @@ class ProductionScanCycle:
         now = now or datetime.now(timezone.utc)
         self.scan_count += 1
         self._bind_stance_custody()
+        deep_1m = self._settled_context_input(deep_1m, candles_1m[-1].get("timestamp"))
 
         raw_data = build_timeframes(candles_1m)
         htf_context = self.htf_engine.update(candles_1m)
@@ -567,7 +733,8 @@ class ProductionScanCycle:
         # rewrites what every tracker already computed from.
         history_revision = self._history.observe(candles_1m)
         if history_revision != self._derived_revision:
-            self._rebuild_derived_state(candles_1m, history_revision)
+            self._rebuild_derived_state(candles_1m, history_revision, deep_1m=deep_1m)
+        self._prepare_chronology(candles_1m, deep_1m=deep_1m)
 
         from adaptive_learning.capital_intelligence_engine import track_capital
         try:
@@ -594,12 +761,7 @@ class ProductionScanCycle:
         def _prepare_current_ecu_facts(current_snapshot):
             """Attach this occurrence's path and retained formations before ECU."""
             current_snapshot["candle_continuity"] = continuity
-            current_snapshot["derived_state"] = {
-                "history_revision": self._history.revision,
-                "derived_revision": self._derived_revision,
-                "current": self.derived_state_is_current(),
-                "last_rebuild": (self.rebuilds[-1] if self.rebuilds else None),
-            }
+            current_snapshot["derived_state"] = self._derived_state_projection()
             self.last_occurrence_writes = self._record_sweep_occurrences(
                 current_snapshot)
             current_snapshot["active_path_state"] = self._update_active_path(
@@ -620,15 +782,18 @@ class ProductionScanCycle:
             current_snapshot["toolbox"] = run_toolbox(current_snapshot)
             ecu_facts["prepared"] = True
 
+        from market_data.object_identity import canonical_instant
+        mechanical = self._snapshot_trackers(canonical_instant(
+            candles_1m[-1].get("timestamp"), strict=True))
         snapshot = build_snapshot(
             raw_data, memory=self.memory,
             experience_summary=self.prev_experience_summary,
             prior_memory_search=self.prev_memory_search,
             prior_dashboard=self.prev_dashboard,
             thesis_engine=self.thesis_engine, symbol=self.symbol,
-            swing_tracker=self.swing_tracker, po3_stability=self.po3_stability,
-            session_po3=self.session_po3, deep_1m=deep_1m,
-            expansion_stability=self.expansion_stability,
+            swing_tracker=mechanical["swing_tracker"], po3_stability=mechanical["po3_stability"],
+            session_po3=mechanical["session_po3"], deep_1m=deep_1m,
+            expansion_stability=mechanical["expansion_stability"],
             capital_report=capital_report, htf_context=htf_context,
             contract_id=self.contract_id, execution_price=execution_price,
             invoke_brain=invoke_brain,
@@ -637,12 +802,7 @@ class ProductionScanCycle:
         if not ecu_facts["prepared"]:
             snapshot["candle_continuity"] = continuity
             # Repaired history is usable only after derived state converges.
-            snapshot["derived_state"] = {
-                "history_revision": self._history.revision,
-                "derived_revision": self._derived_revision,
-                "current": self.derived_state_is_current(),
-                "last_rebuild": (self.rebuilds[-1] if self.rebuilds else None),
-            }
+            snapshot["derived_state"] = self._derived_state_projection()
             # The non-ECU path keeps its established post-build ordering.
             self.last_occurrence_writes = self._record_sweep_occurrences(snapshot)
             snapshot["active_path_state"] = self._update_active_path(snapshot)
@@ -804,6 +964,10 @@ class ProductionScanCycle:
         # only fresh discretionary authorship is absent on this scan.
         shadow = self._two_brain_after_primary(snapshot, brain_block) if invoke_brain else None
 
+        from market_data.object_identity import canonical_instant
+        if (self.derived_state_is_current()
+                and self._processed_tip == canonical_instant(candles_1m[-1].get("timestamp"), strict=True)):
+            self._chronology_window = copy.deepcopy(candles_1m)
         return {
             "snapshot": snapshot,
             "brain_block": brain_block,
@@ -1289,7 +1453,7 @@ class ProductionScanCycle:
                       if self.occurrence_ledger is not None else None)
             session = production_session_key(snapshot.get("timestamp"))
             if health == _OL_HEALTHY and session and self.contract_id:
-                rows = [row for row in self.occurrence_ledger.occurrences()
+                rows = [row for row in self._current_chronology_occurrences()
                         if isinstance(row, dict)
                         and row.get("contract") == self.contract_id
                         and production_session_key(row.get("event_time")) == session]
@@ -1357,6 +1521,20 @@ class ProductionScanCycle:
         """
         from market_state.active_path import ActivePath, extract_occurrences
         try:
+            import copy
+            from market_data.object_identity import canonical_instant
+            cutoff = canonical_instant(snapshot.get("timestamp"), strict=True)
+            cache_key = (self._history.revision, self.contract_id, cutoff)
+            if self._chronology_owned and self._chronology_coverage.get("complete") is not True:
+                return ActivePath().state(available=False, unavailable_reason="chronology_coverage_incomplete")
+            cache = self._chronology_state_cache
+            if self._chronology_owned and cache and cache[0] == cache_key:
+                snapshot["derived_state"] = self._derived_state_projection()
+                status = (self.occurrence_ledger.health().get("status")
+                          if self.occurrence_ledger is not None else self.occurrence_ledger_status)
+                if status != _OL_HEALTHY:
+                    return self._active_path.state(available=False, unavailable_reason=f"ledger:{status}")
+                return copy.deepcopy(cache[1])
             self.last_active_path_occurrences = []
             first_use = self._active_path is None
             if first_use:
@@ -1391,9 +1569,11 @@ class ProductionScanCycle:
             occurrences = extract_occurrences(
                 snapshot, self._active_path_prior_protected, self.contract_id)
             self.last_active_path_occurrences = list(occurrences)
+            self._retain_chronology_occurrences(occurrences)
             for occ in occurrences:
                 try:
-                    self.occurrence_ledger.record(occ)
+                    if not getattr(self, "_chronology_rebuilding", False):
+                        self._record_observed_occurrence(occ)
                 except Exception:  # noqa: BLE001
                     pass
             # Derivation consumes the SAME occurrences that were offered to the
@@ -1407,6 +1587,11 @@ class ProductionScanCycle:
                 unavailable_reason=(None if health == _OL_HEALTHY
                                     else f"ledger:{health}"))
             self._active_path.mark_scan_end()
+            if self._chronology_owned:
+                self._processed_tip = cutoff
+                self._chronology_coverage["processed_to"] = cutoff
+                self._chronology_state_cache = (cache_key, copy.deepcopy(state))
+                snapshot["derived_state"] = self._derived_state_projection()
             return state
         except Exception as exc:  # noqa: BLE001
             from market_state.active_path import ActivePath as _AP
@@ -1422,8 +1607,7 @@ class ProductionScanCycle:
             return self.campaign_scope_custody.advance(
                 owner=self, snapshot=snapshot,
                 settled_1m=(raw_data or {}).get("1m") or [],
-                ledger_rows=(self.occurrence_ledger.occurrences()
-                             if self.occurrence_ledger is not None else []),
+                ledger_rows=self._current_chronology_occurrences(),
                 history_revision=self._history.revision, contract_id=self.contract_id,
                 market_session=production_session_key(snapshot.get("timestamp")),
                 available=facts.get("status") == "AVAILABLE" and self.derived_state_is_current())
@@ -1466,7 +1650,7 @@ class ProductionScanCycle:
                     contract_id=self.contract_id, market_session=session)
             return self.campaign_premise_shadow.advance(
                 snapshot=snapshot, settled_1m=(raw_data or {}).get("1m") or [],
-                ledger_rows=ledger.occurrences(),
+                ledger_rows=self._current_chronology_occurrences(),
                 history_revision=self._history.revision,
                 contract_id=self.contract_id, market_session=session,
                 cutoff=timestamp)
@@ -1474,7 +1658,7 @@ class ProductionScanCycle:
             return _CP.unavailable(reason=f"shadow_error:{type(exc).__name__}",
                                    cutoff=timestamp, contract_id=self.contract_id)
 
-    def _record_sweep_occurrences(self, snapshot: dict) -> list:
+    def _record_sweep_occurrences(self, snapshot: dict, *, persist=True) -> list:
         """Persist every sweep this scan observed. THE ONLY PRODUCTION WRITER.
 
         The detector owns WHAT HAPPENED, `market_events` owns WHICH CANONICAL
@@ -1489,7 +1673,7 @@ class ProductionScanCycle:
         """
         from market_data import occurrence_ledger as _OL
         ledger = self.occurrence_ledger
-        if ledger is None:
+        if ledger is None and persist:
             # Absent by design (no exact contract) or unavailable (construction
             # failed). Both are already recorded; neither is silently "fine".
             self.last_occurrence_persistence_status = self.occurrence_ledger_status
@@ -1530,8 +1714,12 @@ class ProductionScanCycle:
                     snapshot=snapshot)
                 if occurrence is None:
                     continue          # unprovable identity is not an occurrence
-                written.append(ledger.record(occurrence))
-            health = ledger.health()
+                self._retain_chronology_occurrences([occurrence])
+                if persist:
+                    written.append(self._record_observed_occurrence(occurrence))
+                else:
+                    written.append(occurrence)
+            health = ledger.health() if ledger is not None else {"status": _OL.NOT_CONFIGURED, "detail": ""}
             self.last_occurrence_persistence_status = health["status"]
             self.last_occurrence_persistence_error = health["detail"]
             return written

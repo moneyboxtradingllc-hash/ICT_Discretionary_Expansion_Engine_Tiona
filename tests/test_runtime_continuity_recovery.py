@@ -467,7 +467,8 @@ class TestTheShortTapeGuardIsDistinct:
         record = cycle._rebuild_derived_state(tape()[:5], 1)
         assert record["ok"] is False
         assert "bars" in record["error"] and "required" in record["error"]
-        assert cycle._derived_revision == 0
+        assert record["from_revision"] == 0
+        assert cycle.derived_state_is_current() is False
 
     def test_an_empty_replay_is_reported_differently(self):
         cycle = ProductionScanCycle(symbol="MNQ")
