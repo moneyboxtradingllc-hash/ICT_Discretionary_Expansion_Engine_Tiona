@@ -105,7 +105,9 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # chain retirement, watched-life context, duplicate canonical facts).
     # STAGE-3C-1-R2: canonical sweep copies are judged only as of the cutoff.
     # Stage 4 PO3 participation identity and current formation custody.
-    assert PM.brain_contract_fingerprint() == "brain:0646739ca3f68560"
+    # S4E: narrative_continuity's retained prior-leg projection is reachable
+    # only when the current producer release names that exact recorded life.
+    assert PM.brain_contract_fingerprint() == "brain:662b10e5df3ea38c"
 
 
 @pytest.mark.parametrize("addition", [

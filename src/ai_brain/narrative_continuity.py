@@ -126,6 +126,70 @@ def _load_bearing(path):
              "producer_backed")}
 
 
+#: One producer-registered protected-swing life. ActivePath kills a
+#: load-bearing leg only on a violation carrying this exact identity, so the
+#: same fields join a recorded leg to the producer's own release record.
+_LEG_TIMEFRAMES = frozenset({"1m", "3m", "5m", "15m"})
+
+
+def _retained_leg_projection(leg, last, snapshot, path, prior_direction):
+    """Project the prior row's recorded leg ONLY as evidence of a failed life.
+
+    S4E retained-evidence rule. A stance row is never authority; it may name
+    the leg the incumbent rested on. That record is published as the current
+    leg evidence only when the CURRENT producer state corroborates it:
+
+    * the row is a same-session causal row (the caller passes no direction
+      otherwise) and, if it declares a contract, that is this contract;
+    * the snapshot's path is available, belongs to this contract and session,
+      and publishes no live load-bearing structure (live evidence wins);
+    * the recorded leg is a well-formed producer-backed life on the
+      incumbent's supporting side; and
+    * the path's own `last_invalidated` release names that exact life
+      (owner, level, side, timeframe, swing_id, registered_at).
+
+    The projection is marked `intact: False`. It is the failed leg's evidence,
+    never a live leg, a campaign falsifier, a transfer or an entry permission.
+    Anything else -- malformed, legacy-unproved, prior-session, foreign or
+    uncorroborated -- is withheld.
+    """
+    if (_direction(prior_direction) is None or not isinstance(leg, dict)
+            or not isinstance(path, dict) or path.get("state_available") is not True
+            or _load_bearing(path) is not None):
+        return None
+    snapshot_contract = str((snapshot or {}).get("contract_id") or "").strip()
+    current_session = _session_key((snapshot or {}).get("timestamp"))
+    row_contract = str((last or {}).get("contract_id") or "").strip()
+    if (not snapshot_contract or not current_session
+            or str(path.get("contract_id") or "").strip() != snapshot_contract
+            or str(path.get("session") or "").strip() != current_session
+            or (row_contract and row_contract != snapshot_contract)):
+        return None
+    def real(value):
+        return (isinstance(value, (int, float)) and not isinstance(value, bool)
+                and math.isfinite(value))
+
+    side = "low" if prior_direction == "bullish" else "high"
+    if not (real(leg.get("level")) and leg.get("side") == side
+            and leg.get("timeframe") in _LEG_TIMEFRAMES
+            and isinstance(leg.get("swing_id"), str) and leg.get("swing_id")
+            and _aware_datetime(leg.get("registered_at"))
+            and leg.get("producer_backed") is True):
+        return None
+    released = path.get("last_invalidated")
+    if not (isinstance(released, dict) and released.get("owner") == prior_direction
+            and real(released.get("level"))
+            and float(released["level"]) == float(leg["level"])
+            and released.get("side") == side
+            and released.get("source_tf") == leg.get("timeframe")
+            and released.get("swing_id") == leg.get("swing_id")
+            and released.get("registered_at") == leg.get("registered_at")):
+        return None
+    projection = _load_bearing({"load_bearing_structure": leg})
+    projection["intact"] = False
+    return projection
+
+
 def _owner_has_live_structure(path, direction):
     bearing = _load_bearing(path)
     expected_side = "low" if direction == "bullish" else "high"
@@ -477,9 +541,13 @@ def build_narrative_continuity(snapshot: dict, stance_history: dict) -> dict:
                 "incumbent_intact", "developing_transfer", "confirmed_transfer"):
             leg_failure_status = "not_occurred"
 
-    # Exact former derivation: the live leg structure, else whatever the prior
-    # row's recorded leg structure yields through the same projection.
-    retained_leg_structure = _load_bearing(prior_leg_structure or {})
+    # The live leg structure, else the prior row's recorded leg when the current
+    # producer release corroborates that exact failed life (S4E). The former
+    # `_load_bearing(prior_leg_structure)` read a nested path key from a
+    # row-shaped leg and never produced this branch.
+    retained_leg_structure = (
+        None if path_identity_conflict else _retained_leg_projection(
+            prior_leg_structure, last, snap, path, prior_direction))
     active_leg_structure = current_leg_structure or retained_leg_structure
     origin = path.get("origin") if isinstance(path.get("origin"), dict) else {}
 

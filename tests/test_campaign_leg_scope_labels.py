@@ -113,14 +113,20 @@ ACTIVE = ["ACTIVE_DELIVERY", "validated_brain_delivery_with_intact_owner"]
 # invalidation level, leg failure status, recorded leg structure (tf, level)).
 # A propose_entry carries the mocked model's own stop (the 5m protected low
 # 29429.75). A held stand_down takes the CURRENT leg structure when the path
-# publishes one, else the prior thesis's authored invalidation: on the first
-# scan after a leg dies the dead path publishes none, so the held level is the
-# incumbent's authored 29429.75 while the row records the failed leg.
+# publishes one; otherwise (S4E) the RETAINED failed leg when the producer's
+# own release names exactly that recorded life; otherwise the prior thesis's
+# authored invalidation. S4E REPIN (justified, not blind): on 703a417/e8c8df3
+# the retained branch was unreachable (`_load_bearing` read a nested key from
+# a flat row leg), so the post-death held level fell back to the authored
+# 29429.75. With the repaired projection the post-death held level is the
+# released leg's own level: C1 03:15 29429.75 -> 29470.0 (1m 29470@03:13) and
+# C2 03:06/03:11/03:14 29429.75 -> 29457.0 (1m 29457@02:56). Control state,
+# Lifecycle, candidate refusal, leg status and recorded leg are unchanged.
 PINNED = {
     ("C1", "03:14"): ("incumbent_intact", "bullish", ACTIVE, None, "propose_entry",
                       29429.75, "not_occurred", ("1m", 29470.0)),
     ("C1", "03:15"): ("developing_transfer", None, TRANSFER_UNRESOLVED,
-                      "campaign_lifecycle_refused", "stand_down", 29429.75, "occurred",
+                      "campaign_lifecycle_refused", "stand_down", 29470.0, "occurred",
                       ("1m", 29470.0)),
     # The 03:16 reclaim registers a new FORMING 1m 29470 life; the failure
     # stays occurred and the held level follows the current structure.
@@ -130,13 +136,13 @@ PINNED = {
     ("C2", "03:05"): ("incumbent_intact", "bullish", ACTIVE, None, "propose_entry",
                       29429.75, "not_occurred", ("1m", 29457.0)),
     ("C2", "03:06"): ("developing_transfer", None, TRANSFER_UNRESOLVED,
-                      "campaign_lifecycle_refused", "stand_down", 29429.75, "occurred",
+                      "campaign_lifecycle_refused", "stand_down", 29457.0, "occurred",
                       ("1m", 29457.0)),
     ("C2", "03:11"): ("developing_transfer", None, TRANSFER_UNRESOLVED,
-                      "campaign_lifecycle_refused", "stand_down", 29429.75, "occurred",
+                      "campaign_lifecycle_refused", "stand_down", 29457.0, "occurred",
                       ("1m", 29457.0)),
     ("C2", "03:14"): ("developing_transfer", None, TRANSFER_UNRESOLVED,
-                      "campaign_lifecycle_refused", "stand_down", 29429.75, "occurred",
+                      "campaign_lifecycle_refused", "stand_down", 29457.0, "occurred",
                       ("1m", 29457.0)),
     ("C4", "03:12"): ("incumbent_intact", "bullish", ACTIVE, None, "propose_entry",
                       29429.75, "not_occurred", ("1m", 29457.0)),
@@ -261,13 +267,24 @@ STICKY_TAIL = [bar("03:17", 29476, 29477, 29465, 29467),
                bar("03:18", 29467, 29469, 29464, 29466),
                bar("03:19", 29466, 29468, 29463, 29465)]
 # hhmm -> (held invalidation level, recorded leg (tf, level, registered_at)).
+# S4E REPIN: 03:15 held 29429.75 -> 29470.0, the retained released life (see
+# PINNED). 03:17 is also retained (the 03:16 life died at 03:17) and was
+# already 29470.0; 03:16/03:18/03:19 are current producer lives.
 STICKY_PINNED = {
-    "03:15": (29429.75, ("1m", 29470.0, "2026-08-19T03:13:00+00:00")),
+    "03:15": (29470.0, ("1m", 29470.0, "2026-08-19T03:13:00+00:00")),
     "03:16": (29470.0, ("1m", 29470.0, "2026-08-19T03:16:00+00:00")),
     "03:17": (29470.0, ("1m", 29470.0, "2026-08-19T03:16:00+00:00")),
     "03:18": (29463.0, ("1m", 29463.0, "2026-08-19T03:18:00+00:00")),
     "03:19": (29463.0, ("1m", 29463.0, "2026-08-19T03:18:00+00:00")),
 }
+
+
+# hhmm -> (published leg source, intact). Retained = failed released life.
+STICKY_SOURCE = {"03:15": ("retained_prior_leg_row", False),
+                 "03:16": ("current_active_path", True),
+                 "03:17": ("retained_prior_leg_row", False),
+                 "03:18": ("current_active_path", True),
+                 "03:19": ("current_active_path", True)}
 
 
 @TA.ECU_MODES
@@ -297,6 +314,11 @@ def test_sticky_leg_failure_keeps_identical_refusals_across_scans(tmp_path,
         held_level, leg = STICKY_PINNED[hhmm]
         assert (output["current_action"], output["invalidation_level"]) == (
             "stand_down", held_level)
+        source, intact = STICKY_SOURCE[hhmm]
+        assert nc["active_leg_structure_source"] == source
+        assert nc["active_leg_structure"]["intact"] is intact
+        assert (nc["active_leg_structure"]["timeframe"], nc["active_leg_structure"]["level"],
+                nc["active_leg_structure"]["registered_at"]) == leg
         row = cycle.stance_memory.recent(1)[-1]
         assert row["active_leg_failure_status"] == "occurred"
         assert (row["active_leg_structure"]["timeframe"],

@@ -603,7 +603,10 @@ class TestStrategyUntouched:
         # sweep copies only as of the cutoff.
         from ai_brain.production_model import brain_contract_fingerprint
         # Stage 4 PO3 participation identity and current formation custody.
-        assert brain_contract_fingerprint() == "brain:0646739ca3f68560"
+        # S4E repairs the closure-bound retained prior-leg projection in
+        # narrative_continuity (producer-corroborated failed-leg evidence), so
+        # the contract rotates; no prior authorization survives the change.
+        assert brain_contract_fingerprint() == "brain:662b10e5df3ea38c"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.
