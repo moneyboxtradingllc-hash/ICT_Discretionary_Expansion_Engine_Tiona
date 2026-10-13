@@ -918,7 +918,12 @@ _STAGE2_PROTECTED_SOURCE_SHA256 = {
     "src/risk/risk_governor.py": "9618cbfdf410d320f7bc4b40935e3de7a08c82a3cc8f9cfc6680f5c58ff809a6",
     "src/risk/topstep_limits.py": "150c460f96ff46d1f580f4264299d94d6d5533eb27dbb6fe3bc9c05ce0623055",
     "src/market_data/trade_horizon.py": "9968c7f493a4d7ba43c575cfd30b2e144d0da1c8962a29fe26fd73653389ec52",
-    "src/broker/luna_candidate_producer.py": "01c355b12449d40eb041e908eb8d93564d28e6a8176cd4ac07807385221d1cab",
+    # S4I (explicitly authorized, this one pin only): _po3_reversal_ob_rows now
+    # makes a PO3 row execution eligible only with the producer's authentic
+    # current retained formation identity; an identity-less fallback detection
+    # stays visible but cannot execute. No other function in this file changed.
+    # Previous pin 01c355b12449d40eb041e908eb8d93564d28e6a8176cd4ac07807385221d1cab.
+    "src/broker/luna_candidate_producer.py": "9a2793e404fcee13af528f3751e0c16379763fff40b2874e6523efdab8699a12",
 }
 
 

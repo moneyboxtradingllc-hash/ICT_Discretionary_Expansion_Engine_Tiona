@@ -610,7 +610,10 @@ class TestStrategyUntouched:
         # evidence is withheld, never raised), so it rotates again.
         # S4G applies the same timeframe boundary to the closure-bound
         # same-direction successor proof, so it rotates once more.
-        assert brain_contract_fingerprint() == "brain:f94e695838ffb79b"
+        # S4I gates PO3 execution eligibility on the producer's authentic
+        # current retained formation identity in the closure-bound candidate
+        # producer, so it rotates again.
+        assert brain_contract_fingerprint() == "brain:03a7ac184955bf33"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.

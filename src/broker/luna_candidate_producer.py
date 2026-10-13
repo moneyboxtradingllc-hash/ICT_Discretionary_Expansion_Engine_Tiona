@@ -668,15 +668,36 @@ def _po3_reversal_ob_rows(snapshot: dict) -> list:
     validated it. Before that expansion the detector publishes nothing at all --
     the manipulation leg is not yet an order block.
 
+    EXECUTION IDENTITY. Only the producer's own retained formation may execute.
+    `po3_reversal_order_block` falls back to a fresh detection when custody
+    holds nothing, and custody holds nothing exactly when it has RETIRED the
+    object (its generation died) or when the snapshot is a copy/restore whose
+    producer view no longer authenticates. Such an observation stays visible
+    for analysis but is not execution eligible. The row is executable only
+    when `current_block` -- which authenticates the live custody object, the
+    snapshot's contract/session/history revision and a fresh revalidation --
+    returns this very block with CURRENT_PROCESS_REVALIDATED authority. An ID
+    string or copied formation metadata on its own is never authority.
+
     Never raises.
     """
     rows = []
     try:
         from toolbox.price_levels import po3_reversal_order_block
+        from market_data.reversal_formation import current_block
         for direction in ("bullish", "bearish"):
             b = po3_reversal_order_block(snapshot or {}, direction)
             if not b.get("available"):
                 continue
+            retained = current_block(snapshot or {}, direction)
+            authority = (retained.get("formation_authority")
+                         if isinstance(retained, dict) else None)
+            identity = (authority.get("occurrence_id")
+                        if isinstance(authority, dict)
+                        and authority.get("status") == "CURRENT_PROCESS_REVALIDATED"
+                        and b == retained else None)
+            if not (isinstance(identity, str) and identity):
+                authority = identity = None
             rows.append({
                 "tool": direction + "_po3_reversal_order_block",
                 "tool_family": "po3_reversal_order_block",
@@ -684,10 +705,12 @@ def _po3_reversal_ob_rows(snapshot: dict) -> list:
                 "level_type": b.get("level_type"),
                 "source_tf": b.get("source_tf"),
                 "temporal_class": "settled",
-                "execution_eligible": True,
+                "execution_eligible": identity is not None,
                 "execution_quarantined": False,
                 "execution_quarantine_reason": None,
-                "execution_ineligible_reason": None,
+                "execution_ineligible_reason": (
+                    None if identity is not None
+                    else "PO3_FORMATION_IDENTITY_UNAVAILABLE"),
                 "zone_low": b.get("zone_low"),
                 "zone_high": b.get("zone_high"),
                 "mean_threshold": b.get("mean_threshold"),
@@ -702,10 +725,10 @@ def _po3_reversal_ob_rows(snapshot: dict) -> list:
                     "protected_swing_registered_at"),
                 "protected_swing_occurrence_id": b.get(
                     "protected_swing_occurrence_id"),
-                "formation_authority": b.get("formation_authority"),
+                "formation_authority": authority,
                 # The retained producer object owns this identity. Publishing
                 # it here lets the same object author a conditional plan.
-                "occurrence_id": (b.get("formation_authority") or {}).get("occurrence_id"),
+                "occurrence_id": identity,
                 "history_revision": b.get("history_revision", (
                     (snapshot or {}).get("derived_state") or {}).get(
                         "history_revision")),

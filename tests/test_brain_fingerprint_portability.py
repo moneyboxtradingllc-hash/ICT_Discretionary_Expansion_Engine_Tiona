@@ -111,7 +111,9 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # non-string timeframes instead of raising.
     # S4G: the same-direction successor proof withholds malformed or unknown
     # timeframes instead of raising or accepting them.
-    assert PM.brain_contract_fingerprint() == "brain:f94e695838ffb79b"
+    # S4I: a PO3 catalog row executes only with the producer's authentic current
+    # retained formation identity (closure-bound candidate producer).
+    assert PM.brain_contract_fingerprint() == "brain:03a7ac184955bf33"
 
 
 @pytest.mark.parametrize("addition", [
