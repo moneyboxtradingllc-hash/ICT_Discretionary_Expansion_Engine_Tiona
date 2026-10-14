@@ -300,17 +300,48 @@ class TestPivotFallbackSufficiency:
                         "close": base + off + 1, "volume": 100})
         return out
 
+    @staticmethod
+    def _one_minute_tape(periods=10, base=29000.0):
+        """1m bars whose 5m buckets zigzag with strict pivots and whose 15m buckets
+        cannot pivot.
+
+        Each 30-minute period is six 5m buckets with highs base+k+(0,4,8,12,8,4)
+        and lows 6 below, so every 5m peak and trough is strictly beyond its three
+        neighbours on each side. Aggregated to 15m the same bars alternate
+        (8, 12) + k: a rising pair sequence with no strict pivot -- 20 settled 15m
+        bars, zero swings, the live shape. Built through the production
+        aggregator so every bucket carries the member evidence pivots require.
+        """
+        from datetime import datetime, timedelta, timezone
+        t0, out, j = datetime(2026, 9, 1, 13, 0, tzinfo=timezone.utc), [], 0
+        for k in range(periods):
+            for off in (0.0, 4.0, 8.0, 12.0, 8.0, 4.0):
+                high = base + off + k
+                for m in range(5):
+                    o = high - 5.0 + m
+                    out.append({"timestamp": (t0 + timedelta(minutes=5 * j + m)).isoformat(),
+                                "open": o, "high": high, "low": high - 6.0,
+                                "close": o + 0.5, "volume": 100})
+                j += 1
+        return out
+
     def test_a_flat_timeframe_falls_through_to_a_richer_one(self):
+        # Restored: this called `RF.extract_features`, a name the module never
+        # exposed, and so skipped on every run; its hand-built zigzag also had
+        # no strict pivots and no member evidence. Same contract, same
+        # assertions, real entry point and a lawful aggregated fixture.
+        from data_feed.timeframe_builder import build_timeframes
         from regime_classification import regime_features as RF
-        flat = [dict(c, high=29000.0, low=29000.0, open=29000.0, close=29000.0)
-                for c in self._series(19, 0, 15)]
-        settled = {"15m": flat, "5m": self._series(59, 0, 5), "3m": self._series(99, 0, 3)}
-        f = RF.extract_features({"candles": {}}, settled_data=settled,
-                                raw_data=settled) if hasattr(RF, "extract_features") else None
-        if f is None:
-            pytest.skip("feature entry point not exposed under this name")
+        raw = build_timeframes(self._one_minute_tape())
+        settled = {tf: [c for c in rows if c.get("complete") is not False]
+                   for tf, rows in raw.items()}
+        assert [len(settled[tf]) for tf in ("15m", "5m", "3m")] == [20, 60, 100]
+        f = RF.extract_regime_features({"candles": {}}, raw_data=raw,
+                                       settled_data=settled)
         assert f.get("swing_source_timeframe") in ("5m", "3m")
         assert f.get("swing_fallback_trace")
+        # Non-vacuous: 15m existed and was consulted first, with zero pivots.
+        assert f["swing_fallback_trace"][0] == "15m: 0 highs / 0 lows"
 
     def test_the_trace_names_every_timeframe_it_tried(self):
         from regime_classification import regime_features as RF
