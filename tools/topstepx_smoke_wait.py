@@ -217,7 +217,12 @@ def one_scan(session, producer, ledger, fp, contract, n) -> dict:
             engine_inventory=audit.audit_payload(cap.get("payload") or {}),
             snapshot_id=f"live-{candles[-1]['timestamp']}",
             market_data_timestamp=candles[-1]["timestamp"],
-            latest_closed_bar_timestamp=candles[-1]["timestamp"])
+            latest_closed_bar_timestamp=candles[-1]["timestamp"],
+            # This bare snapshot has no ProductionScanCycle behind it: no
+            # campaign scope, Draw or Lifecycle assessment. Participation needs
+            # the same Lifecycle gate the protected ProductionLoop applies, so
+            # without one this route fails closed and only its diagnostics run.
+            require_campaign_lifecycle=True)
     except NoCandidate as exc:
         tag = "STAND-DOWN" if exc.stand_down else "NO CANDIDATE"
         print(f"          {tag}: {exc.reason}")
