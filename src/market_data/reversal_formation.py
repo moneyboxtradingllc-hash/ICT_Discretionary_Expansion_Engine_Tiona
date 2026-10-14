@@ -60,9 +60,14 @@ def _bar_digest(bar):
 
 
 class ProducerOwnedFormationView(dict):
-    """JSON-readable view that loses its live marker when restored from JSON."""
+    """JSON-readable view that loses its live marker when restored from JSON.
 
-    def __init__(self, rows, *, scope, seal, custody=None):
+    A view is authority only on the exact snapshot its producer observed and
+    published it to: another producer's genuine view, or this producer's view
+    from a different scan, never vouches for the snapshot it is placed on.
+    """
+
+    def __init__(self, rows, *, scope, seal, custody=None, publication=None):
         if seal is not _VIEW_SEAL:
             raise ValueError("reversal formation view is producer-minted only")
         super().__init__(copy.deepcopy(rows))
@@ -71,6 +76,7 @@ class ProducerOwnedFormationView(dict):
         self._rows_json = _json(self)
         self._scope_json = _json(scope)
         self._custody = custody
+        self._publication = publication
 
 
 def is_producer_owned_view(value) -> bool:
@@ -470,13 +476,19 @@ class ReversalFormationCustody:
         scope = {"contract_id": contract, "market_session": session,
                  "history_revision": revision,
                  "rebuilding": bool(rebuilding), "release_history": releases}
-        return ProducerOwnedFormationView(rows, scope=scope, seal=_VIEW_SEAL, custody=self)
+        return ProducerOwnedFormationView(rows, scope=scope, seal=_VIEW_SEAL, custody=self,
+                                          publication=snapshot)
 
 
 def current_block(snapshot, direction):
     """Return only a current-process formation that survived revalidation."""
     view = (snapshot or {}).get("reversal_formation_view")
     if not is_producer_owned_view(view):
+        return None
+    # The consuming snapshot must be the view's own publication. Seal, custody
+    # and scope prove a producer minted the view, not that this snapshot's
+    # producer vouches for it.
+    if getattr(view, "_publication", None) is not snapshot:
         return None
     scope = getattr(view, "_scope", None)
     custody = getattr(view, "_custody", None)
