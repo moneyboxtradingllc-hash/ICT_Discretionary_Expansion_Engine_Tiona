@@ -113,7 +113,7 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # timeframes instead of raising or accepting them.
     # S4I: a PO3 catalog row executes only with the producer's authentic current
     # retained formation identity (closure-bound candidate producer).
-    assert PM.brain_contract_fingerprint() == "brain:5a55ff063f8ab938"
+    assert PM.brain_contract_fingerprint() == "brain:fa0dd98df213c9f4"
 
 
 @pytest.mark.parametrize("addition", [

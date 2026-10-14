@@ -613,7 +613,7 @@ class TestStrategyUntouched:
         # S4I gates PO3 execution eligibility on the producer's authentic
         # current retained formation identity in the closure-bound candidate
         # producer, so it rotates again.
-        assert brain_contract_fingerprint() == "brain:5a55ff063f8ab938"
+        assert brain_contract_fingerprint() == "brain:fa0dd98df213c9f4"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.

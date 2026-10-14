@@ -756,7 +756,7 @@ class ProductionScanCycle:
         # locations were never computed from.
         execution_price = self._execution_price()
 
-        ecu_facts = {"prepared": False, "draw_prepared": False}
+        ecu_facts = {"prepared": False, "draw_prepared": False, "flips_prepared": False}
 
         def _prepare_current_ecu_facts(current_snapshot):
             """Attach this occurrence's path and retained formations before ECU."""
@@ -774,6 +774,11 @@ class ProductionScanCycle:
                 self._advance_existing_campaign_draw(
                     current_snapshot, raw_data.get("1m") or []))
             ecu_facts["draw_prepared"] = True
+            # Structure flips (and the MTF state built from them) belong to the
+            # settled facts the canonical ECU call reads, exactly as the non-ECU
+            # Brain reads them; the scan advances them once, here.
+            self._update_structure_flips(current_snapshot)
+            ecu_facts["flips_prepared"] = True
             # ECU needs current physical objects before it authors direction
             # and playbook. This pass is descriptive only; snapshot_builder
             # still rebuilds the final toolbox after qualification, playbook
@@ -871,8 +876,10 @@ class ProductionScanCycle:
         from ai_brain.ecu import ecu_enabled
         canonical = (snapshot.get("candidate_thesis") or {}).get("brain_block")
         # Structure flips are advanced BEFORE the Brain reads its input, so the
-        # authorized catalog for THIS scan already contains them.
-        self._update_structure_flips(snapshot)
+        # authorized catalog for THIS scan already contains them. Under ECU the
+        # pre-cognition hook already advanced them for the canonical call.
+        if not ecu_facts["flips_prepared"]:
+            self._update_structure_flips(snapshot)
 
         if not invoke_brain:
             brain_block = {"source": "preauthorized_plan_trigger",
