@@ -59,6 +59,18 @@ def _bar_digest(bar):
     return hashlib.sha256(_json(fact).encode("utf-8")).hexdigest()
 
 
+def _truncated_bucket(bar):
+    """True when an aggregated bar reports fewer constituents than it needs."""
+    if not isinstance(bar, dict):
+        return False
+    if bar.get("complete") is False:
+        return True
+    members, expected = bar.get("members"), bar.get("expected_members")
+    return (isinstance(members, int) and not isinstance(members, bool)
+            and isinstance(expected, int) and not isinstance(expected, bool)
+            and members < expected)
+
+
 class ProducerOwnedFormationView(dict):
     """JSON-readable view that loses its live marker when restored from JSON.
 
@@ -343,19 +355,22 @@ class ReversalFormationCustody:
         if not current:
             return False
         ordered = sorted(current)
+        # Shedding 1m bars from the left leaves this timeframe's leading
+        # bucket aggregated from a truncated set of constituents. That bucket
+        # is rollout as well: coverage starts at the first whole bucket.
+        if len(ordered) > 1 and _truncated_bucket(current[ordered[0]]):
+            ordered = ordered[1:]
         earliest, latest = ordered[0], ordered[-1]
         for stamp, expected in (record.get("witness_bars") or {}).items():
-            row = current.get(stamp)
-            if row is None:
-                # Finite history naturally sheds old leading bars. A missing
-                # witness inside current coverage is a deletion; a witness
+            if stamp < earliest:
+                # Finite history naturally sheds old leading bars. A witness
                 # before coverage is ordinary rollout, and HistoryRevision
                 # remains the authority for corrections to that old prefix.
-                if stamp >= earliest and stamp <= latest:
-                    return False
-                if stamp > latest:
-                    return False
                 continue
+            row = current.get(stamp)
+            if row is None:
+                # A missing witness inside (or beyond) coverage is a deletion.
+                return False
             if _bar_digest(row) != expected:
                 return False
         return True

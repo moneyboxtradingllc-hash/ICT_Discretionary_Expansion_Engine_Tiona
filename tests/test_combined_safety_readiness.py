@@ -612,8 +612,9 @@ class TestStrategyUntouched:
         # same-direction successor proof, so it rotates once more.
         # S4I gates PO3 execution eligibility on the producer's authentic
         # current retained formation identity in the closure-bound candidate
-        # producer, so it rotates again.
-        assert brain_contract_fingerprint() == "brain:fa0dd98df213c9f4"
+        # producer, so it rotates again. S4-D: formation custody's rolling-window
+        # coverage starts at the first whole bucket, so it rotates once more.
+        assert brain_contract_fingerprint() == "brain:7c952dbed5d85c8c"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.
