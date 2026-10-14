@@ -82,3 +82,72 @@ def test_smoke_scan_refuses_on_the_lifecycle_gate_before_any_candidate(
     trace = producer.last_decision_trace
     assert trace["campaign_lifecycle_refusal"] == "current_campaign_lifecycle_assessment_unavailable"
     assert trace["campaign_lifecycle_state"] is None
+
+
+def _production_scan(root, monkeypatch, upto):
+    """The REAL ProductionScanCycle over the S4C healthy twin, ACTIVE bearish
+    campaign, Brain mocked as in that test; the scan result at `upto`."""
+    import test_campaign_scope as T
+    import test_po3_anchor_replacement_revocation as C
+    import test_po3_execution_identity as X
+    import test_po3_post_settlement_death as D
+    from datetime import datetime, timedelta, timezone
+    from broker.topstepx_slippage import QuoteCapture
+    from live_scan.production_scan_cycle import ProductionScanCycle
+    root.mkdir()
+    X._isolate(root, monkeypatch)
+    tape = D._tape(C._HEALTHY)
+    px = [tape[0]["close"]]
+    cycle = ProductionScanCycle(
+        symbol="MNQ", contract_id=T.CONTRACT, session_id="S4-E-SNAPSHOT",
+        quote_provider=lambda: QuoteCapture(
+            captured_at=datetime.now(timezone.utc), best_bid=px[0], best_ask=px[0] + .25,
+            last_trade=px[0], contract_id=T.CONTRACT, market_data_age_seconds=.25))
+    chosen = {}
+    for end in range(20, len(tape) + 1):
+        bars = tape[:end]
+        px[0] = bars[-1]["close"]
+        if end == 97:
+            RF._mock_current_brain(monkeypatch, [], output_mutator=lambda out, n, payload: C._reply(
+                out, n, payload, px[0], chosen))
+            monkeypatch.setenv("BRAIN_ECU_MODE", "false")
+        scan = cycle.scan(bars, now=datetime.fromisoformat(bars[-1]["timestamp"]) + timedelta(minutes=1),
+                          invoke_brain=end >= 97)
+        if bars[-1]["timestamp"][11:16] == upto:
+            return scan, cycle, bars
+
+
+def test_a_production_quality_snapshot_without_lifecycle_still_refuses_on_lifecycle(
+        tmp_path, monkeypatch, capsys):
+    """Not an incidental refusal. The bare route is handed the REAL scan
+    snapshot of an ACTIVE campaign at a minute where the protected path authors
+    a PO3 candidate, with only its Lifecycle assessment removed: protected
+    invalidations, objectives and the executable PO3 row are all present. The
+    route still refuses on the Lifecycle gate, before any other gate."""
+    import data_feed
+    import market_data.snapshot_builder as SB
+    import test_campaign_scope_binding as B
+    import test_po3_anchor_replacement_revocation as C
+    import test_po3_execution_identity as X
+    scan, cycle, bars = _production_scan(tmp_path / "production", monkeypatch, "15:07")
+    produced = B._candidate(scan, cycle)
+    assert produced.extras["selected_tool_occurrence_id"] == C.FORMATION_ID
+    # The ORIGINAL snapshot object: a copy is not the formation's publication
+    # and would carry no execution identity at all (O4), which would make this
+    # refusal incidental again.
+    snapshot = scan["snapshot"]
+    snapshot.pop("campaign_lifecycle")
+    assert [row["occurrence_id"] for row in X._po3(snapshot)
+            if row["execution_eligible"]] == [C.FORMATION_ID]
+    tool = _load_tool(monkeypatch)
+    provider = _Provider(bars)
+    monkeypatch.setattr(data_feed, "get_provider", lambda name: provider)
+    monkeypatch.setattr(SB, "build_snapshot", lambda *a, **k: snapshot)
+    producer = CandidateProducer(account_fingerprint="acct:smoke-offline", contract=RF.MNQ)
+
+    verdict = tool.one_scan(None, producer, None, "acct:smoke-offline", RF.MNQ, 1)
+
+    assert verdict == {"kind": "gate_refused"}
+    assert "NO CANDIDATE: campaign_lifecycle_refused" in capsys.readouterr().out
+    assert (producer.last_decision_trace["campaign_lifecycle_refusal"]
+            == "current_campaign_lifecycle_assessment_unavailable")
