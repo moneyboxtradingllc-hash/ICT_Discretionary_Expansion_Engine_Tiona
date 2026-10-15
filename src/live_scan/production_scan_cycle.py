@@ -678,7 +678,12 @@ class ProductionScanCycle:
             rolling = bool(old_tip and prior_window and stamps[0] > canonical_instant(
                 prior_window[0].get("timestamp"), strict=True))
             if rolling:
-                if (len(bars) < len(prior_window)
+                # N1. A coherent window advances its start with its tip, then
+                # aligns that start up to the coarsest bucket. Lawful prefix
+                # eviction may therefore shorten the window by at most one
+                # partial bucket; a shorter window is insufficient context.
+                lawful = len(prior_window) - (CONT.COARSEST_TIMEFRAME_MINUTES - 1)
+                if (len(bars) < lawful
                         or canonical_instant(prior_window[-1].get("timestamp"), strict=True) != old_tip):
                     raise ValueError("rolling_context_unavailable")
                 joined = {canonical_instant(b.get("timestamp"), strict=True): b
