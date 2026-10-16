@@ -1,4 +1,20 @@
-# Handoff: JUnit chunk delivery to Maurice (continue from J3)
+# Handoff: JUnit chunk delivery to Maurice
+
+## STATUS 2026-10-16 ~19:15 UTC (supersedes the procedure below)
+
+- JUnit delivery is COMPLETE, done as message-body chunks (BEGIN/END blocks) in thread 1a14602b034addef, batches 1-8.
+  - Sender-side RAW check: c02-c25 all match.
+  - End-to-end rebuild matches: joined 2860ca4d..., xz 7fc73618..., XML 52a351c2....
+  - Completion email: thread 1a1461703a156a1a.
+- Maurice confirmed c01-c19 on his side. c20-c25 are pending his check.
+- Sent the inventory of still-missing originals: per-minute traces, raw JSONL and other members of n1_checkpoint4_76a7211.tar.xz (sha c2b5d94e...).
+  - Offered a body-chunk fallback: 36 chunks, 12 emails. Only send it if he replies "send archive bodies".
+- Distinct formation-anchor/campaign-premise witness: reported still UNPROVEN, with the missing prerequisite as data.
+  - Option (a): an operator 1m session tape with same-side 5m and 15m lives.
+  - Option (b): his authorization of a constructed test-only fixture.
+  - Awaiting his choice.
+- The Drive archive link is still waiting on Tiona's upload and restriction.
+
 
 You are continuing as Tiona's engineering assistant. Mail is sent from tionariveracollabs@gmail.com.
 - Plain-text bodies only, signed exactly `-tiona` on the last line.
