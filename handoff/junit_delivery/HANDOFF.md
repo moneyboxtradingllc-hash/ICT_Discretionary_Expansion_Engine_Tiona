@@ -8,6 +8,7 @@ You are continuing as Tiona's engineering assistant. Mail is sent from tionarive
 ## Where things stand (2026-10-16 ~18:15 UTC)
 
 - **Composition handoff: done.** C1–C5 were sent in the thread below and RAW-verified byte-exact. C4 needed one resend; the resend matches.
+- **Every Maurice email up to his 02:46Z message on 2026-10-16 has been answered.** At ~18:30Z replies went into threads 1a141f7e5b61ae7c, 1a141e8f670aa9ee and 1a141e22fecbc297. His audit bundle codex_n1_audit_76a7211 was verified. Only answer mail that is newer than that.
 - **JUnit replacement: in progress.**
   - The 25 chunks in `chunks/` replace parts 01–10 of `full_76a7211.junit.xml.xz.b64`. Part 11 is unchanged and Maurice already verified it.
   - `chunks/CHUNK_INVENTORY.txt` gives index, name, offset, length, line count and sha256 for each chunk.
