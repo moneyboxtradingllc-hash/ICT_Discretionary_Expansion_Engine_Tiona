@@ -68,13 +68,14 @@ def _plan(tmp_path, monkeypatch, ecu):
                 candidate=candidate, auth=auth, authority=authority)
 
 
-def _final_quote(p, fresh, *, now=None):
+def _final_quote(p, fresh, *, now=None, price=None):
     zone = p["authority"].payload()["activation_zone"]
     fresh.extras["conditional_plan_id"] = p["candidate"].candidate_id
     return validate_final_quote(
         authority=p["authority"], scope=p["producer"]._conditional_plan_scope,
         candidate=fresh, contract_id=RF.CONTRACT,
-        executable_price=(zone["low"] + zone["high"]) / 2, now=now or p["now"])
+        executable_price=(zone["low"] + zone["high"]) / 2 if price is None else price,
+        now=now or p["now"])
 
 
 @T.ECU_MODES
@@ -115,6 +116,14 @@ def test_sealed_plan_triggers_through_the_final_quote_across_the_step(
     assert evidence["campaign_episode_id"] == bound["draw"]["campaign_episode_id"]
     assert evidence["history_revision"] == bound["history_revision"] == 0
     assert _final_quote(p, fresh) == (True, None)
+    # Final-quote controls on the same trigger candidate: the sealed zone and
+    # expiry still bind after the step.
+    zone = bound["activation_zone"]
+    assert _final_quote(p, fresh, price=zone["high"] + 1.0) == (
+        False, "conditional_plan_final_quote_outside_authorized_zone")
+    expiry = datetime.fromisoformat(bound["expires_at"].replace("Z", "+00:00"))
+    assert _final_quote(p, fresh, now=expiry) == (
+        False, "conditional_plan_expired_before_final_quote")
     assert len(p["calls"]) == brain_calls
 
 
