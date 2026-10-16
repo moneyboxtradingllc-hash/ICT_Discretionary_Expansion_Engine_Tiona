@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash",
+      "Read",
+      "Edit",
+      "Write",
+      "Glob",
+      "Grep",
+      "mcp__Gmail__*",
+      "mcp__Google_Drive__*",
+      "mcp__Claude_Code_Remote__send_later",
+      "mcp__Claude_Code_Remote__read_documentation"
+    ]
+  }
+}
