@@ -55,9 +55,10 @@ class _Candles:
         return [dict(bar) for bar in self.tape[:self.end][-lookback_bars:]]
 
 
-def _run(root, monkeypatch, *, until, brain_from=None, ecu=False):
-    """Scan every minute through `until`. Returns one row per minute, the
-    Brain payloads and the count of live Po3 stability advances."""
+def _run(root, monkeypatch, *, until, brain_from=None, ecu=False, missed=None):
+    """Scan every minute through `until`, except the minutes inside the
+    inclusive `missed` range. Returns one row per scanned minute, the Brain
+    payloads and the count of live Po3 stability advances."""
     from live_scan.production_scan_cycle import ProductionScanCycle
     from structure.po3_alignment_manager import Po3StabilityManager
     X._isolate(root, monkeypatch)
@@ -95,6 +96,8 @@ def _run(root, monkeypatch, *, until, brain_from=None, ecu=False):
     for end in range(20, len(tape) + 1):
         bar = tape[end - 1]
         hm = bar["timestamp"][11:16]
+        if missed and missed[0] <= hm <= missed[1]:
+            continue
         candles.end = end
         clock[0] = datetime.fromisoformat(bar["timestamp"]) + timedelta(minutes=1)
         venue.market_hub.emit("GatewayQuote", [T.CONTRACT, {
@@ -186,3 +189,90 @@ def test_both_lanes_carry_current_custody_across_the_step(tmp_path, monkeypatch,
         assert row["result"]["reason"] == "campaign_lifecycle_refused", row["result"]
     assert rows["18:00"]["bars"] == 286
     assert len(advances) == len(tape)
+
+
+# ── N1 + D: missed-scan reconstruction ────────────────────────────────────────
+# After a normal 19:29 scan (aligned window 14:30-19:29, 300 bars) the loop
+# misses 19:30-19:38. At 19:39 it fetches 300 bars, keeps the aligned
+# 14:45-19:39 (295 bars) and the rolling catch-up replays the nine missed
+# prefixes. Each is rebuilt as the newest 295 bars of the joined history up to
+# its cutoff (14:36-19:30 ... 14:44-19:38), a length slice that is NOT bucket
+# aligned, so its leading 5m bucket (14:35, then 14:40) has fewer than five
+# constituents. Formation custody must read that truncated bucket as rollout
+# (D, aefa3bb) or it drops the retained bearish 5m formation for good.
+# An every-minute aligned window always starts on a 15m boundary and never
+# presents a truncated leading 5m bucket, so ordinary rollout does not need D.
+MISSED = ("19:30", "19:38")
+
+
+def _leading_buckets(monkeypatch):
+    """Spy on custody: record every check whose source-timeframe history
+    starts with a truncated bucket."""
+    from market_data import reversal_formation as R
+    seen, original = [], R.ReversalFormationCustody._still_current
+
+    def spy(self, snapshot, record, revision, contract, session,
+            canonical_timeframes, releases=None):
+        result = original(self, snapshot, record, revision, contract, session,
+                          canonical_timeframes, releases)
+        index = R.ReversalFormationCustody._history_index(
+            canonical_timeframes, record.get("source_tf"))
+        lead = min(index) if index else None
+        if lead is not None and R._truncated_bucket(index[lead]):
+            seen.append(dict(cutoff=snapshot["timestamp"][11:16], lead=lead[11:16],
+                             members=index[lead].get("members"),
+                             witness=lead in (record.get("witness_bars") or {}),
+                             current=result))
+        return result
+    monkeypatch.setattr(R.ReversalFormationCustody, "_still_current", spy)
+    return seen
+
+
+@pytest.fixture(scope="module")
+def missed_scan(tmp_path_factory):
+    with pytest.MonkeyPatch.context() as mp:
+        seen = _leading_buckets(mp)
+        yield _run(tmp_path_factory.mktemp("missed"), mp, until="19:39",
+                   missed=MISSED), seen
+
+
+def test_missed_scan_reconstruction_keeps_the_formation(missed_scan):
+    (rows, calls, advances, tape), seen = missed_scan
+    assert calls == []
+    assert not any(MISSED[0] <= hm <= MISSED[1] for hm in rows)
+    assert (rows["19:29"]["first"], rows["19:29"]["bars"]) == ("14:30", 300)
+    after = rows["19:39"]
+    assert (after["first"], after["bars"]) == ("14:45", 295)
+    assert after["current"] is True, after["coverage"]
+    assert after["coverage"]["complete"] is True
+    assert after["coverage"]["catch_up_bars"] == 9
+    assert after["revision"] == (0, 0) and after["tip"] == after["window_tip"]
+    assert after["formation"] is not None
+    assert after["formation"] == rows["19:29"]["formation"] == rows["14:59"]["formation"]
+    assert len(advances) == len(tape)
+
+
+def test_only_the_reconstructed_prefixes_present_a_truncated_witness(missed_scan):
+    (rows, _, _, _), seen = missed_scan
+    # The cold start replays its own prefixes (13:00-13:58); after it, only the
+    # nine reconstructed catch-up prefixes start mid-bucket.
+    late = [s for s in seen if s["cutoff"] > "13:59"]
+    assert late, "the reconstructed-prefix path was not exercised"
+    assert {s["cutoff"] for s in late} <= {f"19:{m}" for m in range(30, 39)}
+    assert {s["lead"] for s in late} == {"14:35", "14:40"}
+    assert any(s["witness"] and s["lead"] == "14:35" for s in late)
+    assert all(s["current"] is True for s in late)
+
+
+def test_d_parent_predicate_loses_the_formation_on_reconstruction(tmp_path, monkeypatch):
+    # Activated control. With the truncated-bucket predicate disabled,
+    # _still_current is the D-parent (55582a9) check: the truncated leading
+    # bucket counts as coverage and its digest no longer matches the witness.
+    from market_data import reversal_formation as R
+    monkeypatch.setattr(R, "_truncated_bucket", lambda bar: False)
+    rows, calls, _, _ = _run(tmp_path, monkeypatch, until="19:39", missed=MISSED)
+    assert calls == []
+    assert rows["19:29"]["formation"] == rows["14:59"]["formation"] is not None
+    assert rows["19:39"]["coverage"]["catch_up_bars"] == 9
+    assert rows["19:39"]["current"] is True
+    assert rows["19:39"]["formation"] is None
