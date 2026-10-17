@@ -221,3 +221,56 @@ Parent is the M01 child. Offline package only; production never imports it.
   "receipt_digest": "24eafdb9478b6e9b3bd357d661a1653bb8c3adeb0ce14b3b69ce2b0ba4bacfd5"
 }
 ```
+
+## M03: current driver and real boundary instrumentation
+
+Parent is the M02 child.
+
+```json ledger-entry
+{
+  "schema": "engineering_ledger_entry/v1",
+  "mission_id": "M03",
+  "parent_sha": "f3d8a9796401c02c4f852956dce8deae0a269657",
+  "parent_tree": "560f91ad677e705bf3c3d3d6e7bc84f8f94f2063",
+  "parent_tracked_status": "",
+  "brain_fingerprint": "brain:3d9878ad3ff57f1f",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_count": 48,
+  "closure_digest": "d4dbe6a3ea029c4b59f33a1deba3d7c65ccb877e33afa4aed317b68256a15cf1",
+  "protected_count": 32,
+  "protected_digest": "79988f0ea3e84e15e34485a8510e78efc667f6e274d41fcde5d6e3c0307ab79a",
+  "policy_refs": [
+    "09 M03",
+    "04 driver/brain_gateway/recorder",
+    "08 call graph",
+    "13 security boundary",
+    "10 T16/T20/T22/T27"
+  ],
+  "scoped_files": [
+    "src/recognition_validation/driver.py",
+    "src/recognition_validation/brain_gateway.py",
+    "src/recognition_validation/recorder.py",
+    "tests/test_recognition_current_path.py",
+    "tests/test_recognition_recorder_gateway.py",
+    "docs/recognition_validation/*"
+  ],
+  "proof_ids": [
+    "M03-ACTUAL-LOOP-BOTH-LANES",
+    "M03-WRONG-TARGET-CONTROL",
+    "M03-RECORDER-DURABILITY",
+    "M03-GATEWAY-SEAM"
+  ],
+  "seam_note": "provider client object replaced only for the run; production _call_llm builds and checks every request",
+  "predecessor_receipt_digest": "24eafdb9478b6e9b3bd357d661a1653bb8c3adeb0ce14b3b69ce2b0ba4bacfd5",
+  "receipt_digest": "8e3c8b963eb719e0309db24220a91cdfd0d41012e597b42ec75084b1cef2608e"
+}
+```
+
+M03 receipts (VERIFIED-RUN): `test_recognition_current_path.py` 3 passed
+(both lanes reach the real disarmed ProductionLoop through LocalCandlePort
+and DecisionClock; the distinct-anchor candidate is QUALIFIED_CANDIDATE_
+OBSERVED 16:39-16:44 with zero venue writes, network attempts, tokens and
+attempts; every tick recorded once in a verified chain; transported request
+bytes match the recorded artifacts; wrong-patch-target control shows no
+transported request and production's degraded path).
+`test_recognition_recorder_gateway.py` 8 passed.
