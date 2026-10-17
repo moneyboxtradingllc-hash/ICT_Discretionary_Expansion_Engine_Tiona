@@ -1,0 +1,394 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ict-stage5/event/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "event/v1"
+    },
+    "document_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "classification": {
+          "enum": [
+            "CONSTRUCTED",
+            "REPOSITORY_RECORDED",
+            "APPROVED_ARCHIVE",
+            "FICTIONAL",
+            "UNKNOWN"
+          ]
+        },
+        "author_role": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "notes": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "classification",
+        "author_role",
+        "source_refs",
+        "notes"
+      ]
+    },
+    "run_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "trajectory_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "previous_event_digest": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "scan_key": {
+      "type": "string",
+      "minLength": 1
+    },
+    "settled_cutoff": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "observed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "event_kind": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_event_refs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "minLength": 1
+          },
+          "event_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "timeframe": {
+            "anyOf": [
+              {
+                "enum": [
+                  "1m",
+                  "3m",
+                  "5m",
+                  "15m"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "available_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unresolved_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "event_id",
+          "timeframe",
+          "source_time",
+          "available_at",
+          "level",
+          "unresolved_reason"
+        ]
+      },
+      "minItems": 0
+    },
+    "history_revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "derived_revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "process_lineage_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "scope_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "scope_proof_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "draw_record_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "formation_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "tool_occurrence_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "candidate_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "plan_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "boundary": {
+      "enum": [
+        "INGEST",
+        "SCAN",
+        "BRAIN",
+        "SCOPE",
+        "DRAW",
+        "LIFECYCLE",
+        "CATALOG",
+        "CANDIDATE",
+        "PLAN_CAPTURE",
+        "PLAN_TRIGGER",
+        "FINAL_QUOTE",
+        "MISSION",
+        "PRE_VENUE",
+        "RECORDING"
+      ]
+    },
+    "outcome": {
+      "type": "string",
+      "minLength": 1
+    },
+    "first_refusal_code": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "primary_call_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "repair_call_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "origin": {
+            "enum": [
+              "CONSTRUCTED",
+              "REPOSITORY_RECORDED",
+              "APPROVED_ARCHIVE",
+              "FINAL_HISTORY_ONLY",
+              "UNKNOWN"
+            ]
+          }
+        },
+        "required": [
+          "path",
+          "sha256",
+          "bytes",
+          "origin"
+        ]
+      },
+      "minItems": 0
+    },
+    "missing_evidence": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 0
+    },
+    "event_payload_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  },
+  "required": [
+    "schema_version",
+    "document_id",
+    "provenance",
+    "run_digest",
+    "trajectory_id",
+    "sequence",
+    "previous_event_digest",
+    "scan_key",
+    "settled_cutoff",
+    "observed_at",
+    "event_kind",
+    "source_event_refs",
+    "history_revision",
+    "derived_revision",
+    "process_lineage_id",
+    "scope_id",
+    "scope_proof_id",
+    "draw_record_id",
+    "formation_id",
+    "tool_occurrence_id",
+    "candidate_id",
+    "plan_id",
+    "boundary",
+    "outcome",
+    "first_refusal_code",
+    "primary_call_count",
+    "repair_call_count",
+    "evidence_refs",
+    "missing_evidence",
+    "event_payload_digest"
+  ]
+}

@@ -1,0 +1,69 @@
+{
+  "schema_version": "result/v1",
+  "document_id": "FICTIONAL-RESULT",
+  "provenance": {
+    "classification": "FICTIONAL",
+    "author_role": "CONTRACT_EXAMPLE",
+    "source_refs": [
+      "FICTIONAL: no recorded market or owner annotation"
+    ],
+    "notes": "FICTIONAL schema example only; never recognition ground truth."
+  },
+  "run_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+  "mode": "B",
+  "engineering_status": "INCOMPLETE",
+  "stage4_internal_status": "UNPROVEN",
+  "stage4_owner_acceptance_ref": null,
+  "current_brain_recognition": "UNPROVEN",
+  "recognition_ratification_ref": null,
+  "historical_archive_certification": "UNPROVEN",
+  "controlled_observation_authorized": false,
+  "production_authorized": false,
+  "external_request_count": 0,
+  "session_summaries": [
+    {
+      "session_id": "FICTIONAL-SESSION",
+      "trajectory_id": "FICTIONAL-B-1",
+      "scored_episode_count": 0,
+      "missing_episode_count": 1,
+      "metrics": [
+        {
+          "name": "current_brain_recognition_rate",
+          "value": null,
+          "numerator": 0,
+          "denominator": 0,
+          "excluded_count": 0,
+          "unproven_count": 1,
+          "threshold_ref": null,
+          "assessment": "UNPROVEN"
+        }
+      ],
+      "confusion_cells": [
+        {
+          "layer": "RECOGNITION",
+          "expected": "UNKNOWN",
+          "observed": "MISSING_COGNITION",
+          "unit": "EPISODE",
+          "count": 1,
+          "eligible_count": 0,
+          "excluded_count": 0,
+          "unproven_count": 1,
+          "truth_source_ref": null,
+          "assessment": "UNPROVEN"
+        }
+      ],
+      "first_recognition_utc": null,
+      "first_candidate_utc": null,
+      "first_refusal_code": "FICTIONAL_MISSING_COGNITION",
+      "limitations": [
+        "FICTIONAL example only, not a replay or owner annotation"
+      ]
+    }
+  ],
+  "invariant_failures": [],
+  "missing_prerequisites": [
+    "FICTIONAL example; no engineering run or owner evaluation inputs"
+  ],
+  "artifact_refs": [],
+  "final_status": "UNPROVEN"
+}

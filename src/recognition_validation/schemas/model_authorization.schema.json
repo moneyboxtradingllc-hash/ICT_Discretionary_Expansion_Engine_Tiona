@@ -1,0 +1,280 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ict-stage5/model_authorization/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "model_authorization/v1"
+    },
+    "document_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "classification": {
+          "enum": [
+            "CONSTRUCTED",
+            "REPOSITORY_RECORDED",
+            "APPROVED_ARCHIVE",
+            "FICTIONAL",
+            "UNKNOWN"
+          ]
+        },
+        "author_role": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "notes": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "classification",
+        "author_role",
+        "source_refs",
+        "notes"
+      ]
+    },
+    "state": {
+      "enum": [
+        "DISABLED",
+        "OWNER_AUTHORIZED"
+      ]
+    },
+    "owner_receipt_ref": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "origin": {
+              "enum": [
+                "CONSTRUCTED",
+                "REPOSITORY_RECORDED",
+                "APPROVED_ARCHIVE",
+                "FINAL_HISTORY_ONLY",
+                "UNKNOWN"
+              ]
+            }
+          },
+          "required": [
+            "path",
+            "sha256",
+            "bytes",
+            "origin"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "source_sha": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    },
+    "brain_fingerprint": {
+      "type": "string",
+      "minLength": 1
+    },
+    "retrieval_fingerprint": {
+      "type": "string",
+      "minLength": 1
+    },
+    "model": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "parameter_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "endpoint_identity": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "corpus_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "annotation_digests": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-f0-9]{64}$"
+      },
+      "minItems": 0
+    },
+    "scoring_plan_digest": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "schedule_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "trajectory_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "issued_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "max_external_requests": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "max_input_tokens_per_request": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "max_output_tokens_per_request": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "max_repair_requests": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "max_transport_retries": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "max_cost_usd": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+    },
+    "pricing_digest": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "stage4_owner_acceptance_ref": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "seal": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "sealed_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "sealer_ref": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "sha256",
+            "sealed_at",
+            "sealer_ref"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "document_id",
+    "provenance",
+    "state",
+    "owner_receipt_ref",
+    "source_sha",
+    "brain_fingerprint",
+    "retrieval_fingerprint",
+    "model",
+    "parameter_digest",
+    "endpoint_identity",
+    "corpus_digest",
+    "annotation_digests",
+    "scoring_plan_digest",
+    "schedule_digest",
+    "trajectory_count",
+    "issued_at",
+    "expires_at",
+    "max_external_requests",
+    "max_input_tokens_per_request",
+    "max_output_tokens_per_request",
+    "max_repair_requests",
+    "max_transport_retries",
+    "max_cost_usd",
+    "pricing_digest",
+    "stage4_owner_acceptance_ref",
+    "seal"
+  ]
+}

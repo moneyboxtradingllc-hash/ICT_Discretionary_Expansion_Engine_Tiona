@@ -1,0 +1,41 @@
+{
+  "schema_version": "event/v1",
+  "document_id": "FICTIONAL-EVENT",
+  "provenance": {
+    "classification": "FICTIONAL",
+    "author_role": "CONTRACT_EXAMPLE",
+    "source_refs": [
+      "FICTIONAL: no recorded market or owner annotation"
+    ],
+    "notes": "FICTIONAL schema example only; never recognition ground truth."
+  },
+  "run_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+  "trajectory_id": "FICTIONAL-B-1",
+  "sequence": 0,
+  "previous_event_digest": null,
+  "scan_key": "FICTIONAL-SESSION/2030-01-02T14:00:00Z/0",
+  "settled_cutoff": "2030-01-02T14:00:00Z",
+  "observed_at": "2030-01-02T14:01:00Z",
+  "event_kind": "FICTIONAL_MISSING_COGNITION",
+  "source_event_refs": [],
+  "history_revision": 0,
+  "derived_revision": 0,
+  "process_lineage_id": "FICTIONAL-LINEAGE",
+  "scope_id": null,
+  "scope_proof_id": null,
+  "draw_record_id": null,
+  "formation_id": null,
+  "tool_occurrence_id": null,
+  "candidate_id": null,
+  "plan_id": null,
+  "boundary": "BRAIN",
+  "outcome": "UNPROVEN",
+  "first_refusal_code": "FICTIONAL_MISSING_COGNITION",
+  "primary_call_count": 0,
+  "repair_call_count": 0,
+  "evidence_refs": [],
+  "missing_evidence": [
+    "FICTIONAL: no historical cognition"
+  ],
+  "event_payload_digest": "314f6eb0e0c4e2934036593a425766155ec8ef75f49ccf05ab1c1a4e2421890f"
+}

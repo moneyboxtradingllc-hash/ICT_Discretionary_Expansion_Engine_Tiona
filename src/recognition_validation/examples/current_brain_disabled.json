@@ -1,0 +1,54 @@
+{
+  "schema_version": "run/v1",
+  "document_id": "FICTIONAL-C-DISABLED",
+  "provenance": {
+    "classification": "FICTIONAL",
+    "author_role": "CONTRACT_EXAMPLE",
+    "source_refs": [
+      "FICTIONAL: no recorded market or owner annotation"
+    ],
+    "notes": "FICTIONAL schema example only; never recognition ground truth."
+  },
+  "source_sha": "f5934c015de824779352ee9c4a95400b38a44ed9",
+  "source_tree": "96316d4b3ef8cd1895530cf448b2bf08bc32790f",
+  "dirty_tree_digest": null,
+  "brain_fingerprint": "brain:3d9878ad3ff57f1f",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+  "mode": "C",
+  "ecu": true,
+  "trajectory_id": "FICTIONAL-C-DRY",
+  "corpus_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+  "annotation_digest": null,
+  "scoring_plan_digest": null,
+  "schedule_ref": {
+    "path": "FICTIONAL/not-a-real-tape.json",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "bytes": 0,
+    "origin": "CONSTRUCTED"
+  },
+  "memory_policy": "EMPTY",
+  "quote_policy": "MISSING",
+  "clock_policy": "AWARE_UTC_AVAILABILITY",
+  "model_calls_authorized": false,
+  "model_requested": null,
+  "model_parameters": {
+    "profile_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+    "description": "FICTIONAL disabled parameters, no model request"
+  },
+  "budget": {
+    "max_external_requests": 0,
+    "max_input_tokens_per_request": 0,
+    "max_output_tokens_per_request": 0,
+    "max_repair_requests": 0,
+    "max_transport_retries": 0,
+    "max_cost_usd": "0",
+    "pricing_table_ref": null,
+    "authorization_ref": null,
+    "expires_at": null
+  },
+  "trajectory_count": 0,
+  "dry_run": true,
+  "isolation_receipt": "FICTIONAL: not executed",
+  "evaluation_contract_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+}

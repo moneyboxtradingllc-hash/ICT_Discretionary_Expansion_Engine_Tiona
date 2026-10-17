@@ -1,0 +1,27 @@
+{
+  "schema_version": "schedule/v1",
+  "document_id": "FICTIONAL-SCHEDULE",
+  "provenance": {
+    "classification": "FICTIONAL",
+    "author_role": "CONTRACT_EXAMPLE",
+    "source_refs": [
+      "FICTIONAL: no recorded market or owner annotation"
+    ],
+    "notes": "FICTIONAL schema example only; never recognition ground truth."
+  },
+  "corpus_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+  "algorithm": "CONSTRUCTED_ADVERSARIAL",
+  "algorithm_version": "fictional-v1",
+  "cognition_policy": "PRODUCTION_SCAN_ONCE_WITH_PLAN_WAKE_SEMANTICS",
+  "ticks": [
+    {
+      "session_id": "FICTIONAL-SESSION",
+      "ordinal": 0,
+      "decision_time_utc": "2030-01-02T14:01:00Z",
+      "kind": "SCAN",
+      "source_ref": null
+    }
+  ],
+  "warmup_cognition": "NONE",
+  "seal": null
+}

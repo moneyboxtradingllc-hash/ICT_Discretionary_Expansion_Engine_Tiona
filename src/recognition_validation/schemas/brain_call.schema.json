@@ -1,0 +1,510 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ict-stage5/brain_call/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "brain_call/v1"
+    },
+    "document_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "classification": {
+          "enum": [
+            "CONSTRUCTED",
+            "REPOSITORY_RECORDED",
+            "APPROVED_ARCHIVE",
+            "FICTIONAL",
+            "UNKNOWN"
+          ]
+        },
+        "author_role": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "notes": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "classification",
+        "author_role",
+        "source_refs",
+        "notes"
+      ]
+    },
+    "run_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "trajectory_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "scan_key": {
+      "type": "string",
+      "minLength": 1
+    },
+    "settled_cutoff": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "decision_time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "purpose": {
+      "enum": [
+        "PRIMARY",
+        "REPAIR",
+        "FAMILY_REPAIR",
+        "INVALIDATION_REPAIR",
+        "RETRY"
+      ]
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "evaluation_origin": {
+      "enum": [
+        "HISTORICAL",
+        "MOCK",
+        "CURRENT_EXTERNAL",
+        "FALLBACK",
+        "MISSING"
+      ]
+    },
+    "input_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "origin": {
+          "enum": [
+            "CONSTRUCTED",
+            "REPOSITORY_RECORDED",
+            "APPROVED_ARCHIVE",
+            "FINAL_HISTORY_ONLY",
+            "UNKNOWN"
+          ]
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "bytes",
+        "origin"
+      ]
+    },
+    "prompt_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "origin": {
+          "enum": [
+            "CONSTRUCTED",
+            "REPOSITORY_RECORDED",
+            "APPROVED_ARCHIVE",
+            "FINAL_HISTORY_ONLY",
+            "UNKNOWN"
+          ]
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "bytes",
+        "origin"
+      ]
+    },
+    "raw_response_ref": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "origin": {
+              "enum": [
+                "CONSTRUCTED",
+                "REPOSITORY_RECORDED",
+                "APPROVED_ARCHIVE",
+                "FINAL_HISTORY_ONLY",
+                "UNKNOWN"
+              ]
+            }
+          },
+          "required": [
+            "path",
+            "sha256",
+            "bytes",
+            "origin"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "parsed_output_ref": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "origin": {
+              "enum": [
+                "CONSTRUCTED",
+                "REPOSITORY_RECORDED",
+                "APPROVED_ARCHIVE",
+                "FINAL_HISTORY_ONLY",
+                "UNKNOWN"
+              ]
+            }
+          },
+          "required": [
+            "path",
+            "sha256",
+            "bytes",
+            "origin"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "post_guard_output_ref": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "origin": {
+              "enum": [
+                "CONSTRUCTED",
+                "REPOSITORY_RECORDED",
+                "APPROVED_ARCHIVE",
+                "FINAL_HISTORY_ONLY",
+                "UNKNOWN"
+              ]
+            }
+          },
+          "required": [
+            "path",
+            "sha256",
+            "bytes",
+            "origin"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "requested_model": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "served_model": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "brain_fingerprint": {
+      "type": "string",
+      "minLength": 1
+    },
+    "retrieval_fingerprint": {
+      "type": "string",
+      "minLength": 1
+    },
+    "historical_brain_fingerprint": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "historical_unknown_reason": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "parameter_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "provider_request_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "provider_response_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "completed_at": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date-time"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "request_attempted": {
+      "type": "boolean"
+    },
+    "usage": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "input_tokens": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "output_tokens": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "cached_input_tokens": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "input_tokens",
+            "output_tokens",
+            "cached_input_tokens"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "budget_reservation_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "fallback_reason": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "record_status": {
+      "enum": [
+        "COMPLETE",
+        "INCOMPLETE",
+        "REFUSED"
+      ]
+    },
+    "request_ref": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "origin": {
+              "enum": [
+                "CONSTRUCTED",
+                "REPOSITORY_RECORDED",
+                "APPROVED_ARCHIVE",
+                "FINAL_HISTORY_ONLY",
+                "UNKNOWN"
+              ]
+            }
+          },
+          "required": [
+            "path",
+            "sha256",
+            "bytes",
+            "origin"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "document_id",
+    "provenance",
+    "run_digest",
+    "trajectory_id",
+    "scan_key",
+    "settled_cutoff",
+    "decision_time",
+    "purpose",
+    "attempt",
+    "evaluation_origin",
+    "input_ref",
+    "prompt_ref",
+    "raw_response_ref",
+    "parsed_output_ref",
+    "post_guard_output_ref",
+    "requested_model",
+    "served_model",
+    "brain_fingerprint",
+    "retrieval_fingerprint",
+    "historical_brain_fingerprint",
+    "historical_unknown_reason",
+    "parameter_digest",
+    "provider_request_id",
+    "provider_response_id",
+    "started_at",
+    "completed_at",
+    "request_attempted",
+    "usage",
+    "budget_reservation_id",
+    "fallback_reason",
+    "record_status",
+    "request_ref"
+  ]
+}

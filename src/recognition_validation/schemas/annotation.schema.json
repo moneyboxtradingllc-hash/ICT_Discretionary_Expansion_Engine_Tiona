@@ -1,0 +1,731 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ict-stage5/annotation/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "annotation/v1"
+    },
+    "document_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "classification": {
+          "enum": [
+            "CONSTRUCTED",
+            "REPOSITORY_RECORDED",
+            "APPROVED_ARCHIVE",
+            "FICTIONAL",
+            "UNKNOWN"
+          ]
+        },
+        "author_role": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "notes": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "classification",
+        "author_role",
+        "source_refs",
+        "notes"
+      ]
+    },
+    "corpus_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "annotator_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "annotator_role": {
+      "enum": [
+        "OWNER",
+        "AUTHORIZED_DELEGATE",
+        "UNASSIGNED",
+        "FICTIONAL"
+      ]
+    },
+    "authorization_ref": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "state": {
+      "enum": [
+        "DRAFT",
+        "SEALED",
+        "FICTIONAL"
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "labels": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "label_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "window": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "start_utc": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "end_utc": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "start_utc",
+              "end_utc"
+            ]
+          },
+          "earliest_available_utc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "recognition_target": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "start_utc": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "end_utc": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "start_utc",
+              "end_utc"
+            ]
+          },
+          "dominant_campaign_direction": {
+            "enum": [
+              "bullish",
+              "bearish",
+              "conflicted",
+              "neutral",
+              "UNKNOWN"
+            ]
+          },
+          "campaign_origin": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "event_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "timeframe": {
+                  "anyOf": [
+                    {
+                      "enum": [
+                        "1m",
+                        "3m",
+                        "5m",
+                        "15m"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "source_time": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "available_at": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "level": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "unresolved_reason": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "kind",
+                "event_id",
+                "timeframe",
+                "source_time",
+                "available_at",
+                "level",
+                "unresolved_reason"
+              ]
+            },
+            "minItems": 0
+          },
+          "campaign_objective": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "event_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "timeframe": {
+                  "anyOf": [
+                    {
+                      "enum": [
+                        "1m",
+                        "3m",
+                        "5m",
+                        "15m"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "source_time": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "available_at": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "level": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "unresolved_reason": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "kind",
+                "event_id",
+                "timeframe",
+                "source_time",
+                "available_at",
+                "level",
+                "unresolved_reason"
+              ]
+            },
+            "minItems": 0
+          },
+          "delivery_state": {
+            "enum": [
+              "ACTIVE_DELIVERY",
+              "RETRACEMENT",
+              "REVERSAL_DEVELOPING",
+              "TRANSFER_CONFIRMED",
+              "UNKNOWN"
+            ]
+          },
+          "required_invalidation_evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "event_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "timeframe": {
+                  "anyOf": [
+                    {
+                      "enum": [
+                        "1m",
+                        "3m",
+                        "5m",
+                        "15m"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "source_time": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "available_at": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "level": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "unresolved_reason": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "kind",
+                "event_id",
+                "timeframe",
+                "source_time",
+                "available_at",
+                "level",
+                "unresolved_reason"
+              ]
+            },
+            "minItems": 0
+          },
+          "opposing_transfer_evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "event_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "timeframe": {
+                  "anyOf": [
+                    {
+                      "enum": [
+                        "1m",
+                        "3m",
+                        "5m",
+                        "15m"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "source_time": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "available_at": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "level": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "unresolved_reason": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "kind",
+                "event_id",
+                "timeframe",
+                "source_time",
+                "available_at",
+                "level",
+                "unresolved_reason"
+              ]
+            },
+            "minItems": 0
+          },
+          "opportunity": {
+            "enum": [
+              "eligible",
+              "forbidden",
+              "ambiguous",
+              "UNKNOWN"
+            ]
+          },
+          "playbook_family": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tool_family": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "occurrence_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "timeframes": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "1m",
+                "3m",
+                "5m",
+                "15m"
+              ]
+            },
+            "minItems": 0
+          },
+          "expected_action": {
+            "enum": [
+              "ENTRY",
+              "WATCHING",
+              "STAND_DOWN",
+              "UNKNOWN"
+            ]
+          },
+          "expected_unknown_or_stand_down_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "confidence": {
+            "enum": [
+              "CLEAR",
+              "ARGUABLE",
+              "UNKNOWN"
+            ]
+          },
+          "ambiguous": {
+            "type": "boolean"
+          },
+          "source_evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "bytes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "origin": {
+                  "enum": [
+                    "CONSTRUCTED",
+                    "REPOSITORY_RECORDED",
+                    "APPROVED_ARCHIVE",
+                    "FINAL_HISTORY_ONLY",
+                    "UNKNOWN"
+                  ]
+                }
+              },
+              "required": [
+                "path",
+                "sha256",
+                "bytes",
+                "origin"
+              ]
+            },
+            "minItems": 0
+          },
+          "notes": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "label_id",
+          "window",
+          "earliest_available_utc",
+          "recognition_target",
+          "dominant_campaign_direction",
+          "campaign_origin",
+          "campaign_objective",
+          "delivery_state",
+          "required_invalidation_evidence",
+          "opposing_transfer_evidence",
+          "opportunity",
+          "playbook_family",
+          "tool_family",
+          "occurrence_id",
+          "timeframes",
+          "expected_action",
+          "expected_unknown_or_stand_down_reason",
+          "confidence",
+          "ambiguous",
+          "source_evidence",
+          "notes"
+        ]
+      },
+      "minItems": 0
+    },
+    "seal": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "sealed_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "sealer_ref": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "sha256",
+            "sealed_at",
+            "sealer_ref"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "document_id",
+    "provenance",
+    "corpus_digest",
+    "session_id",
+    "annotator_id",
+    "annotator_role",
+    "authorization_ref",
+    "state",
+    "created_at",
+    "labels",
+    "seal"
+  ]
+}

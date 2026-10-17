@@ -173,3 +173,51 @@ M01 progress receipts (VERIFIED-RUN, offline runner as M00):
   `datetime.utcnow()` in src/ai_brain/thesis_lifecycle.py:214, recorded for
   T32), 859 s; JUnit sha256 36f5678c400f3502041f1facc779892a3ddbc9d5690e0919826ca2b1a2311d82. Test-only mission: the full suite is
   deferred to the M07 final frozen child per contract 09.
+
+## M02: input contracts, corpus/provenance, isolated ports
+
+Parent is the M01 child. Offline package only; production never imports it.
+
+```json ledger-entry
+{
+  "schema": "engineering_ledger_entry/v1",
+  "mission_id": "M02",
+  "parent_sha": "63d503f9fb8182b19d64552ac8b4bfbcb8d5f62a",
+  "parent_tree": "3046f4b222c8df9b9a2f43841a9e68320a5d8c58",
+  "parent_tracked_status": "",
+  "brain_fingerprint": "brain:3d9878ad3ff57f1f",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_count": 48,
+  "closure_digest": "d4dbe6a3ea029c4b59f33a1deba3d7c65ccb877e33afa4aed317b68256a15cf1",
+  "protected_count": 32,
+  "protected_digest": "79988f0ea3e84e15e34485a8510e78efc667f6e274d41fcde5d6e3c0307ab79a",
+  "policy_refs": [
+    "09 M02",
+    "04 components contracts/corpus/ports",
+    "05 corpus and provenance",
+    "07 schemas and canonical bytes",
+    "13 security boundary"
+  ],
+  "scoped_files": [
+    "src/recognition_validation/__init__.py",
+    "src/recognition_validation/contracts.py",
+    "src/recognition_validation/corpus.py",
+    "src/recognition_validation/ports.py",
+    "src/recognition_validation/schemas/*",
+    "src/recognition_validation/examples/*",
+    "tests/test_recognition_contracts.py",
+    "tests/test_recognition_corpus_ports.py",
+    "docs/recognition_validation/*"
+  ],
+  "proof_ids": [
+    "M02-CONTRACT-NEGATIVES",
+    "M02-RELEASE-AVAILABILITY",
+    "M02-ARTIFACT-INTEGRITY",
+    "M02-PORTS-DENY-BY-DEFAULT",
+    "M02-FIXTURE-RECONCILIATION"
+  ],
+  "closure_note": "new offline package is not imported by production and is outside the Brain closure",
+  "predecessor_receipt_digest": "7ad840e1e699adeaabd877833b8bf3923afbfa3764ab6de051ec66853b4cc821",
+  "receipt_digest": "24eafdb9478b6e9b3bd357d661a1653bb8c3adeb0ce14b3b69ce2b0ba4bacfd5"
+}
+```

@@ -1,0 +1,28 @@
+{
+  "schema_version": "scoring/v1",
+  "document_id": "FICTIONAL-SCORING",
+  "provenance": {
+    "classification": "FICTIONAL",
+    "author_role": "CONTRACT_EXAMPLE",
+    "source_refs": [
+      "FICTIONAL: no recorded market or owner annotation"
+    ],
+    "notes": "FICTIONAL schema example only; never recognition ground truth."
+  },
+  "state": "FICTIONAL",
+  "owner_decision_ref": null,
+  "corpus_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+  "annotation_digests": [],
+  "direction_labels": [
+    "bullish",
+    "bearish",
+    "conflicted",
+    "neutral",
+    "UNKNOWN"
+  ],
+  "tolerance_seconds": null,
+  "unknown_scoring_rule": "DESCRIPTIVE_ONLY",
+  "thresholds": [],
+  "unit_of_analysis": "SESSION_TRAJECTORY_EPISODE",
+  "seal": null
+}

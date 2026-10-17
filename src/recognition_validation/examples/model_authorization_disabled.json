@@ -1,0 +1,36 @@
+{
+  "schema_version": "model_authorization/v1",
+  "document_id": "FICTIONAL-AUTHORIZATION-DISABLED",
+  "provenance": {
+    "classification": "FICTIONAL",
+    "author_role": "CONTRACT_EXAMPLE",
+    "source_refs": [
+      "FICTIONAL: no recorded market or owner annotation"
+    ],
+    "notes": "FICTIONAL schema example only; never recognition ground truth."
+  },
+  "state": "DISABLED",
+  "owner_receipt_ref": null,
+  "source_sha": "f5934c015de824779352ee9c4a95400b38a44ed9",
+  "brain_fingerprint": "brain:3d9878ad3ff57f1f",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "model": null,
+  "parameter_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+  "endpoint_identity": null,
+  "corpus_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+  "annotation_digests": [],
+  "scoring_plan_digest": null,
+  "schedule_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+  "trajectory_count": 0,
+  "issued_at": "2030-01-01T00:00:00Z",
+  "expires_at": "2030-01-02T00:00:00Z",
+  "max_external_requests": 0,
+  "max_input_tokens_per_request": 0,
+  "max_output_tokens_per_request": 0,
+  "max_repair_requests": 0,
+  "max_transport_retries": 0,
+  "max_cost_usd": "0",
+  "pricing_digest": null,
+  "stage4_owner_acceptance_ref": null,
+  "seal": null
+}

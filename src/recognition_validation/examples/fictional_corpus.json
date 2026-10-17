@@ -1,0 +1,67 @@
+{
+  "schema_version": "corpus/v1",
+  "document_id": "FICTIONAL-CORPUS",
+  "provenance": {
+    "classification": "FICTIONAL",
+    "author_role": "CONTRACT_EXAMPLE",
+    "source_refs": [
+      "FICTIONAL: no recorded market or owner annotation"
+    ],
+    "notes": "FICTIONAL schema example only; never recognition ground truth."
+  },
+  "selection_state": "ENGINEERING_ONLY",
+  "owner_decision_ref": null,
+  "sessions": [
+    {
+      "session_id": "FICTIONAL-SESSION",
+      "instrument": "FICTIONAL",
+      "contract_id": "FICTIONAL-CONTRACT",
+      "market_date": "2030-01-02",
+      "timezone": "America/New_York",
+      "session_window": {
+        "start_utc": "2030-01-02T14:00:00Z",
+        "end_utc": "2030-01-02T14:05:00Z"
+      },
+      "warmup_window": {
+        "start_utc": "2030-01-02T13:00:00Z",
+        "end_utc": "2030-01-02T14:00:00Z"
+      },
+      "scored_window": {
+        "start_utc": "2030-01-02T14:00:00Z",
+        "end_utc": "2030-01-02T14:05:00Z"
+      },
+      "timestamp_semantics": "BAR_OPEN_UTC",
+      "settlement": {
+        "status": "UNKNOWN",
+        "policy_ref": null,
+        "reason": "FICTIONAL: no provider settlement proof"
+      },
+      "provider": null,
+      "original": {
+        "path": "FICTIONAL/not-a-real-tape.json",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "bytes": 0,
+        "origin": "CONSTRUCTED"
+      },
+      "derived": null,
+      "availability_events": null,
+      "history_track": "CONSTRUCTED_RELEASES",
+      "gaps": [],
+      "revisions": [],
+      "missing_intervals": [],
+      "quotes": null,
+      "brain_records": null,
+      "brain_fingerprint": null,
+      "fingerprint_evidence_ref": null,
+      "fingerprint_unknown_reason": "FICTIONAL: no cognition",
+      "memory_seed": null,
+      "news": null,
+      "partition": "ENGINEERING",
+      "eligibility": "UNPROVEN",
+      "exclusion_reasons": [
+        "FICTIONAL: not actual data"
+      ]
+    }
+  ],
+  "seal": null
+}

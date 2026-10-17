@@ -1,0 +1,36 @@
+{
+  "schema_version": "release/v1",
+  "document_id": "FICTIONAL-RELEASE",
+  "provenance": {
+    "classification": "FICTIONAL",
+    "author_role": "CONTRACT_EXAMPLE",
+    "source_refs": [
+      "FICTIONAL: no recorded market or owner annotation"
+    ],
+    "notes": "FICTIONAL schema example only; never recognition ground truth."
+  },
+  "session_id": "FICTIONAL-SESSION",
+  "sequence": 0,
+  "contract_id": "FICTIONAL-CONTRACT",
+  "bar_open_utc": "2030-01-02T14:00:00Z",
+  "available_at_utc": "2030-01-02T14:01:00Z",
+  "settled_at_utc": "2030-01-02T14:01:00Z",
+  "settlement_proven": true,
+  "version": 1,
+  "supersedes_version": null,
+  "source_artifact": {
+    "path": "FICTIONAL/not-a-real-tape.json",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "bytes": 0,
+    "origin": "CONSTRUCTED"
+  },
+  "bar": {
+    "timestamp": "2030-01-02T14:00:00Z",
+    "contract": "FICTIONAL-CONTRACT",
+    "open": 100,
+    "high": 101,
+    "low": 99,
+    "close": 100.5,
+    "volume": 10
+  }
+}

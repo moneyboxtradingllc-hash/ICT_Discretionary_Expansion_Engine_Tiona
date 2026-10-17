@@ -1,0 +1,54 @@
+{
+  "schema_version": "annotation/v1",
+  "document_id": "FICTIONAL-ANNOTATION",
+  "provenance": {
+    "classification": "FICTIONAL",
+    "author_role": "CONTRACT_EXAMPLE",
+    "source_refs": [
+      "FICTIONAL: no recorded market or owner annotation"
+    ],
+    "notes": "FICTIONAL schema example only; never recognition ground truth."
+  },
+  "corpus_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+  "session_id": "FICTIONAL-SESSION",
+  "annotator_id": "FICTIONAL-AUTHOR",
+  "annotator_role": "FICTIONAL",
+  "authorization_ref": null,
+  "state": "FICTIONAL",
+  "created_at": "2030-01-01T00:00:00Z",
+  "labels": [
+    {
+      "label_id": "FICTIONAL-LABEL",
+      "window": {
+        "start_utc": "2030-01-02T14:00:00Z",
+        "end_utc": "2030-01-02T14:05:00Z"
+      },
+      "earliest_available_utc": "2030-01-02T14:00:00Z",
+      "recognition_target": {
+        "start_utc": "2030-01-02T14:00:00Z",
+        "end_utc": "2030-01-02T14:05:00Z"
+      },
+      "dominant_campaign_direction": "UNKNOWN",
+      "campaign_origin": [],
+      "campaign_objective": [],
+      "delivery_state": "UNKNOWN",
+      "required_invalidation_evidence": [],
+      "opposing_transfer_evidence": [],
+      "opportunity": "UNKNOWN",
+      "playbook_family": null,
+      "tool_family": null,
+      "occurrence_id": null,
+      "timeframes": [
+        "5m",
+        "15m"
+      ],
+      "expected_action": "UNKNOWN",
+      "expected_unknown_or_stand_down_reason": "FICTIONAL uncertain chart read",
+      "confidence": "UNKNOWN",
+      "ambiguous": true,
+      "source_evidence": [],
+      "notes": "FICTIONAL: no Maurice annotation is supplied."
+    }
+  ],
+  "seal": null
+}

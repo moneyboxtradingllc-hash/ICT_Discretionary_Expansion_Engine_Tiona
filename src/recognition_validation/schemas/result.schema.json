@@ -1,0 +1,438 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ict-stage5/result/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "result/v1"
+    },
+    "document_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "classification": {
+          "enum": [
+            "CONSTRUCTED",
+            "REPOSITORY_RECORDED",
+            "APPROVED_ARCHIVE",
+            "FICTIONAL",
+            "UNKNOWN"
+          ]
+        },
+        "author_role": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "notes": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "classification",
+        "author_role",
+        "source_refs",
+        "notes"
+      ]
+    },
+    "run_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "mode": {
+      "enum": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "engineering_status": {
+      "enum": [
+        "COMPLETE",
+        "INCOMPLETE",
+        "FAIL"
+      ]
+    },
+    "stage4_internal_status": {
+      "enum": [
+        "PASS",
+        "FAIL",
+        "UNPROVEN"
+      ]
+    },
+    "stage4_owner_acceptance_ref": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "current_brain_recognition": {
+      "enum": [
+        "UNPROVEN",
+        "ELIGIBLE_FOR_OWNER_REVIEW",
+        "OWNER_ACCEPTED",
+        "FAIL"
+      ]
+    },
+    "recognition_ratification_ref": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "historical_archive_certification": {
+      "enum": [
+        "UNPROVEN",
+        "PARTIAL",
+        "VERIFIED"
+      ]
+    },
+    "controlled_observation_authorized": {
+      "const": false
+    },
+    "production_authorized": {
+      "const": false
+    },
+    "external_request_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "session_summaries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "trajectory_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "scored_episode_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "missing_episode_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "metrics": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "value": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "numerator": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "denominator": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "excluded_count": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "unproven_count": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "threshold_ref": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "assessment": {
+                  "enum": [
+                    "DIAGNOSTIC",
+                    "PASS",
+                    "FAIL",
+                    "UNPROVEN",
+                    "UNSCORED"
+                  ]
+                }
+              },
+              "required": [
+                "name",
+                "value",
+                "numerator",
+                "denominator",
+                "excluded_count",
+                "unproven_count",
+                "threshold_ref",
+                "assessment"
+              ]
+            },
+            "minItems": 0
+          },
+          "confusion_cells": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "layer": {
+                  "enum": [
+                    "FACT",
+                    "CAMPAIGN",
+                    "RECOGNITION",
+                    "REFUSAL",
+                    "TIMING",
+                    "COMPOSITION"
+                  ]
+                },
+                "expected": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "observed": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "unit": {
+                  "enum": [
+                    "SCAN",
+                    "EPISODE",
+                    "SESSION_TRAJECTORY"
+                  ]
+                },
+                "count": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "eligible_count": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "excluded_count": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "unproven_count": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "truth_source_ref": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "assessment": {
+                  "enum": [
+                    "DIAGNOSTIC",
+                    "PASS",
+                    "FAIL",
+                    "UNPROVEN",
+                    "UNSCORED"
+                  ]
+                }
+              },
+              "required": [
+                "layer",
+                "expected",
+                "observed",
+                "unit",
+                "count",
+                "eligible_count",
+                "excluded_count",
+                "unproven_count",
+                "truth_source_ref",
+                "assessment"
+              ]
+            },
+            "minItems": 0
+          },
+          "first_recognition_utc": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "first_candidate_utc": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "first_refusal_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "limitations": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 0
+          }
+        },
+        "required": [
+          "session_id",
+          "trajectory_id",
+          "scored_episode_count",
+          "missing_episode_count",
+          "metrics",
+          "confusion_cells",
+          "first_recognition_utc",
+          "first_candidate_utc",
+          "first_refusal_code",
+          "limitations"
+        ]
+      },
+      "minItems": 0
+    },
+    "invariant_failures": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 0
+    },
+    "missing_prerequisites": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 0
+    },
+    "artifact_refs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "origin": {
+            "enum": [
+              "CONSTRUCTED",
+              "REPOSITORY_RECORDED",
+              "APPROVED_ARCHIVE",
+              "FINAL_HISTORY_ONLY",
+              "UNKNOWN"
+            ]
+          }
+        },
+        "required": [
+          "path",
+          "sha256",
+          "bytes",
+          "origin"
+        ]
+      },
+      "minItems": 0
+    },
+    "final_status": {
+      "enum": [
+        "READY_FOR_OWNER_REVIEW",
+        "ENGINEERING_INCOMPLETE",
+        "UNPROVEN",
+        "FAIL"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "document_id",
+    "provenance",
+    "run_digest",
+    "mode",
+    "engineering_status",
+    "stage4_internal_status",
+    "stage4_owner_acceptance_ref",
+    "current_brain_recognition",
+    "recognition_ratification_ref",
+    "historical_archive_certification",
+    "controlled_observation_authorized",
+    "production_authorized",
+    "external_request_count",
+    "session_summaries",
+    "invariant_failures",
+    "missing_prerequisites",
+    "artifact_refs",
+    "final_status"
+  ]
+}

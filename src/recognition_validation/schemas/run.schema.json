@@ -1,0 +1,351 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ict-stage5/run/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "run/v1"
+    },
+    "document_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "classification": {
+          "enum": [
+            "CONSTRUCTED",
+            "REPOSITORY_RECORDED",
+            "APPROVED_ARCHIVE",
+            "FICTIONAL",
+            "UNKNOWN"
+          ]
+        },
+        "author_role": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "notes": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "classification",
+        "author_role",
+        "source_refs",
+        "notes"
+      ]
+    },
+    "source_sha": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    },
+    "source_tree": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    },
+    "dirty_tree_digest": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "brain_fingerprint": {
+      "type": "string",
+      "minLength": 1
+    },
+    "retrieval_fingerprint": {
+      "type": "string",
+      "minLength": 1
+    },
+    "closure_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "mode": {
+      "enum": [
+        "A",
+        "B",
+        "C"
+      ]
+    },
+    "ecu": {
+      "type": "boolean"
+    },
+    "trajectory_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "corpus_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "annotation_digest": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "scoring_plan_digest": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "schedule_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "origin": {
+          "enum": [
+            "CONSTRUCTED",
+            "REPOSITORY_RECORDED",
+            "APPROVED_ARCHIVE",
+            "FINAL_HISTORY_ONLY",
+            "UNKNOWN"
+          ]
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "bytes",
+        "origin"
+      ]
+    },
+    "memory_policy": {
+      "enum": [
+        "EMPTY",
+        "SEALED_APPROVED_SEED"
+      ]
+    },
+    "quote_policy": {
+      "enum": [
+        "ARCHIVED",
+        "CONSTRUCTED",
+        "MISSING"
+      ]
+    },
+    "clock_policy": {
+      "const": "AWARE_UTC_AVAILABILITY"
+    },
+    "model_calls_authorized": {
+      "type": "boolean"
+    },
+    "model_requested": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "model_parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "profile_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "profile_digest",
+        "description"
+      ]
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_external_requests": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_input_tokens_per_request": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_output_tokens_per_request": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_repair_requests": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_transport_retries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_cost_usd": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+        },
+        "pricing_table_ref": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "bytes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "origin": {
+                  "enum": [
+                    "CONSTRUCTED",
+                    "REPOSITORY_RECORDED",
+                    "APPROVED_ARCHIVE",
+                    "FINAL_HISTORY_ONLY",
+                    "UNKNOWN"
+                  ]
+                }
+              },
+              "required": [
+                "path",
+                "sha256",
+                "bytes",
+                "origin"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "authorization_ref": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "max_external_requests",
+        "max_input_tokens_per_request",
+        "max_output_tokens_per_request",
+        "max_repair_requests",
+        "max_transport_retries",
+        "max_cost_usd",
+        "pricing_table_ref",
+        "authorization_ref",
+        "expires_at"
+      ]
+    },
+    "trajectory_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "dry_run": {
+      "type": "boolean"
+    },
+    "isolation_receipt": {
+      "type": "string",
+      "minLength": 1
+    },
+    "evaluation_contract_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  },
+  "required": [
+    "schema_version",
+    "document_id",
+    "provenance",
+    "source_sha",
+    "source_tree",
+    "dirty_tree_digest",
+    "brain_fingerprint",
+    "retrieval_fingerprint",
+    "closure_digest",
+    "mode",
+    "ecu",
+    "trajectory_id",
+    "corpus_digest",
+    "annotation_digest",
+    "scoring_plan_digest",
+    "schedule_ref",
+    "memory_policy",
+    "quote_policy",
+    "clock_policy",
+    "model_calls_authorized",
+    "model_requested",
+    "model_parameters",
+    "budget",
+    "trajectory_count",
+    "dry_run",
+    "isolation_receipt",
+    "evaluation_contract_digest"
+  ]
+}

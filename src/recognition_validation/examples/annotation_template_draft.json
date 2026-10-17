@@ -1,0 +1,19 @@
+{
+  "schema_version": "annotation/v1",
+  "document_id": "DRAFT-ANNOTATION-TEMPLATE",
+  "provenance": {
+    "classification": "UNKNOWN",
+    "author_role": "UNASSIGNED",
+    "source_refs": [],
+    "notes": "DRAFT template. Supply actual corpus/session, author/provenance and labels; seal before comparative scoring. Never treat placeholder digest as data."
+  },
+  "corpus_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+  "session_id": "FICTIONAL-SESSION",
+  "annotator_id": null,
+  "annotator_role": "UNASSIGNED",
+  "authorization_ref": null,
+  "state": "DRAFT",
+  "created_at": "2030-01-01T00:00:00Z",
+  "labels": [],
+  "seal": null
+}

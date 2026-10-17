@@ -1,0 +1,194 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ict-stage5/scoring/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "scoring/v1"
+    },
+    "document_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "classification": {
+          "enum": [
+            "CONSTRUCTED",
+            "REPOSITORY_RECORDED",
+            "APPROVED_ARCHIVE",
+            "FICTIONAL",
+            "UNKNOWN"
+          ]
+        },
+        "author_role": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "notes": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "classification",
+        "author_role",
+        "source_refs",
+        "notes"
+      ]
+    },
+    "state": {
+      "enum": [
+        "PROPOSED",
+        "OWNER_RATIFIED",
+        "FICTIONAL"
+      ]
+    },
+    "owner_decision_ref": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "corpus_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "annotation_digests": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-f0-9]{64}$"
+      },
+      "minItems": 0
+    },
+    "direction_labels": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "bullish",
+          "bearish",
+          "conflicted",
+          "neutral",
+          "UNKNOWN"
+        ]
+      },
+      "minItems": 0
+    },
+    "tolerance_seconds": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "unknown_scoring_rule": {
+      "enum": [
+        "DESCRIPTIVE_ONLY",
+        "OWNER_DEFINED"
+      ]
+    },
+    "thresholds": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "metric": {
+            "type": "string",
+            "minLength": 1
+          },
+          "operator": {
+            "enum": [
+              "<=",
+              ">=",
+              "=="
+            ]
+          },
+          "value": {
+            "type": "number"
+          },
+          "decision_ref": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "metric",
+          "operator",
+          "value",
+          "decision_ref"
+        ]
+      },
+      "minItems": 0
+    },
+    "unit_of_analysis": {
+      "const": "SESSION_TRAJECTORY_EPISODE"
+    },
+    "seal": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "sealed_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "sealer_ref": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "sha256",
+            "sealed_at",
+            "sealer_ref"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "document_id",
+    "provenance",
+    "state",
+    "owner_decision_ref",
+    "corpus_digest",
+    "annotation_digests",
+    "direction_labels",
+    "tolerance_seconds",
+    "unknown_scoring_rule",
+    "thresholds",
+    "unit_of_analysis",
+    "seal"
+  ]
+}

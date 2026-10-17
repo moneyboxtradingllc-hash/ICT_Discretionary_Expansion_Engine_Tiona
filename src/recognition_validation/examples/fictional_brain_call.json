@@ -1,0 +1,52 @@
+{
+  "schema_version": "brain_call/v1",
+  "document_id": "FICTIONAL-CALL",
+  "provenance": {
+    "classification": "FICTIONAL",
+    "author_role": "CONTRACT_EXAMPLE",
+    "source_refs": [
+      "FICTIONAL: no recorded market or owner annotation"
+    ],
+    "notes": "FICTIONAL schema example only; never recognition ground truth."
+  },
+  "run_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+  "trajectory_id": "FICTIONAL-B-1",
+  "scan_key": "FICTIONAL-SESSION/2030-01-02T14:00:00Z/0",
+  "settled_cutoff": "2030-01-02T14:00:00Z",
+  "decision_time": "2030-01-02T14:01:00Z",
+  "purpose": "PRIMARY",
+  "attempt": 0,
+  "evaluation_origin": "MOCK",
+  "input_ref": {
+    "path": "FICTIONAL/not-a-real-tape.json",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "bytes": 0,
+    "origin": "CONSTRUCTED"
+  },
+  "prompt_ref": {
+    "path": "FICTIONAL/not-a-real-tape.json",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "bytes": 0,
+    "origin": "CONSTRUCTED"
+  },
+  "raw_response_ref": null,
+  "parsed_output_ref": null,
+  "post_guard_output_ref": null,
+  "requested_model": null,
+  "served_model": null,
+  "brain_fingerprint": "brain:3d9878ad3ff57f1f",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "historical_brain_fingerprint": null,
+  "historical_unknown_reason": "FICTIONAL example, not historical output",
+  "parameter_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+  "provider_request_id": null,
+  "provider_response_id": null,
+  "started_at": "2030-01-02T14:01:00Z",
+  "completed_at": null,
+  "request_attempted": false,
+  "usage": null,
+  "budget_reservation_id": null,
+  "fallback_reason": "FICTIONAL no request",
+  "record_status": "REFUSED",
+  "request_ref": null
+}

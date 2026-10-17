@@ -1,0 +1,658 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ict-stage5/corpus/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "corpus/v1"
+    },
+    "document_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "classification": {
+          "enum": [
+            "CONSTRUCTED",
+            "REPOSITORY_RECORDED",
+            "APPROVED_ARCHIVE",
+            "FICTIONAL",
+            "UNKNOWN"
+          ]
+        },
+        "author_role": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "notes": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "classification",
+        "author_role",
+        "source_refs",
+        "notes"
+      ]
+    },
+    "selection_state": {
+      "enum": [
+        "ENGINEERING_ONLY",
+        "OWNER_RATIFIED",
+        "PROPOSED"
+      ]
+    },
+    "owner_decision_ref": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "sessions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "instrument": {
+            "type": "string",
+            "minLength": 1
+          },
+          "contract_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "market_date": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "timezone": {
+            "type": "string",
+            "minLength": 1
+          },
+          "session_window": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "start_utc": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "end_utc": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "start_utc",
+              "end_utc"
+            ]
+          },
+          "warmup_window": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "start_utc": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "end_utc": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "start_utc",
+              "end_utc"
+            ]
+          },
+          "scored_window": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "start_utc": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "end_utc": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "start_utc",
+              "end_utc"
+            ]
+          },
+          "timestamp_semantics": {
+            "const": "BAR_OPEN_UTC"
+          },
+          "settlement": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "status": {
+                "enum": [
+                  "PROVEN",
+                  "UNKNOWN"
+                ]
+              },
+              "policy_ref": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "status",
+              "policy_ref",
+              "reason"
+            ]
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "original": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "origin": {
+                "enum": [
+                  "CONSTRUCTED",
+                  "REPOSITORY_RECORDED",
+                  "APPROVED_ARCHIVE",
+                  "FINAL_HISTORY_ONLY",
+                  "UNKNOWN"
+                ]
+              }
+            },
+            "required": [
+              "path",
+              "sha256",
+              "bytes",
+              "origin"
+            ]
+          },
+          "derived": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "bytes": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "origin": {
+                    "enum": [
+                      "CONSTRUCTED",
+                      "REPOSITORY_RECORDED",
+                      "APPROVED_ARCHIVE",
+                      "FINAL_HISTORY_ONLY",
+                      "UNKNOWN"
+                    ]
+                  }
+                },
+                "required": [
+                  "path",
+                  "sha256",
+                  "bytes",
+                  "origin"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "availability_events": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "bytes": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "origin": {
+                    "enum": [
+                      "CONSTRUCTED",
+                      "REPOSITORY_RECORDED",
+                      "APPROVED_ARCHIVE",
+                      "FINAL_HISTORY_ONLY",
+                      "UNKNOWN"
+                    ]
+                  }
+                },
+                "required": [
+                  "path",
+                  "sha256",
+                  "bytes",
+                  "origin"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "history_track": {
+            "enum": [
+              "AS_OBSERVED_RELEASES",
+              "FINAL_HISTORY_ONLY",
+              "CONSTRUCTED_RELEASES",
+              "UNKNOWN"
+            ]
+          },
+          "gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "start_utc": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "end_utc": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "start_utc",
+                "end_utc"
+              ]
+            },
+            "minItems": 0
+          },
+          "revisions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 0
+          },
+          "missing_intervals": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "start_utc": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "end_utc": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "start_utc",
+                "end_utc"
+              ]
+            },
+            "minItems": 0
+          },
+          "quotes": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "bytes": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "origin": {
+                    "enum": [
+                      "CONSTRUCTED",
+                      "REPOSITORY_RECORDED",
+                      "APPROVED_ARCHIVE",
+                      "FINAL_HISTORY_ONLY",
+                      "UNKNOWN"
+                    ]
+                  }
+                },
+                "required": [
+                  "path",
+                  "sha256",
+                  "bytes",
+                  "origin"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "brain_records": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "bytes": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "origin": {
+                    "enum": [
+                      "CONSTRUCTED",
+                      "REPOSITORY_RECORDED",
+                      "APPROVED_ARCHIVE",
+                      "FINAL_HISTORY_ONLY",
+                      "UNKNOWN"
+                    ]
+                  }
+                },
+                "required": [
+                  "path",
+                  "sha256",
+                  "bytes",
+                  "origin"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "brain_fingerprint": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fingerprint_evidence_ref": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fingerprint_unknown_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "memory_seed": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "bytes": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "origin": {
+                    "enum": [
+                      "CONSTRUCTED",
+                      "REPOSITORY_RECORDED",
+                      "APPROVED_ARCHIVE",
+                      "FINAL_HISTORY_ONLY",
+                      "UNKNOWN"
+                    ]
+                  }
+                },
+                "required": [
+                  "path",
+                  "sha256",
+                  "bytes",
+                  "origin"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "news": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "bytes": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "origin": {
+                    "enum": [
+                      "CONSTRUCTED",
+                      "REPOSITORY_RECORDED",
+                      "APPROVED_ARCHIVE",
+                      "FINAL_HISTORY_ONLY",
+                      "UNKNOWN"
+                    ]
+                  }
+                },
+                "required": [
+                  "path",
+                  "sha256",
+                  "bytes",
+                  "origin"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "partition": {
+            "enum": [
+              "ENGINEERING",
+              "CALIBRATION",
+              "EVALUATION"
+            ]
+          },
+          "eligibility": {
+            "enum": [
+              "ELIGIBLE",
+              "PARTIAL",
+              "EXCLUDED",
+              "UNPROVEN"
+            ]
+          },
+          "exclusion_reasons": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 0
+          }
+        },
+        "required": [
+          "session_id",
+          "instrument",
+          "contract_id",
+          "market_date",
+          "timezone",
+          "session_window",
+          "warmup_window",
+          "scored_window",
+          "timestamp_semantics",
+          "settlement",
+          "provider",
+          "original",
+          "derived",
+          "availability_events",
+          "history_track",
+          "gaps",
+          "revisions",
+          "missing_intervals",
+          "quotes",
+          "brain_records",
+          "brain_fingerprint",
+          "fingerprint_evidence_ref",
+          "fingerprint_unknown_reason",
+          "memory_seed",
+          "news",
+          "partition",
+          "eligibility",
+          "exclusion_reasons"
+        ]
+      },
+      "minItems": 1
+    },
+    "seal": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "sealed_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "sealer_ref": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "sha256",
+            "sealed_at",
+            "sealer_ref"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "document_id",
+    "provenance",
+    "selection_state",
+    "owner_decision_ref",
+    "sessions",
+    "seal"
+  ]
+}
