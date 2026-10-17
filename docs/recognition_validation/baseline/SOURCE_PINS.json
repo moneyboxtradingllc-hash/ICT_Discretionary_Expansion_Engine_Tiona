@@ -1,0 +1,237 @@
+{
+  "schema": "source_pins/v1",
+  "baseline_sha": "f5934c015de824779352ee9c4a95400b38a44ed9",
+  "baseline_tree": "96316d4b3ef8cd1895530cf448b2bf08bc32790f",
+  "brain_fingerprint": "brain:3d9878ad3ff57f1f",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "hash_law": "sha256 of file bytes with CRLF canonicalized to LF (production_model.brain_contract_fingerprint law)",
+  "provenance": "Stage 5 contract evidence/VERIFIED_SOURCE_BASELINE.json, re-derived from git objects by tools/verify_engineering_ledger.py",
+  "protected_sources": {
+    "src/broker/break_even.py": "f288edfeef5aa85b0b3786520993c4d69644c4b4f741d530def718644d2244d4",
+    "src/broker/break_even_actuator.py": "d8897ad5a96e4d9f25709f2d10ede5f22ff9c27dd1442b2310603402c0dfd893",
+    "src/broker/break_even_baseline.py": "a8d75011ed44c6e25b6b512b3e63e590df160a5f2e1d9134e548431abe16609c",
+    "src/broker/break_even_binding.py": "b0f30d9f2efe5f25c56aaed68467900e6c45e080a8bfeb2f2ea30b85d3b8ae53",
+    "src/broker/break_even_journal.py": "a509872d1d0d09d3d23690b4a2923f81197d808eca5339f0cafbff621667342f",
+    "src/broker/daily_loss_budget.py": "b4f82569cfb9e6195d4dea7e7e27aee773714edcbc2c169b143e2db20c800713",
+    "src/broker/luna_candidate_producer.py": "9a2793e404fcee13af528f3751e0c16379763fff40b2874e6523efdab8699a12",
+    "src/broker/protection_state.py": "ddaa18ce2e803fdcd97d78dd0d1e03354c1bdb005e99fa4d08ca058d8005ccac",
+    "src/broker/topstepx_adapter.py": "b7f760124b6966ec2682517a45c8062c749d58f7d4540708a76d6b2ed700f8cf",
+    "src/broker/topstepx_combine_risk.py": "362daae12add6c6c3f95bca15f34435e6d628a3256792559df07826092d4dbf6",
+    "src/broker/topstepx_emergency_liquidation.py": "9790540d6ea57dd68ed28a96485600ddb91f1f5b9d824b567739366e9fef7495",
+    "src/broker/topstepx_execution_price.py": "192d4bf00a3d8d0de78f51f75b367b0e7ac60356651ab504004528b282ac8157",
+    "src/broker/topstepx_execution_runner.py": "ba652a16b98545636b41f900f249b46f74c5347459632e1598f513717f7cc485",
+    "src/broker/topstepx_hard_flatten.py": "5a460b6b0c5c7d8ce81196b69833bcb2feb18da3add60bf1c90a2284430b97ec",
+    "src/broker/topstepx_mission_reconciler.py": "ae95d6a38ad80154e6ef8dfdba17167cde8155f2c6161564832fe34cd13d8481",
+    "src/broker/topstepx_mission_recovery.py": "a09d61a11ae9c127912a2561ce96d541717738380709348f0abb134a36536d4c",
+    "src/broker/topstepx_mission_state.py": "dc3b4c2eaee3348aefa63fe94f0ca0f505f4dc674f4215b3601f407938ad2502",
+    "src/broker/topstepx_order_discovery.py": "dd64977d34c8345e26037d11c129884d80b0883bdd0004fa6e2ce7ca3a4c70e1",
+    "src/broker/topstepx_production_session.py": "79f0bf0dcf81598d3abdbec7d63ebbb7a762d337c401c1a8e4244e42224c41bd",
+    "src/broker/topstepx_protection_authority.py": "b9d0090b7de65c613105298b14bceedf8a49c9396c68f60de090ae3612bdf4ca",
+    "src/broker/topstepx_quote_provider.py": "8d1495cdcdeb81b1d99b5982416732d713a3bc977d9410cd7d88304900b3322d",
+    "src/broker/topstepx_session_authorization.py": "b1a5d1b9965575149e87fb7ead76a18c9f562057ffcce6c1f34a2f035f8a5eae",
+    "src/broker/topstepx_session_cognition_lock.py": "ae75b72c75716d5715277907da7de771085ab30cb7c308dff127be174cc00d14",
+    "src/broker/topstepx_session_lifecycle.py": "8932c80892b2299f024cc5c04596a6ab8b6bc9e73c8af4322017558b34f53c2f",
+    "src/broker/topstepx_slippage.py": "144c614405aba9eabea400dabab3db5058f5870572421191fcb5b143b9c47456",
+    "src/broker/topstepx_submission_record.py": "c8c4552a1d0b526a8e448e4a0ff610c0265a791b1f6bd5e6ababdfac2df2e99e",
+    "src/broker/trailing_protection.py": "a09d50927c073f9b4d802b2af19b201437e231ec1aaaeb8355ad05d715f63856",
+    "src/data_feed/trade_interval_truth.py": "50b177bdf65ba32848279620d9afbd5c46b7d991c3d1eb469f91c7d4c3e4f5c2",
+    "src/execution_gate/execution_gate.py": "d8c1a0bc997d2c02584845c1c19bead4e7347fd38d3c15a6f684f70da511d5ca",
+    "src/market_data/trade_horizon.py": "9968c7f493a4d7ba43c575cfd30b2e144d0da1c8962a29fe26fd73653389ec52",
+    "src/risk/risk_governor.py": "9618cbfdf410d320f7bc4b40935e3de7a08c82a3cc8f9cfc6680f5c58ff809a6",
+    "src/risk/topstep_limits.py": "150c460f96ff46d1f580f4264299d94d6d5533eb27dbb6fe3bc9c05ce0623055"
+  },
+  "closure_at_baseline": {
+    "src/ai_brain/brain_prompt.py": {
+      "blob": "2e7d2d2747c0746d449637ba26961aa1feda4e3b",
+      "sha256_lf": "4dc3513a3931da736d0c4ef8e516479658b3b93839e3d41fd819e4ae53b277bf"
+    },
+    "src/ai_brain/brain_schema.py": {
+      "blob": "539bc377141f5f53d4d6a016b25e89736cc0dcff",
+      "sha256_lf": "14dc4cc0cbd15c5bae74c0a5577c0dec0e3712d1a8a1b7d5fa04b4a3da3946ea"
+    },
+    "src/ai_brain/brain_validation.py": {
+      "blob": "a153dec161cba9d19da4a1932a401320bea94bd0",
+      "sha256_lf": "b8be8a8f130788dd544c11d9de01ce51e4c7f73f1064a3b813bdb181c32fa690"
+    },
+    "src/ai_brain/narrative_brain.py": {
+      "blob": "167e367a4ac8fda207c24642c62b7478bd817cfb",
+      "sha256_lf": "96be7850c01163e7e04317376e44317d25ca0404b87853b53fb0d62aa5251fdb"
+    },
+    "src/ai_brain/brain_input.py": {
+      "blob": "8441d384c2b22b41277674481a65cb6dee10fd61",
+      "sha256_lf": "ec053ffad7d9d9718ce7cef416106161f7b73fc25f50255fd647a3cf09d8b420"
+    },
+    "src/narrative_authority/protected_swings.py": {
+      "blob": "62ae80f339907cdafb86ffbce54eecf0e7f873bd",
+      "sha256_lf": "9dc3213e871f3af37249eadb65e29069c2a958da83d7f40a28aefa9b9dda4857"
+    },
+    "src/narrative_authority/swing_structure.py": {
+      "blob": "3a7075502dccea8bb470c301c743fa0999b2fa2d",
+      "sha256_lf": "fb3021ca559cc5dd0187f0ac85e98724eff2e1a6c09c22722c1b69f7157aa397"
+    },
+    "src/market_data/liquidity_scope.py": {
+      "blob": "f60d7c971baa2519bd7d72ef6b5f4e1590640943",
+      "sha256_lf": "bed39da2b234f0f38bf8d7dc542305771106126211ab475cd88c8980bfe0da64"
+    },
+    "src/market_data/sweep_occurrence.py": {
+      "blob": "ba2cc1b8c6949e798bb45ecdda1379e23e436d25",
+      "sha256_lf": "4000e7b20712afd47266650ed12c9a91aa9834bb97d9bbcbc1b4a55ca1ad4227"
+    },
+    "src/structure/liquidity_engine.py": {
+      "blob": "b30be2b17d96eb28266b83af0b4b493c78ecfc0a",
+      "sha256_lf": "f3a74cd588526acd355c6bc9866b1ec615edcb7e2d7695781a252e0be4d259b4"
+    },
+    "src/structure/manipulation_detector.py": {
+      "blob": "b14cf6270b0f6184b8ea8242c4f04e872d4e42f4",
+      "sha256_lf": "7bd6271ce7c2d5b52ad06781589414369058cc084ca407acd3ac0be53f4eb82b"
+    },
+    "src/structure/direction_vote.py": {
+      "blob": "2fa6bd85c40ed12781ebdfaedb00c7a08a25966d",
+      "sha256_lf": "78cec2524700315199a49a2b2b319ac688954d602eedba35dde6fa990f9553a4"
+    },
+    "src/structure/session_po3.py": {
+      "blob": "e797fa64cc919e54f24b6c1ea55e83a1690beebe",
+      "sha256_lf": "b8614a868e310f4564b426418199e2d5b3d5ce78ddb53a42c0e81640bb4264f6"
+    },
+    "src/structure/po3_config.py": {
+      "blob": "3713ef617ca3ab6d4b8ae0d99273c73790f34376",
+      "sha256_lf": "fedd7abe43729e14c9a19e15376ca747a428f4b2411e9afdd7dd0ac1fc4a583c"
+    },
+    "src/market_data/snapshot_builder.py": {
+      "blob": "a3256c3a333efba841e4bc7f6ddcae99d083c99c",
+      "sha256_lf": "d6bc320953c2bea05f50b3095d9b8f8aad98ae14f50a00398b1ef0f6e5a89a7f"
+    },
+    "src/live_scan/production_scan_cycle.py": {
+      "blob": "0e8b22e48a5f2b9556f82d7acc0bd885b0bca174",
+      "sha256_lf": "55397de13c71a1d09ef0b46d500f76905fdf8b81571fd83ac925786df81c88ef"
+    },
+    "src/regime_classification/regime_features.py": {
+      "blob": "6daa5530424d282c498319c8ed9427a041ff5b62",
+      "sha256_lf": "e033ca7c1a36de8291c603e739aab476f56d149984d5195ebec909428a4dbb21"
+    },
+    "src/regime_classification/regime_classifier.py": {
+      "blob": "1091beb3290721f898576cc52de941c9d58f7ec7",
+      "sha256_lf": "d3b9df1bf8fff86d62cb8db07b0068f98cecee7c5b6551c26eebdd5adfdae573"
+    },
+    "src/market_state/mtf_market_state.py": {
+      "blob": "d7512fc6e4ec4829e6f659002080f7f268f20ee6",
+      "sha256_lf": "b2008ab726d08800cfb3cc9c1711ba2fe0bed26c29a79c32a9ba94218f54275c"
+    },
+    "src/structure/structure_flip.py": {
+      "blob": "7daadbc8de99df955e6525d2b31d393b52472fe5",
+      "sha256_lf": "79edd3fc1708d15b0acc091fd2ad3210bd98f68795d5e6df3a168fa7b4038ca5"
+    },
+    "src/broker/luna_candidate_producer.py": {
+      "blob": "8d8266dc14629582744ec8a1cf95b6dec49ffe80",
+      "sha256_lf": "9a2793e404fcee13af528f3751e0c16379763fff40b2874e6523efdab8699a12"
+    },
+    "src/broker/topstepx_combine_risk.py": {
+      "blob": "115ac4b576da159004ce4de718387819e80ec73b",
+      "sha256_lf": "362daae12add6c6c3f95bca15f34435e6d628a3256792559df07826092d4dbf6"
+    },
+    "src/broker/daily_loss_budget.py": {
+      "blob": "77ac2431a73cb5f7c1938baa6d353399913d5bc0",
+      "sha256_lf": "b4f82569cfb9e6195d4dea7e7e27aee773714edcbc2c169b143e2db20c800713"
+    },
+    "src/toolbox/price_levels.py": {
+      "blob": "df0556f8ab7cd059020462abaf136e54020024bd",
+      "sha256_lf": "be0721a70292ac7dcad39ea3dc32c04bd81d45d252d3028867f053029e5c7ce3"
+    },
+    "src/market_data/reversal_formation.py": {
+      "blob": "12ddc14c6fe96d2690c8c8b2e5d7c0c935204d09",
+      "sha256_lf": "02ceb2f7625c7c214ebf21ffcee0919c3abff760f5d5ef73896208f27e8210bd"
+    },
+    "src/toolbox/toolbox_engine.py": {
+      "blob": "ed3e46bff6409e4e484ab937b479041857effffc",
+      "sha256_lf": "43056599195a4dea37fd9ae3cee507c453fbb6952670fa8308d6727dbbbd7cc7"
+    },
+    "src/broker/topstepx_live_session.py": {
+      "blob": "ae3d7ca79420e8666940795ddc6cbf25892768a9",
+      "sha256_lf": "039a87a52b354197fed9633586540e0ca4b6730f44e007ad27014b0dc7ae24a8"
+    },
+    "src/data_feed/topstepx_provider.py": {
+      "blob": "cbaac924895f27ca0256fe74ac853daed8c7b4d4",
+      "sha256_lf": "18af0ce641c801779f35781d4b74aff45a892cc1ada6993befe70fe55aa0ee4b"
+    },
+    "src/broker/topstepx_realtime.py": {
+      "blob": "44127236ad70b90525aad9ff427fae6f05b14aa4",
+      "sha256_lf": "0018d59dcb178c19baa838ea09f9e6a09416c664585af604ebc45a6eff38861e"
+    },
+    "src/broker/topstepx_market_runtime.py": {
+      "blob": "702ff14e5493a633005de7087df23360e1f63d74",
+      "sha256_lf": "454fafd608cbd77ac7e007946aecf647a2100fb24e9c2b87f3deb53d40f17527"
+    },
+    "src/data_feed/trade_interval_truth.py": {
+      "blob": "6fc70c373dd0b42aa32856aa8967c3288bf6731f",
+      "sha256_lf": "50b177bdf65ba32848279620d9afbd5c46b7d991c3d1eb469f91c7d4c3e4f5c2"
+    },
+    "src/data_feed/startup_history_authority.py": {
+      "blob": "569e91affb272cc6864931df2555b3b1d1a47ddf",
+      "sha256_lf": "afe6908e72e331e898828a23e328b307e76c7f2b44c89bb587d5bd0b4a9bc08a"
+    },
+    "src/data_feed/candle_continuity.py": {
+      "blob": "42726b2b71838cd521411fed58ad3774100bd430",
+      "sha256_lf": "ed72c5ed4a98aa9bd3d90a67bb8792c71208538058fc6fca788712307bc77640"
+    },
+    "src/data_feed/timeframe_builder.py": {
+      "blob": "100640913e7db825955ed18abf151d5f7f094de1",
+      "sha256_lf": "92c811f8332d4f686d26589a69d994dd47fceed41fd47b98b9406ca4fd90184b"
+    },
+    "src/market_data/campaign_draw_truth.py": {
+      "blob": "6ccccb97b5f33bc49f5078afcf5ff0301f0d2f41",
+      "sha256_lf": "b3578e67c22cca3c2745abca83760acb2306f3b24a86f4bd75b8413d448daa3b"
+    },
+    "src/market_state/active_path.py": {
+      "blob": "bd22c7a1600f13baf4e94e269ba368d7deae4264",
+      "sha256_lf": "fc09ebe6161bb5a64c48dfa9dfd970773327e33b884cb504f39e4eb0c39c3393"
+    },
+    "src/ai_brain/narrative_continuity.py": {
+      "blob": "8a519c834a3ae616e8067ef85f8920e748976a12",
+      "sha256_lf": "943e30b39aa6c468e7da5e2d2d9ee96b554470da05bfe6cf5e810edb053ca3fe"
+    },
+    "src/ai_brain/stance_memory.py": {
+      "blob": "de9e43cafe629bc41172a8aae6ed43692c1770ce",
+      "sha256_lf": "5e1448f708f479441ef2902fa1b7be8d430913cb3e3edc649bde2fb63b127ba2"
+    },
+    "src/ai_brain/ecu.py": {
+      "blob": "4c14a4f036453499776dda64302e923c03023763",
+      "sha256_lf": "82a638b222023e3a970a2d7271dcec6025ac2bf93e285043f3fec4b91fa4c53a"
+    },
+    "src/market_data/campaign_lifecycle.py": {
+      "blob": "5f4abdeb68b48032de9197f7dbbc6999812b2bab",
+      "sha256_lf": "713fa2dde8a12569ccb778dfc21964fc4a1e6f5882b38d9d6b9f1d78bbe8c752"
+    },
+    "src/broker/topstepx_production_loop.py": {
+      "blob": "d4a657d014248e97c29b208afa028d605fbd50f1",
+      "sha256_lf": "b4e632bd655dee1cdcaf29ac2366caf1c533b020100c7961427d4f9b5b3544e6"
+    },
+    "src/market_data/trade_horizon.py": {
+      "blob": "22d761229dec929cd7cba7d1ae14327446690081",
+      "sha256_lf": "9968c7f493a4d7ba43c575cfd30b2e144d0da1c8962a29fe26fd73653389ec52"
+    },
+    "src/broker/conditional_plan_authority.py": {
+      "blob": "682812cc6fed270df721aefddf1cef3dc69493fc",
+      "sha256_lf": "497a70e685bca0219bbcbb8a1a5ed70f6c2c89f9ae97278642cfa1bfe0841d1b"
+    },
+    "src/broker/topstepx_execution_runner.py": {
+      "blob": "f7c016e14e45c68a984adf60788fb3de8cb6bea7",
+      "sha256_lf": "ba652a16b98545636b41f900f249b46f74c5347459632e1598f513717f7cc485"
+    },
+    "src/broker/topstepx_production_session.py": {
+      "blob": "894a6f084c399e506cbf34c8139d8802614e9ae5",
+      "sha256_lf": "79f0bf0dcf81598d3abdbec7d63ebbb7a762d337c401c1a8e4244e42224c41bd"
+    },
+    "src/market_data/campaign_premise.py": {
+      "blob": "cfae10c689a27cff74d9a51616f48a3e4f471a1c",
+      "sha256_lf": "dfb20889cb3dfef2c3554989d44c4a687f2e6b4e407b75ea33ca96e18a0636ca"
+    },
+    "src/market_data/campaign_scope.py": {
+      "blob": "48ec55de94844b588d4f6b59ccadf45c857aeb79",
+      "sha256_lf": "66fceaad6883b6213cab2446b0bef06b90bf797c2b19f1b7bfe9e04a39873a3b"
+    },
+    "tools/topstepx_production_session.py": {
+      "blob": "d004fc4fad0c5107b680742f6d5be438c5e638ac",
+      "sha256_lf": "7af493279f4369dd682740cb5f650ede9de618e6907d201a60f4c5d794e87889"
+    }
+  }
+}
