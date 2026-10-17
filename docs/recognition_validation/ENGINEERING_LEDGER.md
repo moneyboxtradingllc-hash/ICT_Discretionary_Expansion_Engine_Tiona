@@ -161,3 +161,15 @@ M01 progress receipts (VERIFIED-RUN, offline runner as M00):
   a defect: after a retirement the authentic UNBOUND scope returns to the
   ratified D0=a local table, so participation continues under that
   authority (premise status UNKNOWN).
+- S4-09 `tests/test_bound_scope_history_custody.py`: duplicate settled cutoff
+  and later provider restatement in both lanes, JSON copy of the live
+  snapshot, new-process replay; activated controls revision-skip (bound
+  scope survives corrected history -> killed; formation independently
+  self-revokes on its settled-bar witness) and serialized-view trust
+  (real catalog consumer publishes the JSON formation -> killed).
+- Filled matrix: `docs/recognition_validation/STAGE4_DEPENDENCY_MATRIX.md`
+  (every cited node resolved against the tree).
+- M01 focused run (VERIFIED-RUN): 38 passed, 1 warning (stray
+  `datetime.utcnow()` in src/ai_brain/thesis_lifecycle.py:214, recorded for
+  T32), 859 s; JUnit sha256 36f5678c400f3502041f1facc779892a3ddbc9d5690e0919826ca2b1a2311d82. Test-only mission: the full suite is
+  deferred to the M07 final frozen child per contract 09.

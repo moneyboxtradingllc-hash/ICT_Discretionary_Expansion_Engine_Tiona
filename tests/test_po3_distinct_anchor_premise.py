@@ -142,8 +142,9 @@ def _life(rec):
     return (rec.get("source_tf") or rec.get("timeframe"), rec.get("level"), rec.get("registered_at"))
 
 
-def _run(root, monkeypatch, seq, *, ecu):
-    """REAL ProductionScanCycle every settled minute; the Brain from 15:30."""
+def _prime(root, monkeypatch, seq, *, ecu, session_id="S4-05-DAW", brain=True):
+    """REAL ProductionScanCycle prewarmed brainless to 15:29; returns the
+    cycle, tape, scan function and first Brain-scan index."""
     from broker.topstepx_slippage import QuoteCapture
     from live_scan.production_scan_cycle import ProductionScanCycle
     root.mkdir()
@@ -154,7 +155,7 @@ def _run(root, monkeypatch, seq, *, ecu):
     def quote():
         return QuoteCapture(captured_at=datetime.now(timezone.utc), best_bid=px[0], best_ask=px[0] + .25,
                             last_trade=px[0], contract_id=T.CONTRACT, market_data_age_seconds=.25)
-    cycle = ProductionScanCycle(symbol="MNQ", contract_id=T.CONTRACT, session_id="S4-05-DAW",
+    cycle = ProductionScanCycle(symbol="MNQ", contract_id=T.CONTRACT, session_id=session_id,
                                 quote_provider=quote)
 
     def scan(end, brain):
@@ -165,44 +166,56 @@ def _run(root, monkeypatch, seq, *, ecu):
     first = next(i for i, bar in enumerate(tape) if bar["timestamp"][11:16] == "15:30") + 1
     for end in range(20, first):
         scan(end, False)
-    calls, state = [], {}
-    RF._mock_current_brain(monkeypatch, calls,
-                           output_mutator=lambda out, n, payload: _reply(out, n, payload, px[0], state))
-    monkeypatch.setenv("BRAIN_ECU_MODE", "true" if ecu else "false")
+    if brain:
+        calls, state = [], {}
+        RF._mock_current_brain(monkeypatch, calls,
+                               output_mutator=lambda out, n, payload: _reply(out, n, payload, px[0], state))
+        monkeypatch.setenv("BRAIN_ECU_MODE", "true" if ecu else "false")
+    return cycle, tape, scan, first
+
+
+def _row(result, cycle):
+    """The per-minute observation every assertion reads."""
+    snap = result["snapshot"]
+    scope = read_current_campaign_scope(snap) or {}
+    campaign = scope.get("campaign") or {}
+    continuity = (result.get("brain_block") or {}).get("narrative_continuity") or {}
+    output = (result.get("brain_block") or {}).get("output") or {}
+    lifecycle = result.get("campaign_lifecycle") or {}
+    facts = D._facts(result, cycle)
+    highs = ((snap.get("protected_swings") or {}).get("by_timeframe") or {}).get("highs") or {}
+    anchor = ((current_block(snap, "bearish") or {}).get("formation_authority") or {}).get(
+        "anchor_identity") or {}
+    try:
+        candidate = B._candidate(result, cycle)
+        outcome = ("CANDIDATE", candidate.extras.get("selected_tool_occurrence_id"),
+                   candidate.entry_price, candidate.invalidation_price, candidate.objective.price)
+    except NoCandidate as exc:
+        outcome = ("NoCandidate", exc.reason)
+    row = {
+        "scope": (scope.get("state"), campaign.get("status"), campaign.get("direction"),
+                  (campaign.get("certificate") or {}).get("status")),
+        "premise_life": _life(campaign.get("premise") or {}),
+        "premise": (continuity.get("campaign_premise") or {}).get("status"),
+        "lifecycle": (lifecycle.get("state"), lifecycle.get("participation_permitted")),
+        "highs": {tf: _life({**rec, "timeframe": tf}) for tf, rec in highs.items() if isinstance(rec, dict)},
+        "custody": facts["custody"],
+        "anchor_life": _life(anchor) if anchor else None,
+        "anchor_side": anchor.get("side"),
+        "executable": [r[1] for r in facts["catalog"] if r[0] is True],
+        "named": output.get("recommended_tool_occurrence_id"),
+        "candidate": outcome,
+    }
+    return row
+
+
+def _run(root, monkeypatch, seq, *, ecu):
+    """REAL ProductionScanCycle every settled minute; the Brain from 15:30."""
+    cycle, tape, scan, first = _prime(root, monkeypatch, seq, ecu=ecu)
     out = {}
     for end in range(first, len(tape) + 1):
         result = scan(end, True)
-        snap = result["snapshot"]
-        hm = D._hm(snap["timestamp"])
-        scope = read_current_campaign_scope(snap) or {}
-        campaign = scope.get("campaign") or {}
-        continuity = (result.get("brain_block") or {}).get("narrative_continuity") or {}
-        output = (result.get("brain_block") or {}).get("output") or {}
-        lifecycle = result.get("campaign_lifecycle") or {}
-        facts = D._facts(result, cycle)
-        highs = ((snap.get("protected_swings") or {}).get("by_timeframe") or {}).get("highs") or {}
-        anchor = ((current_block(snap, "bearish") or {}).get("formation_authority") or {}).get(
-            "anchor_identity") or {}
-        try:
-            candidate = B._candidate(result, cycle)
-            outcome = ("CANDIDATE", candidate.extras.get("selected_tool_occurrence_id"),
-                       candidate.entry_price, candidate.invalidation_price, candidate.objective.price)
-        except NoCandidate as exc:
-            outcome = ("NoCandidate", exc.reason)
-        out[hm] = {
-            "scope": (scope.get("state"), campaign.get("status"), campaign.get("direction"),
-                      (campaign.get("certificate") or {}).get("status")),
-            "premise_life": _life(campaign.get("premise") or {}),
-            "premise": (continuity.get("campaign_premise") or {}).get("status"),
-            "lifecycle": (lifecycle.get("state"), lifecycle.get("participation_permitted")),
-            "highs": {tf: _life({**rec, "timeframe": tf}) for tf, rec in highs.items() if isinstance(rec, dict)},
-            "custody": facts["custody"],
-            "anchor_life": _life(anchor) if anchor else None,
-            "anchor_side": anchor.get("side"),
-            "executable": [row[1] for row in facts["catalog"] if row[0] is True],
-            "named": output.get("recommended_tool_occurrence_id"),
-            "candidate": outcome,
-        }
+        out[D._hm(result["snapshot"]["timestamp"])] = _row(result, cycle)
     return out
 
 
