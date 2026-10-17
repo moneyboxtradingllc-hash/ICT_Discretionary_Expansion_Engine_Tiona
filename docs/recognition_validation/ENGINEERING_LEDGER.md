@@ -136,3 +136,28 @@ require amending this entry before the change (scope plus closure rationale).
   "receipt_digest": "7ad840e1e699adeaabd877833b8bf3923afbfa3764ab6de051ec66853b4cc821"
 }
 ```
+
+M01 progress receipts (VERIFIED-RUN, offline runner as M00):
+
+- S4-10 `tests/test_order_route_inventory.py` (commit 6db3b47): 9 passed with
+  `test_legacy_smoke_route_fail_closed.py` 13 total. Entry-capable venue
+  writes are exactly 10 indexed call sites (production loop -> session ->
+  runner.gated_submit -> runner.submit -> place_order; legacy smoke_wait via
+  Lifecycle-gated one_scan; manual release canary and lifecycle smoke; three
+  legacy Alpaca paper writers). Production entrypoint static import closure
+  (205 files) reaches no manual smoke tool and no paper-order writer. Five
+  activated source-text mutants each caught.
+- S4-05 `tests/test_po3_distinct_anchor_premise.py`: CONSTRUCTED tape on the
+  natural W5 seed. Campaign premise = 15m context life 29538 (born 15:29,
+  raid 15:15 after incumbent death 14:23); PO3 formation = 5m active_leg
+  life 29518.5 (born 16:19, own raid 16:15, validated 16:29). Both lanes:
+  healthy twin CANDIDATE on that exact occurrence 16:39-16:44 (stop 29518.5,
+  objective 29505.5); one-bar twin replaces only the 5m life at 16:39 and
+  refuses `tool_not_detected` while scope, premise and Lifecycle
+  (ACTIVE_DELIVERY, permitted) are identical. Activated controls: identity
+  collapse (formation kept alive by the 15m context life) -> replaced twin
+  executes, killed; retirement collapse (any same-side life end read as the
+  premise's violation) -> healthy premise retired, killed. Observation, not
+  a defect: after a retirement the authentic UNBOUND scope returns to the
+  ratified D0=a local table, so participation continues under that
+  authority (premise status UNKNOWN).
