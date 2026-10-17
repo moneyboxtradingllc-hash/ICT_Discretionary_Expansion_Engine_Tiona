@@ -10,6 +10,10 @@ repair and continuity path. Both the ECU and non-ECU lanes reach this seam.
 
 A thin observer on `_call_llm` records which repair purpose a request served
 and the call record production returned; it never substitutes an output.
+Production stamps provider calls with the wall clock (narrative_brain.py
+`time.time()` / `datetime.now`) and the stamp re-enters the next Brain input
+(campaign_draw_context.brain_lineage); inside the seam those two names read
+the decision clock, the only admissible clock offline.
 
 Modes (out-of-band provenance, never inferred from `source='llm'`):
   * B / MOCK        a frozen script answers each causal request key;
@@ -23,8 +27,11 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import time
 from dataclasses import dataclass, field
+from datetime import datetime
 
+from recognition_validation import compare as CMP
 from recognition_validation import contracts as C
 
 PURPOSES = {"primary": "PRIMARY", "json_repair": "REPAIR", "family_repair": "FAMILY_REPAIR",
@@ -111,6 +118,28 @@ class _FakeProviderModule:
         return _FakeClient(self._gateway, **kwargs)
 
 
+class _ClockTime:
+    """`time` for narrative_brain: `time()` is the decision clock, the rest is real."""
+
+    def __init__(self, clock):
+        self._clock = clock
+
+    def time(self) -> float:
+        return self._clock().timestamp()
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+
+def _clock_datetime(clock):
+    class ClockDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            moment = clock()
+            return moment.astimezone(tz) if tz is not None else moment.replace(tzinfo=None)
+    return ClockDatetime
+
+
 class ScriptedResponder:
     """Mode B. `script(request) -> dict | None`; None declines (MISSING)."""
 
@@ -153,14 +182,26 @@ class HistoricalResponder:
         if record is None:
             raise ProviderRefusal("MISSING_COGNITION", str(key))
         self.consumed.add(key)
+        content = record["raw_response"]
+        mapping = None
+        if record.get("input_text") is not None and request.get("user_contents"):
+            mapping = CMP.rebinding(record["input_text"], request["user_contents"][0])
+        semantic = mapping is not None or (record.get("semantic_input_digest") is not None and
+                                           record["semantic_input_digest"] == request.get("semantic_input_digest"))
+        rebound = {k: v for k, v in (mapping or {}).items() if k != v and k in content}
+        if rebound:
+            content = CMP._pattern(rebound).sub(lambda m: rebound[m.group(0)], content)
         request["historical"] = {
             "record_digest": C.digest(record),
             "input_matches_archive": record.get("input_digest") == request["input_digest"],
+            "input_matches_semantic_v1": semantic,
+            "archived_response_sha256": C.sha256_hex(record["raw_response"].encode("utf-8")),
+            "rebound_identities": len(rebound),
             "historical_brain_fingerprint": record.get("brain_fingerprint"),
             "historical_unknown_reason": None if record.get("brain_fingerprint") else
             "archived record carries no per-call fingerprint",
         }
-        return ProviderReply(content=record["raw_response"], served_model=record.get("served_model"),
+        return ProviderReply(content=content, served_model=record.get("served_model"),
                              request_id=record.get("provider_request_id"),
                              response_id=record.get("provider_response_id"))
 
@@ -190,7 +231,7 @@ class BrainGateway:
         from ai_brain import narrative_brain
         from ai_layer import ai_api_adapter
         saved = (ai_api_adapter._openai, ai_api_adapter._OPENAI_AVAILABLE, narrative_brain._call_llm,
-                 os.environ.get("OPENAI_API_KEY"))
+                 os.environ.get("OPENAI_API_KEY"), narrative_brain.time, narrative_brain.datetime)
         original_call = narrative_brain._call_llm
         gateway = self
 
@@ -206,11 +247,13 @@ class BrainGateway:
         ai_api_adapter._openai = _FakeProviderModule(self)
         ai_api_adapter._OPENAI_AVAILABLE = True
         narrative_brain._call_llm = observed_call
+        narrative_brain.time, narrative_brain.datetime = _ClockTime(self.clock), _clock_datetime(self.clock)
         os.environ["OPENAI_API_KEY"] = _SENTINEL_KEY
         try:
             yield self
         finally:
             ai_api_adapter._openai, ai_api_adapter._OPENAI_AVAILABLE, narrative_brain._call_llm = saved[:3]
+            narrative_brain.time, narrative_brain.datetime = saved[4:]
             if saved[3] is None:
                 os.environ.pop("OPENAI_API_KEY", None)
             else:
@@ -239,6 +282,7 @@ class BrainGateway:
             "parameters": {k: v for k, v in kwargs.items() if k not in ("messages", "extra_headers")},
             "client_parameters": {k: v for k, v in client_kwargs.items() if k != "api_key"},
             "input_digest": C.sha256_hex(users[0].encode("utf-8")) if users else None,
+            "semantic_input_digest": CMP.semantic_input_digest(users[0]) if users else None,
             "prompt_digest": C.sha256_hex(system.encode("utf-8")),
         }
         request["request_digest"] = C.digest({k: request[k] for k in
@@ -286,11 +330,19 @@ class BrainGateway:
         evaluation_origin = origin
         if request.get("refusal") in ("MISSING_COGNITION", "MOCK_SCRIPT_DECLINED"):
             evaluation_origin = "MISSING"
+        notes = f"Mode origin {origin}; recorded at the provider seam."
+        if historical and not historical.get("input_matches_archive"):
+            if historical.get("input_matches_semantic_v1"):
+                notes += (" HISTORICAL_INPUT_SEMANTIC_V1_MATCH: archived and transported inputs differ only in"
+                          f" process-random identities; {historical['rebound_identities']} rebound in the archived"
+                          f" output (archived raw sha256 {historical['archived_response_sha256']}).")
+            else:
+                notes += " HISTORICAL_OUTPUT_ON_CURRENT_INPUTS: archived input differs from the transported input."
         return {
             "schema_version": "brain_call/v1",
             "document_id": f"{self.trajectory_id}:call:{len(self.calls) - 1}",
             "provenance": {"classification": classification, "author_role": "STAGE5_BRAIN_GATEWAY",
-                           "source_refs": [], "notes": f"Mode origin {origin}; recorded at the provider seam."},
+                           "source_refs": [], "notes": notes},
             "run_digest": rec.run_digest, "trajectory_id": self.trajectory_id,
             "scan_key": request.get("scan_key") or f"{self.trajectory_id}/unreached",
             "settled_cutoff": request.get("settled_cutoff") or self.clock().isoformat(),

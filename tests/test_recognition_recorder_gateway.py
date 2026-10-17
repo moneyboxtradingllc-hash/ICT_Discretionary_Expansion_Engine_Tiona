@@ -108,13 +108,15 @@ def test_gateway_seam_restores_production_and_refuses_foreign_credentials(monkey
     from ai_brain import narrative_brain
     from ai_layer import ai_api_adapter
     before = (ai_api_adapter._openai, ai_api_adapter._OPENAI_AVAILABLE, narrative_brain._call_llm,
-              os.environ.get("OPENAI_API_KEY"))
+              os.environ.get("OPENAI_API_KEY"), narrative_brain.time, narrative_brain.datetime)
     clock = P.DecisionClock(T0)
     gateway = G.BrainGateway(G.DisabledCurrentModel(), trajectory_id="T", clock=clock)
     with gateway.installed():
         assert isinstance(ai_api_adapter._openai, G._FakeProviderModule)
+        assert narrative_brain.time.time() == T0.timestamp()
+        assert narrative_brain.datetime.now(timezone.utc) == T0
         with pytest.raises(C.ContractError) as exc:
             ai_api_adapter._openai.OpenAI(api_key="sk-real-looking").chat.completions.create(messages=[])
         assert exc.value.code == "UNEXPECTED_PROVIDER_CREDENTIAL"
     assert (ai_api_adapter._openai, ai_api_adapter._OPENAI_AVAILABLE, narrative_brain._call_llm,
-            os.environ.get("OPENAI_API_KEY")) == before
+            os.environ.get("OPENAI_API_KEY"), narrative_brain.time, narrative_brain.datetime) == before

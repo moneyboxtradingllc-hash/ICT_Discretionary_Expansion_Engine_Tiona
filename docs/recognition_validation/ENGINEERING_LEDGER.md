@@ -274,3 +274,87 @@ attempts; every tick recorded once in a verified chain; transported request
 bytes match the recorded artifacts; wrong-patch-target control shows no
 transported request and production's degraded path).
 `test_recognition_recorder_gateway.py` 8 passed.
+
+## M04: Mode B determinism and Mode A exact historical association
+
+Parent is the M03 child.
+
+```json ledger-entry
+{
+  "schema": "engineering_ledger_entry/v1",
+  "mission_id": "M04",
+  "parent_sha": "e046cbf1dbd50e433189d87b098bdd1da23779a6",
+  "parent_tree": "36ebef08b3470259f8f455516afafd4735237817",
+  "parent_tracked_status": "",
+  "brain_fingerprint": "brain:3d9878ad3ff57f1f",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_count": 48,
+  "closure_digest": "d4dbe6a3ea029c4b59f33a1deba3d7c65ccb877e33afa4aed317b68256a15cf1",
+  "protected_count": 32,
+  "protected_digest": "79988f0ea3e84e15e34485a8510e78efc667f6e274d41fcde5d6e3c0307ab79a",
+  "policy_refs": [
+    "09 M04",
+    "04 brain_gateway/compare",
+    "05 Mode A/B semantics",
+    "10 T23/T24/T25/T26/T30",
+    "13 security boundary"
+  ],
+  "scoped_files": [
+    "src/recognition_validation/compare.py",
+    "src/recognition_validation/driver.py",
+    "src/recognition_validation/brain_gateway.py",
+    "tests/test_recognition_replay_modes.py",
+    "tests/test_recognition_recorder_gateway.py",
+    "docs/recognition_validation/*"
+  ],
+  "proof_ids": [
+    "M04-MODE-B-SEMANTIC-DETERMINISM",
+    "M04-PROJECTION-CONTROLS",
+    "M04-MODE-A-EXACT-ASSOCIATION",
+    "M04-MODE-A-ATTACKS",
+    "M04-DECISION-CLOCK-PROVIDER-STAMPS"
+  ],
+  "projection": "semantic-v1: alpha-rename process-random ids only (uuid4 custody/draw lineage); content ids, prices, times, outcomes compared raw",
+  "predecessor_receipt_digest": "8e3c8b963eb719e0309db24220a91cdfd0d41012e597b42ec75084b1cef2608e",
+  "receipt_digest": "2ab8ca6cee05f5fed3860bc8bc5b95f94da8837c01620a1385cc6d28f33ee8f7"
+}
+```
+
+M04 receipts (VERIFIED-RUN): `test_recognition_replay_modes.py` 9 passed,
+`test_recognition_recorder_gateway.py` 8 passed; M00-M03 recognition and
+distinct-anchor tests 80 passed after the change.
+
+- Two Mode B runs of the CONSTRUCTED distinct-anchor session from fresh roots
+  have identical semantic-v1 event and call traces. Their raw call traces
+  differ, as expected, because each run has its own process lineage.
+- semantic-v1 renames only identities that production mints from a
+  per-process uuid4 (VERIFIED-CODE):
+  - `CampaignScopeCustody._lineage`, which feeds the campaign ids,
+    premise_candidate_id and proposal ids (market_data/campaign_scope.py:203,
+    145, 425, 512);
+  - the `CampaignDrawTruth` namespace and episode (record_id,
+    campaign_episode_id).
+  The premise catalog's row order (sorted by premise_candidate_id) and its
+  digest (which covers custody_lineage) are re-derived. Content-derived ids
+  (proof_id, tip_digest, sweep, occurrence and formation ids), prices, times
+  and outcomes are compared raw. Controls show that a moved level or a changed
+  formation id still diverges.
+- Mode A association is exact (cutoff, same-cutoff ordinal, purpose). If an
+  archived output cites the archive process's premise ids, they are rebound
+  to the current ids only when the archived input equals the transported
+  input under semantic-v1. That rebinding is disclosed per call, together
+  with the archived raw sha256. With rebinding, Mode A reproduces the Mode B
+  semantic event trace, including the formation.
+- Mode A attacks, each disclosed or refused:
+  - a missing record becomes MISSING cognition, never a neighbour;
+  - a duplicate or foreign-contract association refuses at load;
+  - a reused record refuses;
+  - a changed archived input is disclosed as
+    HISTORICAL_OUTPUT_ON_CURRENT_INPUTS;
+  - a foreign served model is refused by production's own check.
+- Observation T32 (VERIFIED-CODE, owner-visible, production unchanged):
+  narrative_brain.py:577-593 and 659 stamp provider calls with the wall clock.
+  The stamp re-enters the next Brain input as
+  campaign_draw_context.brain_lineage.provider_call_completed_at. Inside the
+  gateway seam only, those two names read the decision clock; outside the
+  seam production is restored and untouched.

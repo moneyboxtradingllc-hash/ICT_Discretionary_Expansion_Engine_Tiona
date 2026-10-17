@@ -219,3 +219,37 @@ def run_trajectory(*, organism: OfflineOrganism, stream, ticks, gateway, recorde
 
 def utc(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+
+
+def run_offline(*, corpus_path, session_id: str, out_root, responder, ecu: bool, trajectory_id: str,
+                prewarm_until: str | None = None, ticks_until: str | None = None,
+                fingerprints: dict | None = None) -> dict:
+    """One whole-session trajectory from a sealed corpus into a fresh root."""
+    from recognition_validation import brain_gateway as G
+    from recognition_validation import corpus as K
+    from recognition_validation import recorder as REC
+    corpus = K.load_corpus(corpus_path)
+    loaded = corpus.sessions[session_id]
+    C.require(loaded.stream is not None, "RELEASE_STREAM_REQUIRED", f"/sessions/{session_id}")
+    stream, entry = loaded.stream, loaded.entry
+    ticks = minute_schedule(stream, prewarm_until=utc(prewarm_until) if prewarm_until else None)
+    if ticks_until:
+        ticks = [tick for tick in ticks if tick.decision_time <= utc(ticks_until)]
+    C.require(bool(ticks), "EMPTY_SCHEDULE", "/ticks")
+    out_root = Path(out_root)
+    C.require(not out_root.exists() or not any(out_root.iterdir()), "OUTPUT_ROOT_REUSE", "/" + str(out_root))
+    classification = corpus.document["provenance"]["classification"]
+    with isolation(out_root, ecu=ecu):
+        clock = P.DecisionClock(ticks[0].decision_time)
+        organism = build_organism(stream=stream, clock=clock, store_dir=out_root / "store",
+                                  session_id=trajectory_id, contract_id=entry["contract_id"],
+                                  session_date=entry["market_date"].replace("-", ""),
+                                  issued_at=entry["session_window"]["start_utc"])
+        recorder = REC.Recorder(out_root / "evidence", run_digest=corpus.digest, trajectory_id=trajectory_id,
+                                classification=classification)
+        gateway = G.BrainGateway(responder, trajectory_id=trajectory_id, clock=clock, recorder=recorder,
+                                 fingerprints=fingerprints)
+        summary = run_trajectory(organism=organism, stream=stream, ticks=ticks, gateway=gateway, recorder=recorder)
+    summary.update(evidence_root=str(out_root / "evidence"), corpus_digest=corpus.digest,
+                   tick_count=len(ticks), requests=gateway.requests, calls=gateway.calls)
+    return summary
