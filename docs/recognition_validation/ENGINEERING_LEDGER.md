@@ -96,3 +96,43 @@ TWO_BRAIN_MODE=off, isolated runtime roots, proxy pointed at a closed port):
 - Open proofs carried to M01: S4-05 distinct anchor, S4-09 restart/history
   cross-product, S4-10 gated_submit caller inventory. S4-11 archive-dependent
   certification remains UNPROVEN under owner decision D04.
+
+## M01: remaining Stage 4 dependency closure
+
+Parent is the M00 child. Test-only by declaration; a source defect would
+require amending this entry before the change (scope plus closure rationale).
+
+```json ledger-entry
+{
+  "schema": "engineering_ledger_entry/v1",
+  "mission_id": "M01",
+  "parent_sha": "6e6286c8d53cec8f7c50627cddb6c7f6249172f4",
+  "parent_tree": "0157c2bfb27dc6560b5223ee2c503d59d61661e3",
+  "parent_tracked_status": "",
+  "brain_fingerprint": "brain:3d9878ad3ff57f1f",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_count": 48,
+  "closure_digest": "d4dbe6a3ea029c4b59f33a1deba3d7c65ccb877e33afa4aed317b68256a15cf1",
+  "protected_count": 32,
+  "protected_digest": "79988f0ea3e84e15e34485a8510e78efc667f6e274d41fcde5d6e3c0307ab79a",
+  "policy_refs": [
+    "09 M01",
+    "10 T10/T11-T19",
+    "03 S4-05/S4-09/S4-10",
+    "S4K O1: PO3 direct-entry provenance-only; no entry-zone/formation-stop/minimum-stop rule",
+    "Stage 3 D0=a D1=a roles 5m/15m K=1 D3=B/STRICT D4-D6=a"
+  ],
+  "scoped_files": [
+    "tests/*",
+    "docs/recognition_validation/*"
+  ],
+  "proof_ids": [
+    "M01-ROUTES-S4-10",
+    "M01-DAW-S4-05",
+    "M01-HISTORY-S4-09"
+  ],
+  "test_only": true,
+  "predecessor_receipt_digest": "473698e2f7eb8f6973ddc13dd6b138d9c304c923a0e531865548503efd61979a",
+  "receipt_digest": "7ad840e1e699adeaabd877833b8bf3923afbfa3764ab6de051ec66853b4cc821"
+}
+```
