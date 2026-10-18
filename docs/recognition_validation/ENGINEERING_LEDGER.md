@@ -671,3 +671,47 @@ failures were analysed against baseline f5934c0:
   "receipt_digest": "cf7bf4c2ec953a9630cf43af4f21f772dc4e53a2304b0b41a97354f9923d807d"
 }
 ```
+
+## M07P: final package (evidence only)
+
+Parent is the M07R child fb20d96, the reviewed final code. This child adds
+only `docs/recognition_validation/final_package/`:
+
+- the single portable archive `STAGE5_FINAL_fb20d96.tar.xz` and its sha256;
+- the archive's MANIFEST_SHA256 (one line per payload file);
+- FINAL_REPORT.md (contract 12), copied out of the archive so it can be
+  read on GitHub.
+
+The archive holds no credentials, account identifiers, operator archives or
+runtime state. The fresh-clone suite of fb20d96 gave 8977 passed, 583
+skipped and 1 failed (the disclosed pre-existing environmental walker
+test). Its log and JUnit are inside the archive.
+
+```json ledger-entry
+{
+  "schema": "engineering_ledger_entry/v1",
+  "mission_id": "M07P",
+  "parent_sha": "fb20d96a5b4675eb2998e1e269f2b977e23cfa7b",
+  "parent_tree": "b81d0fe680e426a040abbf4cb2e92bb46ac16ed4",
+  "parent_tracked_status": "",
+  "brain_fingerprint": "brain:3d9878ad3ff57f1f",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_count": 48,
+  "closure_digest": "d4dbe6a3ea029c4b59f33a1deba3d7c65ccb877e33afa4aed317b68256a15cf1",
+  "protected_count": 32,
+  "protected_digest": "79988f0ea3e84e15e34485a8510e78efc667f6e274d41fcde5d6e3c0307ab79a",
+  "policy_refs": [
+    "12 final delivery (one indexed portable archive + MANIFEST_SHA256)",
+    "13 artifact hygiene"
+  ],
+  "scoped_files": [
+    "docs/recognition_validation/*"
+  ],
+  "proof_ids": [
+    "M07P-FINAL-PACKAGE-fb20d96"
+  ],
+  "package_note": "evidence-only child; reviewed code is fb20d96; archive sha256 948c2dab1263b66ac12b03f26cb6aac0800728c3f59c1c533d2053953a102015; manifest sha256 92f0be5d0173383f5a3ff57090fa8af9b8331438133b7ef95c363f62f9d196ce",
+  "predecessor_receipt_digest": "cf7bf4c2ec953a9630cf43af4f21f772dc4e53a2304b0b41a97354f9923d807d",
+  "receipt_digest": "95c84beb83fe3888d02cdf5ecc96a551e8f3ab28c11894bb873629ce07c334e0"
+}
+```
