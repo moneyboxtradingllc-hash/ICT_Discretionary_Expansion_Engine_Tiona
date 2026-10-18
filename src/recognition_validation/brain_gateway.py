@@ -25,6 +25,7 @@ Modes (out-of-band provenance, never inferred from `source='llm'`):
 from __future__ import annotations
 
 import contextlib
+import copy
 import json
 import os
 import time
@@ -215,6 +216,83 @@ class DisabledCurrentModel:
         raise ProviderRefusal("CURRENT_MODEL_CALLS_DISABLED", "no owner model-call authorization")
 
 
+class TransportError(Exception):
+    """The external transport failed after it was reached (usage unknown)."""
+
+
+class CurrentModelResponder:
+    """Mode C under a validated authority; every attempt reserved before transport.
+
+    `transport` exposes `endpoint_identity` and `send(payload) -> ProviderReply`.
+    Only fake transports exist in this repository.
+    """
+
+    origin = "CURRENT_EXTERNAL"
+
+    def __init__(self, authority, ledger, transport, *, trajectory_id: str):
+        self.authority, self.ledger, self.transport = authority, ledger, transport
+        self.trajectory_id = trajectory_id
+        self.halted: str | None = None
+        self.transport_calls = 0
+
+    def _refuse(self, code: str, detail: str = ""):
+        raise ProviderRefusal(code, detail)
+
+    def respond(self, request: dict) -> ProviderReply:
+        from recognition_validation import model_authority as MA
+        if self.halted:
+            self._refuse(self.halted)
+        try:
+            self.authority.admit()
+        except C.ContractError as error:
+            self._refuse(error.code, error.pointer)
+        doc = self.authority.authorization
+        if self.transport.endpoint_identity != doc["endpoint_identity"]:
+            self._refuse("AUTHORIZATION_IDENTITY_MISMATCH", "/endpoint_identity")
+        if request.get("requested_model") != doc["model"]:
+            self._refuse("AUTHORIZATION_IDENTITY_MISMATCH", "/model")
+        # An implicit SDK retry would be an uncounted request.
+        if (request.get("client_parameters") or {}).get("max_retries") != 0:
+            self._refuse("SDK_RETRY_UNCOUNTED", "/client_parameters/max_retries")
+        messages = ([{"role": "system", "content": request.get("system_prompt") or ""}]
+                    + [{"role": "user", "content": u} for u in request.get("user_contents") or []])
+        bound = MA.input_token_bound(messages)
+        if bound > doc["max_input_tokens_per_request"]:
+            self._refuse("INPUT_TOKEN_CAP_EXCEEDED", f"{bound}>{doc['max_input_tokens_per_request']}")
+        parameters = dict(request.get("parameters") or {})
+        parameters["max_completion_tokens"] = self.authority.parameters.max_completion_tokens
+        payload = {**parameters, "messages": messages}
+        request["evaluation_parameter_digest"] = self.authority.parameters.digest
+        last = None
+        for transport_attempt in range(1 + doc["max_transport_retries"]):
+            reservation_id = "rsv:" + C.digest([self.trajectory_id, request["scan_key"], request["purpose"],
+                                                request["cutoff_ordinal"], request["attempt"],
+                                                transport_attempt])[:32]
+            try:
+                self.ledger.reserve(reservation_id=reservation_id, purpose=request["purpose"],
+                                    transport_attempt=transport_attempt, scan_key=request["scan_key"])
+            except C.ContractError as error:
+                self._refuse(error.code, error.detail)
+            request["budget_reservation_id"] = reservation_id
+            request["transport_reached"] = True
+            self.transport_calls += 1
+            try:
+                reply = self.transport.send(copy.deepcopy(payload))
+            except TransportError as error:
+                self.ledger.settle(reservation_id, None, self.authority.pricing)
+                last = error
+                continue
+            usage = reply.usage or {}
+            settled = self.ledger.settle(
+                reservation_id, {"input_tokens": usage.get("prompt_tokens"),
+                                 "output_tokens": usage.get("completion_tokens")}, self.authority.pricing)
+            if settled.get("exceeded"):
+                self.halted = "USAGE_EXCEEDED_RESERVATION"
+            request["usage_known"] = settled.get("usage_known")
+            return reply
+        self._refuse("TRANSPORT_FAILED", str(last))
+
+
 class BrainGateway:
     def __init__(self, responder, *, trajectory_id: str, clock, recorder=None, fingerprints=None):
         self.responder, self.trajectory_id, self.clock = responder, trajectory_id, clock
@@ -290,6 +368,10 @@ class BrainGateway:
         if self._pending is not None:
             self._pending["request"] = request
         self.requests.append(request)
+        if self.recorder is not None and self.recorder.failed:
+            # Cognition without a durable record is UNPROVEN: stop before any transport.
+            request["refusal"] = "RECORDER_FAILED"
+            raise ProviderRefusal("RECORDER_FAILED", self.recorder.failed)
         try:
             reply = self.responder.respond(request)
         except ProviderRefusal as refusal:
@@ -310,6 +392,18 @@ class BrainGateway:
         self.calls.append(record)
         if self.recorder is not None:
             self.recorder.brain_call(self._brain_call_document(record))
+
+    @staticmethod
+    def _usage(origin, request, reply):
+        if not reply:
+            return None
+        if origin != "CURRENT_EXTERNAL":
+            return {"input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0}
+        if not request.get("usage_known"):
+            return None
+        usage = reply.get("usage") or {}
+        return {"input_tokens": usage["prompt_tokens"], "output_tokens": usage["completion_tokens"],
+                "cached_input_tokens": int(usage.get("cached_tokens") or 0)}
 
     def _brain_call_document(self, record: dict) -> dict:
         rec = self.recorder
@@ -361,9 +455,9 @@ class BrainGateway:
             "provider_response_id": (reply or {}).get("response_id"),
             "started_at": request.get("decision_time") or self.clock().isoformat(),
             "completed_at": request.get("decision_time"),
-            "request_attempted": record["provider_request_attempted"] and origin == "CURRENT_EXTERNAL",
-            "usage": ({"input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0} if reply else None),
-            "budget_reservation_id": None,
+            "request_attempted": bool(request.get("transport_reached")) and origin == "CURRENT_EXTERNAL",
+            "usage": self._usage(origin, request, reply),
+            "budget_reservation_id": request.get("budget_reservation_id"),
             "fallback_reason": record["fallback_reason"] or request.get("refusal"),
             "record_status": status, "request_ref": None,
         }

@@ -358,3 +358,104 @@ distinct-anchor tests 80 passed after the change.
   campaign_draw_context.brain_lineage.provider_call_completed_at. Inside the
   gateway seam only, those two names read the decision clock; outside the
   seam production is restored and untouched.
+
+## M05: disabled Mode C, owner authority, hard budgets
+
+Parent is the M04 child.
+
+```json ledger-entry
+{
+  "schema": "engineering_ledger_entry/v1",
+  "mission_id": "M05",
+  "parent_sha": "cecdfe796a144e9023625dc949fac03a49624749",
+  "parent_tree": "04d2b1763c68afb624419ea86946533a3303a762",
+  "parent_tracked_status": "",
+  "brain_fingerprint": "brain:3d9878ad3ff57f1f",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_count": 48,
+  "closure_digest": "d4dbe6a3ea029c4b59f33a1deba3d7c65ccb877e33afa4aed317b68256a15cf1",
+  "protected_count": 32,
+  "protected_digest": "79988f0ea3e84e15e34485a8510e78efc667f6e274d41fcde5d6e3c0307ab79a",
+  "policy_refs": [
+    "09 M05",
+    "06 C budget and transport contract",
+    "13 security boundary",
+    "10 model-authority rows"
+  ],
+  "scoped_files": [
+    "src/recognition_validation/model_authority.py",
+    "src/recognition_validation/brain_gateway.py",
+    "tests/test_recognition_model_authority.py",
+    "docs/recognition_validation/*"
+  ],
+  "proof_ids": [
+    "M05-DISABLED-DEFAULT",
+    "M05-PRECONDITIONS-BEFORE-TRANSPORT",
+    "M05-BUDGET-STATE-MACHINE",
+    "M05-LEDGER-RESTART",
+    "M05-FAKE-TRAJECTORY-BOTH-LANES",
+    "M05-DRY-RUN-PLAN"
+  ],
+  "external_requests": 0,
+  "predecessor_receipt_digest": "2ab8ca6cee05f5fed3860bc8bc5b95f94da8837c01620a1385cc6d28f33ee8f7",
+  "receipt_digest": "57527198cd4fdb70c0e2a901075a3885ccb613122c504c8372559f18ee133010"
+}
+```
+
+M05 receipts (VERIFIED-RUN): `test_recognition_model_authority.py` 28 passed,
+`test_recognition_recorder_gateway.py` 8 passed. After the change, the
+replay-mode, current-path and contract tests still pass (55 passed). External
+requests made: 0. Only fake transports exist; the repository holds no key.
+
+- Mode C is disabled by default. The disabled example document refuses with
+  CURRENT_MODEL_CALLS_DISABLED even when enabling-looking environment
+  variables are set, because no CLI flag or environment variable is read.
+- Each of these preconditions refuses before the fake transport is reached,
+  with zero reservations. The test is parametrized over 17 cases:
+  - owner receipt: missing, or forged with the same byte length (digest
+    checked);
+  - stale source SHA, corpus, annotation set or Brain fingerprint;
+  - expired or not-yet-valid authorization, judged on the real UTC clock and
+    never on the market decision clock;
+  - pricing: missing, unapproved or tampered;
+  - tampered authorization seal, refused when the authority is built;
+  - no output cap;
+  - a different parameter profile;
+  - a different endpoint;
+  - an SDK retry not disabled;
+  - an input-token bound over the cap.
+- Observation (VERIFIED-CODE, production unchanged): production's request
+  (narrative_brain.py `_call_llm`) sets no output-token cap, so its worst-case
+  cost is unbounded. External mode therefore needs an evaluation-parameter
+  profile that adds `max_completion_tokens`. That profile has its own digest,
+  bound in the authorization's parameter_digest. It is not a production
+  parameter change, and the Brain fingerprint is unchanged.
+- Budget accounting:
+  - Every attempt is reserved at the worst case
+    `(max_in * uncached_input_rate + max_out * output_rate) / rate_unit`
+    in a durable fsynced JSONL ledger before transport. This includes the
+    primary, each repair purpose and each transport retry.
+  - Unknown usage, and usage above the reservation, are charged the full
+    reservation. An overrun halts the run.
+  - The request, repair, retry and cost caps each stop the next request
+    before transport.
+  - When the ledger is reopened, a reservation that was never settled is
+    ORPHANED_CHARGED. A cancellation charges zero. A duplicate id or a
+    settle of an unknown reservation refuses.
+  - A recorder failure refuses the next request, in every mode, before
+    transport.
+- Whole-trajectory tests run in both lanes through the real loop with a
+  fake provider:
+  - every call is CURRENT_EXTERNAL, attempted, has a unique reservation and
+    matching usage;
+  - the bytes sent equal production's transported input;
+  - a foreign served model is refused by production as
+    provider_model_mismatch, and the attempt is still counted and charged.
+- The dry run prints a finite plan: ticks x lanes x trajectories x 4 calls
+  per scan (primary plus three repair sites, narrative_brain.py
+  1029/1046/1099/1148) x (1 + retries), capped by the request cap. Its
+  maximum cost is the planned bound x the per-request bound, never above
+  max_cost_usd. With the disabled authorization the plan is 0 requests,
+  with blockers listed.
+- No full suite is needed here: no shared adapter or production source was
+  touched. The full fresh suite runs at M07.
