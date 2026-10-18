@@ -715,3 +715,39 @@ test). Its log and JUnit are inside the archive.
   "receipt_digest": "95c84beb83fe3888d02cdf5ecc96a551e8f3ab28c11894bb873629ce07c334e0"
 }
 ```
+
+## Owner independent audit corrections
+
+```json ledger-entry
+{
+  "schema": "engineering_ledger_entry/v1",
+  "mission_id": "OWNER_AUDIT_01",
+  "parent_sha": "a41c552e2406413a6798fc31ae583b2bb6b323cf",
+  "parent_tree": "9296494e3cd8dee59c4df89316d1c274202d9c39",
+  "parent_tracked_status": "",
+  "brain_fingerprint": "brain:3d9878ad3ff57f1f",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_count": 48,
+  "closure_digest": "d4dbe6a3ea029c4b59f33a1deba3d7c65ccb877e33afa4aed317b68256a15cf1",
+  "protected_count": 32,
+  "protected_digest": "79988f0ea3e84e15e34485a8510e78efc667f6e274d41fcde5d6e3c0307ab79a",
+  "policy_refs": [
+    "Owner final independent audit and subsequent corrections on our side",
+    "Contract 04/07/09/10/13: truthful provenance, trace completeness, source/schedule binding; no trading policy change"
+  ],
+  "scoped_files": [
+    "src/recognition_validation/*.py",
+    "tests/test_recognition*.py",
+    "tests/test_replay2_session_walker.py",
+    "tools/verify_engineering_ledger.py",
+    "docs/recognition_validation/*"
+  ],
+  "proof_ids": [
+    "OWNER-AUDIT-PARENT-REPRODUCERS",
+    "OWNER-AUDIT-REGRESSIONS",
+    "OWNER-AUDIT-FINAL-SUITE"
+  ],
+  "predecessor_receipt_digest": "95c84beb83fe3888d02cdf5ecc96a551e8f3ab28c11894bb873629ce07c334e0",
+  "receipt_digest": "d080d8d8c4b8b0be4a7da37e19fd70e7a4acae94ad24dc45095ae5f3559e7ae1"
+}
+```
