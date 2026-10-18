@@ -573,3 +573,47 @@ was re-run after this entry was committed.
     `_call_llm`.
 - OWNER_DECISIONS_APPENDIX.md fills D01-D10 with the safe default kept, what
   stays UNPROVEN and the exact future commands.
+
+## M07: final integration and freeze
+
+Parent is the M06 child. This child changes documentation only and is the
+frozen final review candidate. Before freezing, checks on the M06 child
+gave VERIFIED-RUN: `compileall -q src tests` OK, and `git diff --check`
+from baseline f5934c0 OK (54 files, +12704, no deletions). The fresh-clone
+full suite, the collection inventory, the CLI samples and the hashes for
+this exact SHA travel in the single final package (contract 12). Committing
+them would change the SHA they describe.
+
+```json ledger-entry
+{
+  "schema": "engineering_ledger_entry/v1",
+  "mission_id": "M07",
+  "parent_sha": "90d8b56965d9002b39f2c3782957ea08766e1acd",
+  "parent_tree": "2ee0be6a3e3038629f7628b797c9d3131ed2fd84",
+  "parent_tracked_status": "",
+  "brain_fingerprint": "brain:3d9878ad3ff57f1f",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_count": 48,
+  "closure_digest": "d4dbe6a3ea029c4b59f33a1deba3d7c65ccb877e33afa4aed317b68256a15cf1",
+  "protected_count": 32,
+  "protected_digest": "79988f0ea3e84e15e34485a8510e78efc667f6e274d41fcde5d6e3c0307ab79a",
+  "policy_refs": [
+    "09 M07",
+    "12 final delivery template",
+    "13 security boundary",
+    "10 adversarial matrix"
+  ],
+  "scoped_files": [
+    "docs/recognition_validation/*"
+  ],
+  "proof_ids": [
+    "M07-FRESH-CLONE-FULL-SUITE",
+    "M07-COLLECTION-INVENTORY",
+    "M07-CLI-SAMPLES",
+    "M07-FINAL-PACKAGE"
+  ],
+  "freeze_note": "docs-only child; it is the frozen final review candidate; suite and package evidence travel in the final package",
+  "predecessor_receipt_digest": "8f93ad3596301dc4495c3a4a1eb4fca2dd13a54a6f025eb394af160e38c60d4c",
+  "receipt_digest": "c0a9d936a87402495d2dd5c76ea47e75bc27cec7f5761da3d661317aa014f0cd"
+}
+```
