@@ -319,7 +319,26 @@ class TestToolVerificationIsNotStopAuthority:
             "src/broker/conditional_plan_authority.py",
             "src/broker/luna_candidate_producer.py",
             "src/broker/topstepx_production_loop.py",
+            # Stage 5 offline harness: copies the id into its evidence record,
+            # once, after the scan. It is never a consumer: the field appears
+            # only in that recording line, and no production module imports
+            # the harness (both pinned below).
+            "src/recognition_validation/driver.py",
         ], found
+        with open(_os.path.join(root, "recognition_validation", "driver.py"), encoding="utf-8") as fh:
+            harness = fh.read()
+        assert harness.count("selected_tool_occurrence_id") == 1
+        assert 'tool_occurrence_id=(candidate.extras.get("selected_tool_occurrence_id")' in harness
+        importers = []
+        for base, _dirs, files in _os.walk(root):
+            if "__pycache__" in base or _os.path.basename(base) == "recognition_validation":
+                continue
+            for fn in files:
+                if fn.endswith(".py"):
+                    with open(_os.path.join(base, fn), encoding="utf-8", errors="replace") as fh:
+                        if "recognition_validation" in fh.read():
+                            importers.append(fn)
+        assert importers == [], importers
         wrapper_path = _os.path.join(
             root, "broker", "conditional_plan_authority.py")
         with open(wrapper_path, encoding="utf-8") as fh:

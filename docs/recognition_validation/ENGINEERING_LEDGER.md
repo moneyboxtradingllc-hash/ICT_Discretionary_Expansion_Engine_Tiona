@@ -617,3 +617,57 @@ them would change the SHA they describe.
   "receipt_digest": "c0a9d936a87402495d2dd5c76ea47e75bc27cec7f5761da3d661317aa014f0cd"
 }
 ```
+
+## M07R: repair the regression found by the final suite
+
+Parent is the M07 child 63e194f. The fresh-clone full suite of 63e194f
+(VERIFIED-RUN, 1h50m) gave 8976 passed, 583 skipped and 2 failed. Both
+failures were analysed against baseline f5934c0:
+
+- `test_production_fvg_stop_ownership.py::...::test_downstream_occurrence_read_only_revalidates_conditional_plan_identity`
+  is a REGRESSION from this program. It passes on f5934c0. The test is a
+  source-content theorem: only three production files may name
+  `selected_tool_occurrence_id`, and the M03 offline driver names it once,
+  to copy the id into its event record. Repair: a scoped literal update that
+  admits the harness file and pins two facts. The field appears in it exactly
+  once, in that recording line. No production module mentions
+  `recognition_validation`. Activated control: a planted production import of
+  the harness fails on that importer assertion.
+- `test_replay2_session_walker.py::TestWalker::test_end_to_end_synthetic_walk_and_forced_safety`
+  is NOT this program's change. It fails identically on f5934c0 under the
+  contract-13 forced environment (`EXECUTION_ENABLED=false`). It passes on
+  both f5934c0 and the child once that variable is unset. The test assumes
+  the variable is absent: after the run it expects the default "true", where
+  the right check is the pre-run value. It is left unchanged and disclosed,
+  with a proposed patch, in the final package.
+
+```json ledger-entry
+{
+  "schema": "engineering_ledger_entry/v1",
+  "mission_id": "M07R",
+  "parent_sha": "63e194f2a528d3614c6be851cac0229a37380922",
+  "parent_tree": "726410a04602b6ae8a2977aced3515f85e81fdfa",
+  "parent_tracked_status": "",
+  "brain_fingerprint": "brain:3d9878ad3ff57f1f",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_count": 48,
+  "closure_digest": "d4dbe6a3ea029c4b59f33a1deba3d7c65ccb877e33afa4aed317b68256a15cf1",
+  "protected_count": 32,
+  "protected_digest": "79988f0ea3e84e15e34485a8510e78efc667f6e274d41fcde5d6e3c0307ab79a",
+  "policy_refs": [
+    "09 M07 (repair discovered regressions)",
+    "13 scoped test literal update",
+    "full suite 63e194f JUnit"
+  ],
+  "scoped_files": [
+    "tests/test_production_fvg_stop_ownership.py",
+    "docs/recognition_validation/*"
+  ],
+  "proof_ids": [
+    "M07R-OCCURRENCE-THEOREM-HARNESS-RECORD-ONLY"
+  ],
+  "regression": "63e194f full suite: test_downstream_occurrence_read_only_revalidates_conditional_plan_identity failed because src/recognition_validation/driver.py (M03) names the field; passes on baseline f5934c0",
+  "predecessor_receipt_digest": "c0a9d936a87402495d2dd5c76ea47e75bc27cec7f5761da3d661317aa014f0cd",
+  "receipt_digest": "cf7bf4c2ec953a9630cf43af4f21f772dc4e53a2304b0b41a97354f9923d807d"
+}
+```
