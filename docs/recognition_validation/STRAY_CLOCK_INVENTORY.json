@@ -1,0 +1,979 @@
+{
+ "generated_by": "recognition_validation.clock_audit.inventory('src')",
+ "note": "Production wall-clock call sites (VERIFIED-CODE). A change here must be reviewed as a T32 item.",
+ "schema": "stray_clock_inventory/v1",
+ "sites": [
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "record_adaptive_actions",
+   "path": "src/adaptive_learning/adaptive_effect.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "build_capital_metrics",
+   "path": "src/adaptive_learning/capital_intelligence_engine.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 2,
+   "function": "track_capital",
+   "path": "src/adaptive_learning/capital_intelligence_engine.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_save",
+   "path": "src/adaptive_learning/earnback.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "generate_proposals",
+   "path": "src/adaptive_learning/earnback.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "set_status",
+   "path": "src/adaptive_learning/earnback.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_today",
+   "path": "src/adaptive_learning/memory_decay_engine.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "update_performance_tables",
+   "path": "src/adaptive_learning/performance_tables.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_scan_date",
+   "path": "src/adaptive_learning/suppression_cost_engine.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "register_blocked_candidate",
+   "path": "src/adaptive_learning/suppression_cost_engine.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_now",
+   "path": "src/ai_brain/ai_call_ledger.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "ledger_path",
+   "path": "src/ai_brain/ai_call_ledger.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "persist_brain_call",
+   "path": "src/ai_brain/brain_persistence.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "BrainRequestGuard._record",
+   "path": "src/ai_brain/brain_request_guard.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "BrainRequestGuard.begin",
+   "path": "src/ai_brain/brain_request_guard.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "BrainRequestGuard.complete",
+   "path": "src/ai_brain/brain_request_guard.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_probe_payload",
+   "path": "src/ai_brain/luna_health.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "run_health_check",
+   "path": "src/ai_brain/luna_health.py"
+  },
+  {
+   "call": "time.time",
+   "count": 2,
+   "function": "run_health_check",
+   "path": "src/ai_brain/luna_health.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_call_llm",
+   "path": "src/ai_brain/narrative_brain.py"
+  },
+  {
+   "call": "time.time",
+   "count": 4,
+   "function": "_call_llm",
+   "path": "src/ai_brain/narrative_brain.py"
+  },
+  {
+   "call": "datetime.utcnow",
+   "count": 1,
+   "function": "ThesisLifecycleEngine.update",
+   "path": "src/ai_brain/thesis_lifecycle.py"
+  },
+  {
+   "call": "datetime.utcnow",
+   "count": 1,
+   "function": "_archive_path",
+   "path": "src/ai_brain/thesis_lifecycle.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 2,
+   "function": "_minutes_since",
+   "path": "src/ai_brain/thesis_lifecycle.py"
+  },
+  {
+   "call": "time.monotonic",
+   "count": 9,
+   "function": "call_external_ai",
+   "path": "src/ai_layer/ai_api_adapter.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "build_records",
+   "path": "src/ai_retrieval/memory_authoring.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_persist",
+   "path": "src/ai_retrieval/retrieval.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_today_et",
+   "path": "src/ai_retrieval/retrieval.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "build_record",
+   "path": "src/ai_retrieval/retrieval_telemetry.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "validate_attestation",
+   "path": "src/ai_retrieval/session_closure.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_now",
+   "path": "src/broker/break_even_journal.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "CandidateProducer.is_expired",
+   "path": "src/broker/luna_candidate_producer.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "CandidateProducer.produce",
+   "path": "src/broker/luna_candidate_producer.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "assess",
+   "path": "src/broker/topstepx_candidate_freshness.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "validate_objective",
+   "path": "src/broker/topstepx_candidate_freshness.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "TopstepXClient.__init__",
+   "path": "src/broker/topstepx_client.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "Readiness.__init__",
+   "path": "src/broker/topstepx_combine_readiness.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "ExecutionRunner",
+   "path": "src/broker/topstepx_execution_runner.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "TopstepXLiveSession.__init__",
+   "path": "src/broker/topstepx_live_session.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "TopstepXMarketRuntime.__init__",
+   "path": "src/broker/topstepx_market_runtime.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "MissionReconciler.reconcile",
+   "path": "src/broker/topstepx_mission_reconciler.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "record_void",
+   "path": "src/broker/topstepx_mission_recovery.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_now",
+   "path": "src/broker/topstepx_mission_state.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "ProductionLoop.__init__",
+   "path": "src/broker/topstepx_production_loop.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "ProductionLoop._record_protection_observation",
+   "path": "src/broker/topstepx_production_loop.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "ProductionSession.__init__",
+   "path": "src/broker/topstepx_production_session.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "build",
+   "path": "src/broker/topstepx_protection_authority.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "LiveQuoteProvider.__init__",
+   "path": "src/broker/topstepx_quote_provider.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "TopstepXReadOnlySession.__init__",
+   "path": "src/broker/topstepx_readonly.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "Preflight.__init__",
+   "path": "src/broker/topstepx_readonly_preflight.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "SignalRHub.__init__",
+   "path": "src/broker/topstepx_realtime.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "StreamHealth.age_seconds",
+   "path": "src/broker/topstepx_realtime.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_now",
+   "path": "src/broker/topstepx_session_authorization.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "record_contaminated",
+   "path": "src/broker/topstepx_session_cognition_lock.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "SessionLedger.record",
+   "path": "src/broker/topstepx_session_ledger.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_now",
+   "path": "src/broker/topstepx_slippage.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "SmokeAuthorization.burn",
+   "path": "src/broker/topstepx_smoke_auth.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "SmokeAuthorization.is_expired",
+   "path": "src/broker/topstepx_smoke_auth.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "SmokeAuthorization.validate_for",
+   "path": "src/broker/topstepx_smoke_auth.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "issue",
+   "path": "src/broker/topstepx_smoke_auth.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_now",
+   "path": "src/broker/topstepx_submission_record.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_now",
+   "path": "src/broker/trade_lineage.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "is_within_scan_window",
+   "path": "src/data_feed/market_clock.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "evaluate",
+   "path": "src/data_feed/startup_history_authority.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "MinuteCandleAggregator.roll",
+   "path": "src/data_feed/topstepx_provider.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "TopstepXDataProvider._now",
+   "path": "src/data_feed/topstepx_provider.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "TopstepXDataProvider._on_coverage_event",
+   "path": "src/data_feed/topstepx_provider.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "TopstepXDataProvider._on_quote",
+   "path": "src/data_feed/topstepx_provider.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "TopstepXDataProvider._on_trade",
+   "path": "src/data_feed/topstepx_provider.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "TopstepXDataProvider._validate_trade_interval_authority_locked",
+   "path": "src/data_feed/topstepx_provider.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "TopstepXDataProvider.fetch_1m_candles",
+   "path": "src/data_feed/topstepx_provider.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "TopstepXDataProvider.is_warming_up",
+   "path": "src/data_feed/topstepx_provider.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 2,
+   "function": "TopstepXDataProvider.start",
+   "path": "src/data_feed/topstepx_provider.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "TopstepXDataProvider.stop",
+   "path": "src/data_feed/topstepx_provider.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "TradeIntervalTruth.__init__",
+   "path": "src/data_feed/trade_interval_truth.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "prior_completed_rth_profile",
+   "path": "src/data_feed/volume_profile.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "record_lesson",
+   "path": "src/deployment/global_memory.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_date_range",
+   "path": "src/experience_intelligence/experience_query.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "main",
+   "path": "src/integrations/topstepx/deterministic/backtest.py"
+  },
+  {
+   "call": "time.time",
+   "count": 1,
+   "function": "record_scan",
+   "path": "src/integrations/topstepx/deterministic/evidence.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 2,
+   "function": "_now_et",
+   "path": "src/integrations/topstepx/deterministic/loop.py"
+  },
+  {
+   "call": "time.time",
+   "count": 2,
+   "function": "route_deterministic_order",
+   "path": "src/integrations/topstepx/deterministic/loop.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_same_et_day",
+   "path": "src/integrations/topstepx/deterministic/session.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "TopstepXLaneClient._bar_age_minutes",
+   "path": "src/integrations/topstepx/deterministic/topstepx_lane_client.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_archive_filepath",
+   "path": "src/intent_archive/intent_archive.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_make_archive_key",
+   "path": "src/intent_archive/intent_archive.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_make_new_record",
+   "path": "src/intent_archive/intent_archive.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_save_archive",
+   "path": "src/intent_archive/intent_archive.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "update_archive",
+   "path": "src/intent_archive/intent_archive.py"
+  },
+  {
+   "call": "time.time",
+   "count": 3,
+   "function": "ProductionScanCycle._rebuild_derived_state",
+   "path": "src/live_scan/production_scan_cycle.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "ProductionScanCycle.scan",
+   "path": "src/live_scan/production_scan_cycle.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_print_loop_summary",
+   "path": "src/live_scan/scan_loop.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_print_scan_summary",
+   "path": "src/live_scan/scan_loop.py"
+  },
+  {
+   "call": "time.monotonic",
+   "count": 1,
+   "function": "_sleep_remainder",
+   "path": "src/live_scan/scan_loop.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 2,
+   "function": "run_scan_loop",
+   "path": "src/live_scan/scan_loop.py"
+  },
+  {
+   "call": "time.monotonic",
+   "count": 1,
+   "function": "run_scan_loop",
+   "path": "src/live_scan/scan_loop.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "save_snapshot",
+   "path": "src/live_scan/snapshot_store.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "WakeRegistry._observed_at",
+   "path": "src/live_scan/wake_registry.py"
+  },
+  {
+   "call": "time.monotonic",
+   "count": 2,
+   "function": "WakeRegistry.wait",
+   "path": "src/live_scan/wake_registry.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_run_live_scan",
+   "path": "src/main.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "main",
+   "path": "src/main.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "build_snapshot",
+   "path": "src/market_data/snapshot_builder.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "VapCaptureProvider.__init__",
+   "path": "src/market_data/vap_provider.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "build_record",
+   "path": "src/market_data/vap_store.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "prune",
+   "path": "src/market_data/vap_store.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_age_days",
+   "path": "src/mission_control/mission_control.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "collect_status",
+   "path": "src/mission_control/mission_control.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "BreakingNewsProvider.recent",
+   "path": "src/news/breaking_news_provider.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "EconomicCalendarProvider.snapshot",
+   "path": "src/news/calendar_provider.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "NewsMemory.record",
+   "path": "src/news/news_memory.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "check_eod_state",
+   "path": "src/operational_readiness/eod_authority.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_now_str",
+   "path": "src/operational_readiness/startup_authority.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_stale_state_hygiene",
+   "path": "src/operational_readiness/startup_authority.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "attest_config",
+   "path": "src/operational_readiness/startup_authority.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "run_startup_authority",
+   "path": "src/operational_readiness/startup_authority.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "log_activation_event",
+   "path": "src/paper_activation/activation_report.py"
+  },
+  {
+   "call": "time.monotonic",
+   "count": 3,
+   "function": "_attempt",
+   "path": "src/paper_execution/execution_engine.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_make_trade_id",
+   "path": "src/paper_execution/execution_engine.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_cancel_if_dead",
+   "path": "src/paper_execution/pending_order_lifecycle.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_log_incident",
+   "path": "src/paper_execution/position_supremacy.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_now",
+   "path": "src/paper_execution/position_supremacy.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_submit",
+   "path": "src/paper_execution/protective_stop.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_monitor",
+   "path": "src/paper_execution/thesis_monitor.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_journal_filepath",
+   "path": "src/paper_execution/trade_journal.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_search_recent_files",
+   "path": "src/paper_execution/trade_journal.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "append_trade",
+   "path": "src/paper_execution/trade_journal.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "make_record",
+   "path": "src/paper_execution/trade_journal.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "mark_exit_submitted",
+   "path": "src/paper_execution/trade_journal.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_execute_breakeven",
+   "path": "src/paper_execution/trade_manager.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_execute_take_profit",
+   "path": "src/paper_execution/trade_manager.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_execute_trail",
+   "path": "src/paper_execution/trade_manager.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_close_from_exit",
+   "path": "src/paper_execution/trade_reconciliation.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_handle_externally_closed",
+   "path": "src/paper_execution/trade_reconciliation.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_aggregate",
+   "path": "src/replay_validation/adaptive_effect_resolver.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "resolve_effects",
+   "path": "src/replay_validation/adaptive_effect_resolver.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "build_brain_accuracy",
+   "path": "src/replay_validation/brain_accuracy.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "build_table",
+   "path": "src/replay_validation/brain_thesis_quality.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "archive_session",
+   "path": "src/replay_validation/candle_archive.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "backfill",
+   "path": "src/replay_validation/candle_archive.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 2,
+   "function": "run_lab",
+   "path": "src/replay_validation/counterfactual_lab.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "normalize_milestone",
+   "path": "src/replay_validation/evolution_timeline.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "render_html",
+   "path": "src/replay_validation/evolution_timeline.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "render_markdown",
+   "path": "src/replay_validation/evolution_timeline.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 2,
+   "function": "run",
+   "path": "src/replay_validation/family_repair_replay.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 2,
+   "function": "aggregate",
+   "path": "src/replay_validation/live_brain_study.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "do_run",
+   "path": "src/replay_validation/live_brain_study.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 2,
+   "function": "build_health_report",
+   "path": "src/replay_validation/organism_health.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_main",
+   "path": "src/replay_validation/replay_session.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 2,
+   "function": "replay_session",
+   "path": "src/replay_validation/replay_session.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 2,
+   "function": "run_suite",
+   "path": "src/replay_validation/validation_suite.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "<module>",
+   "path": "src/replay_validation/volume_witness_report.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "build_report",
+   "path": "src/replay_validation/volume_witness_report.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_find_intent",
+   "path": "src/rule_governance/divergence_ledger.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "append_events",
+   "path": "src/rule_governance/divergence_ledger.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "load_events",
+   "path": "src/rule_governance/divergence_ledger.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 2,
+   "function": "resolve_pending",
+   "path": "src/rule_governance/divergence_ledger.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "build_daily_digest",
+   "path": "src/rule_governance/governance_report.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "build_weekly_report",
+   "path": "src/rule_governance/governance_report.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "rules_near_review",
+   "path": "src/rule_governance/rule_registry.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "transition_rule",
+   "path": "src/rule_governance/rule_registry.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_evaluate",
+   "path": "src/rule_governance/shadow_evaluator.py"
+  },
+  {
+   "call": "datetime.now",
+   "count": 1,
+   "function": "_now",
+   "path": "src/structure/structure_flip.py"
+  }
+ ]
+}

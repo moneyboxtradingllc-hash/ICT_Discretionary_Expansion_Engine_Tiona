@@ -459,3 +459,117 @@ requests made: 0. Only fake transports exist; the repository holds no key.
   with blockers listed.
 - No full suite is needed here: no shared adapter or production source was
   touched. The full fresh suite runs at M07.
+
+## M06: scoring join, result/report, operator CLI, stray-clock audit
+
+Parent is the M05 child.
+
+```json ledger-entry
+{
+  "schema": "engineering_ledger_entry/v1",
+  "mission_id": "M06",
+  "parent_sha": "5032345090c96d3b920dde65355a4fb287deb15b",
+  "parent_tree": "bd291f7a3eed9133a341752543063e65a1d08e57",
+  "parent_tracked_status": "",
+  "brain_fingerprint": "brain:3d9878ad3ff57f1f",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_count": 48,
+  "closure_digest": "d4dbe6a3ea029c4b59f33a1deba3d7c65ccb877e33afa4aed317b68256a15cf1",
+  "protected_count": 32,
+  "protected_digest": "79988f0ea3e84e15e34485a8510e78efc667f6e274d41fcde5d6e3c0307ab79a",
+  "policy_refs": [
+    "09 M06",
+    "07 annotation/scoring/result",
+    "10 T27/T28/T29/T32",
+    "11 owner decisions",
+    "13 security boundary"
+  ],
+  "scoped_files": [
+    "src/recognition_validation/scoring.py",
+    "src/recognition_validation/report.py",
+    "src/recognition_validation/__main__.py",
+    "src/recognition_validation/clock_audit.py",
+    "src/recognition_validation/driver.py",
+    "tests/test_recognition_scoring_cli.py",
+    "tests/test_recognition_clock_audit.py",
+    "docs/recognition_validation/*"
+  ],
+  "proof_ids": [
+    "M06-EXACT-CELLS-REAL-TRACE",
+    "M06-SEPARATE-NOTRADE-BLOCKED-UNKNOWN",
+    "M06-T29-AVAILABILITY",
+    "M06-T28-TRUTH-FROZEN",
+    "M06-MODE-B-NOT-CURRENT",
+    "M06-DENOMINATORS-RAW-IDENTITY",
+    "M06-CLI-EXIT-CODES",
+    "M06-T27-INCOMPLETE",
+    "M06-T32-CLOCK-AUDIT"
+  ],
+  "predecessor_receipt_digest": "57527198cd4fdb70c0e2a901075a3885ccb613122c504c8372559f18ee133010",
+  "receipt_digest": "8f93ad3596301dc4495c3a4a1eb4fca2dd13a54a6f025eb394af160e38c60d4c"
+}
+```
+
+M06 receipts (VERIFIED-RUN): `test_recognition_scoring_cli.py` 9 passed and
+`test_recognition_clock_audit.py` 4 passed. All twelve Stage 4/5 modules
+together gave 154 passed and 1 failed in 23m20s. The one failure is the
+real-repository ledger check, run while the M06 driver change was still
+uncommitted. The verifier correctly reported
+STALE_LEDGER_OUT_OF_SCOPE_CHANGE (M05 does not cover driver.py). The check
+was re-run after this entry was committed.
+
+- `scoring.py` joins one chain-verified raw trace with at most one
+  annotation set, after execution. It reports cells per layer:
+  - FACT: the exact production occurrence identity.
+  - RECOGNITION: the direction of each complete primary call.
+  - TIMING.
+  - REFUSAL: HIT, CORRECT_REFUSAL, FALSE_POSITIVE, MISS (CLEAR labels only),
+    HONEST_UNKNOWN, AMBIGUOUS_UNSCORED, RECOGNIZED_BLOCKED_BY_<blocker>,
+    UNKNOWN_TRUTH_DIRECTIONAL_OBSERVATION and UNPROVEN.
+- Every metric carries a numerator, a denominator, an excluded count and an
+  UNPROVEN count. A zero denominator gives UNSCORED. PASS/FAIL appears only
+  under an OWNER_RATIFIED plan, on sealed owner truth, in Mode C. Mode A/B
+  cells are excluded from current-recognition denominators.
+- On the real CONSTRUCTED trace, the known labels give exactly:
+  - entry-window HIT, with EXACT_OCCURRENCE equal to the distinct-anchor
+    formation identity and the first candidate at 16:39;
+  - quiet window CORRECT_REFUSAL;
+  - unclear window HONEST_UNKNOWN;
+  - recognition_hits 0/0 UNSCORED (3 excluded);
+  - diagnostic hits 2/2.
+- T28 refusals: SELF_AUTHORED_OWNER_ANNOTATION, OUTCOME_AS_TRUTH (a label
+  citing this run's own evidence), ANNOTATION_SEALED_AFTER_OUTPUTS,
+  SEAL_MISMATCH after mutation, NONOWNER_ANNOTATION_NOT_CERTIFIABLE and
+  CORPUS_SEALED_AFTER_OUTPUTS. These are judged on real time from the new
+  RUN_MANIFEST.json written by driver.run_offline.
+- T29:
+  - A tolerance only extends a target forward.
+  - A judgment before earliest availability is EARLY_BEFORE_AVAILABILITY,
+    never a hit.
+  - An entry that early is EARLY_POSITIVE_AUTHORITY, an invariant failure.
+  - Activated control: a tolerant-lookahead label turns the same judgment
+    into a hit.
+- Mode B with a ratified plan and sealed truth still yields UNPROVEN. A
+  forged ELIGIBLE result for Mode B is refused (MOCK_COGNITION_LAUNDERING).
+  A semantic-projected trace cannot be scored, because it has no verifiable
+  chain.
+- The CLI `python -m recognition_validation` provides validate, plan, run
+  (A/B, and C dry-run), compare and report. Exit codes are 0/2/3/4/5 as in
+  contract 07.
+  - A live Mode C run exits 2 (EXTERNAL_TRANSPORT_UNAVAILABLE).
+  - Output-root reuse exits 2.
+  - A divergent compare exits 4.
+  - A report without annotations exits 3.
+  - T27: a recording error, a missing artifact or a missing manifest exits
+    5 with ENGINEERING_INCOMPLETE, and never produces a passing result.
+- T32 (VERIFIED-CODE/RUN):
+  - STRAY_CLOCK_INVENTORY.json lists 162 production wall-clock sites
+    (192 calls), and the test fails on any change to it.
+  - A short Mode B run observed zero production `time.time` readers outside
+    the decision-clock seam. The positive control proves the observer
+    detects one.
+  - `datetime.now` cannot be intercepted, so it is covered statically,
+    including thesis_lifecycle `_archive_path`/`update` and narrative_brain
+    `_call_llm`.
+- OWNER_DECISIONS_APPENDIX.md fills D01-D10 with the safe default kept, what
+  stays UNPROVEN and the exact future commands.

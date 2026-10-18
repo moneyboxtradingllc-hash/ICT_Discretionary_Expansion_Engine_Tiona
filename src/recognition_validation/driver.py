@@ -18,6 +18,7 @@ its whole session; runs require an isolated runtime root (see `isolation`).
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -239,6 +240,7 @@ def run_offline(*, corpus_path, session_id: str, out_root, responder, ecu: bool,
     out_root = Path(out_root)
     C.require(not out_root.exists() or not any(out_root.iterdir()), "OUTPUT_ROOT_REUSE", "/" + str(out_root))
     classification = corpus.document["provenance"]["classification"]
+    started_at = P.real_utc_now().isoformat()
     with isolation(out_root, ecu=ecu):
         clock = P.DecisionClock(ticks[0].decision_time)
         organism = build_organism(stream=stream, clock=clock, store_dir=out_root / "store",
@@ -252,4 +254,22 @@ def run_offline(*, corpus_path, session_id: str, out_root, responder, ecu: bool,
         summary = run_trajectory(organism=organism, stream=stream, ticks=ticks, gateway=gateway, recorder=recorder)
     summary.update(evidence_root=str(out_root / "evidence"), corpus_digest=corpus.digest,
                    tick_count=len(ticks), requests=gateway.requests, calls=gateway.calls)
+    write_manifest(out_root / "evidence", {
+        "schema": "run_manifest/v1", "trajectory_id": trajectory_id, "session_id": session_id,
+        "evaluation_origin": getattr(responder, "origin", "MOCK"), "ecu": ecu, "corpus_digest": corpus.digest,
+        "real_started_at": started_at, "real_completed_at": P.real_utc_now().isoformat(),
+        "tick_count": len(ticks), "ticks": summary["ticks"], "events": summary["events"],
+        "primary_calls": summary["primary_calls"], "repair_calls": summary["repair_calls"],
+        "infrastructure_error": summary["infrastructure_error"],
+        "network_attempts": [str(a) for a in summary["network_attempts"]],
+        "venue_writes": [str(w) for w in summary["venue_writes"]],
+        "mission_tokens": summary["mission_tokens"], "mission_attempts": summary["mission_attempts"],
+        "fixture_digest": getattr(responder, "fixture_digest", None)})
     return summary
+
+
+def write_manifest(root, manifest: dict) -> None:
+    """Real-time run bounds and counts; created once, never overwritten."""
+    data = json.dumps(manifest, sort_keys=True, indent=1).encode("utf-8")
+    with open(Path(root) / "RUN_MANIFEST.json", "xb") as handle:
+        handle.write(data)
