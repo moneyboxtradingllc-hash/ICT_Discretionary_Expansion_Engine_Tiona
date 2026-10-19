@@ -221,20 +221,26 @@ def cmd_report(args) -> int:
     refs = [{"path": f"evidence/{name}", "sha256": C.sha256_hex((root / name).read_bytes()),
              "bytes": (root / name).stat().st_size, "origin": "CONSTRUCTED"}
             for name in ("events.jsonl", "brain_calls.jsonl", RP.MANIFEST) if (root / name).exists()]
+    if corpus is None:
+        missing.append("CORPUS_ABSENT: the required session/trajectory set is undeclared")
     result = RP.build_result(document_id=f"result:{scored[0]['summary']['trajectory_id']}",
                              run_digest=(manifest or {}).get("run_digest") or (manifest or {}).get("corpus_digest") or "0" * 64,
                              mode=mode, scored=scored,
                              manifest=manifest, artifact_refs=refs, missing_prerequisites=missing,
-                             stage4_internal_status=args.stage4_status)
+                             stage4_internal_status=args.stage4_status, scoring=scoring,
+                             required_units=RP.required_units(corpus, scored) if corpus is not None else None)
     _write_json(out / "result.json", result)
     (out / "report.md").write_text(RP.render_markdown(result, scored), encoding="utf-8")
     print(json.dumps({"final_status": result["final_status"], "engineering_status": result["engineering_status"],
-                      "current_brain_recognition": result["current_brain_recognition"]}, sort_keys=True))
+                      "current_brain_recognition": result["current_brain_recognition"],
+                      "rule_coverage": result["rule_coverage"]["status"]}, sort_keys=True))
     if result["invariant_failures"]:
         return EXIT_INVARIANT
     if result["engineering_status"] == "INCOMPLETE":
         return EXIT_INFRA
-    return EXIT_MISSING if annotation is None else EXIT_OK
+    if annotation is None or (result["rule_coverage"]["rules"] and result["rule_coverage"]["status"] == "INCOMPLETE"):
+        return EXIT_MISSING
+    return EXIT_OK
 
 
 def parser() -> argparse.ArgumentParser:

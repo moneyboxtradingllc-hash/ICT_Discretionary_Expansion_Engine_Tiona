@@ -1,11 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://example.invalid/ict-stage5/result/v1",
+  "$id": "https://example.invalid/ict-stage5/result",
   "type": "object",
   "additionalProperties": false,
   "properties": {
     "schema_version": {
-      "const": "result/v1"
+      "enum": [
+        "result/v1",
+        "result/v2"
+      ]
     },
     "document_id": {
       "type": "string",
@@ -411,6 +414,220 @@
         "ENGINEERING_INCOMPLETE",
         "UNPROVEN",
         "FAIL"
+      ]
+    },
+    "rule_coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "declared": {
+          "type": "boolean"
+        },
+        "status": {
+          "enum": [
+            "COMPLETE",
+            "INCOMPLETE",
+            "UNDECLARED",
+            "FAIL"
+          ]
+        },
+        "required_units": {
+          "type": "array",
+          "minItems": 0,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "session_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "trajectory_id": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "session_id",
+              "trajectory_id"
+            ]
+          }
+        },
+        "rules": {
+          "type": "array",
+          "minItems": 0,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "metric": {
+                "type": "string",
+                "minLength": 1
+              },
+              "operator": {
+                "enum": [
+                  "<=",
+                  ">=",
+                  "=="
+                ]
+              },
+              "value": {
+                "type": "number"
+              },
+              "decision_ref": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "metric",
+              "operator",
+              "value",
+              "decision_ref"
+            ]
+          }
+        },
+        "obligations": {
+          "type": "array",
+          "minItems": 0,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "session_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "trajectory_id": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "metric": {
+                "type": "string",
+                "minLength": 1
+              },
+              "operator": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "<=",
+                      ">=",
+                      "=="
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "threshold_value": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "decision_ref": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "numerator": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "denominator": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "value": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "status": {
+                "enum": [
+                  "PASS",
+                  "FAIL",
+                  "UNPROVEN"
+                ]
+              },
+              "reason": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "session_id",
+              "trajectory_id",
+              "metric",
+              "operator",
+              "threshold_value",
+              "decision_ref",
+              "numerator",
+              "denominator",
+              "value",
+              "status",
+              "reason"
+            ]
+          }
+        }
+      },
+      "required": [
+        "declared",
+        "status",
+        "required_units",
+        "rules",
+        "obligations"
       ]
     }
   },

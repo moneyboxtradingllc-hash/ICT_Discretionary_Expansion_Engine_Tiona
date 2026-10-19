@@ -195,15 +195,35 @@ def classify_episode(label: dict, events: list, directions: list, *, tolerance_s
             "observed_action": observed, "evidence": "missing" if not scored else "present"}
 
 
+#: Every metric `score_trace` emits; a ratified rule naming anything else is refused.
+METRIC_NAMES = ("episodes_with_evidence", "recognition_hits", "recognition_hits_diagnostic", "false_positive_entries",
+                "correct_refusals", "exact_occurrence_selected", "authority_invariant_violations",
+                "missing_cognition_calls", "degraded_scans", "unique_candidates")
+
+
+def rule_holds(value, rule: dict) -> bool:
+    """The one comparison a ratified threshold rule means; the report reuses it."""
+    return {"<=": value <= rule["value"], ">=": value >= rule["value"], "==": value == rule["value"]}[rule["operator"]]
+
+
 def _threshold(metric: dict, scoring: dict | None, inclusion: Inclusion) -> dict:
-    if not (inclusion.ratified and inclusion.current_recognition) or metric["denominator"] == 0:
+    if not (inclusion.ratified and inclusion.current_recognition):
         return metric
     for rule in scoring["thresholds"]:
         if rule["metric"] == metric["name"]:
-            value = metric["value"]
-            ok = {"<=": value <= rule["value"], ">=": value >= rule["value"], "==": value == rule["value"]}
-            metric.update(assessment="PASS" if ok[rule["operator"]] else "FAIL", threshold_ref=rule["decision_ref"])
+            # A required rule with no scored evidence stays bound to its rule as UNPROVEN;
+            # it must never drop out of the obligation set (contract 07, owner audit residual).
+            assessment = ("UNPROVEN" if metric["denominator"] == 0
+                          else "PASS" if rule_holds(metric["value"], rule) else "FAIL")
+            metric.update(assessment=assessment, threshold_ref=rule["decision_ref"])
     return metric
+
+
+def check_rules(scoring: dict) -> None:
+    """Unknown or duplicated threshold rules are hard refusals, never silently skipped."""
+    rules = [r["metric"] for r in scoring["thresholds"]]
+    C.require(all(name in METRIC_NAMES for name in rules), "UNKNOWN_SCORING_METRIC", "/thresholds")
+    C.require(len(rules) == len(set(rules)), "DUPLICATE_SCORING_METRIC", "/thresholds")
 
 
 def score_trace(root, *, mode: str, session_id: str, trajectory_id: str, annotation: dict | None,
@@ -286,11 +306,9 @@ def score_trace(root, *, mode: str, session_id: str, trajectory_id: str, annotat
         _metric("degraded_scans", degraded, len(events)),
         _metric("unique_candidates", unique_candidates, max(unique_candidates, 1) if events else 0),
     ]
+    C.require(tuple(m["name"] for m in metrics) == METRIC_NAMES, "METRIC_SET_DRIFT", "/metrics")
     if scoring is not None:
-        names = {m["name"] for m in metrics}
-        rules = [r["metric"] for r in scoring["thresholds"]]
-        C.require(all(name in names for name in rules), "UNKNOWN_SCORING_METRIC", "/thresholds")
-        C.require(len(rules) == len(set(rules)), "DUPLICATE_SCORING_METRIC", "/thresholds")
+        check_rules(scoring)
         metrics = [_threshold(metric, scoring, inclusion) for metric in metrics]
     limitations = []
     if annotation is None:

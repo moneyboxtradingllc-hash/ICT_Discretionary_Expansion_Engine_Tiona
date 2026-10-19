@@ -372,6 +372,41 @@ class _Semantics:
         if doc["final_status"] == "READY_FOR_OWNER_REVIEW":
             require(doc["engineering_status"] == "COMPLETE" and not doc["invariant_failures"],
                     "INCOMPLETE_READY_CLAIM", "/final_status")
+        claims = doc["current_brain_recognition"] in ("ELIGIBLE_FOR_OWNER_REVIEW", "OWNER_ACCEPTED")
+        if doc["schema_version"] == "result/v1":
+            # v1 carries no rule-obligation evidence: its records stay readable, but
+            # an eligibility claim in one cannot be verified and is refused, not reinterpreted.
+            require(not claims, "RESULT_V1_RULE_COVERAGE_UNVERIFIABLE", "/current_brain_recognition")
+            require("rule_coverage" not in doc, "RESULT_V1_UNKNOWN_FIELD", "/rule_coverage")
+            return
+        require("rule_coverage" in doc, "RULE_COVERAGE_REQUIRED", "/rule_coverage")
+        coverage = doc["rule_coverage"]
+        obligations = coverage["obligations"]
+        for index, item in enumerate(obligations):
+            pointer = f"/rule_coverage/obligations/{index}"
+            if item["status"] == "UNPROVEN":
+                require(item["reason"] is not None, "UNPROVEN_OBLIGATION_REASON_REQUIRED", pointer)
+                continue
+            require(item["reason"] is None and bool(item["denominator"]) and item["value"] is not None,
+                    "SCORED_OBLIGATION_WITHOUT_EVIDENCE", pointer)
+            if item["operator"] is not None:
+                holds = {"<=": item["value"] <= item["threshold_value"], ">=": item["value"] >= item["threshold_value"],
+                         "==": item["value"] == item["threshold_value"]}[item["operator"]]
+                require(holds == (item["status"] == "PASS"), "OBLIGATION_ASSESSMENT_MISMATCH", pointer)
+        if coverage["declared"]:
+            expected = sorted((u["session_id"], u["trajectory_id"] or "", r["metric"], r["decision_ref"])
+                              for u in coverage["required_units"] for r in coverage["rules"])
+            actual = sorted((o["session_id"], o["trajectory_id"] or "", o["metric"], o["decision_ref"] or "")
+                            for o in obligations)
+            require(expected == actual, "RULE_OBLIGATION_SET_INCOMPLETE", "/rule_coverage/obligations")
+        statuses = {o["status"] for o in obligations}
+        status = ("FAIL" if "FAIL" in statuses else "UNDECLARED" if not coverage["declared"]
+                  else "COMPLETE" if obligations and statuses == {"PASS"} else "INCOMPLETE")
+        require(coverage["status"] == status, "RULE_COVERAGE_STATUS_MISMATCH", "/rule_coverage/status")
+        require(not claims or status == "COMPLETE", "ELIGIBILITY_WITHOUT_COMPLETE_RULE_COVERAGE",
+                "/current_brain_recognition")
+        require(doc["current_brain_recognition"] != "FAIL" or status == "FAIL", "FAIL_WITHOUT_SCORED_RULE_FAILURE",
+                "/current_brain_recognition")
 
     @staticmethod
     def model_authorization(doc, certification):

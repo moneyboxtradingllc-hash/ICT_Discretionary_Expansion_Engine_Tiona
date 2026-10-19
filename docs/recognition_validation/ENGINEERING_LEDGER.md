@@ -751,3 +751,61 @@ test). Its log and JUnit are inside the archive.
   "receipt_digest": "d080d8d8c4b8b0be4a7da37e19fd70e7a4acae94ad24dc45095ae5f3559e7ae1"
 }
 ```
+
+## GAP_M1: required scoring-rule coverage
+
+Engineering GO of 2026-10-19 (gap closure, mission 1 of 4). Parent is the
+owner-audit correction commit 51eb3e1 (tree 883d8c5e), fetched from
+`audit/stage5-owner-corrections-20261018` and verified; work continues on the
+new branch `engineering/stage5-gap-closure-20261019`.
+
+Parent defect (VERIFIED-RUN, the audit's own reproducer on 51eb3e1): a
+ratified `recognition_hits` rule with denominator 0 got no `threshold_ref`,
+dropped out of the all-pass aggregation, and `build_result` returned
+ELIGIBLE_FOR_OWNER_REVIEW. The healthy failure control returned FAIL.
+
+Repair: `scoring._threshold` keeps a zero-denominator required metric bound
+to its rule as UNPROVEN. `report.rule_coverage` emits one obligation per
+ratified rule per required session/trajectory (PASS, FAIL, or UNPROVEN with a
+reason: ZERO_DENOMINATOR, REQUIRED_TRAJECTORY_NOT_SCORED,
+NOT_CURRENT_RECOGNITION_ELIGIBLE, RULE_METRIC_ABSENT). Eligibility needs a
+declared, complete, all-PASS coverage. Any scored rule failure is FAIL, and
+missing coverage never becomes FAIL. The required set comes from the corpus's
+EVALUATION sessions. Only an OWNER_RATIFIED corpus's own EXCLUDED session
+with recorded reasons leaves it; no exclusion, threshold, N or denominator
+policy is chosen here. `result/v2` carries `rule_coverage`, and the contract
+validator recomputes obligation completeness and status. `result/v1` stays
+readable but may not claim eligibility. Unknown/duplicate rules stay hard
+refusals. No production source is touched.
+
+```json ledger-entry
+{
+  "schema": "engineering_ledger_entry/v1",
+  "mission_id": "GAP_M1",
+  "parent_sha": "51eb3e1c209d205891a75a1181ad2f42dd65333d",
+  "parent_tree": "883d8c5e01a7091226b591db29612922441af26c",
+  "parent_tracked_status": "",
+  "brain_fingerprint": "brain:3d9878ad3ff57f1f",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_count": 48,
+  "closure_digest": "d4dbe6a3ea029c4b59f33a1deba3d7c65ccb877e33afa4aed317b68256a15cf1",
+  "protected_count": 32,
+  "protected_digest": "79988f0ea3e84e15e34485a8510e78efc667f6e274d41fcde5d6e3c0307ab79a",
+  "policy_refs": [
+    "GO 2026-10-19 Mission 1: required scoring-rule coverage",
+    "Contract 07 scoring/result; owner audit residual (zero-denominator required rule)"
+  ],
+  "scoped_files": [
+    "src/recognition_validation/*",
+    "tests/test_recognition*.py",
+    "docs/recognition_validation/*"
+  ],
+  "proof_ids": [
+    "GAP-M1-PARENT-REPRODUCER",
+    "GAP-M1-RULE-COVERAGE-TESTS",
+    "GAP-M1-ACTIVATED-MUTANTS"
+  ],
+  "predecessor_receipt_digest": "d080d8d8c4b8b0be4a7da37e19fd70e7a4acae94ad24dc45095ae5f3559e7ae1",
+  "receipt_digest": "7c33aa389048a188902e9e78ed4564dd0b47dfcc252be6d0ff5172541c2e50bb"
+}
+```
