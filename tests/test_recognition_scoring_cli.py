@@ -103,7 +103,9 @@ def test_known_labels_on_the_real_trace_give_exact_separate_cells(world):
     # Deterministic truth: the exact production occurrence identity, compared raw.
     assert _cells(scored, "FACT") == {(W.FORMATION_ID, "EXACT_OCCURRENCE")}
     entry = next(e for e in scored["episodes"] if e["label_id"] == "entry-window")
-    assert entry["first_candidate_utc"][11:16] == W.WINDOW[0] and entry["selected_occurrences"] == [W.FORMATION_ID]
+    # This label starts at 16:39 decision time; the already-delivering campaign
+    # also has candidates before that window. Score the first observation inside it.
+    assert entry["first_candidate_utc"][11:16] == "16:39" and entry["selected_occurrences"] == [W.FORMATION_ID]
     assert _metric(scored, "exact_occurrence_selected")["numerator"] == 1
     assert _metric(scored, "correct_refusals")["numerator"] == 1
     assert _metric(scored, "false_positive_entries")["numerator"] == 0
@@ -170,7 +172,7 @@ def test_self_authored_owner_annotation_and_outcome_as_truth_refuse(world):
     labels[0]["source_evidence"] = [{"path": "events.jsonl", "sha256": C.sha256_hex(events), "bytes": len(events),
                                      "origin": "CONSTRUCTED"}]
     with pytest.raises(C.ContractError) as exc:
-        SC.score_trace(world["root"], mode="B", session_id=CP.SESSION, trajectory_id="T",
+        SC.score_trace(world["root"], mode="B", session_id=CP.SESSION, trajectory_id="S5-M06",
                        annotation=_annotation(world, labels))
     assert exc.value.code == "OUTCOME_AS_TRUTH"
 
@@ -205,7 +207,7 @@ def test_mode_b_can_never_be_declared_current_recognition(world):
     annotation = _annotation(world, _known_labels(), **owner)
     scoring = {"schema_version": "scoring/v1", "document_id": "S", "state": "OWNER_RATIFIED",
                "thresholds": [{"metric": "recognition_hits", "operator": ">=", "value": 0.0, "decision_ref": "x"}]}
-    scored = SC.score_trace(world["root"], mode="B", session_id=CP.SESSION, trajectory_id="T",
+    scored = SC.score_trace(world["root"], mode="B", session_id=CP.SESSION, trajectory_id="S5-M06",
                             annotation=annotation, scoring=scoring)
     assert scored["inclusion"]["current_recognition_eligible"] is False
     assert _metric(scored, "recognition_hits")["assessment"] == "UNSCORED"
@@ -223,7 +225,7 @@ def test_missing_denominators_are_unscored_and_projection_cannot_be_scored(world
     assert empty["value"] is None and empty["assessment"] == "UNSCORED"
     with pytest.raises(C.ContractError):
         SC._metric("x", 2, 1)
-    scored = SC.score_trace(world["root"], mode="B", session_id=CP.SESSION, trajectory_id="T", annotation=None)
+    scored = SC.score_trace(world["root"], mode="B", session_id=CP.SESSION, trajectory_id="S5-M06", annotation=None)
     assert all(m["assessment"] == "UNSCORED" for m in scored["summary"]["metrics"]
                if m["name"] in ("episodes_with_evidence", "recognition_hits", "exact_occurrence_selected"))
     assert "NO_ANNOTATION" in scored["summary"]["limitations"][0]
@@ -232,7 +234,7 @@ def test_missing_denominators_are_unscored_and_projection_cannot_be_scored(world
     projected = CMP.project_events(REC.read_events(world["root"]))
     (tmp_path / "events.jsonl").write_text("".join(json.dumps(e) + "\n" for e in projected))
     with pytest.raises(C.ContractError):
-        SC.score_trace(tmp_path, mode="B", session_id=CP.SESSION, trajectory_id="T", annotation=None)
+        SC.score_trace(tmp_path, mode="B", session_id=CP.SESSION, trajectory_id="S5-M06", annotation=None)
     raw = REC.read_events(world["root"])
     assert _metric(scored, "unique_candidates")["numerator"] == len({e["candidate_id"] for e in raw
                                                                      if e["candidate_id"]})
@@ -247,6 +249,18 @@ def _run_doc(world, path, **over):
                corpus_digest=world["digest"], mode="B", ecu=True, trajectory_id="S5-CLI", dry_run=False,
                trajectory_count=1)
     doc.update(over)
+    doc.update(C.source_identity())
+    doc["quote_policy"] = "CONSTRUCTED"
+    stream = K.load_corpus(world["corpus_path"]).sessions[CP.SESSION].stream
+    ticks = [t for t in DR.minute_schedule(stream, prewarm_until=DR.utc(PREWARM)) if t.decision_time <= DR.utc(UNTIL)]
+    schedule = json.loads((ROOT / "src/recognition_validation/examples/fictional_schedule.json").read_text())
+    schedule.update(corpus_digest=world["digest"], ticks=[{"session_id":CP.SESSION,"ordinal":t.ordinal,
+                    "decision_time_utc":t.decision_time.isoformat(),"kind":t.kind,"source_ref":None} for t in ticks], seal=None)
+    schedule["seal"] = {"sha256":C.seal_digest(schedule),"sealed_at":"2026-10-17T00:00:00Z","sealer_ref":"TEST_ONLY"}
+    data = C.canonical(schedule)
+    schedule_path = path.with_suffix(".schedule.json")
+    schedule_path.write_bytes(data)
+    doc["schedule_ref"] = {"path":schedule_path.name,"sha256":C.sha256_hex(data),"bytes":len(data),"origin":"CONSTRUCTED"}
     C.validate(doc)
     path.write_text(json.dumps(doc))
     return path
@@ -312,6 +326,7 @@ def test_t27_recording_failure_or_missing_artifact_is_incomplete_never_a_pass(wo
     shutil.copytree(world["root"], broken)
     manifest = json.loads((broken / RP.MANIFEST).read_text())
     manifest["infrastructure_error"] = "OSError: No space left on device"
+    manifest["seal"]["sha256"] = C.seal_digest(manifest)
     (broken / RP.MANIFEST).write_text(json.dumps(manifest))
     assert CLI.main(["report", "--run", str(broken), "--out", str(tmp_path / "r")]) == 5
     result = json.loads((tmp_path / "r" / "result.json").read_text())

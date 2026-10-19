@@ -370,7 +370,7 @@ def test_fake_provider_whole_trajectory_records_and_counts_every_attempt(corpus_
                              ticks_until="2026-08-19T15:40:00Z", responder=responder)
     calls = REC.read_calls(summary["evidence_root"])
     assert calls and len(calls) == len(transport.sent) == responder.ledger.requests
-    assert all(c["evaluation_origin"] == "CURRENT_EXTERNAL" and c["request_attempted"] for c in calls)
+    assert all(c["evaluation_origin"] == "MOCK" and not c["request_attempted"] for c in calls)
     assert len({c["budget_reservation_id"] for c in calls}) == len(calls)
     assert set(responder.ledger.reservations) == {c["budget_reservation_id"] for c in calls}
     assert all(p["max_completion_tokens"] == PROFILE.max_completion_tokens and p["model"] == MODEL
@@ -382,7 +382,7 @@ def test_fake_provider_whole_trajectory_records_and_counts_every_attempt(corpus_
     served = [c["served_model"] for c in calls]
     assert served[0].startswith(MODEL) and served[2] is None
     assert calls[2]["fallback_reason"].startswith("provider_model_mismatch")
-    assert all(c["usage"] == {"input_tokens": 30000, "output_tokens": 700, "cached_input_tokens": 0}
+    assert all(c["usage"] == {"input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0}
                for c in calls)
     assert responder.ledger.exposure == len(calls) * MA.request_upper_bound(30000, 700, _pricing())
 

@@ -33,7 +33,7 @@ LEDGER_PATH = "docs/recognition_validation/ENGINEERING_LEDGER.md"
 PINS_PATH = "docs/recognition_validation/baseline/SOURCE_PINS.json"
 ENTRY_SCHEMA = "engineering_ledger_entry/v1"
 PRODUCTION_MODEL = "src/ai_brain/production_model.py"
-_ENTRY_RE = re.compile(r"```json ledger-entry\n(.*?)\n```", re.S)
+_ENTRY_RE = re.compile(r"```json ledger-entry\r?\n(.*?)\r?\n```", re.S)
 _HEX40 = re.compile(r"^[0-9a-f]{40}$")
 _REQUIRED = (
     "schema", "mission_id", "parent_sha", "parent_tree", "parent_tracked_status",

@@ -227,7 +227,9 @@ class CurrentModelResponder:
     Only fake transports exist in this repository.
     """
 
-    origin = "CURRENT_EXTERNAL"
+    # This build contains fake transports only. Exercising authorization and
+    # accounting does not turn a simulated reply into current cognition.
+    origin = "MOCK"
 
     def __init__(self, authority, ledger, transport, *, trajectory_id: str):
         self.authority, self.ledger, self.transport = authority, ledger, transport

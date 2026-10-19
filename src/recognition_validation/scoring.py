@@ -86,7 +86,7 @@ def _primary_directions(root: Path, calls: list) -> list:
         data = C.verify_artifact(call["post_guard_output_ref"], root, "/post_guard_output_ref")
         parsed = json.loads(data.decode("utf-8"))
         direction = parsed.get("narrative_direction") if isinstance(parsed, dict) else None
-        out.append((C.instant(call["settled_cutoff"]), direction if direction in DIRECTIONS else "UNKNOWN",
+        out.append((C.instant(call["decision_time"]), direction if direction in DIRECTIONS else "UNKNOWN",
                     call["evaluation_origin"]))
     return out
 
@@ -113,15 +113,17 @@ def classify_episode(label: dict, events: list, directions: list, *, tolerance_s
     target_end = C.instant(label["recognition_target"]["end_utc"])
     # Tolerance extends the target forward only; it never moves availability earlier.
     tolerant_end = target_end + timedelta(seconds=max(0, tolerance_seconds))
-    inside = [e for e in events if window[0] <= C.instant(e["settled_cutoff"]) < window[1]]
+    def observation_time(event):
+        return C.instant(event.get("observed_at", event["settled_cutoff"]))
+    inside = [e for e in events if window[0] <= observation_time(e) < window[1]]
     scored = [e for e in inside if not e["event_kind"].startswith("PREWARM")]
     expected_direction = label["dominant_campaign_direction"]
     violations, cells = [], []
     early = [d for d in directions if d[0] < earliest and d[1] == expected_direction
              and target_start <= d[0] < tolerant_end]
-    early_entries = [e for e in scored if e["outcome"] in ENTRY_OUTCOMES and C.instant(e["settled_cutoff"]) < earliest]
+    early_entries = [e for e in scored if e["outcome"] in ENTRY_OUTCOMES and observation_time(e) < earliest]
     if early_entries:
-        violations.append(f"EARLY_POSITIVE_AUTHORITY:{label['label_id']}:{early_entries[0]['settled_cutoff']}")
+        violations.append(f"EARLY_POSITIVE_AUTHORITY:{label['label_id']}:{observation_time(early_entries[0]).isoformat()}")
     lawful = [d for d in directions if earliest <= d[0] and target_start <= d[0] < tolerant_end]
     first_match = next((d for d in lawful if d[1] == expected_direction), None)
     observed_direction = lawful[0][1] if lawful else "unavailable"
@@ -129,6 +131,8 @@ def classify_episode(label: dict, events: list, directions: list, *, tolerance_s
     # RECOGNITION
     if not lawful:
         cells.append(_cell("RECOGNITION", expected_direction, "unavailable", unproven=True))
+    elif expected_direction != "UNKNOWN" and all(d[1] == "UNKNOWN" for d in lawful):
+        cells.append(_cell("RECOGNITION", expected_direction, "UNKNOWN_JUDGMENT", unproven=True))
     elif expected_direction == "UNKNOWN" or ambiguous:
         name = "UNKNOWN_TRUTH_DIRECTIONAL_OBSERVATION" if observed_direction in ("bullish", "bearish") else \
             "AMBIGUOUS_UNSCORED"
@@ -147,7 +151,7 @@ def classify_episode(label: dict, events: list, directions: list, *, tolerance_s
         cells.append(_cell("TIMING", "after_availability", "EARLY_BEFORE_AVAILABILITY", eligible=False))
     # REFUSAL / opportunity
     expected_action = label["expected_action"]
-    entries = [e for e in scored if e["outcome"] in ENTRY_OUTCOMES and C.instant(e["settled_cutoff"]) >= earliest]
+    entries = [e for e in scored if e["outcome"] in ENTRY_OUTCOMES and observation_time(e) >= earliest]
     blockers = [e for e in scored if e["outcome"] in NON_COGNITION_BLOCKERS]
     degraded = scored and all(e["outcome"] in DEGRADED_OUTCOMES for e in scored)
     if not scored:
@@ -158,7 +162,8 @@ def classify_episode(label: dict, events: list, directions: list, *, tolerance_s
         observed = "ENTRY"
     else:
         observed = "STAND_DOWN"
-    if observed in ("missing", "degraded"):
+    if observed in ("missing", "degraded") or (not lawful and not entries and not blockers) or (
+            expected_action == "ENTRY" and lawful and all(d[1] == "UNKNOWN" for d in lawful) and not entries):
         name, unproven, eligible = "UNPROVEN", True, True
     elif expected_action == "UNKNOWN" or ambiguous or label["opportunity"] in ("ambiguous", "UNKNOWN"):
         name, unproven, eligible = ("HONEST_UNKNOWN" if observed == "STAND_DOWN" else "AMBIGUOUS_UNSCORED"), False, False
@@ -181,7 +186,7 @@ def classify_episode(label: dict, events: list, directions: list, *, tolerance_s
     if occurrence:
         cells.append(_cell("FACT", occurrence, "EXACT_OCCURRENCE" if occurrence in selected else
                            ("OTHER_OCCURRENCE" if selected else "NOT_SELECTED"), ref=label["label_id"]))
-    first_candidate = next((e["settled_cutoff"] for e in entries), None)
+    first_candidate = observation_time(entries[0]).isoformat() if entries else None
     return {"label_id": label["label_id"], "cells": cells, "violations": violations,
             "first_recognition_utc": first_match[0].isoformat() if first_match else None,
             "first_candidate_utc": first_candidate, "latency_seconds": latency,
@@ -205,10 +210,34 @@ def score_trace(root, *, mode: str, session_id: str, trajectory_id: str, annotat
                 scoring: dict | None = None) -> dict:
     """One session/trajectory summary (result/v1 `session_summaries[]` item) + its mask."""
     root = Path(root)
+    from recognition_validation.report import read_manifest
+    manifest = read_manifest(root)
     events = REC.read_events(root)      # chain-verified, raw identities
     calls = REC.read_calls(root)
+    if annotation is not None:
+        admit_annotation(annotation, corpus=None, run_started_at=(manifest or {}).get("real_started_at"))
+        C.require(annotation["session_id"] == session_id, "ANNOTATION_SESSION_MISMATCH", "/session_id")
+    expected_calls = sum(e["primary_call_count"] + e["repair_call_count"] for e in events)
+    C.require(expected_calls == len(calls), "BRAIN_CALL_COUNT_MISMATCH", "/brain_calls",
+              f"{len(calls)} records for {expected_calls} declared calls")
+    allowed = {"A": {"HISTORICAL", "MISSING"}, "B": {"MOCK", "MISSING"},
+               "C": {"CURRENT_EXTERNAL", "MISSING"}}
+    C.require(mode in allowed, "MODE_UNKNOWN", "/mode")
+    C.require(all(c["evaluation_origin"] in allowed[mode] for c in calls),
+              "MODE_EVIDENCE_MISMATCH", "/brain_calls/evaluation_origin")
+    for record in events + calls:
+        C.require(record["trajectory_id"] == trajectory_id, "ARTIFACT_FOREIGN_TRAJECTORY", "/trajectory_id")
+        if manifest:
+            C.require(record["run_digest"] == manifest.get("run_digest", manifest["corpus_digest"]),
+                      "ARTIFACT_FOREIGN_RUN", "/run_digest")
+    if manifest and annotation:
+        C.require(annotation["corpus_digest"] == manifest["corpus_digest"], "ANNOTATION_CORPUS_MISMATCH", "/corpus_digest")
+    for event in events:
+        for ref in event["evidence_refs"]:
+            C.verify_artifact(ref, root, "/events/evidence_refs")
     for call in calls:
-        for name in ("input_ref", "raw_response_ref", "parsed_output_ref", "post_guard_output_ref"):
+        for name in ("input_ref", "prompt_ref", "raw_response_ref", "parsed_output_ref", "post_guard_output_ref",
+                     "request_ref"):
             if call.get(name):
                 C.verify_artifact(call[name], root, f"/calls/{call['document_id']}/{name}")
     # An outcome is never truth: labels may not cite this run's own evidence.
@@ -257,6 +286,12 @@ def score_trace(root, *, mode: str, session_id: str, trajectory_id: str, annotat
         _metric("degraded_scans", degraded, len(events)),
         _metric("unique_candidates", unique_candidates, max(unique_candidates, 1) if events else 0),
     ]
+    if scoring is not None:
+        names = {m["name"] for m in metrics}
+        rules = [r["metric"] for r in scoring["thresholds"]]
+        C.require(all(name in names for name in rules), "UNKNOWN_SCORING_METRIC", "/thresholds")
+        C.require(len(rules) == len(set(rules)), "DUPLICATE_SCORING_METRIC", "/thresholds")
+        metrics = [_threshold(metric, scoring, inclusion) for metric in metrics]
     limitations = []
     if annotation is None:
         limitations.append("NO_ANNOTATION: every label metric UNSCORED")

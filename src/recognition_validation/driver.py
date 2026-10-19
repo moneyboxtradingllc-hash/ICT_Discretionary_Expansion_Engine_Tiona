@@ -122,7 +122,7 @@ def build_organism(*, stream, clock: P.DecisionClock, store_dir, session_id: str
         production_session=production_session, session_mission=mission,
         producer=CandidateProducer(account_fingerprint=account_fingerprint, contract=contract),
         candles=P.LocalCandlePort(stream, clock), runtime=runtime, account_id=venue.account.id, armed=False,
-        scan_cycle=cycle, clock=clock, in_window=lambda: True)
+        scan_cycle=cycle, clock=clock, in_window=lambda: P.production_window_open(clock.now()))
     return organism
 
 
@@ -152,7 +152,7 @@ _BOUNDARY = {"NO_CANDLES": "INGEST", "BRAIN_DEGRADED": "BRAIN", "BRAIN_SLEEP_HOL
 
 
 def run_trajectory(*, organism: OfflineOrganism, stream, ticks, gateway, recorder, quote_closes: bool = True,
-                   network_guard: P.NetworkGuard | None = None) -> dict:
+                   quote_port=None, network_guard: P.NetworkGuard | None = None) -> dict:
     """Offer every tick; record one event per tick after the action."""
     from market_data.campaign_draw_truth import scan_participation_authority
     guard = network_guard or P.NetworkGuard()
@@ -165,6 +165,14 @@ def run_trajectory(*, organism: OfflineOrganism, stream, ticks, gateway, recorde
             visible = stream.candles_at(tick.decision_time)
             if quote_closes and visible:
                 constructed_quote(organism, visible[-1]["close"])
+            if quote_port is not None:
+                quote = quote_port.capture()
+                if not isinstance(quote, P.MissingQuote):
+                    organism.venue.market_hub.emit("GatewayQuote", [organism.contract.id,
+                        {"bestBid": quote.best_bid, "bestAsk": quote.best_ask}])
+                    # The event was received historically, not afresh on every scan.
+                    # Preserve the age used by the actual production price checks.
+                    organism.loop.ps.quote_provider._last_at = quote.captured_at
             calls_before = len(gateway.calls)
             organism.last_scan = {}
             if tick.kind == "PREWARM":
@@ -187,6 +195,8 @@ def run_trajectory(*, organism: OfflineOrganism, stream, ticks, gateway, recorde
                 missing.append("no_release_available_by_decision_time")
             if tick.kind == "PREWARM":
                 missing.append("declared_prewarm_no_cognition")
+            if not quote_closes and quote_port is None:
+                missing.append("independent_quote_unavailable")
             try:
                 recorder.event(
                     scan_key=f"{recorder.trajectory_id}/{cutoff}/{tick.ordinal}",
@@ -224,19 +234,35 @@ def utc(value: str) -> datetime:
 
 def run_offline(*, corpus_path, session_id: str, out_root, responder, ecu: bool, trajectory_id: str,
                 prewarm_until: str | None = None, ticks_until: str | None = None,
-                fingerprints: dict | None = None) -> dict:
+                fingerprints: dict | None = None, ticks=None, quote_policy: str | None = None,
+                run_document: dict | None = None) -> dict:
     """One whole-session trajectory from a sealed corpus into a fresh root."""
     from recognition_validation import brain_gateway as G
     from recognition_validation import corpus as K
     from recognition_validation import recorder as REC
     corpus = K.load_corpus(corpus_path)
     loaded = corpus.sessions[session_id]
+    identity = C.source_identity()
+    if fingerprints:
+        C.require(fingerprints == {"brain":identity["brain_fingerprint"],"retrieval":identity["retrieval_fingerprint"]},
+                  "RUN_SOURCE_MISMATCH", "/fingerprints")
     C.require(loaded.stream is not None, "RELEASE_STREAM_REQUIRED", f"/sessions/{session_id}")
     stream, entry = loaded.stream, loaded.entry
-    ticks = minute_schedule(stream, prewarm_until=utc(prewarm_until) if prewarm_until else None)
+    ticks = list(ticks) if ticks is not None else minute_schedule(stream, prewarm_until=utc(prewarm_until) if prewarm_until else None)
     if ticks_until:
         ticks = [tick for tick in ticks if tick.decision_time <= utc(ticks_until)]
     C.require(bool(ticks), "EMPTY_SCHEDULE", "/ticks")
+    C.require(loaded.entry["instrument"] == "MNQ", "INSTRUMENT_ADAPTER_UNAVAILABLE", "/instrument")
+    C.require(all(t.kind in TICK_KINDS for t in ticks), "TICK_ADAPTER_UNAVAILABLE", "/ticks/kind")
+    quote_policy = quote_policy or ("CONSTRUCTED" if corpus.document["provenance"]["classification"] == "CONSTRUCTED" else "MISSING")
+    C.require(quote_policy in ("CONSTRUCTED", "ARCHIVED", "MISSING"), "QUOTE_POLICY_UNKNOWN", "/quote_policy")
+    C.require(quote_policy != "CONSTRUCTED" or corpus.document["provenance"]["classification"] == "CONSTRUCTED",
+              "CONSTRUCTED_QUOTES_ON_ARCHIVE", "/quote_policy")
+    tick_document = [{"ordinal":t.ordinal,"decision_time":t.decision_time.isoformat(),"kind":t.kind} for t in ticks]
+    run_document = run_document or {"schema":"offline_run/v1", "source_identity":identity,
+        "corpus_digest":corpus.digest,"session_id":session_id,"ecu":ecu,"trajectory_id":trajectory_id,
+        "quote_policy":quote_policy,"ticks":tick_document,"fixture_digest":getattr(responder,"fixture_digest",None)}
+    run_digest = C.digest(run_document)
     out_root = Path(out_root)
     C.require(not out_root.exists() or not any(out_root.iterdir()), "OUTPUT_ROOT_REUSE", "/" + str(out_root))
     classification = corpus.document["provenance"]["classification"]
@@ -247,15 +273,25 @@ def run_offline(*, corpus_path, session_id: str, out_root, responder, ecu: bool,
                                   session_id=trajectory_id, contract_id=entry["contract_id"],
                                   session_date=entry["market_date"].replace("-", ""),
                                   issued_at=entry["session_window"]["start_utc"])
-        recorder = REC.Recorder(out_root / "evidence", run_digest=corpus.digest, trajectory_id=trajectory_id,
+        recorder = REC.Recorder(out_root / "evidence", run_digest=run_digest, trajectory_id=trajectory_id,
                                 classification=classification)
         gateway = G.BrainGateway(responder, trajectory_id=trajectory_id, clock=clock, recorder=recorder,
-                                 fingerprints=fingerprints)
-        summary = run_trajectory(organism=organism, stream=stream, ticks=ticks, gateway=gateway, recorder=recorder)
+                                 fingerprints={"brain":identity["brain_fingerprint"],"retrieval":identity["retrieval_fingerprint"]})
+        quote_port = None
+        if quote_policy == "ARCHIVED":
+            C.require(bool(entry["quotes"]), "QUOTE_ARCHIVE_MISSING", "/quotes")
+            quotes = C.loads_strict(C.verify_artifact(entry["quotes"], corpus.root).decode("utf-8"))
+            quote_port = P.LocalQuotePort(quotes, clock, contract_id=entry["contract_id"], origin="ARCHIVED")
+        run_ref = recorder.json_artifact(run_document, kind="run_config", origin="CONSTRUCTED")
+        schedule_ref = recorder.json_artifact(tick_document, kind="schedule", origin="CONSTRUCTED")
+        summary = run_trajectory(organism=organism, stream=stream, ticks=ticks, gateway=gateway, recorder=recorder,
+                                 quote_closes=quote_policy == "CONSTRUCTED", quote_port=quote_port)
     summary.update(evidence_root=str(out_root / "evidence"), corpus_digest=corpus.digest,
                    tick_count=len(ticks), requests=gateway.requests, calls=gateway.calls)
     write_manifest(out_root / "evidence", {
-        "schema": "run_manifest/v1", "trajectory_id": trajectory_id, "session_id": session_id,
+        "schema": "run_manifest/v2", "trajectory_id": trajectory_id, "session_id": session_id,
+        "run_digest": run_digest, "run_config_ref": run_ref, "schedule_ref": schedule_ref,
+        "source_identity": identity, "quote_policy": quote_policy,
         "evaluation_origin": getattr(responder, "origin", "MOCK"), "ecu": ecu, "corpus_digest": corpus.digest,
         "real_started_at": started_at, "real_completed_at": P.real_utc_now().isoformat(),
         "tick_count": len(ticks), "ticks": summary["ticks"], "events": summary["events"],
@@ -270,6 +306,12 @@ def run_offline(*, corpus_path, session_id: str, out_root, responder, ecu: bool,
 
 def write_manifest(root, manifest: dict) -> None:
     """Real-time run bounds and counts; created once, never overwritten."""
+    root = Path(root)
+    manifest["trace_refs"] = [{"path":name,"sha256":C.sha256_hex((root/name).read_bytes()),
+                               "bytes":(root/name).stat().st_size,"origin":"CONSTRUCTED"}
+                              for name in ("events.jsonl","brain_calls.jsonl") if (root/name).exists()]
+    manifest["seal"] = {"sha256":C.seal_digest(manifest),"sealed_at":P.real_utc_now().isoformat(),
+                         "sealer_ref":"OFFLINE_RECORDER; engineering integrity, not owner acceptance"}
     data = json.dumps(manifest, sort_keys=True, indent=1).encode("utf-8")
     with open(Path(root) / "RUN_MANIFEST.json", "xb") as handle:
         handle.write(data)

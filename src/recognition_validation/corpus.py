@@ -103,7 +103,8 @@ class ReleaseStream:
         for release in self.releases:
             if release.available_at <= t:
                 latest[release.bar_open] = release
-        return [latest[key] for key in sorted(latest)]
+        return [latest[key] for key in sorted(latest)
+                if latest[key].settled_at is not None and latest[key].settled_at <= t]
 
     def candles_at(self, t: datetime, lookback: int | None = None) -> list[dict]:
         rows = [release.candle() for release in self.visible(t)]

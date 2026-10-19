@@ -18,7 +18,7 @@ from recognition_validation import contracts as C
 
 EXIT_OK, EXIT_CONTRACT, EXIT_MISSING, EXIT_INVARIANT, EXIT_INFRA = 0, 2, 3, 4, 5
 #: Refusals about the recorded evidence itself (not about the operator's inputs).
-EVIDENCE_PREFIXES = ("ARTIFACT_", "EVENT_", "SYMLINK_ARTIFACT")
+EVIDENCE_PREFIXES = ("ARTIFACT_", "EVENT_", "SYMLINK_ARTIFACT", "BRAIN_CALL_")
 
 
 def _load(path, kind=None, *, certification=False) -> dict:
@@ -104,6 +104,26 @@ def _authorization(path):
     return _load(disabled, "model_authorization")
 
 
+def _run_ticks(run, run_path, corpus, session, args):
+    from recognition_validation import driver as DR, ports as P
+    raw = C.verify_artifact(run["schedule_ref"], Path(run_path).resolve().parent, "/schedule_ref")
+    schedule = C.loads_strict(raw.decode("utf-8"))
+    C.require(C.validate(schedule) == "schedule", "WRONG_DOCUMENT_KIND", "/schedule_ref")
+    C.require(bool(schedule["seal"]), "SCHEDULE_UNSEALED", "/schedule_ref")
+    C.require(schedule["corpus_digest"] == corpus.digest, "SCHEDULE_CORPUS_MISMATCH", "/corpus_digest")
+    C.require(C.instant(schedule["seal"]["sealed_at"]) <= P.real_utc_now(), "SCHEDULE_SEALED_IN_FUTURE", "/seal")
+    C.require(all(t["session_id"] in corpus.sessions for t in schedule["ticks"]), "SCHEDULE_FOREIGN_SESSION", "/ticks")
+    ticks = [DR.Tick(t["ordinal"], C.instant(t["decision_time_utc"]), t["kind"])
+             for t in schedule["ticks"] if t["session_id"] == session]
+    C.require(bool(ticks), "EMPTY_SCHEDULE", "/ticks")
+    C.require(all(t.kind in DR.TICK_KINDS for t in ticks), "TICK_ADAPTER_UNAVAILABLE", "/ticks/kind")
+    if args.prewarm_until or args.ticks_until:
+        generated = _schedule(corpus, session, args.prewarm_until, args.ticks_until)
+        C.require([(t.decision_time, t.kind) for t in ticks] == [(t.decision_time, t.kind) for t in generated],
+                  "SCHEDULE_OVERRIDE_MISMATCH", "/schedule_ref")
+    return ticks
+
+
 def cmd_run(args) -> int:
     from recognition_validation import brain_gateway as G
     from recognition_validation import corpus as K
@@ -133,6 +153,10 @@ def cmd_run(args) -> int:
         C.require(authorization["state"] == "OWNER_AUTHORIZED", "CURRENT_MODEL_CALLS_DISABLED", "/state")
         raise C.ContractError("EXTERNAL_TRANSPORT_UNAVAILABLE", "/mode",
                               detail="this build contains no external transport; only fake transports exist")
+    C.verify_run_source(run)
+    C.require(run["memory_policy"] == "EMPTY", "MEMORY_SEED_ADAPTER_UNAVAILABLE", "/memory_policy")
+    C.require(run["trajectory_count"] == 1, "TRAJECTORY_ADAPTER_UNAVAILABLE", "/trajectory_count")
+    ticks = _run_ticks(run, args.run, corpus, session, args)
     if args.mode == "B":
         C.require(bool(args.script), "MOCK_SCRIPT_MISSING", "/script")
         responder = _script_responder(args.script)
@@ -143,6 +167,7 @@ def cmd_run(args) -> int:
     summary = DR.run_offline(corpus_path=args.corpus, session_id=session, out_root=args.out, responder=responder,
                              ecu=run["ecu"], trajectory_id=run["trajectory_id"], prewarm_until=args.prewarm_until,
                              ticks_until=args.ticks_until,
+                             ticks=ticks, quote_policy=run["quote_policy"], run_document=run,
                              fingerprints={"brain": run["brain_fingerprint"], "retrieval": run["retrieval_fingerprint"]})
     status = {k: summary[k] for k in ("ticks", "events", "primary_calls", "repair_calls", "infrastructure_error")}
     print(json.dumps({"status": "RUN_COMPLETE" if not summary["infrastructure_error"] else "RUN_INCOMPLETE",
@@ -197,7 +222,8 @@ def cmd_report(args) -> int:
              "bytes": (root / name).stat().st_size, "origin": "CONSTRUCTED"}
             for name in ("events.jsonl", "brain_calls.jsonl", RP.MANIFEST) if (root / name).exists()]
     result = RP.build_result(document_id=f"result:{scored[0]['summary']['trajectory_id']}",
-                             run_digest=(manifest or {}).get("corpus_digest") or "0" * 64, mode=mode, scored=scored,
+                             run_digest=(manifest or {}).get("run_digest") or (manifest or {}).get("corpus_digest") or "0" * 64,
+                             mode=mode, scored=scored,
                              manifest=manifest, artifact_refs=refs, missing_prerequisites=missing,
                              stage4_internal_status=args.stage4_status)
     _write_json(out / "result.json", result)

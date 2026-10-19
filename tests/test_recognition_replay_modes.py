@@ -126,7 +126,14 @@ def test_mode_a_exact_association_reproduces_the_trace(corpus_path, b_runs, tmp_
     first = b_runs[0]
     replay = _mode_a(corpus_path, tmp_path / "A", _records(first))
     report = CMP.compare_runs(first["evidence_root"], replay["evidence_root"])
-    assert report["left"]["semantic_events_sha256"] == report["right"]["semantic_events_sha256"]
+    # Configuration lineage now binds the mode's actual fixture; never normalize
+    # away that difference. The mechanical observations still agree fieldwise.
+    assert not report["identical"]
+    a = CMP.project_events(REC.read_events(first["evidence_root"]))
+    b = CMP.project_events(REC.read_events(replay["evidence_root"]))
+    assert {e["run_digest"] for e in a} != {e["run_digest"] for e in b}
+    assert [{k:v for k,v in e.items() if k != "run_digest"} for e in a] == [
+        {k:v for k,v in e.items() if k != "run_digest"} for e in b]
     calls = REC.read_calls(replay["evidence_root"])
     assert calls and all(c["evaluation_origin"] == "HISTORICAL" for c in calls)
     assert all("HISTORICAL_OUTPUT_ON_CURRENT_INPUTS" not in c["provenance"]["notes"] for c in calls)

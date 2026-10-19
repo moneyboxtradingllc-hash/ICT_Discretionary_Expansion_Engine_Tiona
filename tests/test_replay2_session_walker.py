@@ -149,6 +149,7 @@ class TestWalker(unittest.TestCase):
         self._e.stop()
 
     def test_end_to_end_synthetic_walk_and_forced_safety(self):
+        before = os.environ.get("EXECUTION_ENABLED")
         # caller tries to enable execution — the walker must force it off
         result = replay_session(
             "20260708", "QQQ", lookback=30, max_scans=3,
@@ -163,7 +164,7 @@ class TestWalker(unittest.TestCase):
         for scan in result["scans"]:
             self.assertIn("trace", scan)
         # safety env restored after the run
-        self.assertEqual(os.environ.get("EXECUTION_ENABLED", "true"), "true")
+        self.assertEqual(os.environ.get("EXECUTION_ENABLED"), before)
 
 
 if __name__ == "__main__":

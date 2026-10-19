@@ -139,6 +139,9 @@ def test_tampered_missing_or_escaping_artifacts_refuse(tmp_path):
     with pytest.raises(C.ContractError) as exc:
         K.load_corpus(path2)
     assert exc.value.code == "ARTIFACT_MISSING"
+
+
+def test_symlink_artifact_refuses_when_platform_can_create_links(tmp_path):
     path3 = _build(tmp_path / "link")
     corpus3 = json.loads(path3.read_text())
     original = tmp_path / "link" / corpus3["sessions"][0]["original"]["path"]
@@ -146,7 +149,12 @@ def test_tampered_missing_or_escaping_artifacts_refuse(tmp_path):
     original.unlink()
     outside = tmp_path / "outside.json"
     outside.write_bytes(data)
-    os.symlink(outside, original)
+    try:
+        os.symlink(outside, original)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Windows account lacks symlink creation privilege; tamper/missing tests run separately")
+        raise
     with pytest.raises(C.ContractError) as exc:
         K.load_corpus(path3)
     assert exc.value.code == "SYMLINK_ARTIFACT"

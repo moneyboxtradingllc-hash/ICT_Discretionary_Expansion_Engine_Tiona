@@ -12,6 +12,10 @@ from __future__ import annotations
 
 import contextlib
 import socket
+import ast
+from pathlib import Path
+from functools import lru_cache
+from zoneinfo import ZoneInfo
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
@@ -21,6 +25,24 @@ from recognition_validation import contracts as C
 def real_utc_now() -> datetime:
     """Real transport/authorization time. Never the historical decision clock."""
     return datetime.now(timezone.utc)
+
+
+@lru_cache(maxsize=1)
+def _window_predicate():
+    """Load the actual entrypoint functions without importing its dotenv/startup code."""
+    path = Path(__file__).resolve().parents[2] / "tools/topstepx_production_session.py"
+    names = {"_now_et", "effective_window", "production_window_open"}
+    functions = [n for n in ast.parse(path.read_text(encoding="utf-8")).body
+                 if isinstance(n, ast.FunctionDef) and n.name in names]
+    C.require(len(functions) == len(names), "WINDOW_ADAPTER_UNAVAILABLE", "/production_window")
+    namespace = {}
+    exec(compile(ast.Module(body=functions, type_ignores=[]), str(path), "exec"), namespace)
+    return namespace["production_window_open"]
+
+
+def production_window_open(moment):
+    from broker import topstepx_session_authorization as SA
+    return _window_predicate()(moment.astimezone(ZoneInfo(SA.PRODUCTION_WINDOW_TZ)))
 
 
 class DecisionClock:
@@ -214,7 +236,7 @@ def synthetic_authorization(store_dir, *, session_id: str, contract_id: str, ses
     from broker import topstepx_session_authorization as SA
     auth = SA.SessionAuthorization(
         session_id=session_id, account_fingerprint=account_fingerprint, contract_id=contract_id,
-        session_date=session_date, decision_window="00:00-23:59", issued_at=issued_at,
+        session_date=session_date, decision_window=SA.window_text(session_date), issued_at=issued_at,
         path=os.path.join(str(store_dir), f"session_auth_{session_id}.json"),
         daily_loss_budget_usd=SA.DAILY_LOSS_BUDGET_USD)
     auth.authorization_fingerprint = auth.fingerprint()

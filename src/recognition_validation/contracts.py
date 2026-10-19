@@ -17,6 +17,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import ast
+import subprocess
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path, PurePosixPath
@@ -27,6 +29,51 @@ _KNOWN_KEYWORDS = {"$schema", "$id", "type", "additionalProperties", "properties
                    "items", "minItems", "minLength", "minimum", "pattern", "format", "enum",
                    "const", "anyOf"}
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
+
+
+def source_identity(repo_root=None) -> dict:
+    """Observe the loaded checkout and canonical closure; never trust run-file labels."""
+    root = Path(repo_root or Path(__file__).resolve().parents[2]).resolve()
+    def git(*args):
+        result = subprocess.run(["git", "-c", f"safe.directory={root.as_posix()}", "-C", str(root), *args],
+                                capture_output=True)
+        require(result.returncode == 0, "SOURCE_IDENTITY_UNAVAILABLE", "/source_sha")
+        return result.stdout
+    require(not git("ls-files", "--others", "--exclude-standard", "--", "src", "tools").strip(),
+            "UNTRACKED_RUNTIME_SOURCE", "/source_sha")
+    model_path = root / "src/ai_brain/production_model.py"
+    constants = {}
+    for node in ast.parse(model_path.read_text(encoding="utf-8")).body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            name = node.targets[0].id
+            if name in ("_CONTRACT_SOURCES", "_CONTRACT_SOURCES_REPO"):
+                constants[name] = ast.literal_eval(node.value)
+    require(len(constants) == 2, "SOURCE_CLOSURE_UNAVAILABLE", "/closure_digest")
+    paths = [(label, "src/" + path) for label, path in constants["_CONTRACT_SOURCES"]]
+    paths += list(constants["_CONTRACT_SOURCES_REPO"])
+    closure = [[label, path, sha256_hex((root/path).read_bytes().replace(b"\r\n", b"\n"))]
+               for label, path in paths]
+    pins = loads_strict((root/"docs/recognition_validation/baseline/SOURCE_PINS.json").read_text())
+    for path, expected in pins["protected_sources"].items():
+        require(sha256_hex((root/path).read_bytes().replace(b"\r\n", b"\n")) == expected,
+                "PROTECTED_SOURCE_ALTERED", "/" + path)
+    from ai_brain.production_model import brain_contract_fingerprint
+    from ai_retrieval.retrieval_contract import retrieval_contract_fingerprint
+    diff = git("diff", "--binary", "HEAD")
+    return {"source_sha": git("rev-parse", "HEAD").decode().strip(),
+            "source_tree": git("rev-parse", "HEAD^{tree}").decode().strip(),
+            "dirty_tree_digest": sha256_hex(diff) if diff else None,
+            "brain_fingerprint": brain_contract_fingerprint(),
+            "retrieval_fingerprint": retrieval_contract_fingerprint(),
+            "closure_digest": digest(closure)}
+
+
+def verify_run_source(run: dict) -> dict:
+    observed = source_identity()
+    for key, value in observed.items():
+        require(run[key] == value, "RUN_SOURCE_MISMATCH", "/" + key,
+                f"declared {run[key]!r}; observed {value!r}")
+    return observed
 
 
 class ContractError(ValueError):

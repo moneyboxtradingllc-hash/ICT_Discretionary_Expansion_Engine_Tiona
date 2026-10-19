@@ -18,7 +18,17 @@ MANIFEST = "RUN_MANIFEST.json"
 
 def read_manifest(root) -> dict | None:
     path = Path(root) / MANIFEST
-    return C.loads_strict(path.read_text(encoding="utf-8"), pointer="/" + MANIFEST) if path.exists() else None
+    if not path.exists():
+        return None
+    manifest = C.loads_strict(path.read_text(encoding="utf-8"), pointer="/" + MANIFEST)
+    if manifest.get("seal"):
+        C.require(manifest["seal"]["sha256"] == C.seal_digest(manifest), "ARTIFACT_MANIFEST_SEAL_MISMATCH", "/seal")
+        for ref in manifest.get("trace_refs", []):
+            C.verify_artifact(ref, root, "/trace_refs")
+        for name in ("run_config_ref", "schedule_ref"):
+            if manifest.get(name):
+                C.verify_artifact(manifest[name], root, "/" + name)
+    return manifest
 
 
 def build_result(*, document_id: str, run_digest: str, mode: str, scored: list, manifest: dict | None,
@@ -38,6 +48,12 @@ def build_result(*, document_id: str, run_digest: str, mode: str, scored: list, 
         invariant_failures.append("VENUE_WRITE_OFFLINE")
     if manifest and manifest.get("events") != sum(s["event_count"] for s in scored):
         incomplete.append("EVENT_COUNT_MISMATCH")
+    if manifest and (manifest.get("tick_count") != manifest.get("ticks")
+                     or manifest.get("ticks") != manifest.get("events")):
+        incomplete.append("TICK_COVERAGE_INCOMPLETE")
+    if manifest and (manifest.get("primary_calls", 0) + manifest.get("repair_calls", 0)
+                     != sum(s["call_count"] for s in scored)):
+        incomplete.append("BRAIN_CALL_COUNT_MISMATCH")
     engineering = "FAIL" if invariant_failures else ("INCOMPLETE" if incomplete else "COMPLETE")
     metrics = [m for s in scored for m in s["summary"]["metrics"] if m["threshold_ref"]]
     all_pass = bool(metrics) and all(m["assessment"] == "PASS" for m in metrics)
