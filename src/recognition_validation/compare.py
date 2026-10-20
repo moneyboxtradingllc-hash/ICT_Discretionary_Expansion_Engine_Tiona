@@ -218,14 +218,19 @@ def process_disclosure(left_root, right_root) -> dict:
     Raw pids, run digests and source identity stay visible side by side; the
     semantic comparison above never reads them.
     """
-    from recognition_validation.report import read_manifest
+    from recognition_validation.report import MANIFEST, read_manifest
 
     def side(root):
-        manifest = read_manifest(root) or {}
+        path = Path(root) / MANIFEST
+        manifest = C.loads_strict(path.read_text(encoding="utf-8"), pointer="/" + MANIFEST) if path.exists() else {}
+        try:
+            verified = read_manifest(root) is not None
+        except C.ContractError:
+            verified = False  # disclosed, never trusted: the semantic comparison above decides
         process = manifest.get("process_isolation") or {}
         return {"kind": process.get("kind"), "pid": process.get("pid"), "ppid": process.get("ppid"),
                 "request_sha256": process.get("request_sha256"), "run_digest": manifest.get("run_digest"),
-                "source_identity": manifest.get("source_identity")}
+                "source_identity": manifest.get("source_identity"), "manifest_verified": verified}
     left, right = side(left_root), side(right_root)
     return {"varying_fields": ["pid", "ppid", "request_sha256", "process_lineage_id"], "left": left, "right": right,
             "source_identity_equal": left["source_identity"] == right["source_identity"],
