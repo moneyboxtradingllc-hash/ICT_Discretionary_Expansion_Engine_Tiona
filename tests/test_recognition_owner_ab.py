@@ -183,5 +183,6 @@ def test_direction_timing_is_explicitly_diagnostic_and_separate_from_recognition
 def test_actual_cli_json_and_markdown_disclose_timing_scope(tmp_path):
     root=tmp_path/'e';root.mkdir();child_evidence(root)
     _,result=report(root,tmp_path/'report')
+    assert 'NO_ANNOTATION' in result['session_summaries'][0]['limitations'][0]
     assert any('CAMPAIGN_DIRECTION_ONLY' in s for s in result['session_summaries'][0]['limitations'])
     assert 'not Brain or opportunity recognition' in (tmp_path/'report/report.md').read_text()

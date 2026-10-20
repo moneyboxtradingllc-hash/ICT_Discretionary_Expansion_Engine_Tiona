@@ -334,10 +334,6 @@ def score_trace(root, *, mode: str, session_id: str, trajectory_id: str, annotat
         check_rules(scoring)
         metrics = [_threshold(metric, scoring, inclusion) for metric in metrics]
     limitations = []
-    limitations.append("LAYER_TIMING_CAMPAIGN_DIRECTION_ONLY: layer_timing and its ON_TIME/LATE cells measure "
-                       "Draw-direction agreement, not Brain or opportunity recognition. Brain-direction timing is "
-                       "reported separately in confusion_cells/first_recognition_utc; eligible opportunity requires "
-                       "the separate TOOL and COMPOSITION evidence. A combined recognition criterion is owner-reserved.")
     if annotation is None:
         limitations.append("NO_ANNOTATION: every label metric UNSCORED")
     elif not inclusion.owner_truth:
@@ -346,6 +342,10 @@ def score_trace(root, *, mode: str, session_id: str, trajectory_id: str, annotat
         limitations.append(f"MODE_{mode}: mechanics only; current discretionary recognition UNPROVEN")
     if not inclusion.ratified:
         limitations.append("SCORING_NOT_RATIFIED: no thresholds; assessments DIAGNOSTIC")
+    limitations.append("LAYER_TIMING_CAMPAIGN_DIRECTION_ONLY: layer_timing and its ON_TIME/LATE cells measure "
+                       "Draw-direction agreement, not Brain or opportunity recognition. Brain-direction timing is "
+                       "reported separately in confusion_cells/first_recognition_utc; eligible opportunity requires "
+                       "the separate TOOL and COMPOSITION evidence. A combined recognition criterion is owner-reserved.")
     first_rec = sorted(e["first_recognition_utc"] for e in episodes if e["first_recognition_utc"])
     first_cand = sorted(e["first_candidate_utc"] for e in episodes if e["first_candidate_utc"])
     return {
