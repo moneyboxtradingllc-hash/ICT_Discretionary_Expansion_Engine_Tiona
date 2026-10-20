@@ -9,7 +9,6 @@ run never reach a network, even from a credential-bearing environment.
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import sys
 from pathlib import Path
@@ -87,16 +86,6 @@ def cmd_plan(args) -> int:
     return EXIT_OK
 
 
-def _script_responder(path):
-    from recognition_validation import brain_gateway as G
-    data = Path(path).read_bytes()
-    spec = importlib.util.spec_from_file_location("stage5_mode_b_script", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    C.require(callable(getattr(module, "script", None)), "MOCK_SCRIPT_MISSING", "/script")
-    return G.ScriptedResponder(module.script, fixture_digest=C.sha256_hex(data))
-
-
 def _authorization(path):
     if path:
         return _load(path, "model_authorization")
@@ -125,9 +114,7 @@ def _run_ticks(run, run_path, corpus, session, args):
 
 
 def cmd_run(args) -> int:
-    from recognition_validation import brain_gateway as G
     from recognition_validation import corpus as K
-    from recognition_validation import driver as DR
     from recognition_validation import model_authority as MA
     from recognition_validation import ports as P
     run = _load(args.run, "run")
@@ -153,30 +140,51 @@ def cmd_run(args) -> int:
         C.require(authorization["state"] == "OWNER_AUTHORIZED", "CURRENT_MODEL_CALLS_DISABLED", "/state")
         raise C.ContractError("EXTERNAL_TRANSPORT_UNAVAILABLE", "/mode",
                               detail="this build contains no external transport; only fake transports exist")
-    C.verify_run_source(run)
+    from recognition_validation import child as CH
+    request = trajectory_request(run, args.run, args.corpus, session=args.session, mode=args.mode, script=args.script,
+                                 records=args.records, prewarm_until=args.prewarm_until, ticks_until=args.ticks_until,
+                                 corpus=corpus)
+    # Never in this interpreter: the trajectory gets a fresh allowlisted child (contract 09).
+    status = CH.run_in_child(request, out_root=args.out, timeout_seconds=args.child_timeout)
+    summary = status["summary"] or {}
+    print(json.dumps({"status": summary.get("status") or f"CHILD_{status['state']}",
+                      "child_state": status["state"], "child_exit_code": status["exit_code"],
+                      "complete": status["complete"], **{k: summary.get(k) for k in (
+                          "evidence_root", "ticks", "events", "primary_calls", "repair_calls",
+                          "infrastructure_error")}}, sort_keys=True))
+    if status["state"] == "EXITED" and status["exit_code"] in (EXIT_CONTRACT, EXIT_MISSING, EXIT_INVARIANT):
+        return status["exit_code"]
+    return EXIT_OK if status["complete"] else EXIT_INFRA
+
+
+def trajectory_request(run: dict, run_path, corpus_path, *, session, mode: str, script, records, prewarm_until,
+                       ticks_until, corpus=None) -> dict:
+    """The sealed inputs one trajectory child needs; built without loading the runtime stack."""
+    from recognition_validation import child as CH
+    from recognition_validation import corpus as K
+    corpus = corpus or K.load_corpus(corpus_path)
+    session = _session(corpus, session)
+    expected = C.verify_run_source(run)
     C.require(run["memory_policy"] == "EMPTY", "MEMORY_SEED_ADAPTER_UNAVAILABLE", "/memory_policy")
     C.require(run["trajectory_count"] == 1, "TRAJECTORY_ADAPTER_UNAVAILABLE", "/trajectory_count")
-    ticks = _run_ticks(run, args.run, corpus, session, args)
-    if args.mode == "B":
-        C.require(bool(args.script), "MOCK_SCRIPT_MISSING", "/script")
-        responder = _script_responder(args.script)
+    args = argparse.Namespace(prewarm_until=prewarm_until, ticks_until=ticks_until)
+    ticks = _run_ticks(run, run_path, corpus, session, args)
+    if mode == "B":
+        C.require(bool(script), "MOCK_SCRIPT_MISSING", "/script")
+        responder = {"kind": "SCRIPT", "path": str(Path(script).resolve())}
     else:
-        C.require(bool(args.records), "HISTORICAL_RECORDS_MISSING", "/records")
-        records = C.loads_strict(Path(args.records).read_text(encoding="utf-8"), pointer="/records")
-        responder = G.HistoricalResponder(records, contract_id=corpus.sessions[session].entry["contract_id"])
-    summary = DR.run_offline(corpus_path=args.corpus, session_id=session, out_root=args.out, responder=responder,
-                             ecu=run["ecu"], trajectory_id=run["trajectory_id"], prewarm_until=args.prewarm_until,
-                             ticks_until=args.ticks_until,
-                             ticks=ticks, quote_policy=run["quote_policy"], run_document=run,
-                             fingerprints={"brain": run["brain_fingerprint"], "retrieval": run["retrieval_fingerprint"]})
-    status = {k: summary[k] for k in ("ticks", "events", "primary_calls", "repair_calls", "infrastructure_error")}
-    print(json.dumps({"status": "RUN_COMPLETE" if not summary["infrastructure_error"] else "RUN_INCOMPLETE",
-                      "evidence_root": summary["evidence_root"], **status}, sort_keys=True))
-    if summary["infrastructure_error"]:
-        return EXIT_INFRA
-    if summary["network_attempts"] or summary["venue_writes"]:
-        return EXIT_INVARIANT
-    return EXIT_OK
+        C.require(bool(records), "HISTORICAL_RECORDS_MISSING", "/records")
+        responder = {"kind": "HISTORICAL", "path": str(Path(records).resolve())}
+    responder["sha256"] = C.sha256_hex(Path(responder["path"]).read_bytes())
+    return {"schema": CH.REQUEST_SCHEMA, "mode": mode, "corpus_path": str(Path(corpus_path).resolve()),
+            "corpus_digest": corpus.digest, "session_id": session,
+            "contract_id": corpus.sessions[session].entry["contract_id"], "ecu": run["ecu"],
+            "trajectory_id": run["trajectory_id"], "quote_policy": run["quote_policy"],
+            "memory_policy": run["memory_policy"], "run_document": run, "responder": responder,
+            "fingerprints": {"brain": run["brain_fingerprint"], "retrieval": run["retrieval_fingerprint"]},
+            "expected_source_identity": expected,
+            "ticks": [{"ordinal": t.ordinal, "decision_time": t.decision_time.isoformat(), "kind": t.kind}
+                      for t in ticks]}
 
 
 def cmd_compare(args) -> int:
@@ -217,10 +225,15 @@ def cmd_report(args) -> int:
     scored = [SC.score_trace(root, mode=mode, session_id=(manifest or {}).get("session_id") or "UNKNOWN",
                              trajectory_id=(manifest or {}).get("trajectory_id") or "UNKNOWN",
                              annotation=annotation, scoring=scoring)]
+    from recognition_validation import child as CH
+    process = (manifest or {}).get("process_isolation") or {}
+    problems = (CH.verify_child_status(root, manifest or {})
+                if process.get("kind") == "FRESH_CHILD" or (root / CH.STATUS_FILE).exists() else [])
     out = _fresh(args.out)
     refs = [{"path": f"evidence/{name}", "sha256": C.sha256_hex((root / name).read_bytes()),
              "bytes": (root / name).stat().st_size, "origin": "CONSTRUCTED"}
-            for name in ("events.jsonl", "brain_calls.jsonl", RP.MANIFEST) if (root / name).exists()]
+            for name in ("events.jsonl", "brain_calls.jsonl", RP.MANIFEST, CH.STATUS_FILE, CH.EXIT_FILE)
+            if (root / name).exists()]
     if corpus is None:
         missing.append("CORPUS_ABSENT: the required session/trajectory set is undeclared")
     result = RP.build_result(document_id=f"result:{scored[0]['summary']['trajectory_id']}",
@@ -228,7 +241,8 @@ def cmd_report(args) -> int:
                              mode=mode, scored=scored,
                              manifest=manifest, artifact_refs=refs, missing_prerequisites=missing,
                              stage4_internal_status=args.stage4_status, scoring=scoring,
-                             required_units=RP.required_units(corpus, scored) if corpus is not None else None)
+                             required_units=RP.required_units(corpus, scored) if corpus is not None else None,
+                             process_problems=problems)
     _write_json(out / "result.json", result)
     (out / "report.md").write_text(RP.render_markdown(result, scored), encoding="utf-8")
     print(json.dumps({"final_status": result["final_status"], "engineering_status": result["engineering_status"],
@@ -270,6 +284,7 @@ def parser() -> argparse.ArgumentParser:
             p.add_argument("--authorization")
             p.add_argument("--pricing")
             p.add_argument("--max-completion-tokens", type=int)
+            p.add_argument("--child-timeout", type=float, default=3600.0)
     c = sub.add_parser("compare")
     c.add_argument("--left", required=True)
     c.add_argument("--right", required=True)

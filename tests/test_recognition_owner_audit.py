@@ -148,11 +148,13 @@ def cli_world(tmp_path, monkeypatch):
     script=tmp_path/"script.py"
     script.write_text("def script(request): return None\n")
     captured=[]
-    def stub(**kwargs):
-        captured.append(kwargs)
-        return dict(ticks=1,events=1,primary_calls=0,repair_calls=0,infrastructure_error=None,
-                     evidence_root="TEST_ONLY",network_attempts=[],venue_writes=[])
-    monkeypatch.setattr(DR,"run_offline",stub)
+    # The CLI hands each trajectory to a fresh child (gap mission 2); capture the sealed request it would send.
+    from recognition_validation import child as CH
+    def stub(request,**kwargs):
+        captured.append(request)
+        return dict(state="EXITED",exit_code=0,complete=True,summary=dict(status="RUN_COMPLETE",ticks=1,events=1,
+                    primary_calls=0,repair_calls=0,infrastructure_error=None,evidence_root="TEST_ONLY"))
+    monkeypatch.setattr(CH,"run_in_child",stub)
     def invoke(**over):
         doc={**source,**over}
         config=tmp_path/"run.json"

@@ -208,4 +208,25 @@ def compare_runs(left_root, right_root) -> dict:
     calls_left, calls_right = project_calls(left_calls, left_root), project_calls(right_calls, right_root)
     divergence = first_divergence(semantic_left, semantic_right) or first_divergence(calls_left, calls_right)
     return {"projection": PROJECTION, "identical": divergence is None, "first_divergence": divergence,
-            "left": trace_digests(left_root), "right": trace_digests(right_root)}
+            "left": trace_digests(left_root), "right": trace_digests(right_root),
+            "process_identity": process_disclosure(left_root, right_root)}
+
+
+def process_disclosure(left_root, right_root) -> dict:
+    """Process identities legitimately differ between trajectories; disclose them, never hide them.
+
+    Raw pids, run digests and source identity stay visible side by side; the
+    semantic comparison above never reads them.
+    """
+    from recognition_validation.report import read_manifest
+
+    def side(root):
+        manifest = read_manifest(root) or {}
+        process = manifest.get("process_isolation") or {}
+        return {"kind": process.get("kind"), "pid": process.get("pid"), "ppid": process.get("ppid"),
+                "request_sha256": process.get("request_sha256"), "run_digest": manifest.get("run_digest"),
+                "source_identity": manifest.get("source_identity")}
+    left, right = side(left_root), side(right_root)
+    return {"varying_fields": ["pid", "ppid", "request_sha256", "process_lineage_id"], "left": left, "right": right,
+            "source_identity_equal": left["source_identity"] == right["source_identity"],
+            "run_digest_equal": left["run_digest"] == right["run_digest"]}

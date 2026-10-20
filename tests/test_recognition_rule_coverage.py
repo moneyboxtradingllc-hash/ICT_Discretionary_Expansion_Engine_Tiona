@@ -54,7 +54,8 @@ def _summary(counts, *, plan, session="FICTIONAL-UNIT-SESSION", trajectory="FICT
 
 
 def _result(scored, *, mode="C", scoring=None, units=None, refs=True):
-    manifest = dict(events=len(scored), tick_count=len(scored), ticks=len(scored), primary_calls=0, repair_calls=0)
+    manifest = dict(events=len(scored), tick_count=len(scored), ticks=len(scored), primary_calls=0, repair_calls=0,
+                    process_isolation={"kind": "FRESH_CHILD"})  # synthetic precondition (gap mission 2)
     return RP.build_result(document_id="FICTIONAL-UNIT-RESULT", run_digest="a" * 64, mode=mode, scored=scored,
                            manifest=manifest, artifact_refs=[], missing_prerequisites=[], scoring=scoring,
                            required_units=units, **(REFS if refs else {}))

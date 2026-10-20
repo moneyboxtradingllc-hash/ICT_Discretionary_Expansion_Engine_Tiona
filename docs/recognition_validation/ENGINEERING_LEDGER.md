@@ -809,3 +809,85 @@ refusals. No production source is touched.
   "receipt_digest": "7c33aa389048a188902e9e78ed4564dd0b47dfcc252be6d0ff5172541c2e50bb"
 }
 ```
+
+## GAP_M2: fresh child process per trajectory
+
+Engineering GO of 2026-10-19, mission 2 of 4. Parent: GAP_M1 exit commit
+82937f0 (tree 64734e29).
+
+Parent counterexample (VERIFIED-RUN, the audit probe on 51eb3e1):
+`narrative_brain._open_hard_quota_circuit(...)` before `driver.isolation(...)`
+leaves the provider circuit open inside the "new" trajectory. Environment and
+CWD redirection is not a process.
+
+Repair: `recognition_validation.child`. The CLI `run` never drives a trajectory
+in its own interpreter. For each trajectory it does the following:
+
+- It writes a sealed request: corpus path and digest, session, ticks with
+  decision times, run document, a responder reference with its sha256, and
+  the expected source identity.
+- It starts `python -I` with an environment built from an allowlist only:
+  scratch HOME/TMPDIR/cache, disarmed flags, refused proxy, and per-root
+  runtime directories.
+
+Before any runtime-authority import, the child refuses each of these:
+
+- a non-allowlisted or credential-like environment name;
+- a preloaded runtime module;
+- a non-fresh runtime root;
+- a non-EMPTY memory policy (MEMORY_SEED_ADAPTER_UNAVAILABLE);
+- a source/fingerprint mismatch;
+- an altered responder.
+
+It installs the network deny for its whole lifetime, records the cold provider
+state, and runs the actual driver. Its receipt (pid, ppid, `-I`, environment
+names, cold state, source identity, request digest) is sealed into
+RUN_MANIFEST.json. The parent writes CHILD_STATUS.json with the exit, timeout
+and stderr digest (redacted tail). The report keeps a crashed, timed-out,
+unbound or missing-status child INCOMPLETE, and keeps any in-process
+trajectory at PROCESS_ISOLATION_UNPROVEN. `compare` discloses process
+identities, run digests and source identity side by side.
+
+Finding (protected source unchanged, for independent review):
+`src/data_feed/__init__.py` calls `load_dotenv()` at import. That module is on
+the production scan-cycle import path (`live_scan.production_scan_cycle` ->
+`data_feed`), and python-dotenv searches upward from that module for a
+`.env`. Any importer of the scan cycle, including an offline replay, therefore
+loads an operator `.env` into its environment. In a trajectory child the load
+is a recorded no-op (`dotenv_refused`), and the environment is re-checked
+against the allowlist after the run. Proposed narrow fix: move the
+`load_dotenv()` call to the launcher entrypoint (`tools/topstepx_production_session.py`,
+which already owns startup) and leave library modules import-pure. The same
+pattern appears in `src/live_scan/scan_loop.py` and `src/main.py`.
+
+```json ledger-entry
+{
+  "schema": "engineering_ledger_entry/v1",
+  "mission_id": "GAP_M2",
+  "parent_sha": "82937f0f7433b83bb0ad135580fdc1e23efa4537",
+  "parent_tree": "64734e2988d19b9363ec32d088b9575d61a6ddc0",
+  "parent_tracked_status": "",
+  "brain_fingerprint": "brain:3d9878ad3ff57f1f",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_count": 48,
+  "closure_digest": "d4dbe6a3ea029c4b59f33a1deba3d7c65ccb877e33afa4aed317b68256a15cf1",
+  "protected_count": 32,
+  "protected_digest": "79988f0ea3e84e15e34485a8510e78efc667f6e274d41fcde5d6e3c0307ab79a",
+  "policy_refs": [
+    "GO 2026-10-19 Mission 2: fresh child process per trajectory",
+    "Contract 09 isolation; owner audit gap 2 (provider circuit survives env/CWD redirection)"
+  ],
+  "scoped_files": [
+    "src/recognition_validation/*",
+    "tests/test_recognition*.py",
+    "docs/recognition_validation/*"
+  ],
+  "proof_ids": [
+    "GAP-M2-PARENT-COUNTEREXAMPLE",
+    "GAP-M2-PROCESS-ISOLATION-TESTS",
+    "GAP-M2-ACTIVATED-MUTANTS"
+  ],
+  "predecessor_receipt_digest": "7c33aa389048a188902e9e78ed4564dd0b47dfcc252be6d0ff5172541c2e50bb",
+  "receipt_digest": "7e8a0357880ac22ce573670fc81609701a6841a6cb7f738c003797ad1adc2a56"
+}
+```

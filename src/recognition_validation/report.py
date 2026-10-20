@@ -120,7 +120,7 @@ def build_result(*, document_id: str, run_digest: str, mode: str, scored: list, 
                  artifact_refs: list, missing_prerequisites: list, stage4_internal_status: str = "UNPROVEN",
                  recognition_ratification_ref: str | None = None,
                  stage4_owner_acceptance_ref: str | None = None, scoring: dict | None = None,
-                 required_units: list | None = None) -> dict:
+                 required_units: list | None = None, process_problems: list | None = None) -> dict:
     invariant_failures = sorted({v for s in scored for v in s["violations"]})
     missing = list(missing_prerequisites)
     incomplete = []
@@ -140,9 +140,14 @@ def build_result(*, document_id: str, run_digest: str, mode: str, scored: list, 
     if manifest and (manifest.get("primary_calls", 0) + manifest.get("repair_calls", 0)
                      != sum(s["call_count"] for s in scored)):
         incomplete.append("BRAIN_CALL_COUNT_MISMATCH")
+    # A trajectory child that crashed, timed out or never bound its request is INCOMPLETE.
+    incomplete += list(process_problems or [])
+    isolated = (manifest or {}).get("process_isolation", {}).get("kind") == "FRESH_CHILD" and not process_problems
+    if manifest is not None and not isolated:
+        missing.append("PROCESS_ISOLATION_UNPROVEN: trajectory not recorded by a completed fresh child process")
     engineering = "FAIL" if invariant_failures else ("INCOMPLETE" if incomplete else "COMPLETE")
     coverage = rule_coverage(scored, scoring=scoring, units=required_units)
-    eligible = (mode == "C" and coverage["status"] == "COMPLETE"
+    eligible = (mode == "C" and isolated and coverage["status"] == "COMPLETE"
                 and all(s["inclusion"]["current_recognition_eligible"] for s in scored)
                 and bool(recognition_ratification_ref) and bool(stage4_owner_acceptance_ref)
                 and engineering == "COMPLETE")

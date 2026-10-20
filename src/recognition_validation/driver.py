@@ -235,8 +235,14 @@ def utc(value: str) -> datetime:
 def run_offline(*, corpus_path, session_id: str, out_root, responder, ecu: bool, trajectory_id: str,
                 prewarm_until: str | None = None, ticks_until: str | None = None,
                 fingerprints: dict | None = None, ticks=None, quote_policy: str | None = None,
-                run_document: dict | None = None) -> dict:
-    """One whole-session trajectory from a sealed corpus into a fresh root."""
+                run_document: dict | None = None, process_receipt: dict | None = None,
+                network_guard: P.NetworkGuard | None = None) -> dict:
+    """One whole-session trajectory from a sealed corpus into a fresh root.
+
+    The CLI only ever calls this inside a fresh child (`child.child_main`), which
+    passes its `process_receipt`; a direct in-process call is recorded as
+    IN_PROCESS and the report keeps process isolation UNPROVEN for it.
+    """
     from recognition_validation import brain_gateway as G
     from recognition_validation import corpus as K
     from recognition_validation import recorder as REC
@@ -264,7 +270,11 @@ def run_offline(*, corpus_path, session_id: str, out_root, responder, ecu: bool,
         "quote_policy":quote_policy,"ticks":tick_document,"fixture_digest":getattr(responder,"fixture_digest",None)}
     run_digest = C.digest(run_document)
     out_root = Path(out_root)
-    C.require(not out_root.exists() or not any(out_root.iterdir()), "OUTPUT_ROOT_REUSE", "/" + str(out_root))
+    # A child's own request/scratch directory is the only thing allowed to precede the run.
+    existing = {p.name for p in out_root.iterdir()} if out_root.exists() else set()
+    C.require(existing <= ({"child"} if process_receipt else set()), "OUTPUT_ROOT_REUSE", "/" + str(out_root))
+    process = process_receipt or {"kind": "IN_PROCESS", "pid": os.getpid(),
+                                  "note": "not a fresh child; process isolation UNPROVEN"}
     classification = corpus.document["provenance"]["classification"]
     started_at = P.real_utc_now().isoformat()
     with isolation(out_root, ecu=ecu):
@@ -285,7 +295,8 @@ def run_offline(*, corpus_path, session_id: str, out_root, responder, ecu: bool,
         run_ref = recorder.json_artifact(run_document, kind="run_config", origin="CONSTRUCTED")
         schedule_ref = recorder.json_artifact(tick_document, kind="schedule", origin="CONSTRUCTED")
         summary = run_trajectory(organism=organism, stream=stream, ticks=ticks, gateway=gateway, recorder=recorder,
-                                 quote_closes=quote_policy == "CONSTRUCTED", quote_port=quote_port)
+                                 quote_closes=quote_policy == "CONSTRUCTED", quote_port=quote_port,
+                                 network_guard=network_guard)
     summary.update(evidence_root=str(out_root / "evidence"), corpus_digest=corpus.digest,
                    tick_count=len(ticks), requests=gateway.requests, calls=gateway.calls)
     write_manifest(out_root / "evidence", {
@@ -300,7 +311,7 @@ def run_offline(*, corpus_path, session_id: str, out_root, responder, ecu: bool,
         "network_attempts": [str(a) for a in summary["network_attempts"]],
         "venue_writes": [str(w) for w in summary["venue_writes"]],
         "mission_tokens": summary["mission_tokens"], "mission_attempts": summary["mission_attempts"],
-        "fixture_digest": getattr(responder, "fixture_digest", None)})
+        "fixture_digest": getattr(responder, "fixture_digest", None), "process_isolation": process})
     return summary
 
 
