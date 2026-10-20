@@ -436,8 +436,10 @@ def score_label(label: dict, projections: list, findings: dict, *, stream=None, 
                            ticks=[p["tick"]["ordinal"] for p in composition if p["layers"]["COMPOSITION"]["outcome"]
                                   in (ENTRY_OUTCOMES + WATCHING_OUTCOMES)][:1], source=source,
                            truth_field="expected_action"))
-    # TIMING: first lawful matching Draw direction against availability and target
-    source = "projection TIMING + CAMPAIGN"
+    # This legacy layer measures Draw agreement, not discretionary recognition.
+    # Preserve its numbers; make the scope explicit rather than silently choose
+    # an owner policy combining Brain judgment, tool eligibility and timing.
+    source = "CAMPAIGN_DIRECTION_ONLY: projection TIMING + CAMPAIGN; not Brain or opportunity recognition"
     matching = [p for p in window if p["layers"]["CAMPAIGN"]["state"] == "PROJECTED"
                 and p["layers"]["CAMPAIGN"]["direction"] == direction]
     early = [p for p in matching if _at(p["tick"]["decision_time"]) < earliest and _in(_at(p["tick"]["decision_time"]), t0, t1)]

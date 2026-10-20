@@ -107,8 +107,8 @@ def run_in_child(request: dict, *, out_root, timeout_seconds: float = 3600.0, ex
     status["child_exit"] = (C.loads_strict(exit_path.read_text(encoding="utf-8"), pointer="/" + EXIT_FILE)
                             if exit_path.exists() else None)
     status["complete"] = bool(status["state"] == "EXITED" and status["exit_code"] == 0
-                              and status["manifest_sha256"] and status["child_exit"]
-                              and status["child_exit"].get("request_sha256") == status["request_sha256"])
+                              and status["manifest_sha256"]
+                              and _successful_exit(status["child_exit"], status["request_sha256"]))
     with open(evidence / STATUS_FILE, "xb") as handle:
         handle.write(json.dumps(status, sort_keys=True, indent=1).encode("utf-8"))
     status["summary"] = _last_json(stdout)
@@ -126,22 +126,57 @@ def _last_json(stdout: bytes):
     return None
 
 
+def _successful_exit(receipt, request_sha256) -> bool:
+    """Completion is bound to the same request, not just a zero process exit."""
+    return (isinstance(receipt, dict) and receipt.get("schema") == "trajectory_child_exit/v1"
+            and receipt.get("status") == "RUN_COMPLETE" and receipt.get("exit_code") == 0
+            and isinstance(request_sha256, str) and re.fullmatch(r"[0-9a-f]{64}", request_sha256) is not None
+            and receipt.get("request_sha256") == request_sha256)
+
+
 def verify_child_status(evidence_root, manifest: dict) -> list:
     """Problems that keep a child-recorded run INCOMPLETE (empty list: the child finished)."""
-    path = Path(evidence_root) / STATUS_FILE
+    root = Path(evidence_root)
+    path = root / STATUS_FILE
     if not path.exists():
         return ["CHILD_STATUS_MISSING"]
-    status = C.loads_strict(path.read_text(encoding="utf-8"), pointer="/" + STATUS_FILE)
+    try:
+        status = C.loads_strict(path.read_text(encoding="utf-8"), pointer="/" + STATUS_FILE)
+    except (OSError, ValueError, C.ContractError):
+        return ["CHILD_STATUS_INVALID"]
+    if not isinstance(status, dict) or status.get("schema") != "trajectory_child_status/v1":
+        return ["CHILD_STATUS_INVALID"]
     problems = []
     if status.get("state") != "EXITED" or status.get("exit_code") != 0:
         problems.append(f"CHILD_PROCESS_{status.get('state')}_{status.get('exit_code')}")
-    if not status.get("complete"):
+    if status.get("complete") is not True:
         problems.append("CHILD_RUN_NOT_COMPLETE")
+    # Self-seals detect accidental edits, but can be recomputed. Reauthenticate
+    # current bytes against what the parent actually observed after child exit.
+    try:
+        data = (root / "RUN_MANIFEST.json").read_bytes()
+        if C.sha256_hex(data) != status.get("manifest_sha256"):
+            problems.append("CHILD_MANIFEST_DIGEST_MISMATCH")
+        if C.loads_strict(data.decode("utf-8"), pointer="/RUN_MANIFEST.json") != manifest:
+            problems.append("CHILD_MANIFEST_ARGUMENT_MISMATCH")
+    except (OSError, ValueError, C.ContractError):
+        problems.append("CHILD_MANIFEST_MISSING_OR_INVALID")
+    try:
+        child_exit = C.loads_strict((root / EXIT_FILE).read_text(encoding="utf-8"), pointer="/" + EXIT_FILE)
+    except (OSError, ValueError, C.ContractError):
+        problems.append("CHILD_EXIT_MISSING_OR_INVALID")
+    else:
+        if child_exit != status.get("child_exit"):
+            problems.append("CHILD_EXIT_RECEIPT_MISMATCH")
+        if not _successful_exit(child_exit, status.get("request_sha256")):
+            problems.append("CHILD_EXIT_NOT_COMPLETE")
     receipt = manifest.get("process_isolation") or {}
     if receipt.get("request_sha256") != status.get("request_sha256"):
         problems.append("CHILD_REQUEST_BINDING_MISMATCH")
     if receipt.get("pid") is None or receipt.get("pid") == status.get("parent_pid"):
         problems.append("CHILD_PID_NOT_DISTINCT")
+    if receipt.get("ppid") != status.get("parent_pid"):
+        problems.append("CHILD_PARENT_PID_MISMATCH")
     return problems
 
 
