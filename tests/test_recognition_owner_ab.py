@@ -99,6 +99,15 @@ def test_exit_receipt_json_formatting_preserves_healthy_content(tmp_path):
     assert CH.verify_child_status(root,manifest)==[]
 
 
+@pytest.mark.parametrize('changed_zero',[False,0.0])
+def test_exit_receipt_reauthentication_preserves_json_value_types(tmp_path,changed_zero):
+    root=tmp_path/'e';root.mkdir();manifest,_,exit_record=child_evidence(root)
+    assert CH.verify_child_status(root,manifest)==[]
+    exit_record['exit_code']=changed_zero
+    (root/CH.EXIT_FILE).write_text(json.dumps(exit_record))
+    assert 'CHILD_EXIT_RECEIPT_MISMATCH' in CH.verify_child_status(root,manifest)
+
+
 @pytest.mark.parametrize('completion',['RUN_COMPLETE','RUN_INCOMPLETE'])
 def test_parent_completion_consumes_actual_child_exit_status(tmp_path,monkeypatch,completion):
     """Controlled transport only; exercise the real parent writer and completion predicate."""

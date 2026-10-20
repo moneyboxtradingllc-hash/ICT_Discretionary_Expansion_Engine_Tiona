@@ -157,7 +157,7 @@ def verify_child_status(evidence_root, manifest: dict) -> list:
         data = (root / "RUN_MANIFEST.json").read_bytes()
         if C.sha256_hex(data) != status.get("manifest_sha256"):
             problems.append("CHILD_MANIFEST_DIGEST_MISMATCH")
-        if C.loads_strict(data.decode("utf-8"), pointer="/RUN_MANIFEST.json") != manifest:
+        if C.canonical(C.loads_strict(data.decode("utf-8"), pointer="/RUN_MANIFEST.json")) != C.canonical(manifest):
             problems.append("CHILD_MANIFEST_ARGUMENT_MISMATCH")
     except (OSError, ValueError, C.ContractError):
         problems.append("CHILD_MANIFEST_MISSING_OR_INVALID")
@@ -166,7 +166,7 @@ def verify_child_status(evidence_root, manifest: dict) -> list:
     except (OSError, ValueError, C.ContractError):
         problems.append("CHILD_EXIT_MISSING_OR_INVALID")
     else:
-        if child_exit != status.get("child_exit"):
+        if C.canonical(child_exit) != C.canonical(status.get("child_exit")):
             problems.append("CHILD_EXIT_RECEIPT_MISMATCH")
         if not _successful_exit(child_exit, status.get("request_sha256")):
             problems.append("CHILD_EXIT_NOT_COMPLETE")
