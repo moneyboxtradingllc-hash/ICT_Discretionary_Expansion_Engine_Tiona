@@ -1274,3 +1274,95 @@ Exact parent is frozen before any repair. A/B hypotheses are tested against the 
   "receipt_digest": "ad68c3e813c79f8964fe76920836fc0bdd48e1580d53693e0561fb12f2832387"
 }
 ```
+
+
+## OWNER_AB_PORTABILITY_20261020: trajectory child environment portability
+
+Owner A/B return, remaining failed checks. Parent: audit source 201c60c (A/B repairs preserved unchanged).
+
+Parent reproducer:
+
+- VERIFIED-RUN on the owner host (Windows 11, Python 3.14.5; Codex evidence
+  PARENT_HOST_FAILURES.json and ADAPTED_HOST_LIMIT.json): the same ten
+  isolated-child tests fail on c962a3d and 201c60c. The child PATH is the
+  interpreter directory plus `/usr/local/bin:/usr/bin:/bin`, so Git is not
+  found (`source_identity`, FileNotFoundError WinError 2). With a test-only
+  PATH adapter the child then fails in asyncio/_overlapped with WinError 10106.
+- VERIFIED-CODE on c962a3d and 201c60c: the builder never carries SYSTEMROOT,
+  and the child-side allowlist refuses it. Python's subprocess documentation
+  requires a valid SystemRoot in an explicit Windows env; without it Winsock
+  initialisation reports WinError 10106 (INFERRED root cause of the second
+  failure; not executed on Windows here).
+- VERIFIED-RUN on the supported runtime (Linux, Python 3.12.3, 47 of 47
+  requirements.txt pins exact): all ten tests pass on both c962a3d and 201c60c.
+  These are host-portability failures, not A/B regressions.
+
+Repair (`src/recognition_validation/child.py` only):
+
+- The POSIX environment and allowlist are byte-identical to the submission.
+- `_child_path` appends the directory of the Git the parent resolves, only
+  when the OS directories do not already hold it.
+- On Windows (`os.name == "nt"`), `env_allowlist("nt")` admits exactly
+  SYSTEMROOT, TEMP, TMP and USERPROFILE. The child carries the parent's
+  SYSTEMROOT and `%SYSTEMROOT%\System32` instead of the Unix directories.
+  TEMP and TMP point at the scratch TMPDIR, and USERPROFILE at the scratch HOME.
+- Nothing else is inherited. The child-side refusals (allowlist, credential
+  names, marker, preload, fresh roots, dotenv, source identity, network deny)
+  are unchanged.
+
+Acceptance (tests/test_recognition_child_portability.py):
+
+- The POSIX builder equals a transcription of the submitted builder in both
+  ECU lanes.
+- A Git outside the OS directories becomes reachable.
+- The constructed Windows environment, in both ECU lanes, carries SYSTEMROOT,
+  System32 and the Git directory, with no credential, APPDATA, operator PATH or
+  USERPROFILE value inherited.
+- No SYSTEMROOT is invented when the parent has none.
+- The real CLI child launch uses the builder and completes in both lanes.
+- A SYSTEMROOT injected into a POSIX child is still refused with
+  CHILD_ENV_NOT_ALLOWLISTED.
+- Five activated mutants are killed: no SYSTEMROOT, no Git directory, POSIX
+  allowlist widened, parent environment inherited, Unix directories on Windows.
+
+Declared limits:
+
+- No Windows host is available to this engineering run, so a healthy fresh
+  Windows child launch is not claimed. The return package carries the
+  one-command owner-host check.
+- A further Windows-only failure after SYSTEMROOT would remain UNPROVEN until
+  that run.
+
+```json ledger-entry
+{
+  "schema": "engineering_ledger_entry/v1",
+  "mission_id": "OWNER_AB_PORTABILITY_20261020",
+  "parent_sha": "201c60c2bc8cb1fb8944248b4055d625edeabf5c",
+  "parent_tree": "018c2aa28c4658d498df34d63b6efc7683093db5",
+  "parent_tracked_status": "",
+  "brain_fingerprint": "brain:3d9878ad3ff57f1f",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_count": 48,
+  "closure_digest": "d4dbe6a3ea029c4b59f33a1deba3d7c65ccb877e33afa4aed317b68256a15cf1",
+  "protected_count": 32,
+  "protected_digest": "79988f0ea3e84e15e34485a8510e78efc667f6e274d41fcde5d6e3c0307ab79a",
+  "policy_refs": [
+    "Maurice/Codex 2026-10-20: STAGE 5 OWNER AUDIT, remaining offline failures returned to Claude (CLAUDE_FAILURE_RETURN.md at 892d9df)",
+    "Preserve A/B repairs; no environment, network, dotenv, isolation or refusal check weakened; no production/Brain/economics/risk change"
+  ],
+  "scoped_files": [
+    "src/recognition_validation/child.py",
+    "tests/test_recognition_child_portability.py",
+    "docs/recognition_validation/*"
+  ],
+  "proof_ids": [
+    "PORTABILITY-PARENT-REPRODUCER",
+    "PORTABILITY-POSIX-BYTE-IDENTITY",
+    "PORTABILITY-REACHABLE-CONSUMER-BOTH-LANES",
+    "PORTABILITY-ACTIVATED-MUTANTS-5",
+    "PORTABILITY-SUPPORTED-RUNTIME-FULL-SUITE"
+  ],
+  "predecessor_receipt_digest": "ad68c3e813c79f8964fe76920836fc0bdd48e1580d53693e0561fb12f2832387",
+  "receipt_digest": "2b2484e13758ff9e8119dff3dccf3cd73221beb419c3f3516b6cc3b22d2ba15b"
+}
+```

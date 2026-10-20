@@ -22,8 +22,11 @@ INCOMPLETE and can never produce a complete result.
 from __future__ import annotations
 
 import json
+import ntpath
 import os
+import posixpath
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -36,11 +39,23 @@ STATUS_FILE = "CHILD_STATUS.json"
 EXIT_FILE = "CHILD_EXIT.json"
 RUNTIME_ROOTS = ("AI_BRAIN_DIR", "AI_RETRIEVAL_DIR", "OCCURRENCE_LEDGER_DIR", "REPLAY_SESSIONS_DIR",
                  "PERFORMANCE_TABLES_DIR", "HTF_MEMORY_DIR", "GLOBAL_MEMORY_DIR")
-#: The complete set of environment names a trajectory child may see.
-ENV_ALLOWLIST = frozenset(("PATH", "LANG", "TZ", "HOME", "TMPDIR", "XDG_CACHE_HOME", "PYTHONIOENCODING",
-                           "PYTHONDONTWRITEBYTECODE", "PYTHONHASHSEED", "EXECUTION_ENABLED", "ALLOW_PAPER_ORDERS",
-                           "AI_BRAIN_LLM", "TWO_BRAIN_MODE", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY",
-                           "STAGE5_TRAJECTORY_CHILD") + RUNTIME_ROOTS)
+_POSIX_ENV_NAMES = frozenset(("PATH", "LANG", "TZ", "HOME", "TMPDIR", "XDG_CACHE_HOME", "PYTHONIOENCODING",
+                              "PYTHONDONTWRITEBYTECODE", "PYTHONHASHSEED", "EXECUTION_ENABLED", "ALLOW_PAPER_ORDERS",
+                              "AI_BRAIN_LLM", "TWO_BRAIN_MODE", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY",
+                              "STAGE5_TRAJECTORY_CHILD") + RUNTIME_ROOTS)
+#: Names Windows itself needs in an environment built from nothing. Without SYSTEMROOT, Winsock (and so
+#: asyncio's _overlapped) fails to initialise with WinError 10106; TEMP/TMP and USERPROFILE are the Windows
+#: spellings of the scratch TMPDIR and HOME. Values are scratch roots or the OS directory, never inherited secrets.
+WINDOWS_ENV_NAMES = ("SYSTEMROOT", "TEMP", "TMP", "USERPROFILE")
+
+
+def env_allowlist(platform: str = os.name) -> frozenset:
+    """The complete set of environment names a trajectory child may see on `platform` (an os.name value)."""
+    return _POSIX_ENV_NAMES | frozenset(WINDOWS_ENV_NAMES) if platform == "nt" else _POSIX_ENV_NAMES
+
+
+#: The complete set of environment names a trajectory child may see on this host.
+ENV_ALLOWLIST = env_allowlist()
 _CREDENTIAL = re.compile(r"(KEY|TOKEN|SECRET|PASSW|CREDENTIAL|AUTH|COOKIE|BEARER)", re.I)
 #: Packages that make up the runtime authority stack; none may be loaded before isolation is proven.
 RUNTIME_PACKAGES = ("ai_brain", "ai_retrieval", "ai_layer", "broker", "live_scan", "market_data", "integrations",
@@ -56,9 +71,27 @@ def _runtime_modules() -> list:
                   if name.split(".")[0] in RUNTIME_PACKAGES)
 
 
-def child_environment(child_root: Path, *, ecu: bool) -> dict:
-    """Built from nothing: scratch home/tmp/cache, disarmed flags, refused proxy, runtime roots."""
-    env = {"PATH": os.pathsep.join([str(Path(sys.executable).parent), "/usr/local/bin", "/usr/bin", "/bin"]),
+def _child_path(platform: str, environ, which) -> str:
+    """The interpreter's directory, the OS tool directories and the directory of the Git the parent resolves
+    (source identity runs git); Git is appended only when the OS directories do not already hold it."""
+    paths = ntpath if platform == "nt" else posixpath
+    dirs = [str(Path(sys.executable).parent)]
+    if platform == "nt":
+        dirs += [paths.join(environ["SYSTEMROOT"], "System32")] if environ.get("SYSTEMROOT") else []
+    else:
+        dirs += ["/usr/local/bin", "/usr/bin", "/bin"]
+    git = which("git")
+    if git and paths.dirname(git) not in dirs:
+        dirs.append(paths.dirname(git))
+    return paths.pathsep.join(dirs)
+
+
+def child_environment(child_root: Path, *, ecu: bool, platform: str = os.name, environ=None,
+                      which=None) -> dict:
+    """Built from nothing: scratch home/tmp/cache, disarmed flags, refused proxy, runtime roots. On Windows it
+    also carries the OS directory (SYSTEMROOT) and the Windows names of the scratch home and temp roots."""
+    environ = os.environ if environ is None else environ
+    env = {"PATH": _child_path(platform, environ, which or shutil.which),
            "LANG": "C.UTF-8", "TZ": "UTC", "HOME": str(child_root / "home"), "TMPDIR": str(child_root / "tmp"),
            "XDG_CACHE_HOME": str(child_root / "cache"), "PYTHONIOENCODING": "utf-8", "PYTHONDONTWRITEBYTECODE": "1",
            "PYTHONHASHSEED": "0", "EXECUTION_ENABLED": "false", "ALLOW_PAPER_ORDERS": "false",
@@ -66,6 +99,10 @@ def child_environment(child_root: Path, *, ecu: bool) -> dict:
            "HTTP_PROXY": "http://127.0.0.1:9", "NO_PROXY": "", "STAGE5_TRAJECTORY_CHILD": "1"}
     for key in RUNTIME_ROOTS:
         env[key] = str(child_root.parent / "runtime" / key.lower())
+    if platform == "nt":
+        env.update(TEMP=env["TMPDIR"], TMP=env["TMPDIR"], USERPROFILE=env["HOME"])
+        if environ.get("SYSTEMROOT"):
+            env["SYSTEMROOT"] = environ["SYSTEMROOT"]
     for name in ("home", "tmp", "cache"):
         (child_root / name).mkdir(parents=True, exist_ok=True)
     return env
