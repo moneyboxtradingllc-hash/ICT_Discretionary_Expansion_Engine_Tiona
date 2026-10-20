@@ -260,24 +260,49 @@ def constructed_session_entry(*, session_id: str, contract_id: str, market_date:
 
 
 def build_constructed_corpus(root, *, session_id: str, contract_id: str, market_date: str, tape: list,
-                             warmup_end: str, notes: str, sealed_at: str) -> Path:
-    """Write tape, releases and a sealed ENGINEERING_ONLY corpus under a fresh root."""
+                             warmup_end: str, notes: str, sealed_at: str, quotes: list | None = None,
+                             revisions: list | None = None) -> Path:
+    """Write tape, releases and a sealed ENGINEERING_ONLY corpus under a fresh root.
+
+    `quotes` is an optional CONSTRUCTED sided quote stream (captured_at_utc, bid, ask,
+    contract_id); it is recorded as constructed mechanics, never venue truth. `revisions` are
+    CONSTRUCTED provider corrections ({bar_open_utc, bar, available_at_utc}): each becomes version 2
+    of its bar, released in arrival order and never hidden."""
     root = Path(root)
     C.require(not (root / "corpus.json").exists(), "OUTPUT_ROOT_REUSE", "/corpus.json")
     tape_bytes = json.dumps(tape, sort_keys=True, indent=1).encode("utf-8")
     original = write_artifact(root, f"tapes/{session_id}.json", tape_bytes, "CONSTRUCTED")
     docs = release_documents_from_tape(tape, session_id=session_id, contract_id=contract_id,
                                        source_artifact=original)
+    for revision in revisions or []:
+        base = next(d for d in docs if d["bar_open_utc"] == _iso(C.instant(revision["bar_open_utc"])))
+        docs.append({**copy.deepcopy(base), "available_at_utc": _iso(C.instant(revision["available_at_utc"])),
+                     "version": 2, "supersedes_version": 1,
+                     "bar": {**base["bar"], **{k: float(v) for k, v in revision["bar"].items()}}})
+    docs.sort(key=lambda d: (C.instant(d["available_at_utc"]), d["version"]))
+    for index, doc in enumerate(docs):
+        doc.update(sequence=index, document_id=f"{session_id}:release:{index}")
     releases = write_artifact(root, f"releases/{session_id}.json",
                               json.dumps(docs, sort_keys=True, indent=1).encode("utf-8"), "CONSTRUCTED")
+    entry = constructed_session_entry(session_id=session_id, contract_id=contract_id, market_date=market_date,
+                                      tape=tape, original=original, releases=releases, warmup_end=warmup_end,
+                                      notes=notes)
+    if quotes is not None:
+        for index, quote in enumerate(quotes):
+            C.require({"captured_at_utc", "bid", "ask", "contract_id"} <= set(quote), "QUOTE_FIELDS_MISSING",
+                      f"/quotes/{index}")
+            C.instant(quote["captured_at_utc"], f"/quotes/{index}/captured_at_utc")
+        entry["quotes"] = write_artifact(root, f"quotes/{session_id}.json",
+                                         json.dumps(quotes, sort_keys=True, indent=1).encode("utf-8"), "CONSTRUCTED")
+        entry["exclusion_reasons"] = [r if r != "no independent quote archive" else
+                                      "CONSTRUCTED quote stream: mechanics only, not venue truth"
+                                      for r in entry["exclusion_reasons"]]
     corpus = {
         "schema_version": "corpus/v1", "document_id": f"CONSTRUCTED-{session_id}",
         "provenance": {"classification": "CONSTRUCTED", "author_role": "ENGINEERING_GENERATOR",
                        "source_refs": [original["path"]], "notes": notes},
         "selection_state": "ENGINEERING_ONLY", "owner_decision_ref": None,
-        "sessions": [constructed_session_entry(session_id=session_id, contract_id=contract_id,
-                                               market_date=market_date, tape=tape, original=original,
-                                               releases=releases, warmup_end=warmup_end, notes=notes)],
+        "sessions": [entry],
         "seal": None,
     }
     corpus["seal"] = {"sha256": C.seal_digest(corpus), "sealed_at": sealed_at,

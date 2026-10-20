@@ -233,7 +233,9 @@ def child_main(request_path: str) -> int:
             launcher_modules_loaded=[m for m in LAUNCHER_MODULES if m in sys.modules],
             network_attempts=[str(a) for a in guard.attempts], infrastructure_error=summary["infrastructure_error"],
             status="RUN_COMPLETE" if not summary["infrastructure_error"] else "RUN_INCOMPLETE")
-        code = 5 if summary["infrastructure_error"] else 4 if (summary["network_attempts"] or summary["venue_writes"]
+        refused_writes_expected = request["run_document"].get("venue_lane", "DISARMED") == "REFUSING_VENUE_DOUBLE"
+        code = 5 if summary["infrastructure_error"] else 4 if (summary["network_attempts"]
+                                                                  or (summary["venue_writes"] and not refused_writes_expected)
                                                                   or exit_record["launcher_modules_loaded"]
                                                                   or exit_record["env_grew_outside_allowlist"]) else 0
         print(json.dumps({"status": exit_record["status"], "evidence_root": summary["evidence_root"],

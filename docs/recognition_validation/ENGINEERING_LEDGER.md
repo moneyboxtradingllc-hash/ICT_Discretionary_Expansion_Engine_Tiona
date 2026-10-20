@@ -891,3 +891,143 @@ pattern appears in `src/live_scan/scan_loop.py` and `src/main.py`.
   "receipt_digest": "7e8a0357880ac22ce573670fc81609701a6841a6cb7f738c003797ad1adc2a56"
 }
 ```
+
+## GAP_M3: quote wake, conditional trigger and final quote in both lanes
+
+Engineering GO of 2026-10-19, mission 3 of 4. Parent: GAP_M2 exit commit
+2c063d0.
+
+Parent reproducer (VERIFIED-RUN on 2c063d0, CONSTRUCTED distinct-anchor tape,
+MOCK Brain authoring a `watching` plan):
+
+- `driver.TICK_KINDS` is `("PREWARM", "SCAN")`, so a QUOTE_WAKE tick is
+  refused with TICK_ADAPTER_UNAVAILABLE.
+- The candle port has no wake registry and the loop is built with
+  `armed=False`.
+- So every scan from 16:30 to 16:35 refuses the authored plan with
+  `conditional_plan_watch_unavailable` and makes a fresh Brain call.
+  `handle_pending_conditional_wake` never fires, and the runner's final-quote
+  authentication is unreachable.
+
+Repair (recognition_validation only; production sources unchanged):
+
+- The driver now holds the actual `WakeRegistry`, and feeds it the way the
+  launcher and the live quote provider do:
+  - bootstrap before the first non-PREWARM tick, then publish it on the candle
+    port;
+  - `note_bar_closed` -> `consume_structure` -> `refresh_from_bars` on every
+    new release;
+  - `on_quote` for every delivered sided quote. Its original capture time and
+    age are kept, and a historical message is delivered once.
+- Each tick routes like one launcher loop iteration:
+  `handle_pending_conditional_wake()` first, `scan_once()` otherwise.
+- Tick kinds are now SCAN, QUOTE_WAKE, RELEASE and PREWARM.
+- A run declares `venue_lane`:
+  - DISARMED (the default);
+  - REFUSING_VENUE_DOUBLE (Mode A/B only, refused for Mode C in both the run
+    contract and the driver). This lane turns the loop's arm switch ON against
+    the refusing venue double and a synthetic replay-local authorization.
+- The report counts a venue write as VENUE_WRITE_OFFLINE only in the DISARMED
+  lane.
+- A corpus may carry an explicit sided quote stream and versioned bar
+  revisions. A QUOTE_WAKE without a quote stream is refused.
+- Every non-PREWARM tick writes an `offline_tick_trace/v1` artifact, referenced
+  from its event. It holds:
+  - the quote;
+  - the route;
+  - registry facts, including `interaction_pending_after_route`;
+  - the plan before and after (identities, zone, structural invalidation,
+    authority payload digest);
+  - new production plan events;
+  - changed final-quote economics;
+  - mission tokens and attempts;
+  - venue writes;
+  - Brain calls.
+
+Acceptance (tests/test_recognition_quote_wake_trigger.py). The plan publishes
+at 16:30: bearish order block 29513.25-29517.5, 3m protected-high stop 29518.5
+(INV_PH_3m_3). A sided quote at 16:32:30 wakes it, and it triggers with zero
+Brain calls.
+
+- DISARMED: QUALIFIED_CANDIDATE_OBSERVED, no venue write, no token.
+- REFUSING_VENUE_DOUBLE: `validate_final_quote` passes (EXECUTE_AS_AUTHORIZED
+  at the bid 29514.0, quote age 0). One place_order is refused (SUBMIT_FAILED,
+  boundary PRE_VENUE), with one token and one attempt.
+- Both ECU modes are covered.
+- One CLI run takes the refusing lane in a fresh child.
+
+Attacks. Each has a healthy reachable control from the same tape, differs from
+it in one input, and has its decisive cause read from the tick trace and plan
+events:
+
+| Attack | Decisive outcome |
+|---|---|
+| expired plan (135 s lifetime) | `conditional_plan_expired` |
+| stale quote (age 10 s > 5 s) | `conditional_plan_trigger_no_longer_true` |
+| quote for another contract | MISSING `quote_contract_mismatch`; no wake; plan keeps waiting |
+| duplicate wake after a trigger | QUOTE_WAKE_NO_INTERACTION; tokens stay 1 |
+| normal (non-plan) wake | routes a fresh scan; the live plan suppresses the Brain; the plan still triggers later |
+| objective reached before the trigger | `conditional_plan_review_required` |
+| provider revision of the 16:31 bar (v2 at 16:32:10) | `campaign_lifecycle_refused`; history revision moves only in the revised world |
+| restart after the authoring minute | no plan to trigger; the wake requests fresh cognition (one Brain call) |
+| completed 3m close beyond the stop, both lanes | `invalidation_id_unknown` (control: 3m close below the stop is accepted) |
+| Brain contract fingerprint changed at revalidation, both lanes | refused at plan revalidation |
+| campaign Draw episode changed at the trigger | refused (Draw or Lifecycle) |
+| final quote moved outside the zone between trigger and capture | `validate_final_quote` refusal, no venue write |
+
+Semantics note (not a defect): the protected-swing stop is judged on completed
+closes of its own timeframe. A 1m close above 29518.5 inside an incomplete 3m
+bar does not retire the plan.
+
+Declared limits:
+
+- One offered tick holds one historical quote. A quote that arrives between
+  the trigger scan and the runner's final capture is modelled by emitting it
+  on the hub at capture time.
+- An interaction raised by the route itself (for example
+  `conditional_plan_armed_inside` at publication) is spent by the next offered
+  tick, not by the current one. The trace records it as
+  `interaction_pending_after_route`.
+- The Brain fingerprint and Draw attacks are in-process instrumentation of
+  values production reads at revalidation. They are not natural tapes.
+
+Activated mutants: the m3_mutants harness in the return package. Mutants:
+
+- route without the pending-wake call;
+- quotes that skip the registry;
+- the armed loop in every lane;
+- no Mode C lane guard;
+- a quote wake without a stream;
+- a report that ignores the lane.
+
+```json ledger-entry
+{
+  "schema": "engineering_ledger_entry/v1",
+  "mission_id": "GAP_M3",
+  "parent_sha": "2c063d072ca43a126188a075fac646afb5599264",
+  "parent_tree": "c68250ed794482887873d741fbd08115666ee8eb",
+  "parent_tracked_status": "",
+  "brain_fingerprint": "brain:3d9878ad3ff57f1f",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_count": 48,
+  "closure_digest": "d4dbe6a3ea029c4b59f33a1deba3d7c65ccb877e33afa4aed317b68256a15cf1",
+  "protected_count": 32,
+  "protected_digest": "79988f0ea3e84e15e34485a8510e78efc667f6e274d41fcde5d6e3c0307ab79a",
+  "policy_refs": [
+    "GO 2026-10-19 Mission 3: integrated quote-wake / conditional trigger / final quote in both lanes",
+    "Contract 05 ports and driver; owner audit gap 3 (no quote-wake or trigger adapter)"
+  ],
+  "scoped_files": [
+    "src/recognition_validation/*",
+    "tests/test_recognition*.py",
+    "docs/recognition_validation/*"
+  ],
+  "proof_ids": [
+    "GAP-M3-PARENT-REPRODUCER",
+    "GAP-M3-QUOTE-WAKE-TRIGGER-TESTS",
+    "GAP-M3-ACTIVATED-MUTANTS"
+  ],
+  "predecessor_receipt_digest": "7e8a0357880ac22ce573670fc81609701a6841a6cb7f738c003797ad1adc2a56",
+  "receipt_digest": "8f2416056f8a205018b98a0b5706869ea1707d2be4161974f5c0a6b21094601f"
+}
+```

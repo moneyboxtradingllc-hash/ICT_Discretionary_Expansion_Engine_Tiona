@@ -310,6 +310,9 @@ class _Semantics:
 
     @staticmethod
     def run(doc, certification):
+        # The armed loop exists offline only against the refusing venue double, never in Mode C.
+        require(doc.get("venue_lane", "DISARMED") == "DISARMED" or doc["mode"] in ("A", "B"),
+                "REFUSING_VENUE_LANE_MODE_C", "/venue_lane")
         budget = doc["budget"]
         cost = _decimal(budget["max_cost_usd"], "/budget/max_cost_usd")
         if doc["mode"] != "C" or not doc["model_calls_authorized"]:

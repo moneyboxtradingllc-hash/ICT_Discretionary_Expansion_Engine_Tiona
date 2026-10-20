@@ -130,8 +130,8 @@ def build_result(*, document_id: str, run_digest: str, mode: str, scored: list, 
         incomplete.append("RECORDING_OR_INFRASTRUCTURE_ERROR: " + manifest["infrastructure_error"])
     if manifest and manifest.get("network_attempts"):
         invariant_failures.append("NETWORK_ATTEMPTED_OFFLINE")
-    if manifest and manifest.get("venue_writes"):
-        invariant_failures.append("VENUE_WRITE_OFFLINE")
+    if manifest and manifest.get("venue_writes") and manifest.get("venue_lane", "DISARMED") == "DISARMED":
+        invariant_failures.append("VENUE_WRITE_OFFLINE")  # a disarmed trajectory never reaches the venue seam
     if manifest and manifest.get("events") != sum(s["event_count"] for s in scored):
         incomplete.append("EVENT_COUNT_MISMATCH")
     if manifest and (manifest.get("tick_count") != manifest.get("ticks")

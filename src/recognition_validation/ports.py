@@ -27,22 +27,35 @@ def real_utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+#: Launcher functions the offline loop reuses verbatim (window predicate, admitted wake quote).
+LAUNCHER_FUNCTIONS = frozenset({"_now_et", "effective_window", "production_window_open", "admitted_sided_prices"})
+
+
 @lru_cache(maxsize=1)
-def _window_predicate():
+def _launcher():
     """Load the actual entrypoint functions without importing its dotenv/startup code."""
     path = Path(__file__).resolve().parents[2] / "tools/topstepx_production_session.py"
-    names = {"_now_et", "effective_window", "production_window_open"}
     functions = [n for n in ast.parse(path.read_text(encoding="utf-8")).body
-                 if isinstance(n, ast.FunctionDef) and n.name in names]
-    C.require(len(functions) == len(names), "WINDOW_ADAPTER_UNAVAILABLE", "/production_window")
+                 if isinstance(n, ast.FunctionDef) and n.name in LAUNCHER_FUNCTIONS]
+    C.require(len(functions) == len(LAUNCHER_FUNCTIONS), "LAUNCHER_ADAPTER_UNAVAILABLE", "/launcher_functions")
     namespace = {}
     exec(compile(ast.Module(body=functions, type_ignores=[]), str(path), "exec"), namespace)
-    return namespace["production_window_open"]
+    return namespace
+
+
+def _window_predicate():
+    return _launcher()["production_window_open"]
 
 
 def production_window_open(moment):
     from broker import topstepx_session_authorization as SA
     return _window_predicate()(moment.astimezone(ZoneInfo(SA.PRODUCTION_WINDOW_TZ)))
+
+
+def admitted_sided_prices(production_session) -> tuple:
+    """The launcher's ONE admitted wake quote (fresh, sided) -- the same authority the submit
+    boundary asks; (None, None) means inside is NOT proven."""
+    return _launcher()["admitted_sided_prices"](production_session)
 
 
 class DecisionClock:
@@ -71,6 +84,9 @@ class LocalCandlePort:
     def __init__(self, stream, clock: DecisionClock, *, symbol: str = "MNQ"):
         self.stream, self.clock, self.symbol = stream, clock, symbol
         self.calls: list = []
+        #: The production loop reads `candles.wake_registry` (as on the live provider);
+        #: the driver publishes the real WakeRegistry here only after bootstrapping it.
+        self.wake_registry = None
 
     def fetch_1m_candles(self, symbol, lookback_bars=300):
         C.require(symbol == self.symbol, "SYMBOL_MISMATCH", "/symbol", str(symbol))

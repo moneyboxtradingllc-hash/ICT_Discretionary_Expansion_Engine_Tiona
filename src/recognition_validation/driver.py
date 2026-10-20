@@ -5,6 +5,28 @@
       -> participation_authority_bound -> CandidateProducer.produce
       -> conditional plan capture / quote wake -> arm switch (OFF)
 
+Ticks follow the production launcher's loop (tools/topstepx_production_session.py):
+the real `WakeRegistry` is bootstrapped (arm, never wake) before the first
+non-PREWARM tick and published on the candle port, as the launcher publishes it
+on the live provider. Every delivered quote reaches `WakeRegistry.on_quote`, as
+the live provider's `_on_quote` does; every newly available release first earns
+the launcher's pure structure refresh. A tick then routes exactly like one loop
+iteration: `handle_pending_conditional_wake()` first, `scan_once()` otherwise.
+
+    SCAN        the deadline: refresh, deliver the quote, route.
+    QUOTE_WAKE  one archived/constructed sided quote available at t (original
+                capture time and age kept). Routes only if the registry raised
+                an interaction: a plan's own zone wake goes to the brainless
+                trigger; any other wake requests a normal fresh evaluation.
+    RELEASE     a bar closed: the pure refresh only. Routes only if the refresh
+                itself raised an interaction (armed while already inside).
+
+The venue lane is DISARMED unless the run declares REFUSING_VENUE_DOUBLE (Mode
+A/B only): then the loop's arm switch is ON against the refusing venue double
+and a synthetic replay-local authorization, so the conditional trigger reaches
+the runner's final-quote authentication; every venue write still raises and is
+recorded. No real account, authorization or order exists anywhere here.
+
 Only the edges are doubles: candles and quotes come from availability-
 controlled local ports, the venue is a read-only synthetic account whose
 every write raises, and the Brain answers at the provider boundary. Every
@@ -29,7 +51,8 @@ from recognition_validation import ports as P
 
 RUNTIME_ROOTS = ("AI_BRAIN_DIR", "AI_RETRIEVAL_DIR", "OCCURRENCE_LEDGER_DIR", "REPLAY_SESSIONS_DIR",
                  "PERFORMANCE_TABLES_DIR", "HTF_MEMORY_DIR", "GLOBAL_MEMORY_DIR")
-TICK_KINDS = ("PREWARM", "SCAN")
+TICK_KINDS = ("PREWARM", "SCAN", "QUOTE_WAKE", "RELEASE")
+VENUE_LANES = ("DISARMED", "REFUSING_VENUE_DOUBLE")
 
 
 @contextlib.contextmanager
@@ -86,12 +109,17 @@ class OfflineOrganism:
     mission: object
     clock: P.DecisionClock
     contract: object
+    registry: object = None
+    venue_lane: str = "DISARMED"
     last_scan: dict = field(default_factory=dict)
 
 
 def build_organism(*, stream, clock: P.DecisionClock, store_dir, session_id: str, contract_id: str,
-                   session_date: str, issued_at: str, account_fingerprint: str = "acct:offline-replay") -> OfflineOrganism:
-    """The real ProductionLoop, disarmed, around offline edges."""
+                   session_date: str, issued_at: str, account_fingerprint: str = "acct:offline-replay",
+                   venue_lane: str = "DISARMED") -> OfflineOrganism:
+    """The real ProductionLoop around offline edges; armed only against the refusing venue double."""
+    from live_scan.wake_registry import WakeRegistry
+    C.require(venue_lane in VENUE_LANES, "VENUE_LANE_UNKNOWN", "/venue_lane", venue_lane)
     from broker import topstepx_production_loop as PL
     from broker import topstepx_session_authorization as SA
     from broker.luna_candidate_producer import CandidateProducer
@@ -110,7 +138,8 @@ def build_organism(*, stream, clock: P.DecisionClock, store_dir, session_id: str
                                               account_fingerprint=account_fingerprint)
     mission = SA.ProductionSessionMission(authorization=authorization, store_dir=str(store_dir))
     cycle = ProductionScanCycle(symbol="MNQ", contract_id=contract_id, session_id=session_id, quote_provider=quotes)
-    organism = OfflineOrganism(loop=None, cycle=cycle, venue=venue, mission=mission, clock=clock, contract=contract)
+    organism = OfflineOrganism(loop=None, cycle=cycle, venue=venue, mission=mission, clock=clock, contract=contract,
+                               registry=WakeRegistry(), venue_lane=venue_lane)
     original_scan = cycle.scan
 
     def observed_scan(*args, **kwargs):
@@ -121,7 +150,8 @@ def build_organism(*, stream, clock: P.DecisionClock, store_dir, session_id: str
     organism.loop = PL.ProductionLoop(
         production_session=production_session, session_mission=mission,
         producer=CandidateProducer(account_fingerprint=account_fingerprint, contract=contract),
-        candles=P.LocalCandlePort(stream, clock), runtime=runtime, account_id=venue.account.id, armed=False,
+        candles=P.LocalCandlePort(stream, clock), runtime=runtime, account_id=venue.account.id,
+        armed=venue_lane == "REFUSING_VENUE_DOUBLE",
         scan_cycle=cycle, clock=clock, in_window=lambda: P.production_window_open(clock.now()))
     return organism
 
@@ -147,8 +177,78 @@ def _formation_id(snapshot):
 
 _BOUNDARY = {"NO_CANDLES": "INGEST", "BRAIN_DEGRADED": "BRAIN", "BRAIN_SLEEP_HOLD": "BRAIN",
              "NO_CANDIDATE": "CANDIDATE", "RISK_REJECTED": "CANDIDATE", "QUALIFIED_CANDIDATE_OBSERVED": "MISSION",
-             "CONDITIONAL_PLAN_PUBLISHED": "PLAN_CAPTURE", "TRADING_COGNITION_OFF": "MISSION",
-             "WINDOW_CLOSED": "SCAN"}
+             "CONDITIONAL_PLAN_PUBLISHED": "PLAN_CAPTURE", "CONDITIONAL_PLAN_WAITING": "PLAN_CAPTURE",
+             "TRADING_COGNITION_OFF": "MISSION", "WINDOW_CLOSED": "SCAN", "SUBMIT_FAILED": "PRE_VENUE",
+             "QUOTE_WAKE_NO_INTERACTION": "SCAN", "QUOTE_WAKE_NO_QUOTE": "INGEST", "RELEASE_STRUCTURE_REFRESHED": "SCAN"}
+
+
+def _jsonable(value):
+    return json.loads(json.dumps(value, default=str, sort_keys=True))
+
+
+def _plan_document(plan) -> dict | None:
+    """The identities a conditional plan binds (as the loop holds it), for the tick trace."""
+    if not isinstance(plan, dict):
+        return None
+    extras = getattr(plan.get("candidate"), "extras", None) or {}
+    zone = extras.get("activation_zone") or {}
+    authority = plan.get("authority")
+    try:
+        payload = authority.payload() if authority is not None else None
+    except Exception:  # noqa: BLE001 -- recorded as unavailable, never repaired
+        payload = None
+    return _jsonable({
+        "plan_id": plan.get("plan_id"), "published_at": plan.get("published_at"),
+        "expires_at": extras.get("plan_expires_at"), "occurrence_id": zone.get("occurrence_id"),
+        "direction": zone.get("direction"), "zone_low": zone.get("low"), "zone_high": zone.get("high"),
+        "authoring_snapshot_id": extras.get("conditional_plan_snapshot_id"),
+        "invalidation_price": getattr(plan.get("candidate"), "invalidation_price", None),
+        "structural_invalidation": extras.get("structural_invalidation"),
+        "authority_payload_digest": C.digest(_jsonable(payload)) if payload is not None else None,
+        "authority": _jsonable({k: payload.get(k) for k in sorted(payload)
+                                if k not in ("parsed", "brain_result")}) if isinstance(payload, dict) else None})
+
+
+def _plan_events_path(loop) -> Path:
+    from ai_retrieval.retrieval_telemetry import session_root
+    session = getattr(getattr(loop.cycle, "retrieval_telemetry", None), "session_id", "") or "UNSCOPED"
+    return Path(session_root(session)) / "conditional_plan_events.jsonl"
+
+
+def _deliver_quote(organism, *, visible, quote_closes, quote_port, last_key):
+    """Hand the sided quote available at t to the hub (the LiveQuoteProvider) and, once
+    published, to the registry -- exactly what the live provider's `_on_quote` does.
+    A quote already delivered is not re-delivered: a historical message arrives once."""
+    now = organism.clock.now()
+    if quote_port is not None:
+        quote = quote_port.capture()
+        if isinstance(quote, P.MissingQuote):
+            return {"state": "MISSING", "reason": quote.reason}, last_key
+        bid, ask, captured, origin = quote.best_bid, quote.best_ask, quote.captured_at, quote_port.origin
+    elif quote_closes and visible:
+        bid = visible[-1]["close"]
+        ask, captured, origin = bid + organism.contract.tick_size, now, "CONSTRUCTED_SETTLED_CLOSE"
+    else:
+        return {"state": "UNAVAILABLE", "reason": "independent_quote_unavailable"}, last_key
+    key = (captured.isoformat(), bid, ask)
+    evidence = {"origin": origin, "best_bid": bid, "best_ask": ask, "captured_at": captured.isoformat(),
+                "age_seconds": (now - captured).total_seconds()}
+    if key == last_key:
+        return {"state": "ALREADY_DELIVERED", **evidence}, last_key
+    organism.venue.market_hub.emit("GatewayQuote", [organism.contract.id, {"bestBid": bid, "bestAsk": ask}])
+    # The message was received historically, not afresh on every scan: keep its age.
+    organism.loop.ps.quote_provider._last_at = captured
+    if organism.loop.candles.wake_registry is not None:
+        organism.registry.on_quote(bid=bid, ask=ask, observed_at=captured.isoformat())
+    return {"state": "DELIVERED", **evidence}, key
+
+
+def _route(loop) -> tuple:
+    """One launcher loop iteration: a plan's own wake first, then the ordinary scan."""
+    out = loop.handle_pending_conditional_wake()
+    if out is not None:
+        return out, "CONDITIONAL_TRIGGER"
+    return loop.scan_once(), "SCAN"
 
 
 def run_trajectory(*, organism: OfflineOrganism, stream, ticks, gateway, recorder, quote_closes: bool = True,
@@ -156,29 +256,58 @@ def run_trajectory(*, organism: OfflineOrganism, stream, ticks, gateway, recorde
     """Offer every tick; record one event per tick after the action."""
     from market_data.campaign_draw_truth import scan_participation_authority
     guard = network_guard or P.NetworkGuard()
-    summary = {"ticks": 0, "events": 0, "primary_calls": 0, "repair_calls": 0, "infrastructure_error": None}
+    summary = {"ticks": 0, "events": 0, "primary_calls": 0, "repair_calls": 0, "infrastructure_error": None,
+               "quote_wakes_routed": 0, "conditional_triggers": 0}
     lineage = f"process:{os.getpid()}:{id(organism.cycle):x}"
+    loop, registry = organism.loop, organism.registry
+    last_key, seen_releases, plan_rows = None, None, 0
     with guard.deny(), gateway.installed():
         for tick in ticks:
             C.require(tick.kind in TICK_KINDS, "TICK_KIND_UNKNOWN", f"/ticks/{tick.ordinal}")
             organism.clock.set(tick.decision_time)
             visible = stream.candles_at(tick.decision_time)
-            if quote_closes and visible:
-                constructed_quote(organism, visible[-1]["close"])
-            if quote_port is not None:
-                quote = quote_port.capture()
-                if not isinstance(quote, P.MissingQuote):
-                    organism.venue.market_hub.emit("GatewayQuote", [organism.contract.id,
-                        {"bestBid": quote.best_bid, "bestAsk": quote.best_ask}])
-                    # The event was received historically, not afresh on every scan.
-                    # Preserve the age used by the actual production price checks.
-                    organism.loop.ps.quote_provider._last_at = quote.captured_at
-            calls_before = len(gateway.calls)
+            calls_before, writes_before = len(gateway.calls), len(organism.venue.writes)
+            wakes_before, plan_before = len(registry.wakes), _plan_document(loop.active_conditional_plan)
+            economics_before = dict(getattr(loop.ps.runner, "final_quote_economics", {}) or {}) \
+                if getattr(loop.ps, "runner", None) is not None else {}
             organism.last_scan = {}
+            refreshed = interaction = bootstrapped = False
+            route = "PREWARM"
             if tick.kind == "PREWARM":
-                outcome = organism.loop._scan_once(observed_at=tick.decision_time, invoke_brain=False)
+                quote, last_key = _deliver_quote(organism, visible=visible, quote_closes=quote_closes,
+                                                 quote_port=quote_port, last_key=last_key)
+                outcome = loop._scan_once(observed_at=tick.decision_time, invoke_brain=False)
             else:
-                outcome = organism.loop.scan_once()
+                quote, last_key = _deliver_quote(organism, visible=visible, quote_closes=quote_closes,
+                                                 quote_port=quote_port, last_key=last_key)
+                if loop.candles.wake_registry is None:
+                    # STARTUP: arm and seed, never wake; only then may the quote path see it.
+                    bid, ask = P.admitted_sided_prices(loop.ps)
+                    registry.bootstrap_from_bars(loop.candles.fetch_1m_candles("MNQ", lookback_bars=300),
+                                                 organism.contract.id, bid=bid, ask=ask)
+                    loop.candles.wake_registry = registry
+                    bootstrapped = True
+                elif seen_releases is not None and len(visible) != seen_releases:
+                    # A bar closed: the launcher's pure canonical refresh, never a Brain call by itself.
+                    registry.note_bar_closed()
+                    if registry.consume_structure():
+                        bid, ask = P.admitted_sided_prices(loop.ps)
+                        registry.refresh_from_bars(loop.candles.fetch_1m_candles("MNQ", lookback_bars=300),
+                                                   organism.contract.id, bid=bid, ask=ask)
+                        refreshed = True
+                interaction = registry.consume_interaction()
+                if tick.kind == "SCAN" or interaction:
+                    outcome, route = _route(loop)
+                elif tick.kind == "QUOTE_WAKE":
+                    route = "WAIT"
+                    outcome = {"outcome": "QUOTE_WAKE_NO_QUOTE" if quote["state"] == "MISSING"
+                               else "QUOTE_WAKE_NO_INTERACTION", "reason": quote.get("reason")}
+                else:
+                    route = "WAIT"
+                    outcome = {"outcome": "RELEASE_STRUCTURE_REFRESHED", "reason": None}
+                summary["quote_wakes_routed"] += int(tick.kind == "QUOTE_WAKE" and interaction)
+                summary["conditional_triggers"] += int(route == "CONDITIONAL_TRIGGER")
+            seen_releases = len(visible) if tick.kind != "PREWARM" else seen_releases
             new_calls = gateway.calls[calls_before:]
             primary = sum(1 for call in new_calls if call["purpose"] == "PRIMARY")
             summary["primary_calls"] += primary
@@ -186,8 +315,8 @@ def run_trajectory(*, organism: OfflineOrganism, stream, ticks, gateway, recorde
             snapshot = (organism.last_scan or {}).get("snapshot") or {}
             scope_id, proof_id, scope_state = _scope_fields(snapshot)
             draw = scan_participation_authority(organism.last_scan) if organism.last_scan else None
-            candidate = organism.loop.active_candidate
-            plan = organism.loop.active_conditional_plan
+            candidate = loop.active_candidate
+            plan = loop.active_conditional_plan
             cutoff = visible[-1]["timestamp"] if visible else tick.decision_time.isoformat()
             status = (outcome or {}).get("outcome") or "UNKNOWN"
             missing = []
@@ -195,9 +324,39 @@ def run_trajectory(*, organism: OfflineOrganism, stream, ticks, gateway, recorde
                 missing.append("no_release_available_by_decision_time")
             if tick.kind == "PREWARM":
                 missing.append("declared_prewarm_no_cognition")
-            if not quote_closes and quote_port is None:
-                missing.append("independent_quote_unavailable")
+            if quote["state"] in ("MISSING", "UNAVAILABLE"):
+                missing.append(quote["reason"])
+            economics = dict(getattr(loop.ps.runner, "final_quote_economics", {}) or {}) \
+                if getattr(loop.ps, "runner", None) is not None else {}
+            boundary = _BOUNDARY.get(status, "SCAN")
+            if route == "CONDITIONAL_TRIGGER":
+                boundary = ("PRE_VENUE" if len(organism.venue.writes) > writes_before
+                            else "FINAL_QUOTE" if economics and economics != economics_before else "PLAN_TRIGGER")
             try:
+                refs = []
+                if tick.kind != "PREWARM":
+                    path = _plan_events_path(loop)
+                    rows = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+                    new_rows, plan_rows = [json.loads(r) for r in rows[plan_rows:]], len(rows)
+                    refs.append(recorder.json_artifact(_jsonable({
+                        "schema": "offline_tick_trace/v1", "venue_lane": organism.venue_lane,
+                        "tick": {"ordinal": tick.ordinal, "kind": tick.kind,
+                                 "decision_time": tick.decision_time.isoformat(), "settled_cutoff": cutoff},
+                        "quote": quote, "route": route,
+                        "registry": {"bootstrapped": bootstrapped, "structure_refreshed": refreshed,
+                                     "interaction_consumed": interaction, "armed": len(registry.armed()),
+                                     "new_wakes": registry.wakes[wakes_before:],
+                                     # Raised during this route (e.g. armed while inside): spent by
+                                     # the NEXT offered tick, never by this one.
+                                     "interaction_pending_after_route": bool(
+                                         registry.health().get("interaction_pending"))},
+                        "plan_before": plan_before, "plan_after": _plan_document(plan), "plan_events": new_rows,
+                        "final_quote_economics": economics if economics != economics_before else None,
+                        "mission": {"tokens": int(getattr(organism.mission, "token_count", 0) or 0),
+                                    "attempts": int(getattr(organism.mission, "entry_attempt_count", 0) or 0)},
+                        "venue_writes": [str(w) for w in organism.venue.writes[writes_before:]],
+                        "brain_calls": {"primary": primary, "repair": len(new_calls) - primary},
+                        "outcome": outcome}), kind="tick_trace", origin="CONSTRUCTED"))
                 recorder.event(
                     scan_key=f"{recorder.trajectory_id}/{cutoff}/{tick.ordinal}",
                     settled_cutoff=cutoff, observed_at=tick.decision_time.isoformat(),
@@ -211,11 +370,13 @@ def run_trajectory(*, organism: OfflineOrganism, stream, ticks, gateway, recorde
                     tool_occurrence_id=(candidate.extras.get("selected_tool_occurrence_id")
                                         if candidate is not None else None),
                     candidate_id=getattr(candidate, "candidate_id", None),
-                    plan_id=(plan or {}).get("plan_id") if isinstance(plan, dict) else None,
-                    boundary=_BOUNDARY.get(status, "SCAN"), outcome=status,
+                    plan_id=((plan or {}).get("plan_id") if isinstance(plan, dict)
+                             else (outcome or {}).get("conditional_plan_id")
+                             or ((plan_before or {}).get("plan_id") if route == "CONDITIONAL_TRIGGER" else None)),
+                    boundary=boundary, outcome=status,
                     first_refusal_code=(outcome or {}).get("reason") if status != "QUALIFIED_CANDIDATE_OBSERVED" else None,
                     primary_call_count=primary, repair_call_count=len(new_calls) - primary,
-                    evidence_refs=[], missing_evidence=missing + ([f"scope:{scope_state}"] if scope_state else []))
+                    evidence_refs=refs, missing_evidence=missing + ([f"scope:{scope_state}"] if scope_state else []))
             except Exception as exc:  # noqa: BLE001 -- a recording failure aborts certification
                 summary["infrastructure_error"] = f"{type(exc).__name__}: {exc}"
                 break
@@ -236,7 +397,7 @@ def run_offline(*, corpus_path, session_id: str, out_root, responder, ecu: bool,
                 prewarm_until: str | None = None, ticks_until: str | None = None,
                 fingerprints: dict | None = None, ticks=None, quote_policy: str | None = None,
                 run_document: dict | None = None, process_receipt: dict | None = None,
-                network_guard: P.NetworkGuard | None = None) -> dict:
+                network_guard: P.NetworkGuard | None = None, venue_lane: str | None = None) -> dict:
     """One whole-session trajectory from a sealed corpus into a fresh root.
 
     The CLI only ever calls this inside a fresh child (`child.child_main`), which
@@ -264,10 +425,15 @@ def run_offline(*, corpus_path, session_id: str, out_root, responder, ecu: bool,
     C.require(quote_policy in ("CONSTRUCTED", "ARCHIVED", "MISSING"), "QUOTE_POLICY_UNKNOWN", "/quote_policy")
     C.require(quote_policy != "CONSTRUCTED" or corpus.document["provenance"]["classification"] == "CONSTRUCTED",
               "CONSTRUCTED_QUOTES_ON_ARCHIVE", "/quote_policy")
+    venue_lane = venue_lane or (run_document or {}).get("venue_lane") or "DISARMED"
+    C.require(venue_lane in VENUE_LANES, "VENUE_LANE_UNKNOWN", "/venue_lane", venue_lane)
+    C.require(venue_lane == "DISARMED" or getattr(responder, "origin", "MOCK") in ("MOCK", "HISTORICAL"),
+              "REFUSING_VENUE_LANE_MODE_C", "/venue_lane")
     tick_document = [{"ordinal":t.ordinal,"decision_time":t.decision_time.isoformat(),"kind":t.kind} for t in ticks]
     run_document = run_document or {"schema":"offline_run/v1", "source_identity":identity,
         "corpus_digest":corpus.digest,"session_id":session_id,"ecu":ecu,"trajectory_id":trajectory_id,
-        "quote_policy":quote_policy,"ticks":tick_document,"fixture_digest":getattr(responder,"fixture_digest",None)}
+        "quote_policy":quote_policy,"ticks":tick_document,"fixture_digest":getattr(responder,"fixture_digest",None),
+        "venue_lane":venue_lane}
     run_digest = C.digest(run_document)
     out_root = Path(out_root)
     # A child's own request/scratch directory is the only thing allowed to precede the run.
@@ -282,7 +448,7 @@ def run_offline(*, corpus_path, session_id: str, out_root, responder, ecu: bool,
         organism = build_organism(stream=stream, clock=clock, store_dir=out_root / "store",
                                   session_id=trajectory_id, contract_id=entry["contract_id"],
                                   session_date=entry["market_date"].replace("-", ""),
-                                  issued_at=entry["session_window"]["start_utc"])
+                                  issued_at=entry["session_window"]["start_utc"], venue_lane=venue_lane)
         recorder = REC.Recorder(out_root / "evidence", run_digest=run_digest, trajectory_id=trajectory_id,
                                 classification=classification)
         gateway = G.BrainGateway(responder, trajectory_id=trajectory_id, clock=clock, recorder=recorder,
@@ -290,12 +456,17 @@ def run_offline(*, corpus_path, session_id: str, out_root, responder, ecu: bool,
         quote_port = None
         if quote_policy == "ARCHIVED":
             C.require(bool(entry["quotes"]), "QUOTE_ARCHIVE_MISSING", "/quotes")
+        if quote_policy != "MISSING" and entry["quotes"]:
+            # An explicit sided quote stream (archived, or CONSTRUCTED for a CONSTRUCTED corpus) is
+            # the only quote source; no settled close is substituted for it.
             quotes = C.loads_strict(C.verify_artifact(entry["quotes"], corpus.root).decode("utf-8"))
-            quote_port = P.LocalQuotePort(quotes, clock, contract_id=entry["contract_id"], origin="ARCHIVED")
+            quote_port = P.LocalQuotePort(quotes, clock, contract_id=entry["contract_id"], origin=quote_policy)
+        C.require(quote_port is not None or not any(t.kind == "QUOTE_WAKE" for t in ticks),
+                  "QUOTE_WAKE_WITHOUT_QUOTE_STREAM", "/ticks/kind")
         run_ref = recorder.json_artifact(run_document, kind="run_config", origin="CONSTRUCTED")
         schedule_ref = recorder.json_artifact(tick_document, kind="schedule", origin="CONSTRUCTED")
         summary = run_trajectory(organism=organism, stream=stream, ticks=ticks, gateway=gateway, recorder=recorder,
-                                 quote_closes=quote_policy == "CONSTRUCTED", quote_port=quote_port,
+                                 quote_closes=quote_policy == "CONSTRUCTED" and quote_port is None, quote_port=quote_port,
                                  network_guard=network_guard)
     summary.update(evidence_root=str(out_root / "evidence"), corpus_digest=corpus.digest,
                    tick_count=len(ticks), requests=gateway.requests, calls=gateway.calls)
@@ -311,7 +482,9 @@ def run_offline(*, corpus_path, session_id: str, out_root, responder, ecu: bool,
         "network_attempts": [str(a) for a in summary["network_attempts"]],
         "venue_writes": [str(w) for w in summary["venue_writes"]],
         "mission_tokens": summary["mission_tokens"], "mission_attempts": summary["mission_attempts"],
-        "fixture_digest": getattr(responder, "fixture_digest", None), "process_isolation": process})
+        "fixture_digest": getattr(responder, "fixture_digest", None), "process_isolation": process,
+        "venue_lane": venue_lane, "quote_wakes_routed": summary["quote_wakes_routed"],
+        "conditional_triggers": summary["conditional_triggers"]})
     return summary
 
 
