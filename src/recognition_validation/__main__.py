@@ -222,9 +222,15 @@ def cmd_report(args) -> int:
     mode = {"MOCK": "B", "HISTORICAL": "A", "CURRENT_EXTERNAL": "C"}.get((manifest or {}).get("evaluation_origin"),
                                                                          args.mode)
     C.require(mode in ("A", "B", "C"), "MODE_UNKNOWN", "/mode")
-    scored = [SC.score_trace(root, mode=mode, session_id=(manifest or {}).get("session_id") or "UNKNOWN",
+    session = (manifest or {}).get("session_id") or "UNKNOWN"
+    stream = None
+    if corpus is not None:
+        from recognition_validation import corpus as K
+        loaded = K.load_corpus(args.corpus).sessions.get(session)
+        stream = loaded.stream if loaded is not None else None   # MARKET_FACTS verify against the sealed corpus
+    scored = [SC.score_trace(root, mode=mode, session_id=session,
                              trajectory_id=(manifest or {}).get("trajectory_id") or "UNKNOWN",
-                             annotation=annotation, scoring=scoring)]
+                             annotation=annotation, scoring=scoring, stream=stream)]
     from recognition_validation import child as CH
     process = (manifest or {}).get("process_isolation") or {}
     problems = (CH.verify_child_status(root, manifest or {})

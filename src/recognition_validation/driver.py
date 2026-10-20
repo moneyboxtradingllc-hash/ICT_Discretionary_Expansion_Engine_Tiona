@@ -47,6 +47,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from recognition_validation import contracts as C
+from recognition_validation import layers as LY
 from recognition_validation import ports as P
 
 RUNTIME_ROOTS = ("AI_BRAIN_DIR", "AI_RETRIEVAL_DIR", "OCCURRENCE_LEDGER_DIR", "REPLAY_SESSIONS_DIR",
@@ -138,8 +139,13 @@ def build_organism(*, stream, clock: P.DecisionClock, store_dir, session_id: str
                                               account_fingerprint=account_fingerprint)
     mission = SA.ProductionSessionMission(authorization=authorization, store_dir=str(store_dir))
     cycle = ProductionScanCycle(symbol="MNQ", contract_id=contract_id, session_id=session_id, quote_provider=quotes)
+    registry = WakeRegistry()
+    # The registry stamps an interaction raised without `observed_at` (publish-while-inside,
+    # armed-inside refresh) with the wall clock (WakeRegistry._observed_at, an inventoried T32
+    # site). Offline it reads the injected decision clock instead, like every other port.
+    registry._observed_at = lambda value=None: WakeRegistry._observed_at(clock.now() if value is None else value)
     organism = OfflineOrganism(loop=None, cycle=cycle, venue=venue, mission=mission, clock=clock, contract=contract,
-                               registry=WakeRegistry(), venue_lane=venue_lane)
+                               registry=registry, venue_lane=venue_lane)
     original_scan = cycle.scan
 
     def observed_scan(*args, **kwargs):
@@ -186,8 +192,22 @@ def _jsonable(value):
     return json.loads(json.dumps(value, default=str, sort_keys=True))
 
 
+def _scrub(node):
+    """Drop the per-process uuid4-lineage identities compare.INPUT_TOKEN_KEYS names (campaign
+    episode, Draw record, scope campaign ids); content-derived identities stay raw."""
+    from recognition_validation.compare import INPUT_TOKEN_KEYS
+    if isinstance(node, dict):
+        return {k: _scrub(v) for k, v in node.items() if k not in INPUT_TOKEN_KEYS}
+    if isinstance(node, list):
+        return [_scrub(v) for v in node]
+    return node
+
+
 def _plan_document(plan) -> dict | None:
-    """The identities a conditional plan binds (as the loop holds it), for the tick trace."""
+    """The identities a conditional plan binds (as the loop holds it), for the tick trace.
+
+    The authority payload is recorded without its process-random identities (they never
+    repeat across trajectories); its digest is over that same scrubbed payload."""
     if not isinstance(plan, dict):
         return None
     extras = getattr(plan.get("candidate"), "extras", None) or {}
@@ -204,9 +224,18 @@ def _plan_document(plan) -> dict | None:
         "authoring_snapshot_id": extras.get("conditional_plan_snapshot_id"),
         "invalidation_price": getattr(plan.get("candidate"), "invalidation_price", None),
         "structural_invalidation": extras.get("structural_invalidation"),
-        "authority_payload_digest": C.digest(_jsonable(payload)) if payload is not None else None,
-        "authority": _jsonable({k: payload.get(k) for k in sorted(payload)
-                                if k not in ("parsed", "brain_result")}) if isinstance(payload, dict) else None})
+        "authority_payload_digest": C.digest(_scrub(_jsonable(payload))) if payload is not None else None,
+        "authority": _scrub(_jsonable({k: payload.get(k) for k in sorted(payload)
+                                       if k not in ("parsed", "brain_result")})) if isinstance(payload, dict) else None})
+
+
+def _venue_write_document(write) -> dict:
+    """A refused venue write for the tick trace, without its per-submission random client tag."""
+    name, payload = (write[0], write[1]) if isinstance(write, tuple) and len(write) == 2 else (str(write), None)
+    if isinstance(payload, dict):
+        return {"call": name, "payload": _jsonable({k: v for k, v in payload.items() if k != "customTag"}),
+                "custom_tag_present": "customTag" in payload}
+    return {"call": name, "payload": _jsonable(payload), "custom_tag_present": False}
 
 
 def _plan_events_path(loop) -> Path:
@@ -252,7 +281,7 @@ def _route(loop) -> tuple:
 
 
 def run_trajectory(*, organism: OfflineOrganism, stream, ticks, gateway, recorder, quote_closes: bool = True,
-                   quote_port=None, network_guard: P.NetworkGuard | None = None) -> dict:
+                   quote_port=None, network_guard: P.NetworkGuard | None = None, market_open: str | None = None) -> dict:
     """Offer every tick; record one event per tick after the action."""
     from market_data.campaign_draw_truth import scan_participation_authority
     guard = network_guard or P.NetworkGuard()
@@ -338,7 +367,7 @@ def run_trajectory(*, organism: OfflineOrganism, stream, ticks, gateway, recorde
                     path = _plan_events_path(loop)
                     rows = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
                     new_rows, plan_rows = [json.loads(r) for r in rows[plan_rows:]], len(rows)
-                    refs.append(recorder.json_artifact(_jsonable({
+                    trace_doc = _jsonable({
                         "schema": "offline_tick_trace/v1", "venue_lane": organism.venue_lane,
                         "tick": {"ordinal": tick.ordinal, "kind": tick.kind,
                                  "decision_time": tick.decision_time.isoformat(), "settled_cutoff": cutoff},
@@ -354,9 +383,17 @@ def run_trajectory(*, organism: OfflineOrganism, stream, ticks, gateway, recorde
                         "final_quote_economics": economics if economics != economics_before else None,
                         "mission": {"tokens": int(getattr(organism.mission, "token_count", 0) or 0),
                                     "attempts": int(getattr(organism.mission, "entry_attempt_count", 0) or 0)},
-                        "venue_writes": [str(w) for w in organism.venue.writes[writes_before:]],
+                        "venue_writes": [_venue_write_document(w) for w in organism.venue.writes[writes_before:]],
                         "brain_calls": {"primary": primary, "repair": len(new_calls) - primary},
-                        "outcome": outcome}), kind="tick_trace", origin="CONSTRUCTED"))
+                        "outcome": outcome})
+                    refs.append(recorder.json_artifact(trace_doc, kind="tick_trace", origin="CONSTRUCTED"))
+                    # Mission 4: the six layers exactly as the producers returned them at this tick.
+                    refs.append(recorder.json_artifact(_jsonable(LY.project(
+                        tick=tick, scan=organism.last_scan, candidate=candidate, plan=plan, outcome=outcome,
+                        route=route, trace=trace_doc, releases=stream.visible(tick.decision_time),
+                        market_open=market_open,
+                        history_revision=organism.cycle._history.revision)), kind="layer_projection",
+                        origin="CONSTRUCTED"))
                 recorder.event(
                     scan_key=f"{recorder.trajectory_id}/{cutoff}/{tick.ordinal}",
                     settled_cutoff=cutoff, observed_at=tick.decision_time.isoformat(),
@@ -467,7 +504,7 @@ def run_offline(*, corpus_path, session_id: str, out_root, responder, ecu: bool,
         schedule_ref = recorder.json_artifact(tick_document, kind="schedule", origin="CONSTRUCTED")
         summary = run_trajectory(organism=organism, stream=stream, ticks=ticks, gateway=gateway, recorder=recorder,
                                  quote_closes=quote_policy == "CONSTRUCTED" and quote_port is None, quote_port=quote_port,
-                                 network_guard=network_guard)
+                                 network_guard=network_guard, market_open=entry["session_window"]["start_utc"])
     summary.update(evidence_root=str(out_root / "evidence"), corpus_digest=corpus.digest,
                    tick_count=len(ticks), requests=gateway.requests, calls=gateway.calls)
     write_manifest(out_root / "evidence", {

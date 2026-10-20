@@ -1031,3 +1031,205 @@ Activated mutants: the m3_mutants harness in the return package. Mutants:
   "receipt_digest": "8f2416056f8a205018b98a0b5706869ea1707d2be4161974f5c0a6b21094601f"
 }
 ```
+
+## GAP_M4: six-layer fact, campaign, causal and timing projection and scoring
+
+Engineering GO of 2026-10-19, mission 4 of 4. Parent: GAP_M3 exit commit
+a68c89a.
+
+Parent reproducer (VERIFIED-RUN on a68c89a, the HEALTHY mission 3 world):
+
+- Two FICTIONAL labels are identical except for their campaign, delivery and
+  tool truth (one is right, the other has delivery_state TRANSFER_CONFIRMED,
+  another playbook and another objective).
+- Both get identical confusion cells and metrics, and no layer cells exist.
+- Events carry at most one evidence ref (the tick trace).
+- So the annotation's campaign origin and objective, delivery state,
+  invalidation and transfer evidence, playbook and tool fields are never
+  compared with what the producers produced.
+
+Repair (recognition_validation only; production sources unchanged):
+
+- `layers.project` runs at every non-PREWARM tick. It writes a
+  `layer_projection/v1` artifact bound to the event, read only from the
+  actual producer outputs. Each layer below names its source binding:
+  - MARKET_FACTS: the snapshot's settled 1m bar and its sealed release
+    (version, availability, settlement).
+  - CAMPAIGN: `scan_participation_authority` (direction, objective,
+    authority, Draw history revision), the path origin, and the Brain's own
+    direction.
+  - DELIVERY: the campaign Lifecycle state and the path owner, status,
+    transfer flags and last invalidation. It is mapped to the annotation
+    vocabulary from production's Lifecycle and ownership change only. Local
+    opposing price movement never becomes a reversal.
+  - TOOL: playbook, tool family, exact occurrence, zone, direction and
+    structural invalidation, from the candidate or the live plan.
+  - COMPOSITION: outcome, route, whether a candidate or plan is present,
+    Brain calls, final-quote economics.
+  - TIMING: market open, settled cutoff, latest availability, decision,
+    plan capture, trigger and final-quote times, each kept separate.
+- An output the producers did not produce is ABSENT, with its reason.
+- The artifact holds no process-random identity. Process lineage, candidate
+  and plan ids stay on the event, where `compare` alpha-renames them, and the
+  per-process campaign episode id is not copied at all.
+- `layers.chronology` (per projection) and `layers.sequence` (across ticks)
+  report:
+  - FACT_AFTER_DECISION, FUTURE_EVIDENCE, FORMING_BAR_AS_FACT and
+    FACT_NOT_SEALED (checked against the sealed corpus stream);
+  - TRIGGER_BEFORE_CAPTURE, FINAL_QUOTE_BEFORE_TRIGGER and
+    FINAL_QUOTE_OUTSIDE_ZONE;
+  - duplicate cognition cutoffs, missed scans with their catch-up,
+    revisions and restarts.
+- `score_trace` adds the chronology and duplicate-cutoff codes to the trace's
+  invariant violations, so the result is FAIL.
+- `layers.score_label` gives six cells per label. They are compared only with
+  sealed admissible truth: the sealed corpus for MARKET_FACTS, and the
+  annotation fields (with their typed evidence references) for the other
+  layers.
+  - An absent or UNKNOWN annotation field is UNSCORED.
+  - Absent or unusable evidence is UNPROVEN, with its reason (for example
+    EVIDENCE_ABSENT, SEALED_CORPUS_NOT_SUPPLIED, PREFIX_EVICTED, STALE_DRAW,
+    CONTRADICTORY_JUDGMENT, LIFECYCLE_AUTHORITY_UNKNOWN, MISSED_SCAN_CATCH_UP,
+    RESTART_IN_WINDOW or MATCH_ON_SUPERSEDED_REVISION).
+  - Neither UNSCORED nor UNPROVEN is a MISS.
+  - A no-trade is UNSCORED (NO_TRADE_NEVER_WRONG).
+  - No win rate or economics is truth.
+- Six metrics (`layer_market_facts` ... `layer_timing`) join METRIC_NAMES, so
+  a ratified rule can require any layer. Mission 1 rule coverage then keeps it
+  as an obligation (PASS, FAIL, or UNPROVEN ZERO_DENOMINATOR).
+- result/v2 session summaries carry `layer_cells`, `layer_table`,
+  `layer_findings` and `layer_projection_count`. The report renders the
+  per-layer table, cells and findings. The CLI report passes the sealed
+  corpus stream to the scorer.
+
+Acceptance (tests/test_recognition_layer_projection.py):
+
+- Healthy, both venue lanes and both ECU modes: every non-PREWARM tick is
+  projected with all six layers from the actual producers. There are no
+  chronology findings against the sealed corpus. Every clock stays separate:
+  settled cutoff 16:32:00 < trigger and decision 16:32:30, and capture
+  16:30:00 < trigger. The refusing lane composes the final quote at 29514.0
+  inside the zone.
+- A healthy label scores all six layers SCORED and in agreement. The 16:31
+  to 16:32 rally into the order block, against the bearish campaign, stays a
+  retracement.
+- The healthy trace round-trips the result schema, the CLI report and the
+  markdown. A forged cell state is refused. A label over prewarm-only minutes
+  is UNPROVEN in every layer.
+- Each layer is mutated independently, against a healthy control, and
+  detected:
+  - facts not sealed, look-ahead cutoff, forming bar, replayed future
+    evidence;
+  - campaign direction, objective, origin, stale Draw, prefix eviction;
+  - false reversal and missed transfer;
+  - tool occurrence and occurrence ownership;
+  - trigger before capture and final quote outside the zone;
+  - early and late recognition, duplicate cutoffs, restart.
+- Natural producer variants:
+  - The provider revision is projected (version 2 of the 16:31 bar and
+    history revision 0 -> 1), with no chronology findings, and a match
+    before the revision is UNPROVEN MATCH_ON_SUPERSEDED_REVISION.
+  - Dropping the 16:24 to 16:27 scans is found as a 4-bar gap with catch-up
+    at 16:28, and the target inside it is UNPROVEN MISSED_SCAN_CATCH_UP.
+  - The healthy trace scored against the revised corpus fails end to end
+    with FACT_NOT_SEALED.
+- Mission 1 is rerun on layer outputs. Required layer rules are COMPLETE
+  (PASS) on the healthy cells, INCOMPLETE (UNPROVEN ZERO_DENOMINATOR) on
+  absent evidence, and FAIL on a scored disagreement. Each result validates.
+
+Determinism repair (found while closing this mission):
+
+- The first frozen focused run of the mission (9c5bf03, preserved in the
+  return package) had 4 failures:
+  - Three were determinism failures. Mode A/B repeats and the clean restart
+    compare differed in evidence digests, because the projection artifact
+    carried process lineage, the Draw campaign episode id, and candidate and
+    plan ids.
+  - One was the occurrence-reader theorem in
+    tests/test_production_fvg_stop_ownership.py.
+- Fixed:
+  - The projection carries no process-random identity.
+  - The mission 3 tick trace's plan authority payload, and its digest, drop
+    the per-process identities `compare.INPUT_TOKEN_KEYS` already names
+    (campaign episode, Draw record and scope campaign ids).
+  - A refused venue write is recorded in the tick trace without its
+    per-submission random `customTag`, with a flag that it was present. The
+    manifest keeps the raw write.
+  - The offline WakeRegistry reads the injected decision clock.
+- Stray-clock finding (protected source unchanged, for independent review):
+  `WakeRegistry._observed_at` (the inventoried T32 site in
+  STRAY_CLOCK_INVENTORY.json) stamps an interaction raised without
+  `observed_at` with the wall clock. This affects
+  `publish_conditional_watch` when it publishes while already inside, and the
+  armed-inside branch of `refresh`. Offline, that wall time reached the wake
+  telemetry and the plan's trigger event. It is telemetry only: plan expiry
+  and revalidation read the loop clock. Proposed narrow fix: the loop passes
+  `observed_at=self.clock()` to `publish_conditional_watch`, and the launcher
+  passes its observation time to `refresh_from_bars`.
+- Scoped literal update: the occurrence-reader theorem now lists
+  `src/recognition_validation/layers.py` as a second record-only harness
+  reader, pinned to exactly one read in the TOOL projection, as M07R did for
+  driver.py.
+- Two determinism tests now pass: repeated watching trajectories in the
+  refusing lane compare identical, and every wake carries the session date.
+
+Declared limits:
+
+- Restart, duplicate-cutoff, stale-Draw, prefix-eviction and false-reversal
+  cases are mutations of copies of the real projections, not natural tapes.
+  One trajectory has one process lineage, so a natural restart is two
+  trajectories.
+- MARKET_FACTS is verified only when the scorer receives the sealed corpus.
+  Without it the cell is UNPROVEN.
+
+Finding for owner review: the existing REFUSAL cell (contract 07
+`classify_episode`) does not know `expected_action` WATCHING. A published
+plan is classified as an entry, so it scores FALSE_POSITIVE against a
+WATCHING label. The COMPOSITION layer scores WATCHING correctly. Changing the
+REFUSAL cell is a scoring-semantics decision reserved to the owner, and it is
+left unchanged here.
+
+Activated mutants (the m4_mutants harness in the return package):
+
+- local opposing movement read as reversal;
+- early judgment not flagged;
+- no-trade scored wrong;
+- facts not checked against the sealed corpus;
+- missed scans hidden;
+- prefix eviction ignored;
+- scorer drops projection violations;
+- driver writes no projection.
+
+```json ledger-entry
+{
+  "schema": "engineering_ledger_entry/v1",
+  "mission_id": "GAP_M4",
+  "parent_sha": "a68c89af3340d3ee63b79dd2618c74f181d532b9",
+  "parent_tree": "2dd4838eacacb4348bc589688fff9d9982384e23",
+  "parent_tracked_status": "",
+  "brain_fingerprint": "brain:3d9878ad3ff57f1f",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_count": 48,
+  "closure_digest": "d4dbe6a3ea029c4b59f33a1deba3d7c65ccb877e33afa4aed317b68256a15cf1",
+  "protected_count": 32,
+  "protected_digest": "79988f0ea3e84e15e34485a8510e78efc667f6e274d41fcde5d6e3c0307ab79a",
+  "policy_refs": [
+    "GO 2026-10-19 Mission 4: fact/campaign/causal/timing projection and scoring in six layers",
+    "Contract 07 scoring/result; owner audit gap 4 (annotation truth fields never compared with producers)"
+  ],
+  "scoped_files": [
+    "src/recognition_validation/*",
+    "tests/test_recognition*.py",
+    "tests/test_production_fvg_stop_ownership.py",
+    "docs/recognition_validation/*"
+  ],
+  "proof_ids": [
+    "GAP-M4-PARENT-REPRODUCER",
+    "GAP-M4-LAYER-PROJECTION-TESTS",
+    "GAP-M4-ACTIVATED-MUTANTS",
+    "GAP-M4-DETERMINISM-REPAIR"
+  ],
+  "predecessor_receipt_digest": "8f2416056f8a205018b98a0b5706869ea1707d2be4161974f5c0a6b21094601f",
+  "receipt_digest": "720e059ceb7ef1ba5a283a8274a9472be492fe4401ce3c2689d1c74dea86b263"
+}
+```

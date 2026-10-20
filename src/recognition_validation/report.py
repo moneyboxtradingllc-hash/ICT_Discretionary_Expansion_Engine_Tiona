@@ -226,5 +226,17 @@ def render_markdown(result: dict, scored: list) -> str:
                            e["latency_seconds"], ", ".join(e["selected_occurrences"]) or None)
                           for e in detail["episodes"]],
                          ["label", "observed", "first recognition", "first candidate", "latency s", "occurrences"]),
-                  "", "Limitations:", ""] + [f"- {x}" for x in s["limitations"]] + [""]
+                  ""]
+        if s.get("layer_table") is not None:
+            lines += [f"### Six-layer projection ({s.get('layer_projection_count', 0)} projected ticks)", "",
+                      _table([(r["layer"], r["cells"], r["scored"], r["agree"], r["unscored"], r["unproven"],
+                               "; ".join(r["reasons"]) or None, "; ".join(r["sources"]) or None)
+                              for r in s["layer_table"]],
+                             ["layer", "cells", "scored", "agree", "unscored", "unproven", "reasons", "source"]), "",
+                      _table([(c["label_id"], c["layer"], c["expected"], c["observed"], c["state"], c["agreement"],
+                               c["reason"]) for c in s["layer_cells"]],
+                             ["label", "layer", "expected", "observed", "state", "agree", "reason"]), "",
+                      "Findings: `" + json.dumps({k: len(v) for k, v in s["layer_findings"].items()},
+                                                sort_keys=True) + "`", ""]
+        lines += ["Limitations:", ""] + [f"- {x}" for x in s["limitations"]] + [""]
     return "\n".join(lines)

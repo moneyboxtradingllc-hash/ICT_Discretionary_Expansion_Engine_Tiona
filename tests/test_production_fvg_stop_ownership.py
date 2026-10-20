@@ -324,11 +324,19 @@ class TestToolVerificationIsNotStopAuthority:
             # only in that recording line, and no production module imports
             # the harness (both pinned below).
             "src/recognition_validation/driver.py",
+            # Stage 5 gap mission 4: the offline layer projection copies the id
+            # into its TOOL evidence once, after the scan, for post-hoc scoring.
+            # Also record-only (pinned below); never a production consumer.
+            "src/recognition_validation/layers.py",
         ], found
         with open(_os.path.join(root, "recognition_validation", "driver.py"), encoding="utf-8") as fh:
             harness = fh.read()
         assert harness.count("selected_tool_occurrence_id") == 1
         assert 'tool_occurrence_id=(candidate.extras.get("selected_tool_occurrence_id")' in harness
+        with open(_os.path.join(root, "recognition_validation", "layers.py"), encoding="utf-8") as fh:
+            projection = fh.read()
+        assert projection.count("selected_tool_occurrence_id") == 1
+        assert '"occurrence_id": extras.get("selected_tool_occurrence_id")' in projection
         importers = []
         for base, _dirs, files in _os.walk(root):
             if "__pycache__" in base or _os.path.basename(base) == "recognition_validation":

@@ -19,6 +19,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from recognition_validation import contracts as C
+from recognition_validation import layers as LY
 from recognition_validation import recorder as REC
 
 ENTRY_OUTCOMES = frozenset({"QUALIFIED_CANDIDATE_OBSERVED", "CONDITIONAL_PLAN_PUBLISHED"})
@@ -198,7 +199,7 @@ def classify_episode(label: dict, events: list, directions: list, *, tolerance_s
 #: Every metric `score_trace` emits; a ratified rule naming anything else is refused.
 METRIC_NAMES = ("episodes_with_evidence", "recognition_hits", "recognition_hits_diagnostic", "false_positive_entries",
                 "correct_refusals", "exact_occurrence_selected", "authority_invariant_violations",
-                "missing_cognition_calls", "degraded_scans", "unique_candidates")
+                "missing_cognition_calls", "degraded_scans", "unique_candidates") + tuple(LY.METRICS.values())
 
 
 def rule_holds(value, rule: dict) -> bool:
@@ -226,8 +227,21 @@ def check_rules(scoring: dict) -> None:
     C.require(len(rules) == len(set(rules)), "DUPLICATE_SCORING_METRIC", "/thresholds")
 
 
+def read_projections(root, events: list) -> list:
+    """Every layer_projection/v1 bound to an event, in event order (artifacts already verified)."""
+    out = []
+    for event in events:
+        for ref in event["evidence_refs"]:
+            document = json.loads((Path(root) / ref["path"]).read_text(encoding="utf-8"))
+            if isinstance(document, dict) and document.get("schema") == LY.SCHEMA:
+                LY.check_projection(document)
+                # The process lineage is the event's (raw here; alpha-renamed only by `compare`).
+                out.append({**document, "process_lineage_id": event["process_lineage_id"]})
+    return out
+
+
 def score_trace(root, *, mode: str, session_id: str, trajectory_id: str, annotation: dict | None,
-                scoring: dict | None = None) -> dict:
+                scoring: dict | None = None, stream=None) -> dict:
     """One session/trajectory summary (result/v1 `session_summaries[]` item) + its mask."""
     root = Path(root)
     from recognition_validation.report import read_manifest
@@ -278,6 +292,15 @@ def score_trace(root, *, mode: str, session_id: str, trajectory_id: str, annotat
                 # Mode A/B (or unsealed truth) are diagnostics outside current-recognition denominators.
                 cell["excluded_count"], cell["eligible_count"] = cell["count"], 0
     violations = [v for e in episodes for v in e["violations"]]
+    # Mission 4: six-layer projection of the actual producers, scored against sealed truth only.
+    projections = read_projections(root, events)
+    findings = LY.sequence(projections)
+    for p in projections:
+        violations += [f"{code}:tick:{p['tick']['ordinal']}" for code in LY.chronology(p, stream=stream)]
+    violations += [f"DUPLICATE_COGNITION_CUTOFF:{d['settled_cutoff']}" for d in findings["duplicate_cognition_cutoffs"]]
+    layer_cells = [cell for label in labels
+                   for cell in LY.score_label(label, projections, findings, stream=stream, tolerance_seconds=tolerance,
+                                              stream_supplied=stream is not None)]
     rec = [c for c in cells if c["layer"] == "RECOGNITION"]
     ref = [c for c in cells if c["layer"] == "REFUSAL"]
     missing_cognition = sum(1 for c in calls if c["evaluation_origin"] == "MISSING")
@@ -305,7 +328,7 @@ def score_trace(root, *, mode: str, session_id: str, trajectory_id: str, annotat
         _metric("missing_cognition_calls", missing_cognition, len(calls)),
         _metric("degraded_scans", degraded, len(events)),
         _metric("unique_candidates", unique_candidates, max(unique_candidates, 1) if events else 0),
-    ]
+    ] + LY.metrics(layer_cells, _metric)
     C.require(tuple(m["name"] for m in metrics) == METRIC_NAMES, "METRIC_SET_DRIFT", "/metrics")
     if scoring is not None:
         check_rules(scoring)
@@ -330,7 +353,8 @@ def score_trace(root, *, mode: str, session_id: str, trajectory_id: str, annotat
                     "first_candidate_utc": first_cand[0] if first_cand else None,
                     "first_refusal_code": next((e["first_refusal_code"] for e in events if e["first_refusal_code"]),
                                                None),
-                    "limitations": limitations},
+                    "limitations": limitations, "layer_cells": layer_cells, "layer_table": LY.table(layer_cells),
+                    "layer_findings": findings, "layer_projection_count": len(projections)},
         "episodes": episodes, "violations": violations, "inclusion": inclusion.document(),
         "external_request_count": sum(1 for c in calls if c["request_attempted"]),
         "event_count": len(events), "call_count": len(calls),

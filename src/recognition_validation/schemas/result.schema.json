@@ -338,6 +338,205 @@
               "minLength": 1
             },
             "minItems": 0
+          },
+          "layer_cells": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "layer": {
+                  "enum": [
+                    "MARKET_FACTS",
+                    "CAMPAIGN",
+                    "DELIVERY",
+                    "TOOL",
+                    "COMPOSITION",
+                    "TIMING"
+                  ]
+                },
+                "label_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "expected": {
+                  "type": "string"
+                },
+                "observed": {
+                  "type": "string"
+                },
+                "state": {
+                  "enum": [
+                    "SCORED",
+                    "UNSCORED",
+                    "UNPROVEN"
+                  ]
+                },
+                "agreement": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "reason": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "truth_field": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "source_binding": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "projection_ticks": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              },
+              "required": [
+                "layer",
+                "label_id",
+                "expected",
+                "observed",
+                "state",
+                "agreement",
+                "reason",
+                "truth_field",
+                "source_binding",
+                "projection_ticks"
+              ]
+            }
+          },
+          "layer_table": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "layer": {
+                  "enum": [
+                    "MARKET_FACTS",
+                    "CAMPAIGN",
+                    "DELIVERY",
+                    "TOOL",
+                    "COMPOSITION",
+                    "TIMING"
+                  ]
+                },
+                "cells": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "scored": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "agree": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "unscored": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "unproven": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "reasons": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "layer",
+                "cells",
+                "scored",
+                "agree",
+                "unscored",
+                "unproven",
+                "reasons",
+                "sources"
+              ]
+            }
+          },
+          "layer_findings": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "duplicate_cognition_cutoffs": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "missed_scans": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "revisions": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "restarts": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              }
+            },
+            "required": [
+              "duplicate_cognition_cutoffs",
+              "missed_scans",
+              "revisions",
+              "restarts"
+            ]
+          },
+          "layer_projection_count": {
+            "type": "integer",
+            "minimum": 0
           }
         },
         "required": [

@@ -142,7 +142,7 @@ def run(tmp_path_factory, variant, lane, *, ecu=False, instrument=None, tag=None
                                                                    fixture_digest=C.digest("m3-watching-v1")))
         evidence = Path(summary["evidence_root"])
         _CACHE[key] = {"summary": summary, "evidence": evidence, "ticks": _traces(evidence),
-                       "manifest": RP.read_manifest(evidence)}
+                       "manifest": RP.read_manifest(evidence), "corpus_path": corpus}
     return _CACHE[key]
 
 
@@ -192,7 +192,7 @@ def _accepted(world, at, lane):
         assert ZONE[0] <= economics["final_entry_reference"] <= ZONE[1]
         assert ("final_quote_captured", None) in events and ("submission_started", None) in events
         assert (event["outcome"], event["boundary"]) == ("SUBMIT_FAILED", "PRE_VENUE")
-        assert len(trace["venue_writes"]) == 1 and "place_order" in trace["venue_writes"][0]
+        assert len(trace["venue_writes"]) == 1 and trace["venue_writes"][0]["call"] == "place_order"
         assert trace["mission"] == {"tokens": 1, "attempts": 1}
     return event, trace
 
