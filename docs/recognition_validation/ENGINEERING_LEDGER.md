@@ -1233,3 +1233,44 @@ Activated mutants (the m4_mutants harness in the return package):
   "receipt_digest": "720e059ceb7ef1ba5a283a8274a9472be492fe4401ce3c2689d1c74dea86b263"
 }
 ```
+
+
+## OWNER_AB_20261020: bounded owner-side evidence and timing audit
+
+Exact parent is frozen before any repair. A/B hypotheses are tested against the actual CLI and verified returned CONSTRUCTED traces. Production and protected authority remain unchanged.
+
+```json ledger-entry
+{
+  "schema": "engineering_ledger_entry/v1",
+  "mission_id": "OWNER_AB_20261020",
+  "parent_sha": "c962a3db256eb76b7b66f9fc158f6f6f1bf01bbb",
+  "parent_tree": "dd7cb762d772e2a2bffa38242f93982bf7ae105b",
+  "parent_tracked_status": "",
+  "brain_fingerprint": "brain:3d9878ad3ff57f1f",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_count": 48,
+  "closure_digest": "d4dbe6a3ea029c4b59f33a1deba3d7c65ccb877e33afa4aed317b68256a15cf1",
+  "protected_count": 32,
+  "protected_digest": "79988f0ea3e84e15e34485a8510e78efc667f6e274d41fcde5d6e3c0307ab79a",
+  "policy_refs": [
+    "Maurice 2026-10-20: Stage 5 Independent Adversarial Verification and Bounded Repair; hypotheses A and B only",
+    "No production/Brain/economics policy changes; B timing interpretation reserved where not ratified"
+  ],
+  "scoped_files": [
+    "src/recognition_validation/child.py",
+    "src/recognition_validation/layers.py",
+    "src/recognition_validation/scoring.py",
+    "src/recognition_validation/report.py",
+    "tests/test_recognition_owner_ab.py",
+    "docs/recognition_validation/*"
+  ],
+  "proof_ids": [
+    "OWNER-AB-PARENT-CLI-TAMPERING",
+    "OWNER-AB-HEALTHY-AND-ACTIVATED-CONTROLS",
+    "OWNER-AB-TIMING-SIX-SITUATIONS",
+    "OWNER-AB-FOCUSED-AND-FROZEN-FULL-SUITE"
+  ],
+  "predecessor_receipt_digest": "720e059ceb7ef1ba5a283a8274a9472be492fe4401ce3c2689d1c74dea86b263",
+  "receipt_digest": "ad68c3e813c79f8964fe76920836fc0bdd48e1580d53693e0561fb12f2832387"
+}
+```
