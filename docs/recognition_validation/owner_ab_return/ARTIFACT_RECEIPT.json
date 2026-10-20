@@ -1,0 +1,10 @@
+{
+  "source_sha": "201c60c2bc8cb1fb8944248b4055d625edeabf5c",
+  "filename": "CLAUDE_FAILURE_RETURN.zip",
+  "bytes": 252099,
+  "sha256": "cee45d30a4761cb824379d478bbcf295e9954916f21e13274ad9d8471362dfaf",
+  "manifest_entries": 29,
+  "full_suite_complete": false,
+  "observed_failures": 8,
+  "parent_reproduced_failures": 10
+}
