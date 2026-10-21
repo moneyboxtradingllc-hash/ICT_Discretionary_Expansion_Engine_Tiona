@@ -157,8 +157,12 @@ def test_macos_injected_names_reach_a_complete_child_and_foreign_values_are_refu
     """The owner-Mac launch condition reproduced on this host, with the activated control beside it."""
     mac = CH.run_in_child(ISO._request(world, tmp_path, "mac"), out_root=tmp_path / "mac", extra_env=MACOS_INJECTED)
     assert mac["complete"] is True and mac["child_exit"]["env_grew_outside_allowlist"] == []
-    forged = CH.run_in_child(ISO._request(world, tmp_path, "forged"), out_root=tmp_path / "forged",
-                             extra_env={"__CF_USER_TEXT_ENCODING": "sk-must-never-be-used"})
+    # macOS CoreFoundation rewrites __CF_USER_TEXT_ENCODING to the real value before Python starts (observed on the
+    # owner Mac), so there the forged value cannot reach the child; a valid non-UTF-8 LC_CTYPE survives, because PEP
+    # 538 coercion only rewrites a C/POSIX locale. Elsewhere the forged __CF value itself reaches the child.
+    forgery = ({"LC_CTYPE": "en_US.ISO8859-1"} if sys.platform == "darwin"
+               else {"__CF_USER_TEXT_ENCODING": "sk-must-never-be-used"})
+    forged = CH.run_in_child(ISO._request(world, tmp_path, "forged"), out_root=tmp_path / "forged", extra_env=forgery)
     assert forged["complete"] is False and forged["manifest_sha256"] is None
     assert forged["child_exit"]["status"] == "REFUSED"
     assert forged["child_exit"]["code"] == "CHILD_ENV_NOT_ALLOWLISTED"
