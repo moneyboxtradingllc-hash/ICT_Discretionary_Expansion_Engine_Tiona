@@ -1,0 +1,19 @@
+{
+ "testsuite_attrs": {
+  "name": "pytest",
+  "tests": "9730",
+  "failures": "0",
+  "errors": "0",
+  "skipped": "583",
+  "time": "7999.001",
+  "shards": "12"
+ },
+ "cases": 9696,
+ "status": {
+  "passed": 9113,
+  "skipped": 583,
+  "failure": 0,
+  "error": 0
+ },
+ "failures": []
+}

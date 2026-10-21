@@ -1,0 +1,31 @@
+{
+ "prefix_match_not_fullmatch": {
+  "killed": true,
+  "summary": "1 failed, 4 passed, 3 deselected in 0.73s",
+  "failed": [
+   "tests/test_recognition_child_portability.py::test_os_injected_names_are_admitted_only_with_their_exact_values"
+  ]
+ },
+ "any_value_admitted": {
+  "killed": true,
+  "summary": "1 failed, 4 passed, 3 deselected in 0.80s",
+  "failed": [
+   "tests/test_recognition_child_portability.py::test_os_injected_names_are_admitted_only_with_their_exact_values"
+  ]
+ },
+ "injected_names_ignored": {
+  "killed": true,
+  "summary": "1 failed, 4 passed, 3 deselected in 0.73s",
+  "failed": [
+   "tests/test_recognition_child_portability.py::test_os_injected_names_are_admitted_only_with_their_exact_values"
+  ]
+ },
+ "injected_names_in_posix_allowlist": {
+  "killed": true,
+  "summary": "2 failed, 3 passed, 3 deselected in 0.70s",
+  "failed": [
+   "tests/test_recognition_child_portability.py::test_posix_child_environment_and_allowlist_are_unchanged",
+   "tests/test_recognition_child_portability.py::test_os_injected_names_are_admitted_only_with_their_exact_values"
+  ]
+ }
+}

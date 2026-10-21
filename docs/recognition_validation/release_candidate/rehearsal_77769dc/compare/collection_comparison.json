@@ -1,0 +1,47 @@
+{
+ "previous": {
+  "attrs": {
+   "name": "pytest",
+   "tests": "9728",
+   "failures": "0",
+   "errors": "0",
+   "skipped": "583",
+   "time": "8263.193",
+   "shards": "12"
+  },
+  "cases": 9694,
+  "status": {
+   "passed": 9111,
+   "skipped": 583,
+   "failure": 0,
+   "error": 0
+  }
+ },
+ "final": {
+  "attrs": {
+   "name": "pytest",
+   "tests": "9730",
+   "failures": "0",
+   "errors": "0",
+   "skipped": "583",
+   "time": "7999.001",
+   "shards": "12"
+  },
+  "cases": 9696,
+  "status": {
+   "passed": 9113,
+   "skipped": 583,
+   "failure": 0,
+   "error": 0
+  }
+ },
+ "added_cases": [
+  "tests.test_recognition_child_portability::test_macos_injected_names_reach_a_complete_child_and_foreign_values_are_refused",
+  "tests.test_recognition_child_portability::test_os_injected_names_are_admitted_only_with_their_exact_values"
+ ],
+ "removed_cases": [],
+ "status_changes": [],
+ "skipped_identical": true,
+ "skipped_added": [],
+ "skipped_removed": []
+}

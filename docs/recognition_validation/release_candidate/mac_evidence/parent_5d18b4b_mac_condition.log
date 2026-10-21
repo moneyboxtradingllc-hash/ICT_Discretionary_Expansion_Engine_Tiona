@@ -1,0 +1,3 @@
+MAC_CONDITION_RESULT {"complete": false, "child_exit_status": "REFUSED", "child_exit_code": "CHILD_ENV_NOT_ALLOWLISTED", "detail": null}
+.
+1 passed in 58.57s

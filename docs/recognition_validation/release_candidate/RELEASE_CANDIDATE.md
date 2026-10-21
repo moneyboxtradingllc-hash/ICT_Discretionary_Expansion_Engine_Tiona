@@ -1,9 +1,15 @@
 # Release candidate for supervised, disarmed, read-only observation (not merged, not deployed)
 
-Branch `release/stage5-rc-20261022`. **Proposed launch source: 5d18b4b41b45e7f895aa6b1d3aa1fd5966c40e03**
-(tree 87cbf50e354e729627748f38a16de759ab5e8cbb). Every later commit on this branch is docs/evidence only:
-`git diff 5d18b4b HEAD -- src tools tests` is empty. Nothing here is merged into
-`feature/latency-1-preauthorized-plans` (production, cbfaddb) or `main` (a1614ae), and nothing is deployed or armed.
+Branch `release/stage5-rc-20261022`. **Proposed launch source: bdd852dd5d8b8b5590d124a4a9b722ddeba2e3d1.**
+
+- It is 5d18b4b plus the owner-approved Mac child-launch fix in `src/recognition_validation/child.py` and its tests
+  (ledger entry MAC_RUNTIME_PORTABILITY_20261021). The trading code is byte-identical to 5d18b4b.
+- The rehearsal below ran at 5d18b4b and again at 77769dc. The 77769dc run gave 9,113 passed, 583 skipped and
+  0 failed; see `rehearsal_77769dc/`.
+- Every later commit is docs/evidence only.
+- Nothing is merged into `feature/latency-1-preauthorized-plans` (production, cbfaddb) or `main` (a1614ae), and
+  nothing is deployed or armed.
+- The GO/NO-GO board is in `GO_NO_GO_BOARD.md`.
 
 ## 1. History reconciliation (VERIFIED-RUN)
 
