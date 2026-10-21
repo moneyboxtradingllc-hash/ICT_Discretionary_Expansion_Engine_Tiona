@@ -1,0 +1,30 @@
+{
+ "collected_tests": 9694,
+ "collected_files": 355,
+ "planned_files": 355,
+ "files_equal_collection": true,
+ "files_disjoint": true,
+ "junit_testcases": 9694,
+ "junit_unique": 9694,
+ "totals": {
+  "tests": 9728,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 583,
+  "time": 8502.202
+ },
+ "shard_tests": [
+  807,
+  809,
+  808,
+  808,
+  808,
+  808,
+  807,
+  809,
+  808,
+  808,
+  806,
+  808
+ ]
+}
