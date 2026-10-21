@@ -1366,3 +1366,76 @@ Declared limits:
   "receipt_digest": "2b2484e13758ff9e8119dff3dccf3cd73221beb419c3f3516b6cc3b22d2ba15b"
 }
 ```
+
+
+## MAC_RUNTIME_PORTABILITY_20261021: trajectory child launch on the operating Mac
+
+Parent: release-candidate head (source 5d18b4b plus docs only).
+
+Owner-host evidence (VERIFIED-RUN by the operator; the summary was returned to engineering and the archive is held
+privately):
+
+- Host: macOS 10.14.6 (18G103), Intel Core i5-8210Y, x86_64, git 2.20.1 (Apple), python.org Python 3.12.7.
+- All 47 pins match, and the ledger verifies.
+- The full suite at 5d18b4b gave 9,089 passed, 583 skipped, 22 failed and 10 errors (9,694 cases). There were two
+  causes:
+  1. **Every real child launch is refused** (12 cases: CHILD_ENV_NOT_ALLOWLISTED). On this Mac, `env -i ... python3 -I`
+     reports `['LC_CTYPE', 'PATH', '__CF_USER_TEXT_ENCODING']`. Python's PEP 538 coercion adds LC_CTYPE=UTF-8 because
+     LANG=C.UTF-8 does not exist on macOS 10.14, and CoreFoundation adds __CF_USER_TEXT_ENCODING to every process. The
+     child-side allowlist refuses both.
+  2. **The ledger test fixture** (10 failed, 10 errors) runs `git init -b`, which needs git 2.28 or later.
+
+Repair (owner-approved narrow fix):
+
+- `child.unallowlisted_env` admits exactly LC_CTYPE in {C.UTF-8, C.utf8, UTF-8} and __CF_USER_TEXT_ENCODING matching
+  `0x..:0x..:0x..` (full match). Any other name or value, including a forged or extended value, is still refused with
+  CHILD_ENV_NOT_ALLOWLISTED.
+- The parent still never passes these names. The POSIX and Windows allowlists and the builder are unchanged.
+- The post-run re-check uses the same rule.
+- The ledger test fixture uses `git init` followed by `symbolic-ref HEAD refs/heads/review`.
+
+Proof:
+
+- **Parent reproducer** on Linux at 5d18b4b, with the Mac-injected pair: REFUSED, CHILD_ENV_NOT_ALLOWLISTED. The repair
+  gives RUN_COMPLETE.
+- **Controls:** unit cases for the exact, foreign, newline-extended and unlisted values. A real child with the Mac pair
+  completes, and a real child with a forged __CF value is refused.
+- **Activated mutants:** 4 of 4 killed (prefix match, any value admitted, injected names ignored, names added to the
+  POSIX allowlist).
+- **Not done here:** confirmation on the owner Mac is the operator rerun recorded in the readiness board.
+
+```json ledger-entry
+{
+  "schema": "engineering_ledger_entry/v1",
+  "mission_id": "MAC_RUNTIME_PORTABILITY_20261021",
+  "parent_sha": "21b780b3ca4c8b7bec920c105f02025b65ab5286",
+  "parent_tree": "5dcc3123cc29f9e2608c642cb8e4f18ef7943957",
+  "parent_tracked_status": "",
+  "brain_fingerprint": "brain:3d9878ad3ff57f1f",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_count": 48,
+  "closure_digest": "d4dbe6a3ea029c4b59f33a1deba3d7c65ccb877e33afa4aed317b68256a15cf1",
+  "protected_count": 32,
+  "protected_digest": "79988f0ea3e84e15e34485a8510e78efc667f6e274d41fcde5d6e3c0307ab79a",
+  "policy_refs": [
+    "Maurice 2026-10-21: Thursday Oct 22 Readiness, Mac Verification and Final Engineering Closeout (item 1)",
+    "Tiona 2026-10-21: approved the narrow fix (exact OS-injected names and values only); no other isolation, network, dotenv or refusal check changed; no production/Brain/economics/risk change"
+  ],
+  "scoped_files": [
+    "src/recognition_validation/child.py",
+    "tests/test_recognition_child_portability.py",
+    "tests/test_recognition_process_isolation.py",
+    "tests/test_recognition_ledger.py",
+    "docs/recognition_validation/*"
+  ],
+  "proof_ids": [
+    "MAC-OWNER-HOST-FULL-RUN-5d18b4b",
+    "MAC-PARENT-REPRODUCER-ON-LINUX",
+    "MAC-HEALTHY-AND-FORGED-VALUE-CONTROLS",
+    "MAC-ACTIVATED-MUTANTS-4",
+    "GIT-2.20-LEDGER-FIXTURE"
+  ],
+  "predecessor_receipt_digest": "2b2484e13758ff9e8119dff3dccf3cd73221beb419c3f3516b6cc3b22d2ba15b",
+  "receipt_digest": "139503824eb7f8abd6866108cf59ec621f849e817449645a1c898178baf68b56"
+}
+```

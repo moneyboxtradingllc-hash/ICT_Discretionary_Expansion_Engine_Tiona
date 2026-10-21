@@ -112,7 +112,7 @@ def test_contaminated_parent_never_reaches_the_child_in_either_lane(world, tmp_p
         assert receipt["cold_state"]["provider_circuit"] == {"open": False, "reason": None}
         assert receipt["cold_state"]["call_context"]["session_id"] == ""
         assert receipt["preloaded_runtime_modules"] == []
-        assert set(receipt["env_names"]) <= CH.ENV_ALLOWLIST
+        assert set(receipt["env_names"]) <= CH.ENV_ALLOWLIST | set(CH.INJECTED_ENV)
         assert not {"OPENAI_API_KEY", "TOPSTEPX_API_KEY"} & set(receipt["env_names"])
         assert receipt["source_identity"] == C.source_identity()
         status, child_exit = _status(evidence), _exit(evidence)

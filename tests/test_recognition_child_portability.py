@@ -132,3 +132,33 @@ def test_windows_names_do_not_widen_the_posix_child_allowlist(world, tmp_path):
     assert status["complete"] is False and status["manifest_sha256"] is None
     assert status["child_exit"]["status"] == "REFUSED"
     assert status["child_exit"]["code"] == "CHILD_ENV_NOT_ALLOWLISTED"
+
+
+#: What a macOS 10.14 child actually reports from `env -i` (owner Mac, 2026-10-21): Python's PEP 538 locale
+#: coercion adds LC_CTYPE and CoreFoundation adds __CF_USER_TEXT_ENCODING to every process.
+MACOS_INJECTED = {"LC_CTYPE": "UTF-8", "__CF_USER_TEXT_ENCODING": "0x1F5:0x0:0x0"}
+
+
+def test_os_injected_names_are_admitted_only_with_their_exact_values(tmp_path):
+    env = CH.child_environment(tmp_path / "child", ecu=False, platform="posix", environ={},
+                               which=lambda name: "/usr/bin/git")
+    assert CH.unallowlisted_env(env) == []
+    assert CH.unallowlisted_env(dict(env, **MACOS_INJECTED)) == []
+    assert CH.unallowlisted_env(dict(env, LC_CTYPE="C.UTF-8")) == []
+    refused = {"LC_CTYPE": "en_US.ISO8859-1", "__CF_USER_TEXT_ENCODING": "sk-must-never-be-used"}
+    assert CH.unallowlisted_env(dict(env, **refused)) == ["LC_CTYPE", "__CF_USER_TEXT_ENCODING"]
+    assert CH.unallowlisted_env(dict(env, __CF_USER_TEXT_ENCODING="0x1F5:0x0:0x0\nOPENAI_API_KEY=x")) \
+        == ["__CF_USER_TEXT_ENCODING"]
+    assert CH.unallowlisted_env(dict(env, LC_ALL="UTF-8", OPENAI_API_KEY="UTF-8")) == ["LC_ALL", "OPENAI_API_KEY"]
+    assert not set(CH.INJECTED_ENV) & CH.env_allowlist("posix") and not set(CH.INJECTED_ENV) & set(env)
+
+
+def test_macos_injected_names_reach_a_complete_child_and_foreign_values_are_refused(world, tmp_path):
+    """The owner-Mac launch condition reproduced on this host, with the activated control beside it."""
+    mac = CH.run_in_child(ISO._request(world, tmp_path, "mac"), out_root=tmp_path / "mac", extra_env=MACOS_INJECTED)
+    assert mac["complete"] is True and mac["child_exit"]["env_grew_outside_allowlist"] == []
+    forged = CH.run_in_child(ISO._request(world, tmp_path, "forged"), out_root=tmp_path / "forged",
+                             extra_env={"__CF_USER_TEXT_ENCODING": "sk-must-never-be-used"})
+    assert forged["complete"] is False and forged["manifest_sha256"] is None
+    assert forged["child_exit"]["status"] == "REFUSED"
+    assert forged["child_exit"]["code"] == "CHILD_ENV_NOT_ALLOWLISTED"

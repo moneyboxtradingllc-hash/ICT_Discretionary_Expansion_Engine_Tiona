@@ -56,6 +56,17 @@ def env_allowlist(platform: str = os.name) -> frozenset:
 
 #: The complete set of environment names a trajectory child may see on this host.
 ENV_ALLOWLIST = env_allowlist()
+#: Names the interpreter or the OS adds to a child started from an emptied environment, admitted only with these
+#: exact non-secret values: Python's PEP 538 locale coercion sets LC_CTYPE when LANG's C.UTF-8 does not exist
+#: (macOS), and macOS CoreFoundation sets __CF_USER_TEXT_ENCODING (uid:encoding:region) in every process.
+INJECTED_ENV = {"LC_CTYPE": re.compile(r"C\.UTF-8|C\.utf8|UTF-8"),
+                "__CF_USER_TEXT_ENCODING": re.compile(r"0x[0-9A-Fa-f]{1,8}:0x[0-9A-Fa-f]{1,8}:0x[0-9A-Fa-f]{1,8}")}
+
+
+def unallowlisted_env(environ) -> list:
+    """Names a child may not see: outside the allowlist and not an exact interpreter/OS-injected value."""
+    return sorted(name for name, value in environ.items() if name not in ENV_ALLOWLIST
+                  and not (name in INJECTED_ENV and INJECTED_ENV[name].fullmatch(value)))
 _CREDENTIAL = re.compile(r"(KEY|TOKEN|SECRET|PASSW|CREDENTIAL|AUTH|COOKIE|BEARER)", re.I)
 #: Packages that make up the runtime authority stack; none may be loaded before isolation is proven.
 RUNTIME_PACKAGES = ("ai_brain", "ai_retrieval", "ai_layer", "broker", "live_scan", "market_data", "integrations",
@@ -267,8 +278,8 @@ def child_main(request_path: str) -> int:
         out_root = Path(request["out_root"])
         exit_record["request_sha256"] = C.sha256_hex(data)
         names = sorted(os.environ)
-        C.require(set(names) <= ENV_ALLOWLIST, "CHILD_ENV_NOT_ALLOWLISTED", "/env",
-                  ",".join(sorted(set(names) - ENV_ALLOWLIST)))
+        unlisted = unallowlisted_env(os.environ)
+        C.require(not unlisted, "CHILD_ENV_NOT_ALLOWLISTED", "/env", ",".join(unlisted))
         C.require(not [n for n in names if _CREDENTIAL.search(n)], "CHILD_CREDENTIAL_PRESENT", "/env")
         C.require(os.environ.get("STAGE5_TRAJECTORY_CHILD") == "1", "CHILD_MARKER_MISSING", "/env")
         preloaded = _runtime_modules()
@@ -301,7 +312,7 @@ def child_main(request_path: str) -> int:
         after = sorted(os.environ)
         exit_record.update(
             final_provider_circuit=N.provider_circuit_state(), dotenv_refused=dotenv_attempts,
-            env_names_after=after, env_grew_outside_allowlist=sorted(set(after) - ENV_ALLOWLIST),
+            env_names_after=after, env_grew_outside_allowlist=unallowlisted_env(os.environ),
             launcher_modules_loaded=[m for m in LAUNCHER_MODULES if m in sys.modules],
             network_attempts=[str(a) for a in guard.attempts], infrastructure_error=summary["infrastructure_error"],
             status="RUN_COMPLETE" if not summary["infrastructure_error"] else "RUN_INCOMPLETE")

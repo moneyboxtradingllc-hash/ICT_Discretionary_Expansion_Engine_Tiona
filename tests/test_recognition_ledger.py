@@ -102,7 +102,8 @@ def failure(root: Path) -> str:
 def repo(tmp_path):
     root = tmp_path / "repo"
     root.mkdir()
-    git(root, "init", "-q", "-b", "review")
+    git(root, "init", "-q")
+    git(root, "symbolic-ref", "HEAD", "refs/heads/review")   # `init -b` needs git >= 2.28
     write(root, "src/ai_brain/production_model.py", PRODUCTION_MODEL)
     write(root, "src/ai_brain/brain_prompt.py", "PROMPT = 'v1'\n")
     write(root, "tools/entry.py", "ENTRY = 1\n")
