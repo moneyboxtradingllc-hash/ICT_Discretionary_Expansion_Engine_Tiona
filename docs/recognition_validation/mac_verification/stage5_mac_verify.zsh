@@ -11,7 +11,7 @@
 # pointed at a dead port. Results land in ~/Desktop/stage5_mac_results_<time>.tar.gz
 # and a short summary is printed at the end. No secrets or .env contents are read.
 set -u
-SRC=5d18b4b41b45e7f895aa6b1d3aa1fd5966c40e03
+SRC=77769dc781c47d339af9a63d16b46089afff62e4
 REPO=https://github.com/moneyboxtradingllc-hash/ICT_Discretionary_Expansion_Engine_Tiona.git
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 W=$HOME/stage5_mac_verify_$STAMP
@@ -142,7 +142,7 @@ echo "== focused regression set (both ECU modes are inside these tests)"
 FOCUSED=(tests/test_recognition_child_portability.py tests/test_recognition_process_isolation.py
          tests/test_recognition_quote_wake_trigger.py tests/test_recognition_scoring_cli.py
          tests/test_recognition_owner_ab.py tests/test_recognition_contracts.py tests/test_recognition_rule_coverage.py
-         tests/test_recognition_layer_projection.py)
+         tests/test_recognition_layer_projection.py tests/test_recognition_ledger.py)
 run $E/focused.log python3 -m pytest -q -rfEs -p no:cacheprovider --junitxml=$E/focused.junit.xml $FOCUSED
 
 if [[ ${1:-} == full ]]; then
