@@ -1,0 +1,135 @@
+{
+ "S4-01": [
+  "test_formation_view_publication:{'pass': 6}",
+  "test_po3_execution_identity::test_copied_restored_stale_and_forged_authority_cannot_publish_executable_row:pass",
+  "test_bound_scope_history_custody::test_json_copy_of_the_live_snapshot_carries_no_custody:pass"
+ ],
+ "S4-02": [
+  "test_ecu_structure_flip_payload:{'pass': 3}"
+ ],
+ "S4-03": [
+  "test_po3_post_capture_release:{'pass': 3}"
+ ],
+ "S4-04": [
+  "test_po3_post_settlement_death:{'pass': 3}"
+ ],
+ "S4-05": [
+  "test_po3_anchor_replacement_revocation:{'pass': 2}",
+  "test_po3_distinct_anchor_premise:{'pass': 4}"
+ ],
+ "S4-06": [
+  "test_po3_full_graph_production_loop:{'pass': 8}",
+  "test_production_scan_loop::TestArmGatesTheOrderPath:NODE_MISSING"
+ ],
+ "S4-07": [
+  "test_conditional_plan_authority:{'pass': 39}",
+  "test_pre_authorized_conditional_plan:{'pass': 12}",
+  "test_latency1_final_quote_zone:{'pass': 16}",
+  "test_po3_participation_binding:{'pass': 19}",
+  "test_conditional_plan_across_alignment_step:{'pass': 6}"
+ ],
+ "S4-08": [
+  "test_rolling_window_prefix_eviction:{'pass': 8}",
+  "test_aligned_rolling_window_loop:{'pass': 8}"
+ ],
+ "S4-09": [
+  "test_campaign_draw_temporal_authority::test_same_cutoff_recognition_cannot_promote_newborn_until_newer_settled_bar:pass",
+  "test_campaign_scope::test_revision_boundary_voids_and_restart_never_restores:pass",
+  "test_campaign_draw_truth::test_restart_does_not_resurrect_old_process_authority:pass",
+  "test_po3_episode_retirement::test_cold_canonical_replay_does_not_restore_retired_episode:pass",
+  "test_conditional_plan_authority::test_saved_json_cannot_restore_live_plan_authority:pass",
+  "test_po3_participation_binding::test_po3_lost_formation_after_successful_trigger_refuses_final_quote:pass",
+  "test_bound_scope_history_custody:{'pass': 8}"
+ ],
+ "S4-10": [
+  "test_order_route_inventory:{'pass': 9}",
+  "test_legacy_smoke_route_fail_closed:{'pass': 4}"
+ ],
+ "S4-11": [
+  "test_recognition_ledger:{'pass': 11}"
+ ],
+ "S4-12": [],
+ "T01": [
+  "test_campaign_premise_shadow:{'pass': 103}",
+  "test_po3_post_settlement_death:{'pass': 3}"
+ ],
+ "T02": [
+  "test_campaign_draw_temporal_authority:{'pass': 27}"
+ ],
+ "T03": [
+  "test_campaign_draw_temporal_authority::test_same_cutoff_recognition_cannot_promote_newborn_until_newer_settled_bar:pass",
+  "test_campaign_scope::test_same_cutoff_fact_conflict_cannot_republish_or_activate:pass",
+  "test_bound_scope_history_custody::test_duplicate_settled_cutoff_repeats_without_advancing_bound_custody:pass"
+ ],
+ "T04": [
+  "test_aligned_rolling_window_loop::test_missed_scan_reconstruction_keeps_the_formation:pass"
+ ],
+ "T05": [
+  "test_rolling_window_prefix_eviction:{'pass': 8}"
+ ],
+ "T06": [
+  "test_campaign_draw_truth:{'pass': 33}",
+  "test_po3_reversal_order_block::test_revised_or_removed_proving_close_retires_prior_authority:pass",
+  "test_bound_scope_history_custody:{'pass': 8}"
+ ],
+ "T07": [
+  "test_campaign_scope::test_revision_boundary_voids_and_restart_never_restores:pass",
+  "test_conditional_plan_authority::test_saved_json_cannot_restore_live_plan_authority:pass",
+  "test_bound_scope_history_custody:{'pass': 8}"
+ ],
+ "T08": [
+  "test_formation_view_publication::test_foreign_genuine_view_cannot_revive_an_object_the_consumer_retired:pass",
+  "test_conditional_plan_authority::test_plan_authority_is_process_local_and_rejects_other_producer:pass"
+ ],
+ "T09": [
+  "test_po3_post_capture_release:{'pass': 3}",
+  "test_po3_episode_retirement:{'pass': 21}"
+ ],
+ "T10": [
+  "test_po3_distinct_anchor_premise:{'pass': 4}"
+ ],
+ "T11": [
+  "test_po3_post_settlement_death:{'pass': 3}",
+  "test_campaign_lifecycle::test_local_opposite_fact_cannot_flip_campaign_owner:pass"
+ ],
+ "T12": [
+  "test_campaign_scope_binding:{'pass': 29}",
+  "test_campaign_scope:{'pass': 49}"
+ ],
+ "T13": [
+  "test_campaign_draw_exact_binding:{'pass': 20}"
+ ],
+ "T14": [
+  "test_po3_execution_identity:{'pass': 11}",
+  "test_po3_full_graph_production_loop::test_a_replaced_anchor_refuses_at_the_tool_gate_before_any_mission:pass"
+ ],
+ "T15": [
+  "test_pre_authorized_conditional_plan:{'pass': 12}",
+  "test_conditional_plan_across_alignment_step::test_expired_plan_is_not_resurrected_by_the_step:pass"
+ ],
+ "T16": [
+  "test_pre_authorized_conditional_plan::test_production_scan_cycle_invocation_counter_is_zero_on_trigger_scan:pass",
+  "test_conditional_plan_authority::test_real_production_loop_trigger_passes_sealed_plan_without_brain_call:pass"
+ ],
+ "T17": [
+  "test_latency1_final_quote_zone:{'pass': 16}"
+ ],
+ "T18": [
+  "test_latency1_final_quote_zone::test_final_quote_uses_quote_capture_directional_side:pass",
+  "test_execution_reserve:{'pass': 13}"
+ ],
+ "T19": [
+  "test_order_route_inventory:{'pass': 9}",
+  "test_legacy_smoke_route_fail_closed:{'pass': 4}"
+ ],
+ "T20": [
+  "test_production_scan_loop::TestArmGatesTheOrderPath:NODE_MISSING",
+  "test_po3_full_graph_production_loop::test_disarmed_produces_the_same_candidate_and_stops_at_the_arm_switch:pass"
+ ],
+ "T21": [
+  "test_po3_full_graph_production_loop::test_a_spent_mission_refuses_every_later_candidate:pass"
+ ],
+ "T22": [
+  "test_ecu_structure_flip_payload::test_brainless_scans_still_advance_flips_once_without_a_brain_call:pass"
+ ]
+}
