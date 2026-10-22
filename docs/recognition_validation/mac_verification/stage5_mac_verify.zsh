@@ -1,8 +1,9 @@
 #!/bin/zsh
 # Stage 5 Mac verification: disposable, offline and disarmed.
 #
-#   zsh stage5_mac_verify.zsh          focused regression set (about 30-45 min)
-#   zsh stage5_mac_verify.zsh full     focused set, then the complete suite (a few hours)
+#   zsh stage5_mac_verify.zsh <source-sha>        focused regression set (about 45 min)
+#   zsh stage5_mac_verify.zsh <source-sha> full   focused set, then the complete suite (a few hours)
+# <source-sha> is the full 40-character frozen source commit named in the readiness board.
 #
 # It clones the exact source commit into a NEW folder under $HOME and never
 # touches your trading checkout, its .env, any account, provider or venue. The
@@ -11,14 +12,18 @@
 # pointed at a dead port. Results land in ~/Desktop/stage5_mac_results_<time>.tar.gz
 # and a short summary is printed at the end. No secrets or .env contents are read.
 set -u
-SRC=77769dc781c47d339af9a63d16b46089afff62e4
+SRC=${1:-}
+MODE=${2:-focused}
+if [[ ! $SRC =~ '^[0-9a-f]{40}$' || ( $MODE != focused && $MODE != full ) ]]; then
+  echo "usage: zsh stage5_mac_verify.zsh <40-character source sha> [full]"; exit 2
+fi
 REPO=https://github.com/moneyboxtradingllc-hash/ICT_Discretionary_Expansion_Engine_Tiona.git
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 W=$HOME/stage5_mac_verify_$STAMP
 E=$W/evidence
 mkdir -p $E $W/rt
 exec > >(tee $E/console.log) 2>&1
-echo "== Stage 5 Mac verification $STAMP  source $SRC  mode ${1:-focused}"
+echo "== Stage 5 Mac verification $STAMP  source $SRC  mode $MODE"
 
 # -- 1. inventory -------------------------------------------------------------
 {
@@ -60,6 +65,7 @@ HEAD_SHA=$(git rev-parse HEAD); TREE=$(git rev-parse 'HEAD^{tree}')
 echo "head $HEAD_SHA tree $TREE" | tee $E/source_identity.txt
 [[ $HEAD_SHA == $SRC ]] || { echo "NO-GO: checkout is not the exact source"; exit 1; }
 [[ -z $(git status --porcelain) ]] || { echo "NO-GO: checkout not clean"; exit 1; }
+echo "clean_before_run: yes" >> $E/source_identity.txt
 
 # -- 3. pinned environment -------------------------------------------------------
 $PY -m venv $W/venv
@@ -145,7 +151,7 @@ FOCUSED=(tests/test_recognition_child_portability.py tests/test_recognition_proc
          tests/test_recognition_layer_projection.py tests/test_recognition_ledger.py)
 run $E/focused.log python3 -m pytest -q -rfEs -p no:cacheprovider --junitxml=$E/focused.junit.xml $FOCUSED
 
-if [[ ${1:-} == full ]]; then
+if [[ $MODE == full ]]; then
   echo "== complete suite (takes a while; leave the Mac awake: caffeinate is used)"
   run $E/collect.txt python3 -m pytest -q --collect-only -p no:cacheprovider tests
   run $E/full.log caffeinate -i python3 -m pytest -q -rfE -p no:cacheprovider --junitxml=$E/full.junit.xml tests
@@ -161,11 +167,14 @@ def junit(name):
     if not p.exists():
         return None
     cases = list(ET.parse(p).iter("testcase"))
-    out = {"cases": len(cases), "passed": 0, "skipped": 0, "failed": []}
+    out = {"cases": len(cases), "passed": 0, "skipped": 0, "failed": [], "node_outcomes": {}}
     for c in cases:
         kids = [k.tag for k in c]
+        node = f'{c.get("classname")}::{c.get("name")}'
+        if kids:
+            out["node_outcomes"][node] = kids        # e.g. ["failure", "error"]: failed in call AND errored in teardown
         if "failure" in kids or "error" in kids:
-            out["failed"].append(f'{c.get("classname")}::{c.get("name")}')
+            out["failed"].append(node)
         elif "skipped" in kids:
             out["skipped"] += 1
         else:
@@ -186,16 +195,43 @@ try:
 except Exception:
     print("child env check FAILED:", child[-300:])
 print("ledger:", "LEDGER_VERIFIED" if "LEDGER_VERIFIED" in ledger else "NOT VERIFIED: " + ledger[-300:])
+import glob
+accounting = {}
+for name in ("focused.junit.xml", "full.junit.xml"):
+    r = junit(name)
+    if r:
+        accounting[name] = {k: (len(v) if isinstance(v, list) else v) for k, v in r.items() if k != "node_outcomes"}
+        accounting[name]["non_pass_nodes"] = r["node_outcomes"]
+        both = [n for n, k in r["node_outcomes"].items() if "failure" in k and "error" in k]
+        accounting[name]["nodes_with_failure_and_error"] = len(both)
+for prior in sorted(glob.glob(str(e.parent.parent / "stage5_mac_verify_*" / "evidence" / "full.junit.xml"))):
+    if str(e) not in prior:
+        cases = list(ET.parse(prior).iter("testcase"))
+        nodes = {f'{c.get("classname")}::{c.get("name")}': [k.tag for k in c] for c in cases if list(c)}
+        ident = Path(prior).parent / "source_identity.txt"
+        accounting[prior.split("/")[-3]] = {"source": ident.read_text().split()[1] if ident.exists() else None,
+            "cases": len(cases), "skipped": sum(1 for v in nodes.values() if v == ["skipped"]),
+            "failure_only": sum(1 for v in nodes.values() if "failure" in v and "error" not in v),
+            "error_only": sum(1 for v in nodes.values() if "error" in v and "failure" not in v),
+            "failure_and_error": sum(1 for v in nodes.values() if "failure" in v and "error" in v),
+            "non_pass_nodes": {n: v for n, v in nodes.items() if v != ["skipped"]}}
+(e / "NODE_ACCOUNTING.json").write_text(json.dumps(accounting, indent=1))
 for name in ("focused.junit.xml", "full.junit.xml"):
     r = junit(name)
     if r:
         print(f'{name}: {r["cases"]} cases, {r["passed"]} passed, {r["skipped"]} skipped, {len(r["failed"])} failed')
         for f in r["failed"][:25]:
-            print("   FAILED", f)
+            print("   FAILED", f, r["node_outcomes"].get(f))
+for key, a in accounting.items():
+    if key.startswith("stage5_mac_verify_"):
+        print(f'prior run {key} source {a["source"]}: {a["cases"]} cases, {a["skipped"]} skipped, '
+              f'{a["failure_only"]} failure-only, {a["error_only"]} error-only, {a["failure_and_error"]} failure+error nodes')
 PYEOF
 cat $E/SUMMARY.txt
 # Keep usernames out of the evidence that will be shared.
 LC_ALL=C find $E -type f -exec sed -i '' "s#$HOME#~#g" {} + 2>/dev/null
+git -C $W/repo status --porcelain > $E/clean_status_after_run.txt; git -C $W/repo rev-parse HEAD >> $E/clean_status_after_run.txt
+(cd $E && find . -type f ! -name MANIFEST_SHA256 | sort | xargs shasum -a 256 > MANIFEST_SHA256)
 OUT=$HOME/Desktop/stage5_mac_results_$STAMP.tar.gz
 tar -czf $OUT -C $W evidence && echo "evidence: $OUT  sha256 $(shasum -a 256 $OUT | cut -d' ' -f1)"
-echo "Done. Paste the STAGE5 MAC SUMMARY block back to Claude and put the .tar.gz in your Google Drive."
+echo "Done. Paste the STAGE5 MAC SUMMARY block back to Claude."
