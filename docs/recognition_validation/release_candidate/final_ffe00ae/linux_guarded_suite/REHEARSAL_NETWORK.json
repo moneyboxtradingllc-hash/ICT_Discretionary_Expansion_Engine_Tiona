@@ -1,0 +1,25 @@
+{
+ "summary": {
+  "shard_exitstatus": {
+   "shard_00.trace.json": 0,
+   "shard_01.trace.json": 0,
+   "shard_02.trace.json": 0,
+   "shard_03.trace.json": 0,
+   "shard_04.trace.json": 0,
+   "shard_05.trace.json": 0,
+   "shard_06.trace.json": 0,
+   "shard_07.trace.json": 0,
+   "shard_08.trace.json": 0,
+   "shard_09.trace.json": 0,
+   "shard_10.trace.json": 0,
+   "shard_11.trace.json": 0
+  },
+  "connect_attempts": 0,
+  "refused_non_loopback": 0,
+  "by_kind": {},
+  "refused_examples": [],
+  "dead_proxy_examples": [],
+  "production_functions_reached": 1346
+ },
+ "connects": []
+}

@@ -1,5 +1,9 @@
 # Thursday Oct 22 readiness: GO/NO-GO board (Wednesday Oct 21, ET)
 
+> **Superseded in part on Oct 22 by `final_ffe00ae/CLOSEOUT_REPORT.md`:** the frozen source is now ffe00ae; the final Mac
+> complete suite is 9,116 passed, 583 skipped, 0 failed; the Mac accounting is corrected (12 failed + 10 errors, not 22 + 10);
+> and the UNPROVEN list is corrected after the coverage-instrument fix. The verdicts are unchanged.
+
 Claims are labelled VERIFIED-RUN (executed, with evidence), VERIFIED-CODE (read from source), or INFERRED/UNPROVEN.
 There are no optimistic status substitutions here.
 

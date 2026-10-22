@@ -1,0 +1,48 @@
+{
+ "previous": {
+  "attrs": {
+   "name": "pytest",
+   "tests": "9730",
+   "failures": "0",
+   "errors": "0",
+   "skipped": "583",
+   "time": "7999.001",
+   "shards": "12"
+  },
+  "cases": 9696,
+  "status": {
+   "passed": 9113,
+   "skipped": 583,
+   "failure": 0,
+   "error": 0
+  }
+ },
+ "final": {
+  "attrs": {
+   "name": "pytest",
+   "tests": "9733",
+   "failures": "0",
+   "errors": "0",
+   "skipped": "583",
+   "time": "7605.989",
+   "shards": "12"
+  },
+  "cases": 9699,
+  "status": {
+   "passed": 9116,
+   "skipped": 583,
+   "failure": 0,
+   "error": 0
+  }
+ },
+ "added_cases": [
+  "tests.test_terminal_latch_persistence_failure::test_after_a_failed_write_a_restart_reconsults_the_governor_and_latches_durably",
+  "tests.test_terminal_latch_persistence_failure::test_clean_governor_leaves_cognition_on",
+  "tests.test_terminal_latch_persistence_failure::test_failed_lock_write_still_latches_this_process_and_reports_the_error"
+ ],
+ "removed_cases": [],
+ "status_changes": [],
+ "skipped_identical": true,
+ "skipped_added": [],
+ "skipped_removed": []
+}

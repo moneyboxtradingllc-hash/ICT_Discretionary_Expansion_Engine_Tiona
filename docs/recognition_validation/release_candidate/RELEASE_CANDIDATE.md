@@ -1,6 +1,6 @@
 # Release candidate for supervised, disarmed, read-only observation (not merged, not deployed)
 
-Branch `release/stage5-rc-20261022`. **Proposed launch source: bdd852dd5d8b8b5590d124a4a9b722ddeba2e3d1.**
+Branch `release/stage5-rc-20261022`. **Proposed launch source: ffe00aef3db7fb2339780ed0fa9016149923c96e** (final, frozen; supersedes bdd852d, from which it differs in tests/docs only; see `final_ffe00ae/CLOSEOUT_REPORT.md`).
 
 - It is 5d18b4b plus the owner-approved Mac child-launch fix in `src/recognition_validation/child.py` and its tests
   (ledger entry MAC_RUNTIME_PORTABILITY_20261021). The trading code is byte-identical to 5d18b4b.
@@ -149,7 +149,7 @@ freshness law through `_assess_freshness`, which the rehearsal reached.
 
 ## 5. Read-only observation command (only after Maurice separately authorizes read-only access)
 
-On the Mac, in a fresh checkout of this branch at 5d18b4b, with the operator's own `.env` (never committed), never
+On the Mac, in a fresh checkout of this branch at ffe00aef3db7fb2339780ed0fa9016149923c96e (or production cbfaddb, per the owner's choice), with the operator's own `.env` (never committed), never
 with `--arm`:
 
     export TOPSTEPX_ARM_ORDERS=false EXECUTION_ENABLED=false ALLOW_PAPER_ORDERS=false

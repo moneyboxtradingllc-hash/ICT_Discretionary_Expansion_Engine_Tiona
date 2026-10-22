@@ -1,0 +1,14 @@
+{
+ "memory_latch_not_set": {
+  "killed": true,
+  "summary": "1 failed, 2 passed in 0.34s"
+ },
+ "persistence_error_hidden": {
+  "killed": true,
+  "summary": "1 failed, 2 passed in 0.38s"
+ },
+ "plan_not_cleared_on_latch": {
+  "killed": true,
+  "summary": "1 failed, 2 passed in 0.45s"
+ }
+}
