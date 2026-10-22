@@ -214,6 +214,7 @@ class TestSubmitWritesJournalFields(unittest.TestCase):
 
             with patch.dict(os.environ, _STOP_ENV), \
                  patch.object(tj_mod,  "_TRADES_DIR", tmpdir), \
+                 patch.object(ps_mod, "get_position", return_value=None), \
                  patch.object(ps_mod, "submit_protective_stop_order", return_value={
                      "alpaca_order_id": "STOP001",
                      "status":          "pending_new",

@@ -69,7 +69,9 @@ def test_posix_child_environment_and_allowlist_are_unchanged(tmp_path):
 def test_posix_git_outside_the_os_directories_is_reachable(tmp_path):
     env = CH.child_environment(tmp_path / "child", ecu=False, platform="posix", environ={},
                                which=lambda name: "/opt/homebrew/bin/git")
-    assert env["PATH"].split(":")[1:] == ["/usr/local/bin", "/usr/bin", "/bin", "/opt/homebrew/bin"]
+    # Compare the whole string: on a Windows host the interpreter directory itself contains "C:".
+    assert env["PATH"] == ":".join([str(Path(sys.executable).parent), "/usr/local/bin", "/usr/bin", "/bin",
+                                    "/opt/homebrew/bin"])
     assert set(env) == SUBMITTED_ALLOWLIST
 
 

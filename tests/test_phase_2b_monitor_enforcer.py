@@ -165,8 +165,8 @@ class TestPositionMonitor(unittest.TestCase):
         self.assertEqual(result["status"], "disabled")
 
     @patch.dict(os.environ, _base_env())
-    @patch.object(broker_mod, "get_position", return_value=None)
-    @patch.object(broker_mod, "is_paper_account_safe", return_value=(True, "ok"))
+    @patch.object(pm_mod, "get_position", return_value=None)   # pm_mod binds the name; patching broker_mod reached Alpaca
+    @patch.object(pm_mod, "is_paper_account_safe", return_value=(True, "ok"))
     def test_no_position_returns_no_position(self, mock_safe, mock_pos):
         result = monitor_paper_position({}, "QQQ")
         self.assertTrue(result["enabled"])
@@ -174,8 +174,8 @@ class TestPositionMonitor(unittest.TestCase):
         self.assertEqual(result["status"], "no_position")
 
     @patch.dict(os.environ, _base_env())
-    @patch.object(broker_mod, "get_position", return_value={"error": "API failure"})
-    @patch.object(broker_mod, "is_paper_account_safe", return_value=(True, "ok"))
+    @patch.object(pm_mod, "get_position", return_value={"error": "API failure"})   # pm_mod binds the name; patching broker_mod reached Alpaca
+    @patch.object(pm_mod, "is_paper_account_safe", return_value=(True, "ok"))
     def test_position_error_returns_no_position(self, mock_safe, mock_pos):
         result = monitor_paper_position({}, "QQQ")
         self.assertEqual(result["status"], "no_position")

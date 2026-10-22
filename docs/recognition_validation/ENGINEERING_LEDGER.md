@@ -1439,3 +1439,65 @@ Proof:
   "receipt_digest": "139503824eb7f8abd6866108cf59ec621f849e817449645a1c898178baf68b56"
 }
 ```
+
+
+## RC_REVIEW_CLOSEOUT_20261022: independent RC review closeout (test-only)
+
+Parent: release-candidate evidence head d9e5fbe. The source under src/ and tools/ is unchanged.
+
+- **Portable PATH assertion.** On the Windows host, `test_posix_git_outside_the_os_directories_is_reachable` split
+  the simulated POSIX PATH on ":", which also splits the interpreter's "C:" drive. The test now compares the whole
+  string. Runtime behaviour is unchanged.
+- **Contamination latch with a failed durable write.** The new `tests/test_terminal_latch_persistence_failure.py`
+  covers the case where `record_contaminated` raises, using a clean-governor healthy control:
+  - cognition stays off in the same process with no second governor call;
+  - the candidate and the conditional plan are cleared;
+  - the persistence error is reported;
+  - a restart re-consults the governor and latches durably.
+
+  Activated mutants, 3 of 3 killed: memory latch not set, persistence error hidden, plan not cleared.
+- **Legacy Alpaca tests.** `test_phase_2b_monitor_enforcer` patched `paper_broker` where `position_monitor` binds the
+  name, and `test_phase_4b_broker_stop` left `protective_stop.get_position` real. Both now patch the bound names. Under
+  the guard they make 0 connect attempts (previously 3, all refused by the dead proxy). The assertions are unchanged.
+- **Coverage-instrument correction** (evidence tooling, outside the source tree). The earlier rehearsal recorder lost
+  recording partway through some shards: shards 6 and 7 recorded only 17 and 12 functions. Its UNPROVEN list therefore
+  over-stated the gaps. For example, `record_contaminated` and `_latch_terminal_contamination` are exercised by
+  `test_session_contamination_repair`, and `_reconcile_after_recording_failure` and `_emergency_recording_marker` by
+  `test_production_submission_recorder`. The hardened recorder re-arms before every test, records any re-arm, and
+  cannot raise.
+
+```json ledger-entry
+{
+  "schema": "engineering_ledger_entry/v1",
+  "mission_id": "RC_REVIEW_CLOSEOUT_20261022",
+  "parent_sha": "d9e5fbeb6bd651016a037e900fa79b999a5c92af",
+  "parent_tree": "e2844d39e450e966a1596e5df95623330a83faa4",
+  "parent_tracked_status": "",
+  "brain_fingerprint": "brain:3d9878ad3ff57f1f",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_count": 48,
+  "closure_digest": "d4dbe6a3ea029c4b59f33a1deba3d7c65ccb877e33afa4aed317b68256a15cf1",
+  "protected_count": 32,
+  "protected_digest": "79988f0ea3e84e15e34485a8510e78efc667f6e274d41fcde5d6e3c0307ab79a",
+  "policy_refs": [
+    "Codex for Maurice 2026-10-21 23:50Z: independent RC review closeout, items 1-5",
+    "Test-only changes; no production, protected, economics, execution, Brain, risk or ratified Stage 3/4 policy change"
+  ],
+  "scoped_files": [
+    "tests/test_recognition_child_portability.py",
+    "tests/test_terminal_latch_persistence_failure.py",
+    "tests/test_phase_2b_monitor_enforcer.py",
+    "tests/test_phase_4b_broker_stop.py",
+    "docs/recognition_validation/*"
+  ],
+  "proof_ids": [
+    "PORTABLE-PATH-ASSERTION",
+    "LATCH-PERSISTENCE-FAILURE-HEALTHY-AND-3-MUTANTS",
+    "ALPACA-TESTS-ZERO-CONNECTS-UNDER-GUARD",
+    "FINAL-SOURCE-GUARDED-FULL-SUITE",
+    "FINAL-SOURCE-MAC-FULL-SUITE"
+  ],
+  "predecessor_receipt_digest": "139503824eb7f8abd6866108cf59ec621f849e817449645a1c898178baf68b56",
+  "receipt_digest": "507327274d8e35fa96a6ca219d50fff66ac67a1a837b591148a382c40e8fe208"
+}
+```
