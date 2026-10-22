@@ -1,0 +1,41 @@
+{
+  "helper": "docs/recognition_validation/release_candidate/startup_proof/stage5_account_rebind.zsh",
+  "helper_sha256": "48728fb425efd96f92de4f14b51fdf5f6af8c0710116361933234671441a9c2b",
+  "executed_body_sha256": "8dc03278422531e891819749f2160afddd07ef793033550a27542cd288cbc749",
+  "frozen_source_head": "ffe00aef3db7fb2339780ed0fa9016149923c96e",
+  "live_calls": 0,
+  "checks": {
+    "healthy: intended selected by exact name, YES, bound, pin accepts": true,
+    "healthy: exactly one login and one account-list request": true,
+    "reordered list [intended, other]: same intended binding": true,
+    "Codex reproduction shape: refused first run, reordered second query, intended still bound": true,
+    "no name typed: refused before any request": true,
+    "ambiguous (two accounts with the intended name): refused, nothing changed": true,
+    "intended account disappeared (sole eligible is another): refused, never chosen": true,
+    "invalid selection (name not exact): refused": true,
+    "invalid selection (intended canTrade=False): refused": true,
+    "invalid selection (intended isVisible=False): refused": true,
+    "GO not typed: refused before any request": true,
+    "YES not typed: refused after the one read, nothing changed": true,
+    "ACTIVATED CONTROL: position-based selection substitutes the other account and the assertion catches it": true,
+    "budget: HTTP 401 on the list -> SDK re-login refused by the guard before sending; 2 requests; nothing changed": true,
+    "budget: HTTP 429 -> no retry; 2 requests; nothing changed": true,
+    "budget: HTTP 503 -> no retry; 2 requests; nothing changed": true,
+    "budget: login refused -> 1 request; nothing changed": true
+  },
+  "sdk_default_requests_for_one_accounts_call_without_guard": {
+    "429": {
+      "login": 1,
+      "account_search": 4
+    },
+    "503": {
+      "login": 1,
+      "account_search": 4
+    },
+    "401": {
+      "login": 2,
+      "account_search": 2
+    }
+  },
+  "result": "PASS"
+}

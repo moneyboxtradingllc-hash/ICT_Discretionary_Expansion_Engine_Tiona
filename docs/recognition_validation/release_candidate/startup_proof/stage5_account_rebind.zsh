@@ -1,97 +1,158 @@
 #!/bin/zsh
-# Rebind the .env to the account that exists AFTER a Topstep Combine reset
-# (docs/topstep_combine_reset_runbook.md steps 2-4). Run it only with the owner's authorization.
+# Rebind the .env to the owner-intended account after a Topstep Combine reset
+# (docs/topstep_combine_reset_runbook.md steps 2-4). Run it only with the owner's explicit authorization.
 #
-#   zsh stage5_account_rebind.zsh /path/to/your/.env          # list, and rebind if exactly one account is tradeable
-#   zsh stage5_account_rebind.zsh /path/to/your/.env 2        # rebind to row 2 of the list
+#   zsh stage5_account_rebind.zsh /path/to/your/.env
 #
-# It reuses the frozen checkout and venv that stage5_startup_proof.zsh already built (~/stage5_startup_proof_*).
-# Broker contact: one login and one account-list read (/api/Account/search). No contract, no positions/orders,
-# no market hub and no order path. It never prints an account id, full name or fingerprint.
-# It writes only your .env: a backup first (.env.before_rebind_<stamp>, readable only by you), then
-# TOPSTEPX_ACCOUNT_ID, TOPSTEPX_ACCOUNT_FINGERPRINT and, if present, TOPSTEPX_ACCOUNT_NAME.
+# Identity: you type the intended account's full name exactly as the TopstepX dashboard shows it. The helper
+# selects that exact name from ONE account-list result, never by row, list order, balance or "the only
+# eligible one". It refuses unless exactly one active account has that name and it is canTrade and isVisible.
+# You then type YES to write. TOPSTEPX_ACCOUNT_ID and TOPSTEPX_ACCOUNT_FINGERPRINT (and TOPSTEPX_ACCOUNT_NAME if
+# present) are all derived from that same selected account object. Any refusal changes nothing.
+# Broker contact is hard-capped at one login and one account-list request: SDK retries are off and a request
+# guard refuses any further transmission, including a re-login after HTTP 401. No contract, positions, orders,
+# market hub or order path. It never prints an id, account name, fingerprint or the other accounts.
+# Reuses the frozen ffe00ae checkout and venv that stage5_startup_proof.zsh built (~/stage5_startup_proof_*).
 set -u
 SRC=ffe00aef3db7fb2339780ed0fa9016149923c96e
 ENVSRC=${1:-}
-PICK=${2:-}
-stop() { echo "STOPPED: $1"; exit 1; }
+stop() { echo "STOPPED (nothing changed): $1"; exit 1; }
 
 [[ -n $ENVSRC && -f $ENVSRC ]] || stop "give the path to your .env, e.g. zsh stage5_account_rebind.zsh ~/Trading/ICT_Discretionary_Expansion_Engine_Tiona/.env"
 W=$(ls -d $HOME/stage5_startup_proof_*(N/) 2>/dev/null | tail -1)
 [[ -n $W && -x $W/venv/bin/python && -d $W/repo ]] || stop "no ~/stage5_startup_proof_* folder with repo and venv found"
 [[ $(git -C $W/repo rev-parse HEAD) == $SRC && -z $(git -C $W/repo status --porcelain) ]] || stop "$W/repo is not a clean checkout of $SRC"
 for k in TOPSTEPX_USERNAME TOPSTEPX_API_KEY; do grep -qE "^${k}=.+" $ENVSRC || stop "$k is missing or empty in your .env"; done
+ENVABS=${ENVSRC:A}
 echo "Using the frozen checkout in $W/repo (source $SRC)."
-echo "Type GO and press Enter to log in and read the account list. Anything else stops without connecting."
-read -r ANSWER
-[[ $ANSWER == GO ]] || stop "operator did not type GO"
-
 cd $W/repo
-PYTHONPATH=src $W/venv/bin/python -I - "$ENVSRC" "$PICK" <<'PYEOF'
+$W/venv/bin/python -I - "$ENVABS" "$W/repo/src" <<'PYEOF'
+# --- REBIND BODY (the offline check executes exactly this block) ---
 import os, re, shutil, stat, sys, time
-sys.path.insert(0, "src")
-envp, pick = sys.argv[1], sys.argv[2]
-lines = open(envp, encoding="utf-8").read().splitlines()
-vals = {}
-for l in lines:
-    if "=" in l and not l.lstrip().startswith("#"):
-        k, v = l.split("=", 1)
-        vals[k.strip()] = v.strip().strip('"').strip("'")
-os.environ["TOPSTEPX_USERNAME"] = vals["TOPSTEPX_USERNAME"]
-os.environ["TOPSTEPX_API_KEY"] = vals["TOPSTEPX_API_KEY"]
 
-from broker.topstepx_live_session import TopstepXLiveSession
-from broker.topstepx_redaction import account_fingerprint
+LOGIN, SEARCH = "/api/Auth/loginKey", "/api/Account/search"
 
-session = TopstepXLiveSession()
-session.authenticate()
-accts = session._client.accounts(only_active=True)          # noqa: SLF001 -- the one read
-old_id = vals.get("TOPSTEPX_ACCOUNT_ID", "")
+
+class Stop(Exception):
+    """Refusal. Raised before any configuration change."""
+
+
+class RequestBudgetExceeded(Exception):
+    """Raised BEFORE transmission when a request would exceed the budget."""
+
+
+def budget_transport(inner, budget=None):
+    budget = dict(budget or {LOGIN: 1, SEARCH: 1})
+    sent = []
+
+    def transport(url, payload, headers, timeout):
+        path = next((p for p in budget if url.endswith(p)), None)
+        if path is None or sent.count(path) >= budget[path]:
+            raise RequestBudgetExceeded(f"request refused before sending: {path or 'other endpoint'}")
+        sent.append(path)
+        return inner(url, payload, headers, timeout)
+
+    transport.sent = sent
+    return transport
+
 
 def kind(name):
-    letters = re.sub(r"[^A-Za-z]", "", name)
-    return (letters[:12] or "?") + "..."
+    return (re.sub(r"[^A-Za-z]", "", name)[:12] or "?") + "..."
 
-print(f"\n{len(accts)} active account(s) visible to this key (names and ids are not shown):")
-print(f"  {'row':>3}  {'kind':16} {'balance':>12}  canTrade  isVisible  simulated  currently-in-.env")
-for i, a in enumerate(accts, 1):
-    print(f"  {i:>3}  {kind(a.name):16} {a.balance:>12,.2f}  {str(a.can_trade):8}  {str(a.is_visible):9}  "
-          f"{str(a.simulated):9}  {'yes' if str(a.id) == old_id else 'no'}")
 
-ok = [i for i, a in enumerate(accts, 1) if a.can_trade and a.is_visible]
-if pick:
-    if not pick.isdigit() or not 1 <= int(pick) <= len(accts):
-        sys.exit(f"STOPPED: row {pick} does not exist")
-    row = int(pick)
-    if row not in ok:
-        sys.exit(f"STOPPED: row {row} is not canTrade=True and isVisible=True; the pin would refuse it")
-elif len(ok) == 1:
-    row = ok[0]
-else:
-    sys.exit(f"STOPPED: {len(ok)} accounts are tradeable and visible. Nothing was changed. "
-             "Pick the reset account (it shows the fresh starting balance) and re-run with its row number, "
-             "e.g. zsh stage5_account_rebind.zsh <your .env> 2")
+def read_env(path):
+    lines = open(path, encoding="utf-8").read().splitlines()
+    vals = {}
+    for line in lines:
+        if "=" in line and not line.lstrip().startswith("#"):
+            k, v = line.split("=", 1)
+            vals[k.strip()] = v.strip().strip('"').strip("'")
+    return lines, vals
 
-a = accts[row - 1]
-fp = account_fingerprint(a.id, a.name)
-stamp = time.strftime("%Y%m%dT%H%M%S")
-bak = f"{envp}.before_rebind_{stamp}"
-shutil.copy2(envp, bak)
-os.chmod(bak, stat.S_IRUSR | stat.S_IWUSR)
-new = {"TOPSTEPX_ACCOUNT_ID": str(a.id), "TOPSTEPX_ACCOUNT_FINGERPRINT": fp}
-if "TOPSTEPX_ACCOUNT_NAME" in vals:
-    new["TOPSTEPX_ACCOUNT_NAME"] = a.name
-seen, out = set(), []
-for l in lines:
-    k = l.split("=", 1)[0].strip() if "=" in l and not l.lstrip().startswith("#") else None
-    if k in new:
-        out.append(f"{k}={new[k]}"); seen.add(k)
-    else:
-        out.append(l)
-out += [f"{k}={v}" for k, v in new.items() if k not in seen]
-open(envp, "w", encoding="utf-8").write("\n".join(out) + "\n")
-os.chmod(envp, stat.S_IRUSR | stat.S_IWUSR)
-print(f"\nREBOUND to row {row} ({kind(a.name)}, balance {a.balance:,.2f}, canTrade True, isVisible True).")
-print(f"Updated in your .env: {', '.join(new)} (values not shown; new fingerprint starts {fp[:9]}...).")
-print(f"Old .env kept at {bak.replace(os.path.expanduser('~'), '~')} (readable only by you). Nothing else was read or changed.")
+
+def select_intended(accounts, intended_name):
+    """The owner-intended account, by exact name, from ONE list result. Never by position."""
+    wanted = (intended_name or "").strip()
+    if not wanted:
+        raise Stop("no intended account name was typed")
+    matches = [a for a in accounts if a.name.strip() == wanted]
+    if not matches:
+        raise Stop("no active account visible to this key has exactly that name")
+    if len(matches) > 1:
+        raise Stop(f"{len(matches)} active accounts have that name; identity is ambiguous")
+    acct = matches[0]
+    if not (acct.can_trade and acct.is_visible):
+        raise Stop("that account is not canTrade=True and isVisible=True; the pin would refuse it")
+    return acct
+
+
+def write_binding(envp, lines, vals, acct, fingerprint):
+    new = {"TOPSTEPX_ACCOUNT_ID": str(acct.id), "TOPSTEPX_ACCOUNT_FINGERPRINT": fingerprint}
+    if "TOPSTEPX_ACCOUNT_NAME" in vals:
+        new["TOPSTEPX_ACCOUNT_NAME"] = acct.name
+    bak = f"{envp}.before_rebind_{time.strftime('%Y%m%dT%H%M%S')}"
+    shutil.copy2(envp, bak)
+    os.chmod(bak, stat.S_IRUSR | stat.S_IWUSR)
+    seen, out = set(), []
+    for line in lines:
+        k = line.split("=", 1)[0].strip() if "=" in line and not line.lstrip().startswith("#") else None
+        if k in new:
+            out.append(f"{k}={new[k]}")
+            seen.add(k)
+        else:
+            out.append(line)
+    out += [f"{k}={v}" for k, v in new.items() if k not in seen]
+    open(envp, "w", encoding="utf-8").write("\n".join(out) + "\n")
+    os.chmod(envp, stat.S_IRUSR | stat.S_IWUSR)
+    return list(new), bak
+
+
+def run(envp, *, transport, ask, say=print):
+    """One login + one account-list read, owner-typed identity, explicit YES, then write. Returns 0 or 1."""
+    from broker.topstepx_client import TopstepXClient
+    from broker.topstepx_redaction import account_fingerprint
+    lines, vals = read_env(envp)
+    for k in ("TOPSTEPX_USERNAME", "TOPSTEPX_API_KEY"):
+        if not vals.get(k):
+            say(f"STOPPED (nothing changed): {k} is missing or empty in your .env")
+            return 1
+    try:
+        intended = ask("Type the intended account's full name exactly as the TopstepX dashboard shows it: ")
+        if not intended.strip():
+            raise Stop("no intended account name was typed")
+        if ask("Type GO to log in and read the account list once (anything else stops without connecting): ").strip() != "GO":
+            raise Stop("operator did not type GO")
+        client = TopstepXClient(vals["TOPSTEPX_USERNAME"], vals["TOPSTEPX_API_KEY"],
+                                transport=transport, max_retries=0)
+        try:
+            accounts = client.accounts(only_active=True)
+        except Exception as exc:  # noqa: BLE001 -- any read failure is a stop with no change
+            raise Stop(f"account-list read failed ({type(exc).__name__}); no retry is made") from None
+        acct = select_intended(accounts, intended)
+        say(f"Matched exactly one active account with that name: {kind(acct.name)}, balance {acct.balance:,.2f}, "
+            f"canTrade True, isVisible True.")
+        if ask("Is this the account Maurice confirmed? Type YES to write it into your .env: ").strip() != "YES":
+            raise Stop("operator did not type YES")
+        fp = account_fingerprint(acct.id, acct.name)
+        names, bak = write_binding(envp, lines, vals, acct, fp)
+    except Stop as exc:
+        say(f"STOPPED (nothing changed): {exc}")
+        return 1
+    say(f"REBOUND. Updated in your .env: {', '.join(names)} (values not shown), all derived from the selected account.")
+    say(f"Old .env kept at {bak.replace(os.path.expanduser('~'), '~')} (readable only by you). Nothing else was read or changed.")
+    return 0
+
+
+def tty_ask(prompt):
+    with open("/dev/tty", "r+") as tty:
+        tty.write(prompt)
+        tty.flush()
+        return tty.readline().rstrip("\n")
+
+
+if __name__ == "__main__":
+    sys.path.insert(0, sys.argv[2])
+    from broker.topstepx_client import _default_transport
+    sys.exit(run(sys.argv[1], transport=budget_transport(_default_transport), ask=tty_ask))
+# --- END REBIND BODY ---
 PYEOF
