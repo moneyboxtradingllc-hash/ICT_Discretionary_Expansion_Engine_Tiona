@@ -35,7 +35,7 @@ Blocker types:
 | S4-06 | Ordinary full graph up to the arm switch | PASS-BOUNDED, PRODUCTION_REACHABLE to the arm switch | PENDING | The armed path is proven only against refusing venue doubles; a live armed path is out of scope | OWNER (D10 controlled observation, separate authorization) |
 | S4-07 | Conditional plan, brainless trigger, final quote | PASS-BOUNDED, PRODUCTION_REACHABLE through the actual trigger and runner final quote | PENDING | Review only | OWNER |
 | S4-08 | Rolling alignment and missed scans | PASS-BOUNDED, PRODUCTION_REACHABLE | PENDING | The N1 length bound is relative, not a minimum-history guarantee | OWNER (whether a minimum-history guarantee is required; engineering only if it is) |
-| S4-09 | History, restart, reset, custody cells | PASS-BOUNDED; bound cells OFFLINE_CONSTRUCTED_REACHABLE | PENDING | Natural restatement and restart evidence. History revision is the bound scope's only protection against restated history; the formation's settled-bar self-revocation is an independent defense | OWNER-INPUT then ENG (D03/D04) |
+| S4-09 | History, restart, reset, custody cells | PASS-BOUNDED; bound cells OFFLINE_CONSTRUCTED_REACHABLE | PENDING | Natural restatement and restart evidence. History revision is the bound scope's only protection against restated history; the formation's settled-bar self-revocation is an independent defense. **Restart precision:** `test_bound_scope_history_custody.py::test_new_process_replay_earns_the_formation_but_never_restores_scope` builds a fresh scan-cycle instance in one interpreter, which proves fresh-instance reconstruction. It does not prove literal OS-process replay of that complete bound tape, and the separate Stage 5 fresh-child proofs do not fill that cross-product. This is a coverage qualification, not a defect | OWNER-INPUT then ENG (D03/D04) |
 | S4-10 | Legacy and direct order routes fail closed | PASS-BOUNDED (static inventory over src/ and tools/) | PENDING | No live test, by design | OWNER |
 | S4-11 | Source, pin and coverage integrity | SOURCE VERIFIED (LEDGER_VERIFIED: 32 pins, 48 closure entries) | PENDING | Historical archive certification: about 440 archive- or credential-dependent skips, never counted green | OWNER (D04 names the required archive subset) then ENG re-run |
 | S4-12 | Source and evidence delivery | CLOSED (owner receipt 2026-10-17) | Closed | None | NONE |
@@ -54,7 +54,9 @@ quote quality, legacy route, disarmed writes, mission reuse, ECU double advance)
 - D01 corpus and sessions; D03 gaps, revisions and unattributed exits; D04 archive certification.
 - D10 controlled observation.
 - D11 WATCHING/refusal semantics.
-- D13 wall-clock wake stamps. The matrix also records `thesis_lifecycle.py:214` `utcnow()` as an observation, not a
+- D13 wall-clock wake stamps. D11 to D14 are not defined in the repository appendix, which stops at
+  D10. Their proposal text, with provenance, is in `DECISIONS_D11_D14_PROVENANCE.md`; they are not
+  ratified. The matrix also records `thesis_lifecycle.py:214` `utcnow()` as an observation, not a
   defect.
 - The observation source choice (ffe00ae or production cbfaddb).
 

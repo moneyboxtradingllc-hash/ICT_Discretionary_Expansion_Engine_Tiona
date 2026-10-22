@@ -2,7 +2,12 @@
 
 > **Superseded in part on Oct 22 by `final_ffe00ae/CLOSEOUT_REPORT.md`:** the frozen source is now ffe00ae; the final Mac
 > complete suite is 9,116 passed, 583 skipped, 0 failed; the Mac accounting is corrected (12 failed + 10 errors, not 22 + 10);
-> and the UNPROVEN list is corrected after the coverage-instrument fix. The verdicts are unchanged.
+> and the UNPROVEN list is corrected after the coverage-instrument fix.
+> **Corrected again on Oct 22 by `final_ffe00ae/OBSERVATION_BOUNDARY.md`:** "disarmed" is not read-only.
+> Continuous scans reconcile and manage positions and hard-flatten at the window end even without `--arm`.
+> The CONDITIONAL GO is narrowed to a supervised `--proof --observe 60` startup proof only. Continuous scans
+> are reserved to the owner's operating contract (D10). Section 7 below is superseded where it says
+> `--until-close` or "read-only".
 
 Claims are labelled VERIFIED-RUN (executed, with evidence), VERIFIED-CODE (read from source), or INFERRED/UNPROVEN.
 There are no optimistic status substitutions here.

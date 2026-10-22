@@ -147,16 +147,22 @@ freshness law through `_assess_freshness`, which the rehearsal reached.
 - On the Mac: `docs/recognition_validation/mac_verification/stage5_mac_verify.zsh`.
 - For the rehearsal: `rehearsal/tools/rehearsal_shards.py` with `rehearsal_guard.py` on the same 12-shard plan.
 
-## 5. Read-only observation command (only after Maurice separately authorizes read-only access)
+## 5. Observation commands (corrected 2026-10-22; see `final_ffe00ae/OBSERVATION_BOUNDARY.md`; nothing here is authorized)
 
-On the Mac, in a fresh checkout of this branch at ffe00aef3db7fb2339780ed0fa9016149923c96e (or production cbfaddb, per the owner's choice), with the operator's own `.env` (never committed), never
-with `--arm`:
+"Disarmed" means no new entry. It is not read-only.
+
+**Startup proof only.** Run this only after owner authorization and source choice, in a fresh checkout at ffe00ae (or
+production cbfaddb), with the operator's own `.env` (never committed), never with `--arm`:
 
     export TOPSTEPX_ARM_ORDERS=false EXECUTION_ENABLED=false ALLOW_PAPER_ORDERS=false
     PYTHONPATH=src python3 tools/topstepx_production_session.py --proof --observe 60
-    PYTHONPATH=src python3 tools/topstepx_production_session.py --until-close     # disarmed scans; prints "No order will be placed"
+
+**Continuous scans (`--until-close` / `--scans N`) are NOT part of this step.** Even disarmed, they reconcile and manage
+an existing position (`ProductionLoop._scan_once`, before the arm switch) and hard-flatten at the window end
+(`run_production_scans`, line 553). They also make model calls. They require the owner's operating contract (D10),
+covering model-call and management/mutation scope; Codex's draft for it is NOT AUTHORIZED.
 
 **Rollback:** stop the process with Ctrl-C (the pump joins and the hub closes) and return to the production checkout at
 cbfaddb. There is no state migration to undo.
 
-The authority to connect, arm or trade is not granted by this document.
+The authority to connect, arm, manage, flatten or trade is not granted by this document.
