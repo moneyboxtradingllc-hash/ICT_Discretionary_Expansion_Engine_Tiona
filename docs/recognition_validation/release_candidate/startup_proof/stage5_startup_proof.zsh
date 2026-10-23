@@ -128,8 +128,10 @@ $V/python - "$P/proof_sanitized.log" "$RC" > $P/summary_body.txt <<'PYEOF'
 import re, sys
 log, rc = open(sys.argv[1]).read(), int(sys.argv[2])
 def grab(label):
-    m = re.search(r"^\s*" + re.escape(label) + r"\s*:\s*(.*)$", log, re.M)
-    return m.group(1).strip() if m else None
+    # The startup banner prints some labels too (e.g. "CANDLE CONSUMER : attached" without counts);
+    # the observation telemetry comes later, so the LAST occurrence is the one that counts.
+    found = re.findall(r"^\s*" + re.escape(label) + r"\s*:\s*(.*)$", log, re.M)
+    return found[-1].strip() if found else None
 keys = ["ARM STATE", "ARMED", "LANE", "NEW ENTRY PERMITTED", "QUOTE CONSUMER", "EXECUTABLE BID/ASK", "CANDLE CONSUMER",
         "CANDLE CONTRACT", "QUOTE CONTRACT", "RECONNECTS OBSERVED", "ACCOUNT STILL FLAT", "SHUTDOWN", "ACCOUNT"]
 vals = {k: grab(k) for k in keys}
