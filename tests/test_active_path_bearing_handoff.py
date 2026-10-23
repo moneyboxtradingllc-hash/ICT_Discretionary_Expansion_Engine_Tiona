@@ -150,3 +150,48 @@ def test_malformed_current_price_fails_closed(bad):
     current['highs']['1m']['level']=bad
     ap.reconcile_current_structure(current,cutoff)
     assert ap.load_bearing is None
+
+
+@pytest.mark.parametrize('ecu',[False,True],ids=['non-ecu','ecu'])
+def test_archived_bars_reach_current_narrative_consumer(tmp_path,monkeypatch,ecu):
+    """Mode B: actual fact builders and consumer, controlled stand-down Brain.
+
+    No entry proposal or geometry is authored. This is wiring/authority proof,
+    never current-model recognition or a certification of the operator tape.
+    """
+    from datetime import datetime,timedelta
+    from ai_brain.narrative_continuity import candidate_direction_authorized
+    from test_reversal_foundation_proof_closure import _mock_current_brain
+    fixture=json.loads((Path(__file__).parent/'fixtures/session_20261023_bearing_handoff.json').read_text())
+    bars=copy.deepcopy(fixture['tape'])
+    for bar in bars:bar['contract']='CON.F.US.MNQ.Z26'
+    cycle=_cycle(tmp_path,monkeypatch);calls=[]
+    def response(output,ordinal,payload):
+        direction='bearish' if ordinal==4 else 'bullish'
+        return {**output,'narrative_direction':direction,
+                'narrative_phase':'reversal' if ordinal==4 else 'continuation',
+                'allowed_direction':direction,
+                'forbidden_direction':'bullish' if direction=='bearish' else 'bearish',
+                'current_action':'stand_down','recommended_playbook_family':'none',
+                'recommended_tool_family':['none'],'preferred_playbooks':[],
+                'preferred_tools':[],'objective_id':None,'invalidation_id':None,
+                'invalidation_level':None,'active_draw':'','campaign_scope_proposal':None}
+    _mock_current_brain(monkeypatch,calls,output_mutator=response)
+    monkeypatch.setenv('BRAIN_ECU_MODE','true' if ecu else 'false')
+    for moment in ['17:07','17:08','17:09','17:15']:
+        cutoff='2026-10-23T'+moment+':00+00:00'
+        window=[b for b in bars if b['timestamp']<=cutoff][-300:]
+        out=cycle.scan(window,now=datetime.fromisoformat(cutoff)+timedelta(minutes=1),
+                       invoke_brain=True)
+        if moment=='17:07':
+            assert out['snapshot']['active_path_state']['owner']=='bullish'
+            assert out['snapshot']['active_path_state']['load_bearing_structure']['level']==29195.0
+        if moment=='17:08':assert out['snapshot']['active_path_state']['owner']=='none'
+    assert len(calls)==4
+    path=out['snapshot']['active_path_state']
+    assert path['owner']=='bearish' and path['load_bearing_structure']['level']==29263.0
+    continuity=out['brain_block']['narrative_continuity']
+    assert continuity['control_state']=='confirmed_transfer',continuity
+    assert out['brain_block']['output']['narrative_direction']=='bearish'
+    assert candidate_direction_authorized('bearish',out['snapshot'],continuity)[0]
+    assert out['brain_block']['output']['current_action']=='stand_down'
