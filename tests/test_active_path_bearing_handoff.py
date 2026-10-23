@@ -78,6 +78,11 @@ def _retained_life_case(change=None):
     if change=='future':
         receipt['registered_at']=receipt['event_time']='2026-10-23T17:16:00+00:00'
         current['highs']['1m']['registered_at']=receipt['registered_at']
+    if change in ('future_source','future_edge','future_observed'):
+        field={'future_source':'source_bar_time','future_edge':'settled_edge_time',
+               'future_observed':'observed_at'}[change]
+        receipt[field]='2026-10-23T17:16:00+00:00'
+    if change=='missing_source':receipt.pop('source_bar_time',None)
     if change!='no_receipt':ap.ingest([receipt])
     if change=='retired':
         dead={**receipt,'event_type':PROTECTED_SWING_VIOLATED,
@@ -105,7 +110,8 @@ def test_retained_matching_life_is_not_a_new_event_or_progression():
 
 
 @pytest.mark.parametrize('change',['no_receipt','foreign','future','retired',
-                                 'new_birth_same_price','wrong_timeframe','missing_registry'])
+                                 'new_birth_same_price','wrong_timeframe','missing_registry',
+                                 'future_source','future_edge','future_observed','missing_source'])
 def test_unowned_or_noncurrent_life_never_repairs_missing_bearing(change):
     ap,current,cutoff=_retained_life_case(change)
     ap.reconcile_current_structure(current,cutoff)

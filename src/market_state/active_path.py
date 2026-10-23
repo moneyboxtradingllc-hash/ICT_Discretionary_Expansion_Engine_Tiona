@@ -641,8 +641,10 @@ class ActivePath:
                         or record.get("basis") != event.get("basis")
                         or record.get("timeframe") != tf):
                     continue
-                if (canonical_instant(key[2], strict=True) > at
-                        or canonical_instant(event.get("event_time"), strict=True) > at):
+                times = [key[2], event.get("event_time"), event.get("source_bar_time")]
+                times.extend(event[field] for field in ("settled_edge_time", "observed_at")
+                             if event.get(field) is not None)
+                if any(canonical_instant(stamp, strict=True) > at for stamp in times):
                     return
                 # Same conversion and initial baseline as a registration
                 # arriving after the origin. No event is appended or minted.
