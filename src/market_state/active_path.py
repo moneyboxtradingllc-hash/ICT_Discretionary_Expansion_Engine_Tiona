@@ -586,6 +586,71 @@ class ActivePath:
                 self.adverse_replacements = []
 
     # ── derived views ───────────────────────────────────────────────────────
+    def reconcile_current_structure(self, protected_by_timeframe, cutoff):
+        """Bind a surviving producer life whose birth preceded this leg.
+
+        Registrations are factual events even while no matching leg exists.
+        Their absence from a later diff does not mean the producer stopped
+        holding them. Reuse the latest retained registration that is STILL
+        the exact current life; never invent a new birth or restore a retired
+        life. This supplies structure only, not an origin or progression.
+        """
+        if self.load_bearing is not None or self.owner not in OPPOSITE:
+            return
+        from market_data.object_identity import canonical_instant
+        import math
+        try:
+            at = canonical_instant(cutoff, strict=True)
+            side = self._supporting_side()
+            current = (protected_by_timeframe or {}).get(side + "s")
+            if not isinstance(current, dict):
+                return
+            retired = set()
+            for event in reversed(self.events):
+                if event.get("contract") != self._contract or event.get("side") != side:
+                    continue
+                tf = event.get("source_tf")
+                key = (tf, event.get("swing_id"), event.get("registered_at"))
+                if not all(isinstance(v, str) and v for v in key):
+                    continue
+                kind = event.get("event_type")
+                if kind == PROTECTED_SWING_VIOLATED:
+                    retired.add(key)
+                    continue
+                if kind not in (PROTECTED_SWING_REGISTERED, PROTECTED_SWING_REPLACED):
+                    continue
+                if kind == PROTECTED_SWING_REPLACED:
+                    retired.add((tf, event.get("old_swing_id"),
+                                 event.get("old_registered_at")))
+                record = current.get(tf)
+                if key in retired or not isinstance(record, dict):
+                    continue
+                level = event.get("level")
+                live_level = record.get("level")
+                if (isinstance(level, bool) or not isinstance(level, (int, float))
+                        or not math.isfinite(level)
+                        or isinstance(live_level, bool)
+                        or not isinstance(live_level, (int, float))
+                        or not math.isfinite(live_level)
+                        or not isinstance(record.get("basis"), str)
+                        or not record.get("basis")):
+                    continue
+                if (record.get("swing_id") != key[1]
+                        or record.get("registered_at") != key[2]
+                        or record.get("level") != event.get("level")
+                        or record.get("basis") != event.get("basis")
+                        or record.get("timeframe") != tf):
+                    continue
+                if (canonical_instant(key[2], strict=True) > at
+                        or canonical_instant(event.get("event_time"), strict=True) > at):
+                    return
+                # Same conversion and initial baseline as a registration
+                # arriving after the origin. No event is appended or minted.
+                self._apply(event)
+                return
+        except (TypeError, ValueError, AttributeError, OverflowError):
+            return
+
     def last_confirmation_time(self):
         stamps = [e.get("event_time") for e in self.events
                   if e.get("event_type") == STRUCTURE_BREAK

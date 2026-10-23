@@ -1501,3 +1501,61 @@ Parent: release-candidate evidence head d9e5fbe. The source under src/ and tools
   "receipt_digest": "507327274d8e35fa96a6ca219d50fff66ac67a1a837b591148a382c40e8fe208"
 }
 ```
+
+
+## OWNER_BEARING_HANDOFF_20261023: owner-side current protected-life handoff repair
+
+The clean source parent was pinned to ffe00ae when the isolated owner-audit
+worktree was created, before source edits. This ledger entry is recorded after
+local reproduction/prototyping and before the implementation commit; it does
+not claim that the local experiments occurred after this text was written.
+Original baseline pins, receipts, frozen production and submitted evidence are
+preserved. Only the two mechanical producer/caller sources below change; all
+32 protected economics/execution/risk pins remain unchanged.
+
+The captured input contains a current protected high whose real registration
+was retained while the preceding path was bullish. A later confirmed bearish
+owner receives no new registration diff, so its load-bearing structure stays
+missing. The repair reuses only a retained registration matching the producer's
+exact current life. It neither mints a birth nor creates origin, progression,
+direction or entry permission. Unknown, mismatched, future or retired lives
+cannot fill the gap. Model recognition and profitability remain unproven.
+
+Proof IDs name required evidence, not a premature claim of completed checks.
+Final measured results and source identity belong in the owner repair report.
+
+```json ledger-entry
+{
+  "schema": "engineering_ledger_entry/v1",
+  "mission_id": "OWNER_BEARING_HANDOFF_20261023",
+  "parent_sha": "ffe00aef3db7fb2339780ed0fa9016149923c96e",
+  "parent_tree": "57cc69c03882efc9bd1d6a7921f4fea6792a31cc",
+  "parent_tracked_status": "",
+  "brain_fingerprint": "brain:3d9878ad3ff57f1f",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_count": 48,
+  "closure_digest": "d4dbe6a3ea029c4b59f33a1deba3d7c65ccb877e33afa4aed317b68256a15cf1",
+  "protected_count": 32,
+  "protected_digest": "79988f0ea3e84e15e34485a8510e78efc667f6e274d41fcde5d6e3c0307ab79a",
+  "policy_refs": [
+    "Maurice: bro its our job to fix this; continue (2026-10-23)",
+    "Preserve ratified strategy, causal ownership, source chronology, risk and execution; owner-side offline review branch only"
+  ],
+  "scoped_files": [
+    "src/market_state/active_path.py",
+    "src/live_scan/production_scan_cycle.py",
+    "tests/test_active_path_bearing_handoff.py",
+    "tests/fixtures/session_20261023_bearing_handoff.json",
+    "docs/recognition_validation/*"
+  ],
+  "proof_ids": [
+    "CAPTURED-HANDOFF-PARENT-FAIL-HEALTHY-PASS",
+    "PARENT-281-SETTLED-CUTOFFS-EXACT-MATCH",
+    "CURRENT-LIFE-IDENTITY-AND-RETIREMENT-CONTROLS",
+    "FINAL-FROZEN-OFFLINE-SUITE"
+  ],
+  "closure_change_rationale": "ActivePath market-fact custody now binds an already-recorded, still-current supporting swing to a newly confirmed local owner. No direction, origin, transfer predicate, Brain prompt, policy threshold, economics or execution change. This changes the canonical Brain source fingerprint; previous session authorization must not be reused.",
+  "predecessor_receipt_digest": "507327274d8e35fa96a6ca219d50fff66ac67a1a837b591148a382c40e8fe208",
+  "receipt_digest": "a5d4afd57510e9e8a878c7619c33dff361e7ada5aa97e6a07c7e362593a72384"
+}
+```

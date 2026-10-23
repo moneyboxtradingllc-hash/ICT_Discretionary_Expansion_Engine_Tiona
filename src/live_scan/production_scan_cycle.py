@@ -1592,6 +1592,10 @@ class ProductionScanCycle:
             # ledger, so a persistence failure degrades durability without
             # silently changing this scan's state.
             self._active_path.ingest(occurrences)
+            if health == _OL_HEALTHY:
+                self._active_path.reconcile_current_structure(
+                    (snapshot.get("protected_swings") or {}).get("by_timeframe"),
+                    snapshot.get("timestamp"))
             self._active_path_prior_protected = (
                 (snapshot.get("protected_swings") or {}).get("by_timeframe") or {})
             state = self._active_path.state(
