@@ -170,6 +170,9 @@ _CONTRACT_SOURCES = (
     # must remain bound with the action authority contract.
     ("brain_assembly", "ai_brain/narrative_brain.py"),
     ("input", "ai_brain/brain_input.py"),
+    # NARRATIVE-FIRST-1: shape and scope text of the transported
+    # market_narrative_history the Brain reads.
+    ("narrative_history", "ai_brain/market_narrative.py"),
     ("protected_swings", "narrative_authority/protected_swings.py"),
     # LUNA-SWING-SEQUENCE-TRUTH-1 (2026-09-01) — THE STRUCTURAL/REGIME TRUTH
     # PRODUCERS. `protected_swings` and `input` were already bound, which binds

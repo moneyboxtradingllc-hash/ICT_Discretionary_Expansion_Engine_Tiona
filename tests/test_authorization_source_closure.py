@@ -47,6 +47,7 @@ MUST_BE_BOUND = {
     "ai_brain/narrative_brain.py":
         "Brain action emitted by deterministic and fallback assembly",
     "ai_brain/brain_input.py": "the evidence payload -- the v13 defect",
+    "ai_brain/market_narrative.py": "shape and scope text of the observational market_narrative_history the Brain reads (NARRATIVE-FIRST-1)",
     "narrative_authority/protected_swings.py": "which structures are protected",
     "market_state/mtf_market_state.py": "the per-timeframe synthesis",
     "structure/structure_flip.py": "the second invalidation family",

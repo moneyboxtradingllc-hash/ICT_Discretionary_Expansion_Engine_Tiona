@@ -1560,3 +1560,48 @@ trading readiness remain unproven.
   "receipt_digest": "8f46514215b6d10a946c85486337f48657189c35cc58e203003266aa5e1fbd0d"
 }
 ```
+
+## NARRATIVE_FIRST_BIND_20261024: bind market_narrative.py into the Brain contract closure
+
+Parent d9599fb. Measured child Brain fingerprint brain:0720fde4c842045d over 49
+sources; retrieval unchanged. Binding only; no behaviour change. The governance
+membership list names the new member explicitly.
+
+```json ledger-entry
+{
+  "schema": "engineering_ledger_entry/v1",
+  "mission_id": "NARRATIVE_FIRST_BIND_20261024",
+  "parent_sha": "d9599fbe72b962d620dd7d39bd5535b26948f059",
+  "parent_tree": "3c4a99d7af8e32b7a7fac4539d75919be9ff59ce",
+  "parent_tracked_status": "",
+  "brain_fingerprint": "brain:6999acd9d6b32bd8",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_count": 48,
+  "closure_digest": "f051be377a40100e67b881171858a9d31c3784ce8f4a8763c206fae297bdcd49",
+  "protected_count": 32,
+  "protected_digest": "79988f0ea3e84e15e34485a8510e78efc667f6e274d41fcde5d6e3c0307ab79a",
+  "policy_refs": [
+    "NARRATIVE_FIRST_CONTRACT_20261024: recompute the true closure/fingerprints; update only legitimate measured fingerprint expectations with a declared rationale"
+  ],
+  "scoped_files": [
+    "src/ai_brain/production_model.py",
+    "src/recognition_validation/examples/current_brain_disabled.json",
+    "src/recognition_validation/examples/fictional_brain_call.json",
+    "src/recognition_validation/examples/model_authorization_disabled.json",
+    "tests/test_brain_fingerprint_portability.py",
+    "tests/test_combined_safety_readiness.py",
+    "tests/test_recognition_current_path.py",
+    "tests/test_recognition_model_authority.py",
+    "tests/test_market_narrative_first.py",
+    "tests/test_authorization_source_closure.py",
+    "docs/recognition_validation/*"
+  ],
+  "proof_ids": [
+    "CLOSURE-49-INCLUDES-MARKET-NARRATIVE",
+    "FINAL-FROZEN-OFFLINE-SUITE"
+  ],
+  "closure_change_rationale": "ai_brain/market_narrative.py defines the shape and scope text of the market_narrative_history the Brain reads, so it is bound into the Brain contract closure (48 -> 49 sources) like brain_input.py; a later change to it must invalidate session authorization. Measured fingerprint becomes brain:0720fde4c842045d (retrieval unchanged); the seven literal expectations and the closure count are updated to the measured values. No behaviour change.",
+  "predecessor_receipt_digest": "8f46514215b6d10a946c85486337f48657189c35cc58e203003266aa5e1fbd0d",
+  "receipt_digest": "b68dbe660f0e6e497e598eebb5eb96ba9ca474d2bb31cf886acf62a7ff4aa1c0"
+}
+```

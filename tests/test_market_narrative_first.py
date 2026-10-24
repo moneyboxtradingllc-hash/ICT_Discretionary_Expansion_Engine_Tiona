@@ -245,7 +245,9 @@ def test_capture_is_by_value_and_truncation_is_declared():
 def test_no_authority_module_reads_the_observational_view():
     allowed = {"ai_brain/market_narrative.py", "ai_brain/narrative_brain.py",
                "ai_brain/stance_memory.py", "ai_brain/brain_input.py",
-               "ai_brain/brain_prompt.py"}
+               "ai_brain/brain_prompt.py",
+               # names the source only, to bind it into the Brain fingerprint
+               "ai_brain/production_model.py"}
     readers = sorted(str(p.relative_to(ROOT / "src")) for p in (ROOT / "src").rglob("*.py")
                      if "authored_market_read" in p.read_text(encoding="utf-8")
                      or "market_narrative_history" in p.read_text(encoding="utf-8"))
