@@ -171,8 +171,12 @@ def _item(row, current=None) -> dict:
     item = {k: copy.deepcopy(read.get(k)) for k in
             ("status", "authority", *LABEL_FIELDS, *TEXT_FIELDS, "authored_action",
              "truncations")}
-    item.update(schema=READ_SCHEMA, recorded_at_cutoff=cutoff,
-                provenance=copy.deepcopy(prov))
+    # The pre-hold digest stays in the envelope and stance row. It hashes the
+    # whole authored object, including per-process catalog/custody ids, so in
+    # the transported input it would make identical cognition look different.
+    transported = {k: copy.deepcopy(v) for k, v in prov.items()
+                   if k != "pre_hold_output_digest"}
+    item.update(schema=READ_SCHEMA, recorded_at_cutoff=cutoff, provenance=transported)
     return item
 
 

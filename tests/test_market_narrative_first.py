@@ -110,6 +110,10 @@ def test_authored_read_reaches_next_brain_and_report_without_participation(
     assert (last["market_story"], last["narrative_direction"], last["authority"]) == (
         STORY, "bearish", "OBSERVATIONAL_ONLY")
     assert last["recorded_at_cutoff"] == nxt["stance_history"]["last"]["recorded_at_cutoff"]
+    # The envelope keeps the pre-hold digest; the transported item omits it
+    # (it hashes per-process ids and would break replay determinism).
+    assert "pre_hold_output_digest" not in last["provenance"]
+    assert last["provenance"]["brain_fingerprint"] == prov["brain_fingerprint"]
     # The healthy bullish read is still present as an earlier item.
     assert any(i.get("narrative_direction") == "bullish" for i in hist["prior"])
     # Operator report consumes the actual persisted records.
