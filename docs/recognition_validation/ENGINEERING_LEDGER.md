@@ -1559,3 +1559,47 @@ Final measured results and source identity belong in the owner repair report.
   "receipt_digest": "a5d4afd57510e9e8a878c7619c33dff361e7ada5aa97e6a07c7e362593a72384"
 }
 ```
+
+## F6_COMPLETION_REVIEW_20261024: completion review of f6e4013 (docs/tests only)
+
+Parent pinned to f6e4013 before any edit; f6e4013 itself is unchanged. Adds the
+PROPOSED CISD fact contract, a shadow validator imported by no production
+module, and policy-independent tests. No production source changes; the Brain
+and retrieval fingerprints below are the unchanged f6e4013 values. CISD
+authority stays DISABLED and the owner choice (evidence vs transfer route)
+UNPROVEN. Recognition, entry geometry and fill remain unproven.
+
+```json ledger-entry
+{
+  "schema": "engineering_ledger_entry/v1",
+  "mission_id": "F6_COMPLETION_REVIEW_20261024",
+  "parent_sha": "f6e4013646e9d139a9fe71586ea4e60391e06c61",
+  "parent_tree": "2eacaaddf65cb8288129f62be4896ee24233e089",
+  "parent_tracked_status": "",
+  "brain_fingerprint": "brain:75ef47f7ffc27bab",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_count": 48,
+  "closure_digest": "9b8f310c2b6100256a50540aea3bda2c26dd299c273dade48d316f36d00eb847",
+  "protected_count": 32,
+  "protected_digest": "79988f0ea3e84e15e34485a8510e78efc667f6e274d41fcde5d6e3c0307ab79a",
+  "policy_refs": [
+    "Maurice via Codex 2026-10-24: delegated remaining verification and CISD engineering contract to Tiona",
+    "No production source, ratified policy, D3=B/STRICT, risk, economics, execution or Brain-constitution change; CISD authority DISABLED/UNPROVEN"
+  ],
+  "scoped_files": [
+    "docs/recognition_validation/cisd/CISD_CONTRACT_PROPOSAL.md",
+    "docs/recognition_validation/cisd/cisd_shadow.py",
+    "tests/test_cisd_shadow_contract.py",
+    "docs/recognition_validation/ENGINEERING_LEDGER.md"
+  ],
+  "proof_ids": [
+    "ACTUAL-SCAN-RESTART-HEALTHY-AND-CONTROLLED-VIOLATION",
+    "RESTART-RESET-MUTANT-ACTIVATED",
+    "CISD-SHADOW-POLICY-INDEPENDENT-15-WITH-4-MUTANTS",
+    "FINAL-FROZEN-OFFLINE-SUITE"
+  ],
+  "closure_change_rationale": "None: no file in the 48-file Brain/retrieval closure or the 32 protected pins changes. Records the f6e4013 HEAD fingerprints brain:75ef47f7ffc27bab / retr:0c241bdb8234d1ba that the OWNER_BEARING_HANDOFF_20261023 entry (parent-pinned) does not state.",
+  "predecessor_receipt_digest": "a5d4afd57510e9e8a878c7619c33dff361e7ada5aa97e6a07c7e362593a72384",
+  "receipt_digest": "ac5cc98baa3ca39c5d8be9903f2dbb2faa3a802606895cd32e07597bf7b4de59"
+}
+```
