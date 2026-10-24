@@ -918,6 +918,14 @@ def _derived_history_authority(snapshot):
 def build_brain_input(snapshot: dict, stance_history: dict) -> dict:
     """Full two-sided evidence payload for the narrative brain. Never raises."""
     try:
+        from ai_brain import market_narrative as MN
+        stance_history = dict(stance_history) if isinstance(stance_history, dict) else stance_history
+        market_narrative_history = (
+            stance_history.pop("market_narrative_history", None)
+            if isinstance(stance_history, dict) else None)
+        if not isinstance(market_narrative_history, dict):
+            market_narrative_history = MN.unavailable_history(
+                "stance_history_unavailable")
         degraded = []
         candles = _candles(snapshot)
         if not candles["available"]:
@@ -1195,6 +1203,10 @@ def build_brain_input(snapshot: dict, stance_history: dict) -> dict:
             "playbook_toolbox": _two_sided_inventory(snapshot),
             "position": _position(snapshot),
             "stance_history": stance_history,
+            # NARRATIVE-FIRST-1: the Brain's own prior pre-hold market reads,
+            # OBSERVATIONAL_ONLY. Separate from stance_history (the guarded
+            # participation view, unchanged) and never an authority input.
+            "market_narrative_history": market_narrative_history,
             # NARRATIVE-AUTHORITY-1: prior campaign, causal falsifier, and
             # current active-path transfer status. This is current-snapshot
             # context; it does not derive direction from an execution tool.

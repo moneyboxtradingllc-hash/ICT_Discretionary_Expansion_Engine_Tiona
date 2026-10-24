@@ -117,7 +117,7 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # window as rollout, not as a deleted witness.
     # N1: the rolling chronology accepts a coherent window's alignment eviction
     # (at most one partial 15m bucket shorter) instead of refusing any shrink.
-    assert PM.brain_contract_fingerprint() == "brain:3d9878ad3ff57f1f"
+    assert PM.brain_contract_fingerprint() == "brain:6999acd9d6b32bd8"
 
 
 @pytest.mark.parametrize("addition", [

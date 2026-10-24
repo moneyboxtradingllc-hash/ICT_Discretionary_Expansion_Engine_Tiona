@@ -1501,3 +1501,62 @@ Parent: release-candidate evidence head d9e5fbe. The source under src/ and tools
   "receipt_digest": "507327274d8e35fa96a6ca219d50fff66ac67a1a837b591148a382c40e8fe208"
 }
 ```
+
+## NARRATIVE_FIRST_20261024: authored market read preserved beside participation permission
+
+Parent pinned to ffe00ae (the stable RC source) before any edit; f6e4013, 0df06ea
+and their evidence are untouched and not absorbed. The fingerprints below are the
+parent values the ledger schema binds. Measured child Brain fingerprint:
+brain:6999acd9d6b32bd8; retrieval unchanged retr:0c241bdb8234d1ba. The validated
+primary judgment is captured by value before output_direction_hold, kept on the
+existing proved stance row and transported as OBSERVATIONAL_ONLY
+market_narrative_history. Participation results are unchanged; no CISD route,
+old-life binding, D3 change or protected-source change. Recognition quality and
+trading readiness remain unproven.
+
+```json ledger-entry
+{
+  "schema": "engineering_ledger_entry/v1",
+  "mission_id": "NARRATIVE_FIRST_20261024",
+  "parent_sha": "ffe00aef3db7fb2339780ed0fa9016149923c96e",
+  "parent_tree": "57cc69c03882efc9bd1d6a7921f4fea6792a31cc",
+  "parent_tracked_status": "",
+  "brain_fingerprint": "brain:3d9878ad3ff57f1f",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_count": 48,
+  "closure_digest": "d4dbe6a3ea029c4b59f33a1deba3d7c65ccb877e33afa4aed317b68256a15cf1",
+  "protected_count": 32,
+  "protected_digest": "79988f0ea3e84e15e34485a8510e78efc667f6e274d41fcde5d6e3c0307ab79a",
+  "policy_refs": [
+    "Maurice via Codex 2026-10-24: NARRATIVE_FIRST_CONTRACT_20261024 (sha256 43a55c8c...) - preserve and transport the Brain-authored market read separately from participation permission",
+    "Additive and OBSERVATIONAL_ONLY: guarded output, ECU execution projection, campaign/leg/transfer policy, D3, Draw, Lifecycle, candidate, conditional plan, final quote and all 32 protected sources unchanged"
+  ],
+  "scoped_files": [
+    "src/ai_brain/market_narrative.py",
+    "src/ai_brain/narrative_brain.py",
+    "src/ai_brain/stance_memory.py",
+    "src/ai_brain/brain_input.py",
+    "src/ai_brain/brain_prompt.py",
+    "src/recognition_validation/examples/current_brain_disabled.json",
+    "src/recognition_validation/examples/fictional_brain_call.json",
+    "src/recognition_validation/examples/model_authorization_disabled.json",
+    "tools/narrative_read_report.py",
+    "tests/test_market_narrative_first.py",
+    "tests/test_brain_fingerprint_portability.py",
+    "tests/test_combined_safety_readiness.py",
+    "tests/test_recognition_current_path.py",
+    "tests/test_recognition_model_authority.py",
+    "docs/recognition_validation/*"
+  ],
+  "proof_ids": [
+    "CODEX-ACCEPTANCE-PARENT-FAIL-CHILD-PASS-BOTH-LANES",
+    "NEXT-INPUT-AND-REPORT-CONSUMPTION",
+    "OBSERVATIONAL-INVARIANCE-CANDIDATE-LIFECYCLE-CONTINUITY",
+    "FIVE-ACTIVATED-CONTROLS",
+    "FINAL-FROZEN-OFFLINE-SUITE"
+  ],
+  "closure_change_rationale": "Brain prompt, input and assembly change additively to capture the validated pre-hold read and transport it as OBSERVATIONAL_ONLY market_narrative_history; stance_memory joins it to the existing proved row. The measured Brain fingerprint becomes brain:6999acd9d6b32bd8 (retrieval unchanged), so the seven literal certified-fingerprint expectations are repinned to that measured value; previous session authorization must not be reused. No participation, guard, transfer, D3, Draw, Lifecycle, candidate or protected-source behaviour changes.",
+  "predecessor_receipt_digest": "507327274d8e35fa96a6ca219d50fff66ac67a1a837b591148a382c40e8fe208",
+  "receipt_digest": "8f46514215b6d10a946c85486337f48657189c35cc58e203003266aa5e1fbd0d"
+}
+```

@@ -1207,6 +1207,17 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             output["warnings"] = [f"schema fallback: {vreason}"]
             source = "degraded"
 
+        # NARRATIVE-FIRST-1: the validated primary judgment, by value, BEFORE
+        # the hold below may rewrite it. Observational only; nothing that
+        # decides participation reads it.
+        from ai_brain import market_narrative
+        authored_market_read = market_narrative.capture(
+            output, source=source, fallback_reason=fallback_reason,
+            llm_call=llm_call, snapshot=snapshot, symbol=symbol,
+            stance_memory=stance_memory,
+            repair={"json": repaired, "family": family_repair_fixed,
+                    "invalidation": invalidation_repair_fixed})
+
         # NARRATIVE-AUTHORITY-1: a local opposing read cannot replace the
         # persisted campaign unless the current active-path ledger proves the
         # complete causal transfer. This carries the incumbent and stands down;
@@ -1221,6 +1232,8 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             source = "degraded"
             narrative_authority_guard = {
                 "status": "schema_fallback", "reason": vreason}
+            authored_market_read = market_narrative.unknown(
+                "narrative_authority_schema_fallback")
 
         if wake_decision is not None and wake_api is not None:
             primary_provider_request = bool(
@@ -1252,15 +1265,20 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
                                   "error": f"wake telemetry exception: {exc}"}
 
         if stance_memory:
+            # NARRATIVE-FIRST-1: only a recorder that declares the observational
+            # read receives it; any other keeps its existing call exactly.
+            extra = ({"authored_market_read": authored_market_read}
+                     if market_narrative.accepts_read(stance_memory) else {})
             if bound:
                 stance_memory.record(
                     snapshot.get("timestamp", ""), output,
                     narrative_continuity=brain_input.get("narrative_continuity"),
-                    snapshot=snapshot)
+                    snapshot=snapshot, **extra)
             else:
                 stance_memory.record(
                     snapshot.get("timestamp", ""), output,
-                    narrative_continuity=brain_input.get("narrative_continuity"))
+                    narrative_continuity=brain_input.get("narrative_continuity"),
+                    **extra)
 
         # ADAPTIVE-1C — telemetry: RECOMMENDED vs APPLIED kept separate; applied is
         # hard-locked 0, final_confidence == base_confidence (no behavioural change).
@@ -1310,6 +1328,7 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             "input_degraded": brain_input.get("degraded", []),
             "input_payload": brain_input,
             "narrative_authority_guard": narrative_authority_guard,
+            "authored_market_read": authored_market_read,
             # RAW-SNAPSHOT-ARCHIVE (2026-08-07) — OBSERVATIONAL ONLY.
             #
             # `input_payload` is what the external Brain saw. The DETERMINISTIC
@@ -1385,6 +1404,9 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             "input_degraded": brain_input.get("degraded", []),
             "narrative_authority_guard": narrative_authority_guard,
             "narrative_continuity": brain_input.get("narrative_continuity"),
+            # NARRATIVE-FIRST-1: the authored read beside, never instead of,
+            # the guarded participation output.
+            "authored_market_read": authored_market_read,
             "output": output,
             "adaptive_telemetry": adaptive_telemetry,   # ADAPTIVE-1C (observe_only)
             "ai_market_commander": ai_market_commander, # MARKET COMMANDER B2 (observe_only)
@@ -1402,5 +1424,7 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
     except Exception as exc:  # noqa: BLE001
         out = empty_brain_output()
         out["warnings"] = [f"brain error (observe-only, non-blocking): {exc}"]
+        from ai_brain.market_narrative import unknown as _unknown_read
         return {"enabled": True, "authority": "observe_only",
-                "source": "degraded", "output": out}
+                "source": "degraded", "output": out,
+                "authored_market_read": _unknown_read("brain_error")}

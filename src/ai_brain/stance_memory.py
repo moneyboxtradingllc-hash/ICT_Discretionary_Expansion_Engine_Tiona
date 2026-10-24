@@ -24,6 +24,7 @@ import math
 import os
 import uuid
 
+from ai_brain import market_narrative as MN
 from ai_brain.narrative_continuity import (CAMPAIGN_FALSIFIER_STATUS_UNBOUND,
                                            campaign_premise_unbound, leg_evidence)
 
@@ -202,7 +203,7 @@ class StanceMemory:
             pass
 
     def record(self, ts: str, stance: dict, narrative_continuity: dict = None,
-               snapshot: dict = None) -> None:
+               snapshot: dict = None, authored_market_read: dict = None) -> None:
         try:
             continuity = (narrative_continuity
                           if isinstance(narrative_continuity, dict) else {})
@@ -274,6 +275,10 @@ class StanceMemory:
                 "active_draw": str(stance.get("active_draw") or "")[:300],
                 "objective_id": stance.get("objective_id"),
                 "control_state": continuity.get("control_state"),
+                # NARRATIVE-FIRST-1: the Brain's own pre-hold read, kept beside
+                # (never instead of) the guarded stance above. Observational
+                # only; no derivation in this row reads it.
+                "authored_market_read": MN.for_record(authored_market_read),
             }
             if self._scope is not None:
                 # STAGE-3B-1A: producer-authored scope from the snapshot this
@@ -334,7 +339,7 @@ class StanceMemory:
                     "from": {"direction": prev["direction"], "phase": prev["phase"]},
                     "to":   {"direction": last["direction"], "phase": last["phase"]},
                 }
-            return copy.deepcopy({
+            summary = copy.deepcopy({
                 "available":          True,
                 "last":               last,
                 "prior_5":            self.recent(5),
@@ -344,6 +349,7 @@ class StanceMemory:
                 # tape that was later repaired. Terra is told, not steered.
                 "history_revision":   self.superseded_summary(),
             })
+            return _with_narrative(summary, MN.history(self.recent(MN.PRIOR_ITEMS + 1)))
         except Exception:  # noqa: BLE001
             return {"available": False, "last": None, "prior_5": [],
                     "thesis_anchor": None, "changed_since_last": None}
@@ -394,7 +400,9 @@ class StanceMemory:
                     }
                 summary.update(last=last, prior_5=eligible[-5:],
                                thesis_anchor=self._eligible_anchor(eligible, current))
-            return copy.deepcopy(summary)
+            return _with_narrative(copy.deepcopy(summary), MN.history(
+                eligible[-(MN.PRIOR_ITEMS + 1):], current=current,
+                withheld_reasons=reasons))
         except Exception:  # noqa: BLE001
             return {"available": False, "last": None, "prior_5": [],
                     "thesis_anchor": None, "changed_since_last": None,
@@ -593,6 +601,17 @@ def _bounded(value):
     if len(text) <= CONTEXT_VALUE_LIMIT:
         return copy.deepcopy(value)
     return _typed_preview(text, value)
+
+
+def _with_narrative(summary, narrative) -> dict:
+    """NARRATIVE-FIRST-1: the guarded rows stay as they were; the authored
+    reads travel in their own observational block."""
+    for key in ("last", "thesis_anchor"):
+        MN.strip_from_stance_view(summary.get(key))
+    for row in summary.get("prior_5") or []:
+        MN.strip_from_stance_view(row)
+    summary["market_narrative_history"] = narrative
+    return summary
 
 
 def _withheld_view(row, reason) -> dict:

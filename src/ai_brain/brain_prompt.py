@@ -47,6 +47,15 @@ Authority rules:
   authority was withheld (future-dated, wrong scope, superseded history,
   unproved lineage, legacy or malformed), and none is a prior thesis,
   leg-failure status or incumbent to defend.
+- market_narrative_history is the market read YOU authored on those same
+  proved rows BEFORE any mechanical participation hold (OBSERVATIONAL_ONLY).
+  stance_history shows what participation was permitted; this shows what you
+  read in delivery, liquidity and structure. Use it to keep your story
+  continuous and to say what changed. It is not a proved incumbent, verified
+  transfer, falsifier or approval, and it never means participation was
+  allowed. An UNKNOWN item has no recorded read; do not infer one. A local
+  leg's owner or an unavailable transfer proof is not a whole-market
+  conclusion. Keep contrary evidence and genuine uncertainty.
 - You are shown live POSITION state. Assess the story knowing current exposure.
 
 SESSION PO3 is CONTEXT_ONLY deterministic evidence, not entry permission. Weigh
