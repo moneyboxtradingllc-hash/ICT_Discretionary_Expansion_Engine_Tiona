@@ -1745,3 +1745,60 @@ risk or execution change. Fresh-model recognition and trading readiness remain u
   "receipt_digest": "b29c1cbbc242241d23adfb77f163ed75aedc2e5af9f973954e6e119e2af69512"
 }
 ```
+
+## PARTICIPATION_REFUSAL_TELEMETRY_20261025: exact mechanical refusal causes in the decision journal
+
+Parent 7b5218a. Measured child Brain fingerprint brain:43569c8bd11004d7 over 49 sources;
+retrieval unchanged retr:0c241bdb8234d1ba; 32 protected pins unchanged. Decision records
+written by the live loop become candidate_decision.v2: the same scan's Lifecycle assessment,
+and for campaign_lifecycle_refused the real gate, exact observed reason, identity, Draw,
+acceptance, scope and authored-versus-consumed intent, with explicit UNKNOWN/ABSENT. The
+neutral PARTICIPATION_REFUSED category reconciles only with complete, consistent evidence;
+v1 journals keep their semantics. Observational only: no participation, Lifecycle, Draw,
+D3, transfer-family, prompt, risk or execution change. Doctrine reconciliation and
+natural-model recognition remain unproven; production remains disarmed.
+
+```json ledger-entry
+{
+  "schema": "engineering_ledger_entry/v1",
+  "mission_id": "PARTICIPATION_REFUSAL_TELEMETRY_20261025",
+  "parent_sha": "7b5218ac2fe9bdc1f348c1c433fa4060ae8ba3a2",
+  "parent_tree": "d1ef036f1b2dbb5d91f53243673580f85767ad5e",
+  "parent_tracked_status": "",
+  "brain_fingerprint": "brain:d17223b71ac698ff",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_count": 49,
+  "closure_digest": "97c81e842e18961911e5776ee7ef2ff342b1c1b28d2778d992ec6d3189a1b227",
+  "protected_count": 32,
+  "protected_digest": "79988f0ea3e84e15e34485a8510e78efc667f6e274d41fcde5d6e3c0307ab79a",
+  "policy_refs": [
+    "Codex telemetry repair contract (email 1a17533dba44f946; TIONA_TELEMETRY_REPAIR_CONTRACT_20261025.zip sha256 78a0635306fbdbc5955fa734bbf3f2dae3ef6d12da322f4fa55b24672dd46d04; 00_TELEMETRY_REPAIR_MISSION.md): persist typed same-scan Lifecycle refusal cause, gate, identity, Draw/acceptance/scope and intent with explicit UNKNOWN; neutral PARTICIPATION_REFUSED terminal category; strict reconciliation; legacy journals unchanged; observational only",
+    "Owner selection 2026-10-09 (M2 MISSION.md): D0=a; D1=a; roles 5m/15m; K=1; D3=B; D3_TIME=STRICT; BEARING=INDEPENDENT_SUPPORTING_LIFE; D4=a; D5=a; D6=a"
+  ],
+  "scoped_files": [
+    "src/broker/candidate_decision_record.py",
+    "src/broker/topstepx_production_loop.py",
+    "src/recognition_validation/examples/*",
+    "tests/test_participation_refusal_telemetry.py",
+    "tests/test_market_narrative_first.py",
+    "tests/test_brain_fingerprint_portability.py",
+    "tests/test_combined_safety_readiness.py",
+    "tests/test_recognition_current_path.py",
+    "tests/test_recognition_model_authority.py",
+    "docs/recognition_validation/*"
+  ],
+  "proof_ids": [
+    "OWNER-REPRODUCER-7-PASS-AT-PARENT-DEFECT-ASSERTIONS-FAIL-AT-FINAL",
+    "LOOP-REFUSALS-EXACT-CAUSE-AND-RECONCILE-BOTH-LANES",
+    "ESTABLISHING-TRANSFER-NEWBORN-BINDING-RECORDER-BOTH-LANES",
+    "CUSTODY-STALE-DECOY-FOREIGN-SUPERSEDED-UNKNOWN",
+    "READER-LEGACY-MIXED-UNKNOWN-MALFORMED-CONTRADICTORY",
+    "STABLE-PARENT-FINAL-DECISION-COMPARISON",
+    "ACTIVATED-MUTANTS-M1-M5",
+    "FINAL-FROZEN-OFFLINE-SUITE"
+  ],
+  "closure_change_rationale": "One bound Brain closure source changes: topstepx_production_loop (bound as campaign_lifecycle_gate). Its two NoCandidate handlers hand the refusal to the recorder keyed to the current scan (scan_count, snapshot_id) without changing the recorder's signature, and the recorder consumes it and calls candidate_decision_record.attach_participation_evidence, which copies the SAME scan's snapshot.campaign_lifecycle assessment, the real raising gate (producer via NoCandidate.decision_trace under the loop's current-scan marker, or the loop's own participation binding), bounded Draw/acceptance/scope identities and the authored vs consumed intent into a typed v2 record with explicit UNKNOWN/ABSENT. candidate_decision_record (not bound) maps campaign_lifecycle_refused to the neutral PARTICIPATION_REFUSED category and reconcile accounts it only with complete, consistent v2 evidence; v1 rows keep their semantics. Observational only: no participation, Lifecycle, Draw, D3, transfer-family, prompt, risk or execution change; parent and final stable decisions are identical. The measured Brain fingerprint becomes brain:43569c8bd11004d7 (retrieval unchanged, closure 49, 32 protected pins unchanged) and the seven literal expectations are repinned to it. The Phase 3 reader-scope guard admits the journal writer as an observational reader of authored_action/narrative_direction/pre_hold_output_digest only.",
+  "predecessor_receipt_digest": "b29c1cbbc242241d23adfb77f163ed75aedc2e5af9f973954e6e119e2af69512",
+  "receipt_digest": "3b415ed2180e369643473df41e28c81c07a2d98a1f2603b224ae7bd9fc844873"
+}
+```

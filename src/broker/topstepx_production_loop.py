@@ -135,6 +135,9 @@ class ProductionLoop:
         # Observability only: the decision record reads the trace solely when
         # this equals the scan being recorded.
         self._decision_trace_owner = None
+        # The refusal a NoCandidate handler hands its recorder: (scan_count,
+        # snapshot_id, exception), consumed by `_record_decision`. Telemetry only.
+        self._decision_refusal = None
         self._pending_wake_event = None
         self.last_repair = None
         self.last_window = None
@@ -238,6 +241,27 @@ class ProductionLoop:
             # Same-scan descriptive VAP evidence; this writer is best-effort
             # telemetry and is never read by production authority.
             record["volume_profile"] = scan.get("volume_profile_evidence")
+            # PARTICIPATION-REFUSAL-TELEMETRY: the same-scan Lifecycle assessment
+            # and, for a mechanical refusal, its exact gate, reason and identity.
+            # Observational only and never raises; nothing reads it as authority.
+            # The refusal object is handed over out of band, keyed to THIS scan
+            # and reason and consumed here, so the recorder's signature (which
+            # callers and tests replace) is unchanged and a refusal left by
+            # another scan can never be read as this one's.
+            pending = getattr(self, "_decision_refusal", None)
+            self._decision_refusal = None
+            refusal = (pending[2] if isinstance(pending, tuple) and len(pending) == 3
+                       and pending[0] == scan.get("scan_count")
+                       and pending[1] == scan.get("snapshot_id")
+                       and getattr(pending[2], "reason", None) == reason else None)
+            from broker.candidate_decision_record import attach_participation_evidence
+            attach_participation_evidence(
+                record, scan=scan, parsed=parsed, reason=reason, refusal=refusal,
+                producer_current=current,
+                producer_trace=(getattr(producer, "last_decision_trace", None)
+                                if current else None),
+                session_id=str(getattr(self.cycle, "session_id", "") or ""),
+                contract_id=record.get("contract") or "")
             with open(_os.path.join(root, "candidate_decisions.jsonl"), "a",
                       encoding="utf-8") as fh:
                 fh.write(_json.dumps(record, default=str) + chr(10))
@@ -1221,6 +1245,7 @@ class ProductionLoop:
                         "current_action")) == "watching"))
         except NoCandidate as exc:
             self._clear_conditional_plan()
+            self._decision_refusal = (scan.get("scan_count"), scan.get("snapshot_id"), exc)
             self._record_decision(scan, "REJECTED", exc.reason, str(exc))
             outcome = WINDOW_CLOSED if exc.reason == "window_closed" else NO_CANDIDATE
             # Direction and action are reported separately. Rendering a bearish
@@ -1655,6 +1680,7 @@ class ProductionLoop:
                 "event": "plan_refused", "timestamp": self.clock().isoformat(),
                 "reason": reason, "detail": str(exc),
             }])
+            self._decision_refusal = (scan.get("scan_count"), scan.get("snapshot_id"), exc)
             self._record_decision(scan, "REJECTED", reason, str(exc))
             if reason == DLB.CONTAMINATED:
                 terminal = self._terminal_cognition_result(

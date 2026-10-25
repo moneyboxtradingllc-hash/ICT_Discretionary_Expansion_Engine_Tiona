@@ -247,11 +247,19 @@ def test_no_authority_module_reads_the_observational_view():
                "ai_brain/stance_memory.py", "ai_brain/brain_input.py",
                "ai_brain/brain_prompt.py",
                # names the source only, to bind it into the Brain fingerprint
-               "ai_brain/production_model.py"}
+               "ai_brain/production_model.py",
+               # PARTICIPATION-REFUSAL-TELEMETRY: the decision JOURNAL writer copies
+               # authored_action/narrative_direction/pre_hold_output_digest into the
+               # observational record (contract item 3); it is not an authority module
+               # and never reads descriptive_market_read. No participation reader of
+               # the journal exists (test_participation_refusal_telemetry).
+               "broker/candidate_decision_record.py"}
     readers = sorted(p.relative_to(ROOT / "src").as_posix() for p in (ROOT / "src").rglob("*.py")
                      if "authored_market_read" in p.read_text(encoding="utf-8")
                      or "market_narrative_history" in p.read_text(encoding="utf-8"))
     assert set(readers) <= allowed, readers
+    journal = (ROOT / "src/broker/candidate_decision_record.py").read_text(encoding="utf-8")
+    assert "descriptive_market_read" not in journal and "market_narrative_history" not in journal
 
 
 # Owner-side review (Codex, PHASE1_OWNER_AUDIT_9045675): the nested read's
