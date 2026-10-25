@@ -33,11 +33,31 @@ TEXT_FIELDS = ("market_story", "dominant_reasoning", "delivery_interpretation",
 LABEL_FIELDS = ("narrative_direction", "narrative_phase")
 TEXT_LIMIT = 1200
 PRIOR_ITEMS = 4
+#: PHASE 3: the optional independent descriptive read. It is model-authored
+#: interpretation only; the root campaign/action fields above keep their
+#: meanings. Server-owned metadata (schema/status/authority/basis) is added
+#: here, never accepted from the model.
+DESCRIPTIVE_SCHEMA = "descriptive_market_read/v1"
+DESCRIPTIVE_BASIS = "validated_model_descriptive_field"
+DESCRIPTIVE_DIRECTIONS = ("bullish", "bearish", "conflicted", "neutral")
+DESCRIPTIVE_TEXT_FIELDS = ("market_story", "dominant_reasoning",
+                           "delivery_interpretation", "liquidity_interpretation",
+                           "protected_high_interpretation",
+                           "protected_low_interpretation", "thesis_health")
+DESCRIPTIVE_REQUIRED_TEXT = ("market_story", "dominant_reasoning")
+DESCRIPTIVE_MODEL_KEYS = frozenset(("direction", *DESCRIPTIVE_TEXT_FIELDS, "uncertainties"))
+UNCERTAINTY_LIMIT = 300
+UNCERTAINTY_MAX = 8
+#: What a transported item's root fields are: the legacy pre-hold campaign
+#: response, never the independent descriptive read.
+ROOT_FIELDS_BASIS = "pre_hold_campaign_response"
 SCOPE_NOTE = ("Prior DESCRIPTIVE market judgment you authored before any mechanical "
               "participation hold. It is not a proved incumbent, verified transfer, "
               "falsifier or entry approval, and it never states that participation "
               "was permitted; current permission is in narrative_continuity and the "
-              "guarded stance_history.")
+              "guarded stance_history. Root fields are your pre-hold campaign "
+              "response; descriptive_market_read, when AVAILABLE, is your "
+              "independent descriptive read and UNKNOWN means none was recorded.")
 
 
 def digest(value) -> str:
@@ -59,6 +79,76 @@ def _bounded_text(value, field, truncations):
     return text
 
 
+def descriptive_unknown(reason: str) -> dict:
+    return {"schema": DESCRIPTIVE_SCHEMA, "status": "UNKNOWN", "reason": str(reason),
+            "authority": AUTHORITY}
+
+
+def descriptive_view(value) -> dict:
+    """Validate the model's optional `descriptive_market_read` object.
+
+    AVAILABLE only for an object holding exactly the model-authored keys:
+    a direction token, the seven prose strings (story and reasoning nonblank)
+    and at most eight short uncertainty strings. Anything else -- absent,
+    null, a non-object, a missing/blank/mistyped field or ANY other key
+    (action, permission, objective, entry, risk, proof, metadata) -- is
+    UNKNOWN with a stable reason. Nothing is copied from the root fields.
+    """
+    if value is None:
+        return descriptive_unknown("descriptive_read_absent")
+    if not isinstance(value, dict):
+        return descriptive_unknown("descriptive_read_not_object")
+    extra = sorted(str(k) for k in value if k not in DESCRIPTIVE_MODEL_KEYS)
+    if extra:
+        return descriptive_unknown(f"descriptive_read_unexpected_field:{extra[0]}")
+    direction = value.get("direction")
+    if direction not in DESCRIPTIVE_DIRECTIONS:
+        return descriptive_unknown("descriptive_read_invalid:direction")
+    for field in DESCRIPTIVE_TEXT_FIELDS:
+        if not isinstance(value.get(field), str):
+            return descriptive_unknown(f"descriptive_read_invalid:{field}")
+    for field in DESCRIPTIVE_REQUIRED_TEXT:
+        if not value[field].strip():
+            return descriptive_unknown(f"descriptive_read_blank:{field}")
+    uncertainties = value.get("uncertainties", [])
+    if (not isinstance(uncertainties, list) or len(uncertainties) > UNCERTAINTY_MAX
+            or not all(isinstance(item, str) for item in uncertainties)):
+        return descriptive_unknown("descriptive_read_invalid:uncertainties")
+    truncations = []
+    view = {"schema": DESCRIPTIVE_SCHEMA, "status": "AVAILABLE", "authority": AUTHORITY,
+            "basis": DESCRIPTIVE_BASIS, "direction": direction}
+    for field in DESCRIPTIVE_TEXT_FIELDS:
+        view[field] = _bounded_text(value[field], field, truncations)
+    bounded = []
+    for index, item in enumerate(uncertainties):
+        if len(item) > UNCERTAINTY_LIMIT:
+            truncations.append({"field": f"uncertainties[{index}]", "chars": len(item),
+                                "digest": digest(item)})
+            item = item[:UNCERTAINTY_LIMIT]
+        bounded.append(item)
+    view["uncertainties"] = bounded
+    view["truncations"] = truncations
+    return view
+
+
+def _transported_descriptive(value) -> dict:
+    """A stored nested view, re-checked before it reaches the next input."""
+    if not isinstance(value, dict) or value.get("schema") != DESCRIPTIVE_SCHEMA:
+        return descriptive_unknown("legacy_read_without_descriptive_field")
+    if value.get("authority") != AUTHORITY:
+        return descriptive_unknown("descriptive_authority_label_invalid")
+    if value.get("status") != "AVAILABLE":
+        return descriptive_unknown(value.get("reason") or "unknown")
+    if value.get("basis") != DESCRIPTIVE_BASIS:
+        return descriptive_unknown("descriptive_basis_invalid")
+    model = {k: value.get(k) for k in DESCRIPTIVE_MODEL_KEYS if k in value}
+    checked = descriptive_view(model)
+    if checked.get("status") != "AVAILABLE":
+        return checked
+    checked["truncations"] = copy.deepcopy(value.get("truncations") or [])
+    return checked
+
+
 def _metadata(fn):
     """Actual metadata or None: a failing producer is reported missing, never guessed."""
     try:
@@ -77,10 +167,10 @@ def capture(output, *, source, fallback_reason, llm_call, repair, snapshot,
     """
     try:
         if source != "llm" or fallback_reason:
-            return unknown("cognition_not_validated_primary",
-                           cognition_source=source, fallback_reason=fallback_reason)
+            return _unknown_read("cognition_not_validated_primary",
+                                 cognition_source=source, fallback_reason=fallback_reason)
         if not isinstance(output, dict):
-            return unknown("validated_output_unavailable")
+            return _unknown_read("validated_output_unavailable")
         authored = copy.deepcopy(output)
         snap = snapshot if isinstance(snapshot, dict) else {}
         derived = snap.get("derived_state")
@@ -99,6 +189,11 @@ def capture(output, *, source, fallback_reason, llm_call, repair, snapshot,
         for field in TEXT_FIELDS:
             read[field] = _bounded_text(authored.get(field), field, truncations)
         read["authored_action"] = authored.get("current_action")
+        # PHASE 3: the independent descriptive view, validated on its own. An
+        # absent or invalid optional field is UNKNOWN here and never touches
+        # the root packet; nothing is copied from the campaign fields.
+        read["descriptive_market_read"] = descriptive_view(
+            authored.get("descriptive_market_read"))
         call = llm_call if isinstance(llm_call, dict) else {}
         read["provenance"] = {
             "source": SOURCE,
@@ -122,7 +217,13 @@ def capture(output, *, source, fallback_reason, llm_call, repair, snapshot,
         read["truncations"] = truncations
         return read
     except Exception as exc:  # noqa: BLE001 -- narrative telemetry never costs a scan
-        return unknown(f"capture_error:{type(exc).__name__}")
+        return _unknown_read(f"capture_error:{type(exc).__name__}")
+
+
+def _unknown_read(reason: str, **context) -> dict:
+    """An UNKNOWN envelope whose nested descriptive view is UNKNOWN too."""
+    return {**unknown(reason, **context),
+            "descriptive_market_read": descriptive_unknown(reason)}
 
 
 def accepts_read(recorder) -> bool:
@@ -141,8 +242,8 @@ def for_record(read) -> dict:
     if isinstance(read, dict) and read.get("schema") == READ_SCHEMA:
         if read.get("status") == "AVAILABLE":
             return copy.deepcopy(read)
-        return unknown(read.get("reason") or "unknown")
-    return unknown("authored_read_not_supplied")
+        return _unknown_read(read.get("reason") or "unknown")
+    return _unknown_read("authored_read_not_supplied")
 
 
 def _item(row, current=None) -> dict:
@@ -150,9 +251,9 @@ def _item(row, current=None) -> dict:
     cutoff = row.get("recorded_at_cutoff") or row.get("timestamp")
     read = row.get("authored_market_read")
     if not isinstance(read, dict):
-        return unknown("legacy_row_without_authored_read", recorded_at_cutoff=cutoff)
+        return _unknown_read("legacy_row_without_authored_read", recorded_at_cutoff=cutoff)
     if read.get("status") != "AVAILABLE":
-        return unknown(read.get("reason") or "unknown", recorded_at_cutoff=cutoff)
+        return _unknown_read(read.get("reason") or "unknown", recorded_at_cutoff=cutoff)
     prov = read.get("provenance") or {}
     if current is not None:
         # The read must belong to the very row (and scope) that carries it: a
@@ -162,22 +263,22 @@ def _item(row, current=None) -> dict:
                                  ("settled_cutoff", row.get("recorded_at_cutoff")),
                                  ("process_session_id", row.get("process_session_id"))):
             if prov.get(field) != row_value:
-                return unknown(f"provenance_mismatch:{field}", recorded_at_cutoff=cutoff)
+                return _unknown_read(f"provenance_mismatch:{field}", recorded_at_cutoff=cutoff)
         lineage = row.get("history_lineage") or {}
         if prov.get("history_revision") != lineage.get("history_revision"):
-            return unknown("provenance_mismatch:history_revision", recorded_at_cutoff=cutoff)
+            return _unknown_read("provenance_mismatch:history_revision", recorded_at_cutoff=cutoff)
         # The read must also come from the custody that recorded this row: the
         # row's own custody is proved by the existing hygiene, the nested read's
         # producer custody must equal it.
         read_custody = (prov.get("history_lineage") or {}).get("custody")
         if not isinstance(read_custody, str) or not read_custody:
-            return unknown("provenance_missing:history_lineage.custody",
+            return _unknown_read("provenance_missing:history_lineage.custody",
                            recorded_at_cutoff=cutoff)
         if read_custody != lineage.get("custody"):
-            return unknown("provenance_mismatch:history_lineage.custody",
+            return _unknown_read("provenance_mismatch:history_lineage.custody",
                            recorded_at_cutoff=cutoff)
     if read.get("authority") != AUTHORITY:
-        return unknown("authority_label_invalid", recorded_at_cutoff=cutoff)
+        return _unknown_read("authority_label_invalid", recorded_at_cutoff=cutoff)
     item = {k: copy.deepcopy(read.get(k)) for k in
             ("status", "authority", *LABEL_FIELDS, *TEXT_FIELDS, "authored_action",
              "truncations")}
@@ -186,7 +287,12 @@ def _item(row, current=None) -> dict:
     # the transported input it would make identical cognition look different.
     transported = {k: copy.deepcopy(v) for k, v in prov.items()
                    if k != "pre_hold_output_digest"}
-    item.update(schema=READ_SCHEMA, recorded_at_cutoff=cutoff, provenance=transported)
+    item.update(schema=READ_SCHEMA, recorded_at_cutoff=cutoff, provenance=transported,
+                root_fields_basis=ROOT_FIELDS_BASIS)
+    # PHASE 3: the nested descriptive view travels only inside the envelope
+    # that passed every check above; a legacy row's is UNKNOWN, never filled.
+    item["descriptive_market_read"] = _transported_descriptive(
+        read.get("descriptive_market_read"))
     return item
 
 

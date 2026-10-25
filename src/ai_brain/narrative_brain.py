@@ -1217,6 +1217,10 @@ def run_narrative_brain(snapshot: dict, symbol: str, stance_memory) -> dict:
             stance_memory=stance_memory,
             repair={"json": repaired, "family": family_repair_fixed,
                     "invalidation": invalidation_repair_fixed})
+        # PHASE 3: the optional descriptive read now lives only in that
+        # envelope. Removing the raw model object here keeps the root/guarded
+        # output exactly as before, so no participation reader can see it.
+        output.pop("descriptive_market_read", None)
 
         # NARRATIVE-AUTHORITY-1: a local opposing read cannot replace the
         # persisted campaign unless the current active-path ledger proves the

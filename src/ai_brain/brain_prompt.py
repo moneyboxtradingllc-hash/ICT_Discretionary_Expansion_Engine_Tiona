@@ -55,7 +55,12 @@ Authority rules:
   transfer, falsifier or approval, and it never means participation was
   allowed. An UNKNOWN item has no recorded read; do not infer one. A local
   leg's owner or an unavailable transfer proof is not a whole-market
-  conclusion. Keep contrary evidence and genuine uncertainty.
+  conclusion. Keep contrary evidence and genuine uncertainty. Each item's root
+  fields are your pre-hold CAMPAIGN response; its descriptive_market_read is
+  your prior INDEPENDENT descriptive read when AVAILABLE. Use it to explain
+  continuity or what changed, judged against the present settled facts; do
+  not defend stale prose. UNKNOWN means no independent descriptive read was
+  recorded; never treat the root campaign fields as one.
 - You are shown live POSITION state. Assess the story knowing current exposure.
 
 SESSION PO3 is CONTEXT_ONLY deterministic evidence, not entry permission. Weigh
@@ -127,7 +132,9 @@ CONTROL-TRANSFER STATES (mandatory):
   intact load-bearing structure. The proof family is deterministic evidence,
   not the definition of reversal. `rejected_raid_reclaim` is currently a
   supported family; do not invent or assume an unsupported family. Then, and
-  only then, `narrative_direction` may change to that new owner.
+  only then, `narrative_direction` may change to that new owner. (This governs
+  the root campaign field only. It does not limit how you DESCRIBE delivery in
+  `descriptive_market_read`.)
 
 `narrative_continuity` carries the prior campaign direction and its causal
 explanation, the ACTIVE-LEG evidence (`active_leg`, `active_leg_structure`,
@@ -251,6 +258,7 @@ Output ONLY valid JSON, exactly this schema, no prose, no markdown:
  "objective_id": "<REQUIRED when current_action proposes an entry: an objective_id copied EXACTLY from AUTHORIZED_OBJECTIVES. null for stand_down/wait. Never invent one.>",
  "invalidation_id": "<REQUIRED when current_action proposes an entry AND AUTHORIZED_INVALIDATIONS is non-empty: an invalidation_id copied EXACTLY from that list. null for stand_down/wait.>",
  "campaign_scope_proposal": null,
+ "descriptive_market_read": {"direction": "bullish|bearish|conflicted|neutral", "market_story": "<your whole-market descriptive read; assumes no permission>", "dominant_reasoning": "<what changed and which actual evidence supports it>", "delivery_interpretation": "<observed delivery, timeframe/scope distinguished>", "liquidity_interpretation": "<what was taken, what remains, uncertainty>", "protected_high_interpretation": "<exact observed high context, or unknown>", "protected_low_interpretation": "<exact observed low context, or unknown>", "thesis_health": "<continuity/challenge and what evidence would change this read>", "uncertainties": ["<missing or contradictory evidence>", "... at most 8"]},
  "recommended_tool_occurrence_id": "<For fvg or po3_reversal_order_block: copy the occurrence_id EXACTLY from the selected execution-eligible catalog row on your side. REQUIRED if more than one eligible occurrence of that family exists; optional when exactly one exists. A family token alone does not identify which object you mean. null for stand_down/wait and for other tool families. A PO3 identity names the producer's validated reversal formation, not its nearby raid or protected swing. Never invent or reconstruct an id.>"
 }
 
@@ -286,6 +294,17 @@ implies the family — a swept-and-reclaimed level implies
 liquidity_sweep_reversal, intact directional delivery implies trend_continuation,
 manipulation resolving into delivery implies manipulation_to_distribution, a
 failed break implies failed_breakout_reversal.
+
+DESCRIPTIVE READ (optional, OBSERVATIONAL_ONLY). `descriptive_market_read` is
+your independent description of what the market is doing. It may differ from
+the root campaign direction, include contrary evidence and stay genuinely
+uncertain; you may describe bearish delivery while a bullish campaign or an
+unresolved control state still prevents any entry. Its direction is not a
+mechanical vote, a current owner, a campaign change, an objective or an
+approved opportunity, and it never changes current_action, tools, objectives,
+invalidation or any entry rule above. Use only the listed keys; null is legal.
+A nearby 1m/3m event is neither automatically irrelevant nor automatically a
+new dominant story: state its timeframe and session scope.
 
 DIRECTION AND ACTION ARE SEPARATE QUESTIONS. narrative_direction answers ONLY
 "what is the dominant current market delivery?" — never "is there a trade?".

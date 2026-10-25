@@ -29,7 +29,7 @@ MODEL = "gpt-6-luna"
 ENDPOINT = "fake-transport://stage5-tests"
 NOW = datetime(2026, 10, 17, 12, 0, tzinfo=timezone.utc)
 PROFILE = MA.EvaluationParameters(max_completion_tokens=4000)
-IDENTITY = MA.RunIdentity(source_sha="a" * 40, brain_fingerprint="brain:62fe5ecf46d75dc4",
+IDENTITY = MA.RunIdentity(source_sha="a" * 40, brain_fingerprint="brain:d17223b71ac698ff",
                           retrieval_fingerprint="retr:0c241bdb8234d1ba", corpus_digest="c" * 64,
                           schedule_digest="d" * 64, model=MODEL, endpoint_identity=ENDPOINT)
 PROVENANCE = {"classification": "CONSTRUCTED", "author_role": "STAGE5_TEST",

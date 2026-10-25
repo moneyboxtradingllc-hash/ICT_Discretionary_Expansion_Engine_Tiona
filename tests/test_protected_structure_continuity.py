@@ -254,15 +254,41 @@ def test_friday_cold_restart_and_duplicate_cutoff_equal_continuous_prefix(tmp_pa
     assert _life(_facts(cold)[1]["highs"]["1m"]) == FRIDAY_HIGH
 
 
+#: Real semantic fields of a campaign_premise_catalog row (campaign_scope.py).
+CATALOG_FACT_FIELDS = ("life", "supports", "certificate", "raids", "d3")
+#: Catalog context fields that identify the PROCESS, not the market.
+PROCESS_CONTEXT = ("process_session_id", "custody_lineage")
+
+
 def _context_view(scan):
     snap = scan["snapshot"]
     catalog = snap.get("campaign_premise_catalog") or {}
-    # Catalog rows compare as a set: their ORDER can follow earlier scans in the
-    # same process (observed across a full-suite shard), and order is not a fact.
-    rows = [{k: row.get(k) for k in ("supports", "life_ref", "raids")}
-            for row in catalog.get("rows") or []]
+    rows = catalog.get("rows") or []
+    assert rows and all(set(CATALOG_FACT_FIELDS) <= set(row) for row in rows)
+    # PHASE 3 correction: compare the fields catalog rows actually carry (the
+    # Phase 2 view asked for `life_ref`, absent from every row, and omitted the
+    # certificate and D3). Rows key by their life's registration identity.
+    # Their ORDER and `premise_candidate_id` derive from the per-process custody
+    # lineage (a fresh uuid4), so they are context identifiers, checked apart.
+    by_life = {row["life"]["registration_occurrence_id"]: row for row in rows}
+    assert len(by_life) == len(rows)
+    context = catalog.get("context") or {}
     return {"facts": _facts(scan), "session_context": snap.get("session_context"),
-            "catalog_rows": sorted(rows, key=lambda r: json.dumps(r, sort_keys=True))}
+            "catalog_context": {k: v for k, v in context.items() if k not in PROCESS_CONTEXT},
+            "catalog_rows": {key: {k: row[k] for k in CATALOG_FACT_FIELDS}
+                             for key, row in sorted(by_life.items())}}
+
+
+def _context_identifiers(scan):
+    """Each row's premise_candidate_id is exactly its context+life digest."""
+    catalog = scan["snapshot"]["campaign_premise_catalog"]
+    for row in catalog["rows"]:
+        blob = json.dumps({"context": catalog["context"], "life": row["life"]},
+                          sort_keys=True, separators=(",", ":"), allow_nan=False)
+        assert row["premise_candidate_id"] == "pc:" + hashlib.sha256(
+            blob.encode("utf-8")).hexdigest()[:24]
+    return {"lineage": catalog["context"]["custody_lineage"],
+            "ids": sorted(row["premise_candidate_id"] for row in catalog["rows"])}
 
 
 def test_future_session_bars_offered_as_deep_context_are_never_used(tmp_path, monkeypatch):
@@ -279,6 +305,13 @@ def test_future_session_bars_offered_as_deep_context_are_never_used(tmp_path, mo
     settled = at_1715("settled", [b for b in TAPE if b["timestamp"] <= _cut("17:15")])
     offered = at_1715("future", copy.deepcopy(TAPE))
     assert _context_view(offered) == _context_view(settled)
+    # Non-vacuous: both lives with intact certificates and D3 verdicts compared.
+    view = _context_view(settled)["catalog_rows"]
+    assert sorted(r["supports"] for r in view.values()) == ["bearish", "bullish"]
+    assert all(r["certificate"]["status"] == "INTACT" and r["d3"] for r in view.values())
+    # Process identifiers are legitimately different and fully derived.
+    ids = _context_identifiers(settled), _context_identifiers(offered)
+    assert ids[0]["lineage"] != ids[1]["lineage"] and ids[0]["ids"] != ids[1]["ids"]
     assert _life(_facts(offered)[1]["highs"]["1m"]) == FRIDAY_HIGH
 
 

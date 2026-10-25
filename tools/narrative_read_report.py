@@ -3,16 +3,22 @@
     python3 -I tools/narrative_read_report.py <persisted brain-call dir> [--json]
 
 Reads persisted Brain call records (`<YYYYMMDD_HHMMSS>_<SYM>.json`) offline. For
-every call it shows, as three separate columns:
+every call it shows, as four separate columns:
 
-    AUTHORED     what the Brain read (record `authored_market_read`; for a
-                 record written before NARRATIVE-FIRST-1, the original
-                 `llm_raw_response`, labelled LEGACY_RAW_RESPONSE)
-    PERMITTED    the guarded participation output (`parsed_output`)
-    REFUSAL      the hold/guard explanation (`narrative_authority_guard`)
+    DESCRIPTIVE_READ            the independent descriptive read (PHASE 3:
+                                `authored_market_read.descriptive_market_read`);
+                                UNKNOWN when none was recorded, including every
+                                record written before that field existed
+    PRE_HOLD_CAMPAIGN_RESPONSE  ("authored") the pre-hold campaign/action
+                                response (`authored_market_read`; for a record
+                                written before NARRATIVE-FIRST-1, the original
+                                `llm_raw_response`, labelled LEGACY_RAW_RESPONSE)
+    PERMITTED_RESPONSE          the guarded participation output (`parsed_output`)
+    REFUSAL                     the hold/guard explanation (`narrative_authority_guard`)
 
-It never reconstructs an authored read from the guarded output, and it grants
-nothing: the authored column is OBSERVATIONAL_ONLY.
+It never reconstructs a read from the guarded output or from another column,
+and it grants nothing: both read columns are OBSERVATIONAL_ONLY, and none is
+historical ground truth.
 """
 import json
 import os
@@ -48,6 +54,21 @@ def _authored(rec):
     return {"basis": None, "status": "UNKNOWN", "reason": "no_authored_read_recorded"}
 
 
+def _descriptive(rec):
+    read = rec.get("authored_market_read")
+    view = read.get("descriptive_market_read") if isinstance(read, dict) else None
+    if isinstance(view, dict) and view.get("status") == "AVAILABLE":
+        return {"basis": "authored_market_read.descriptive_market_read",
+                "status": "AVAILABLE", "direction": view.get("direction"),
+                "story": view.get("market_story"),
+                "uncertainties": list(view.get("uncertainties") or [])}
+    if isinstance(view, dict):
+        return {"basis": "authored_market_read.descriptive_market_read",
+                "status": "UNKNOWN", "reason": view.get("reason")}
+    return {"basis": None, "status": "UNKNOWN",
+            "reason": "no_descriptive_read_recorded"}
+
+
 def rows(directory):
     out = []
     for name in sorted(os.listdir(directory)):
@@ -60,8 +81,13 @@ def rows(directory):
             continue
         permitted = rec.get("parsed_output") or {}
         guard = rec.get("narrative_authority_guard") or {}
+        read = rec.get("authored_market_read")
+        prov = (read.get("provenance") or {}) if isinstance(read, dict) else {}
         out.append({
             "file": name, "cutoff": rec.get("timestamp"),
+            "source": rec.get("source"),
+            "read_settled_cutoff": prov.get("settled_cutoff"),
+            "descriptive": _descriptive(rec),
             "llm_model": rec.get("llm_model"),
             "provider_latency_seconds": rec.get("provider_latency_seconds"),
             "authored": _authored(rec),
@@ -81,14 +107,21 @@ def render(items):
         if "error" in r:
             lines.append(f"{r['file']}: {r['error']}")
             continue
-        a, p, g = r["authored"], r["permitted"], r["refusal"]
-        lines.append(f"== {r['cutoff']}  ({r['file']}, model {r['llm_model']})")
+        d, a, p, g = r["descriptive"], r["authored"], r["permitted"], r["refusal"]
+        lines.append(f"== {r['cutoff']}  ({r['file']}, source {r['source']}, "
+                     f"model {r['llm_model']})")
+        if d["status"] == "AVAILABLE":
+            lines.append(f"  DESCRIPTIVE_READ [{d['basis']}] {d['direction']}: "
+                         f"{str(d['story'] or '')[:STORY_CHARS]}")
+        else:
+            lines.append(f"  DESCRIPTIVE_READ UNKNOWN ({d.get('reason')})")
         if a["status"] == "AVAILABLE":
-            lines.append(f"  AUTHORED  [{a['basis']}] {a['direction']} / {a['action']}: "
+            lines.append(f"  AUTHORED PRE_HOLD_CAMPAIGN_RESPONSE [{a['basis']}] "
+                         f"{a['direction']} / {a['action']}: "
                          f"{str(a['story'] or '')[:STORY_CHARS]}")
         else:
-            lines.append(f"  AUTHORED  UNKNOWN ({a.get('reason')})")
-        lines.append(f"  PERMITTED {p['direction']} / {p['action']}: "
+            lines.append(f"  AUTHORED PRE_HOLD_CAMPAIGN_RESPONSE UNKNOWN ({a.get('reason')})")
+        lines.append(f"  PERMITTED_RESPONSE {p['direction']} / {p['action']}: "
                      f"{str(p['story'] or '')[:STORY_CHARS]}")
         lines.append(f"  REFUSAL   {g['status']} ({g['reason']}; control {g['control_state']})")
     return "\n".join(lines)

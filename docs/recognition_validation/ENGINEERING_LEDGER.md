@@ -1688,3 +1688,60 @@ unchanged, 32 protected pins unchanged. Adds permanent fact/authority separation
   "receipt_digest": "678b94c87cf86be97677b334e4fc957fc56803d8e0b5520b538c61f554966d95"
 }
 ```
+
+## DESCRIPTIVE_READ_INTEGRATION_20261025: optional observational descriptive read + loop-owned decision trace
+
+Parent 736c610. Measured child Brain fingerprint brain:d17223b71ac698ff over 49 sources;
+retrieval unchanged retr:0c241bdb8234d1ba; 32 protected pins unchanged. The optional
+descriptive_market_read is OBSERVATIONAL_ONLY, captured before holds into the existing
+authored_market_read envelope and transported only through market_narrative_history;
+UNKNOWN when absent, legacy, malformed or degraded. Candidate decision records carry the
+loop producer trace for the exact scan or UNKNOWN. No participation, D3, transfer-family,
+risk or execution change. Fresh-model recognition and trading readiness remain unproven.
+
+```json ledger-entry
+{
+  "schema": "engineering_ledger_entry/v1",
+  "mission_id": "DESCRIPTIVE_READ_INTEGRATION_20261025",
+  "parent_sha": "736c610d86e6618e979efd388521deeb9bf669e6",
+  "parent_tree": "55d162a8b78ae91028fb76c5d574fb8352d24658",
+  "parent_tracked_status": "",
+  "brain_fingerprint": "brain:62fe5ecf46d75dc4",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_count": 49,
+  "closure_digest": "06087c8db29ded37d2f23525fd25e929d296bdc450d7ab702b524608ffcabddf",
+  "protected_count": 32,
+  "protected_digest": "79988f0ea3e84e15e34485a8510e78efc667f6e274d41fcde5d6e3c0307ab79a",
+  "policy_refs": [
+    "Codex PHASE 3 assignment (email 1a173fb13c858894; 00_PHASE3_ASSIGNMENT.md, 01_ACCEPTANCE_MATRIX.md, 02_SESSION_AND_AUTHORITY_REVIEW.md): optional descriptive_market_read is OBSERVATIONAL_ONLY, validated independently, captured before holds into the same authored_market_read envelope and transported only through market_narrative_history; no authority reader; candidate decision trace is the loop's own per-scan producer trace or UNKNOWN",
+    "Owner selection 2026-10-09 (M2 MISSION.md): D0=a; D1=a; roles 5m/15m; K=1; D3=B; D3_TIME=STRICT; BEARING=INDEPENDENT_SUPPORTING_LIFE; D4=a; D5=a; D6=a"
+  ],
+  "scoped_files": [
+    "src/ai_brain/market_narrative.py",
+    "src/ai_brain/narrative_brain.py",
+    "src/ai_brain/brain_prompt.py",
+    "src/broker/topstepx_production_loop.py",
+    "src/recognition_validation/examples/*",
+    "tools/narrative_read_report.py",
+    "tests/test_descriptive_market_read.py",
+    "tests/test_decision_trace_ownership.py",
+    "tests/test_protected_structure_continuity.py",
+    "tests/test_brain_fingerprint_portability.py",
+    "tests/test_combined_safety_readiness.py",
+    "tests/test_recognition_current_path.py",
+    "tests/test_recognition_model_authority.py",
+    "docs/recognition_validation/*"
+  ],
+  "proof_ids": [
+    "PARENT-REPRODUCERS-37-FAIL-AT-736C610",
+    "DESCRIPTIVE-READ-PRE-HOLD-CAPTURE-AND-NEXT-INPUT-BOTH-LANES",
+    "OBSERVATIONAL-INVARIANCE-HEALTHY-W5-FRIDAY-C2-BOTH-LANES",
+    "DECISION-TRACE-OWNERSHIP-REAL-LOOP-DECOY-STALE",
+    "ACTIVATED-MUTANTS-1-6",
+    "FINAL-FROZEN-OFFLINE-SUITE"
+  ],
+  "closure_change_rationale": "Four bound Brain closure sources change. market_narrative validates the optional descriptive_market_read independently (nested UNKNOWN with a precise reason when absent, legacy, malformed or degraded; never synthesized from root fields), captures it before output_direction_hold into the existing authored_market_read envelope, and re-validates it on transport only after the existing provenance and custody checks; narrative_brain removes the raw object from the guarded root output after capture; brain_prompt adds the optional schema line and a narrow clarification of the two roles. topstepx_production_loop (bound) marks the owning scan immediately before each of its two visible self.producer.produce calls (produce() replaces its trace on entry), and the decision record reads the loop producer's trace only for that exact scan, otherwise UNKNOWN; telemetry only. No participation, D3, transfer-family, risk or execution change; no authority reader consumes the field. The measured Brain fingerprint becomes brain:d17223b71ac698ff (retrieval unchanged, closure 49, 32 protected pins unchanged) and the seven literal expectations are repinned to it. The Phase 2 future-context diagnostic now compares the catalog rows' real fields (life, supports, certificate, raids, d3) and checks the process-derived premise_candidate_id separately.",
+  "predecessor_receipt_digest": "678b94c87cf86be97677b334e4fc957fc56803d8e0b5520b538c61f554966d95",
+  "receipt_digest": "b29c1cbbc242241d23adfb77f163ed75aedc2e5af9f973954e6e119e2af69512"
+}
+```

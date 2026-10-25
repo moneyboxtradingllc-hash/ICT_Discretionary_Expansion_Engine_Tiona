@@ -130,6 +130,11 @@ class ProductionLoop:
         # price is how an exit gets paired to the wrong entry.
         self.active_candidate = None
         self.active_conditional_plan = None
+        # Which scan last invoked this loop's own producer, set immediately
+        # before each produce() call (produce() replaces its trace on entry).
+        # Observability only: the decision record reads the trace solely when
+        # this equals the scan being recorded.
+        self._decision_trace_owner = None
         self._pending_wake_event = None
         self.last_repair = None
         self.last_window = None
@@ -174,8 +179,17 @@ class ProductionLoop:
                       ((scan.get("brain_block") or {}).get("output") or {}))
             from broker.candidate_decision_record import (build_record,
                                                           terminal_disposition)
-            producer = getattr(self.cycle, "producer", None)
-            trace = dict(getattr(producer, "last_decision_trace", None) or {})
+            # PHASE 3: the trace is the one this loop's OWN producer left while
+            # producing THIS scan. The cycle holds no producer, and a trace
+            # left by an earlier scan is not this decision's: both are UNKNOWN.
+            owner = getattr(self, "_decision_trace_owner", None)
+            current = bool(isinstance(owner, tuple) and len(owner) == 2
+                           and owner[0] is not None
+                           and owner[0] == scan.get("scan_count")
+                           and owner[1] == scan.get("snapshot_id"))
+            producer = getattr(self, "producer", None)
+            trace = dict((getattr(producer, "last_decision_trace", None)
+                          if current else None) or {})
             qual = scan.get("qualification_evidence")
             if isinstance(qual, dict) and trace.get("qualification_result") is None:
                 trace["qualification_result"] = (
@@ -208,6 +222,9 @@ class ProductionLoop:
                 plan_candidate = plan.get("candidate")
                 record["activation_zone"] = ((plan_candidate.extras or {}).get(
                     "activation_zone") if plan_candidate is not None else None)
+            record["decision_trace_source"] = (
+                "loop_producer_current_scan" if current
+                else "UNKNOWN:no_producer_call_this_scan")
             record["active_draw"] = str(parsed.get("active_draw") or "")[:200]
             # CAMPAIGN-DRAW-TRUTH-1 is chart-evidence telemetry only. This
             # journal write preserves the same-scan fact for audit; no reader
@@ -1187,6 +1204,7 @@ class ProductionLoop:
                 contract_id=str(self.ps.contract.id))
             if not bound:
                 raise NoCandidate("campaign_lifecycle_refused", unbound_reason)
+            self._decision_trace_owner = (scan.get("scan_count"), scan.get("snapshot_id"))
             candidate = self.producer.produce(
                 brain_result=scan["brain_result"], brain_input=scan["brain_input"],
                 snapshot=scan["snapshot"], qualification=scan["qualification"],
@@ -1512,6 +1530,7 @@ class ProductionLoop:
                 raise NoCandidate("conditional_plan_review_required",
                                   "active-path transfer evidence changed after plan publication")
 
+            self._decision_trace_owner = (scan.get("scan_count"), scan.get("snapshot_id"))
             fresh = self.producer.produce(
                 brain_result=plan_brain_result, brain_input=brain_input,
                 snapshot=snap, qualification=scan.get("qualification") or {},
