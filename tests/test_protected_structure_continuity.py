@@ -257,9 +257,12 @@ def test_friday_cold_restart_and_duplicate_cutoff_equal_continuous_prefix(tmp_pa
 def _context_view(scan):
     snap = scan["snapshot"]
     catalog = snap.get("campaign_premise_catalog") or {}
+    # Catalog rows compare as a set: their ORDER can follow earlier scans in the
+    # same process (observed across a full-suite shard), and order is not a fact.
+    rows = [{k: row.get(k) for k in ("supports", "life_ref", "raids")}
+            for row in catalog.get("rows") or []]
     return {"facts": _facts(scan), "session_context": snap.get("session_context"),
-            "catalog_rows": [{k: row.get(k) for k in ("supports", "life_ref", "raids")}
-                             for row in catalog.get("rows") or []]}
+            "catalog_rows": sorted(rows, key=lambda r: json.dumps(r, sort_keys=True))}
 
 
 def test_future_session_bars_offered_as_deep_context_are_never_used(tmp_path, monkeypatch):
