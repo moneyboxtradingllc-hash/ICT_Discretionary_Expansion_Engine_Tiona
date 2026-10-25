@@ -166,6 +166,16 @@ def _item(row, current=None) -> dict:
         lineage = row.get("history_lineage") or {}
         if prov.get("history_revision") != lineage.get("history_revision"):
             return unknown("provenance_mismatch:history_revision", recorded_at_cutoff=cutoff)
+        # The read must also come from the custody that recorded this row: the
+        # row's own custody is proved by the existing hygiene, the nested read's
+        # producer custody must equal it.
+        read_custody = (prov.get("history_lineage") or {}).get("custody")
+        if not isinstance(read_custody, str) or not read_custody:
+            return unknown("provenance_missing:history_lineage.custody",
+                           recorded_at_cutoff=cutoff)
+        if read_custody != lineage.get("custody"):
+            return unknown("provenance_mismatch:history_lineage.custody",
+                           recorded_at_cutoff=cutoff)
     if read.get("authority") != AUTHORITY:
         return unknown("authority_label_invalid", recorded_at_cutoff=cutoff)
     item = {k: copy.deepcopy(read.get(k)) for k in

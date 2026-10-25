@@ -1605,3 +1605,47 @@ membership list names the new member explicitly.
   "receipt_digest": "b68dbe660f0e6e497e598eebb5eb96ba9ca474d2bb31cf886acf62a7ff4aa1c0"
 }
 ```
+
+## NARRATIVE_FIRST_CUSTODY_20261025: read custody must match its stance row
+
+Parent 9045675. Measured child Brain fingerprint brain:62fe5ecf46d75dc4 over 49 sources;
+retrieval unchanged. Defensive provenance check only; participation unchanged.
+
+```json ledger-entry
+{
+  "schema": "engineering_ledger_entry/v1",
+  "mission_id": "NARRATIVE_FIRST_CUSTODY_20261025",
+  "parent_sha": "9045675fca32e731c62c60154abb1d54dd062a49",
+  "parent_tree": "0e398e269b7bc11af6376318fd8d79f47a537423",
+  "parent_tracked_status": "",
+  "brain_fingerprint": "brain:0720fde4c842045d",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_count": 49,
+  "closure_digest": "8b43c8c2ae8965411273dc7da45b93572611f686dec41f3c6dfb71d802813def",
+  "protected_count": 32,
+  "protected_digest": "79988f0ea3e84e15e34485a8510e78efc667f6e274d41fcde5d6e3c0307ab79a",
+  "policy_refs": [
+    "Codex owner-side review PHASE1_OWNER_AUDIT_9045675 (sha256 72f56ba0...): require the nested read's producer custody to match the eligible stance row before transporting it AVAILABLE; promote the healthy/foreign-contract/foreign-custody controls; fix the Windows path comparison"
+  ],
+  "scoped_files": [
+    "src/ai_brain/market_narrative.py",
+    "tests/test_market_narrative_first.py",
+    "src/recognition_validation/examples/current_brain_disabled.json",
+    "src/recognition_validation/examples/fictional_brain_call.json",
+    "src/recognition_validation/examples/model_authorization_disabled.json",
+    "tests/test_brain_fingerprint_portability.py",
+    "tests/test_combined_safety_readiness.py",
+    "tests/test_recognition_current_path.py",
+    "tests/test_recognition_model_authority.py",
+    "docs/recognition_validation/*"
+  ],
+  "proof_ids": [
+    "CODEX-REPRO-OLD-FAIL-NEW-PASS-BOTH-LANES",
+    "CUSTODY-CHECK-REMOVED-REACTIVATES-FAILURE",
+    "FINAL-FROZEN-OFFLINE-SUITE"
+  ],
+  "closure_change_rationale": "market_narrative._item now also requires the read's nonempty provenance.history_lineage.custody to equal the eligible row's custody; missing or mismatched custody is typed UNKNOWN. Defensive provenance only: no storage, signature or authority change and no participation effect. The bound closure source changed, so the measured Brain fingerprint becomes brain:62fe5ecf46d75dc4 (retrieval unchanged) and the seven literal expectations are repinned to it.",
+  "predecessor_receipt_digest": "b68dbe660f0e6e497e598eebb5eb96ba9ca474d2bb31cf886acf62a7ff4aa1c0",
+  "receipt_digest": "ab00c1e1d6f0339c596a18bf24720a07cfe299340d2da0ed283a4dc8b208170e"
+}
+```

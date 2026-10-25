@@ -248,7 +248,39 @@ def test_no_authority_module_reads_the_observational_view():
                "ai_brain/brain_prompt.py",
                # names the source only, to bind it into the Brain fingerprint
                "ai_brain/production_model.py"}
-    readers = sorted(str(p.relative_to(ROOT / "src")) for p in (ROOT / "src").rglob("*.py")
+    readers = sorted(p.relative_to(ROOT / "src").as_posix() for p in (ROOT / "src").rglob("*.py")
                      if "authored_market_read" in p.read_text(encoding="utf-8")
                      or "market_narrative_history" in p.read_text(encoding="utf-8"))
     assert set(readers) <= allowed, readers
+
+
+# Owner-side review (Codex, PHASE1_OWNER_AUDIT_9045675): the nested read's
+# producer custody must equal the eligible row's custody, at the actual next
+# consumer, in both lanes.
+@ECU_MODES
+@pytest.mark.parametrize("case", ["healthy", "foreign_contract", "foreign_custody",
+                                  "missing_custody"])
+def test_read_row_identity_at_next_consumer(tmp_path, monkeypatch, ecu, case):
+    def poison(cycle):
+        row = cycle.stance_memory._buf[-1]
+        prov = row["authored_market_read"]["provenance"]
+        assert prov["history_lineage"]["custody"] == row["history_lineage"]["custody"]
+        if case == "foreign_contract":
+            prov["contract_id"] = "CON.F.US.MES.Z26"
+        elif case == "foreign_custody":
+            prov["history_lineage"]["custody"] = "different-producer-custody"
+        elif case == "missing_custody":
+            prov["history_lineage"].pop("custody")
+    _c, _p, _pp, records = _run(tmp_path, monkeypatch, ecu, _bearish(), poison=poison)
+    held, payload = records[2]
+    last = payload["market_narrative_history"]["last"]
+    assert L._candidate(held) == "campaign_lifecycle_refused"
+    expected = {"healthy": None,
+                "foreign_contract": "provenance_mismatch:contract_id",
+                "foreign_custody": "provenance_mismatch:history_lineage.custody",
+                "missing_custody": "provenance_missing:history_lineage.custody"}[case]
+    if expected is None:
+        assert last["status"] == "AVAILABLE" and last["market_story"] == STORY
+    else:
+        assert (last["status"], last["reason"]) == ("UNKNOWN", expected)
+        assert "market_story" not in last
