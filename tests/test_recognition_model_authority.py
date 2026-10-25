@@ -251,10 +251,17 @@ def test_repair_cap_and_cost_cap_refuse_before_transport(tmp_path):
     assert bound == Decimal("0.832")
     priced = tmp_path / "cost"
     priced.mkdir()
-    unknown = FakeTransport([G.ProviderReply(content="{}", served_model=MODEL, usage={})])
-    responder = _responder(priced, authorization=_authorization(priced, max_cost_usd="1.6"), transport=unknown)
-    responder.respond(_request(1))
-    _refused(responder, _request(2), "COST_CAP_EXHAUSTED")
+    # PHASE-E1: an unknown-usage reply now halts the run (01_ACCEPTANCE_AND_REFUSALS),
+    # so the cost cap is exercised directly: one worst case (0.832) exceeds 0.8.
+    responder = _responder(priced, authorization=_authorization(priced, max_cost_usd="0.8"))
+    _refused(responder, _request(1), "COST_CAP_EXHAUSTED")
+    assert responder.ledger.exposure == 0 and responder.ledger.requests == 0
+    two = tmp_path / "two"
+    two.mkdir()
+    responder = _responder(two, authorization=_authorization(two, max_cost_usd="1.6"))
+    responder.respond(_request(1))            # known usage: settles below its reservation
+    assert responder.ledger.exposure < responder.ledger.per_request_bound
+    responder.respond(_request(2))
     assert responder.ledger.exposure <= Decimal("1.6")
 
 
@@ -279,15 +286,22 @@ def test_transport_retry_is_reserved_counted_and_charged_in_full(tmp_path):
 
 
 def test_unknown_usage_charges_reservation_and_overrun_halts_the_run(tmp_path):
-    transport = FakeTransport([G.ProviderReply(content="{}", served_model=MODEL, usage={}),
-                               G.ProviderReply(content="{}", served_model=MODEL,
-                                               usage={"prompt_tokens": 400000, "completion_tokens": 900000})])
+    # PHASE-E1 (01_ACCEPTANCE_AND_REFUSALS): unknown usage keeps the full
+    # reservation AND halts every further request, durably.
+    transport = FakeTransport([G.ProviderReply(content="{}", served_model=MODEL, usage={})])
     responder = _responder(tmp_path, transport=transport)
     responder.respond(_request(1))
     assert responder.ledger.exposure == responder.ledger.per_request_bound
-    responder.respond(_request(2))
-    assert responder.ledger.exposure == 2 * responder.ledger.per_request_bound  # never above reserved
-    _refused(responder, _request(3), "USAGE_EXCEEDED_RESERVATION")
+    _refused(responder, _request(2), "USAGE_UNKNOWN")
+    assert responder.ledger.halted == "USAGE_UNKNOWN"
+    over = tmp_path / "over"
+    over.mkdir()
+    transport = FakeTransport([G.ProviderReply(content="{}", served_model=MODEL,
+                                               usage={"prompt_tokens": 400000, "completion_tokens": 900000})])
+    responder = _responder(over, transport=transport)
+    responder.respond(_request(1))
+    assert responder.ledger.exposure == responder.ledger.per_request_bound  # never above reserved
+    _refused(responder, _request(2), "USAGE_EXCEEDED_RESERVATION")
 
 
 def test_ledger_persists_reservations_cancellation_and_restart(tmp_path):
@@ -298,18 +312,20 @@ def test_ledger_persists_reservations_cancellation_and_restart(tmp_path):
     ledger.settle("r1", {"input_tokens": 10, "output_tokens": 10}, _pricing())
     ledger.reserve(reservation_id="r2", purpose="PRIMARY", transport_attempt=0, scan_key="s2")
     ledger.cancel("r2", "proven never sent")
+    with pytest.raises(C.ContractError) as exc:
+        ledger.reserve(reservation_id="r1", purpose="PRIMARY", transport_attempt=0, scan_key="s1")
+    assert exc.value.code == "DUPLICATE_RESERVATION"
     ledger.reserve(reservation_id="r3", purpose="REPAIR", transport_attempt=0, scan_key="s3")
     # crash here: r3 reserved, never settled
     reopened = MA.BudgetLedger(tmp_path / "l.jsonl", auth, bound)
     assert reopened.orphans == ["r3"] and reopened.reservations["r3"]["state"] == "ORPHANED_CHARGED"
     assert reopened.requests == 2 and reopened.exposure == Decimal(ledger.reservations["r1"]["charged"]) + bound
-    with pytest.raises(C.ContractError) as exc:
-        reopened.reserve(reservation_id="r1", purpose="PRIMARY", transport_attempt=0, scan_key="s1")
-    assert exc.value.code == "DUPLICATE_RESERVATION"
-    reopened.reserve(reservation_id="r4", purpose="PRIMARY", transport_attempt=0, scan_key="s4")
-    with pytest.raises(C.ContractError) as exc:
-        reopened.reserve(reservation_id="r5", purpose="PRIMARY", transport_attempt=0, scan_key="s5")
-    assert exc.value.code == "REQUEST_CAP_EXHAUSTED"
+    # PHASE-E1: an orphan's usage is unknown, so the reopened run is halted for good.
+    assert reopened.halted == "ORPHANED_RESERVATION_USAGE_UNKNOWN"
+    for again in (reopened, MA.BudgetLedger(tmp_path / "l.jsonl", auth, bound)):
+        with pytest.raises(C.ContractError) as exc:
+            again.reserve(reservation_id="r4", purpose="PRIMARY", transport_attempt=0, scan_key="s4")
+        assert exc.value.code == "RUN_HALTED"
     with open(tmp_path / "l.jsonl", "a") as handle:
         handle.write(json.dumps({"kind": "settle", "reservation_id": "ghost", "charged_usd": "0"}) + "\n")
     with pytest.raises(C.ContractError) as exc:

@@ -434,7 +434,8 @@ def run_offline(*, corpus_path, session_id: str, out_root, responder, ecu: bool,
                 prewarm_until: str | None = None, ticks_until: str | None = None,
                 fingerprints: dict | None = None, ticks=None, quote_policy: str | None = None,
                 run_document: dict | None = None, process_receipt: dict | None = None,
-                network_guard: P.NetworkGuard | None = None, venue_lane: str | None = None) -> dict:
+                network_guard: P.NetworkGuard | None = None, venue_lane: str | None = None,
+                controlled_quotes: list | None = None) -> dict:
     """One whole-session trajectory from a sealed corpus into a fresh root.
 
     The CLI only ever calls this inside a fresh child (`child.child_main`), which
@@ -459,7 +460,12 @@ def run_offline(*, corpus_path, session_id: str, out_root, responder, ecu: bool,
     C.require(loaded.entry["instrument"] == "MNQ", "INSTRUMENT_ADAPTER_UNAVAILABLE", "/instrument")
     C.require(all(t.kind in TICK_KINDS for t in ticks), "TICK_ADAPTER_UNAVAILABLE", "/ticks/kind")
     quote_policy = quote_policy or ("CONSTRUCTED" if corpus.document["provenance"]["classification"] == "CONSTRUCTED" else "MISSING")
-    C.require(quote_policy in ("CONSTRUCTED", "ARCHIVED", "MISSING"), "QUOTE_POLICY_UNKNOWN", "/quote_policy")
+    C.require(quote_policy in ("CONSTRUCTED", "ARCHIVED", "MISSING", "CONTROLLED"), "QUOTE_POLICY_UNKNOWN",
+              "/quote_policy")
+    # CONTROLLED quotes are supplied explicitly by a sealed evaluation plan, never read from or
+    # attributed to the corpus, and never accepted under any other policy.
+    C.require((quote_policy == "CONTROLLED") == (controlled_quotes is not None), "CONTROLLED_QUOTES_POLICY",
+              "/quote_policy")
     C.require(quote_policy != "CONSTRUCTED" or corpus.document["provenance"]["classification"] == "CONSTRUCTED",
               "CONSTRUCTED_QUOTES_ON_ARCHIVE", "/quote_policy")
     venue_lane = venue_lane or (run_document or {}).get("venue_lane") or "DISARMED"
@@ -469,8 +475,11 @@ def run_offline(*, corpus_path, session_id: str, out_root, responder, ecu: bool,
     tick_document = [{"ordinal":t.ordinal,"decision_time":t.decision_time.isoformat(),"kind":t.kind} for t in ticks]
     run_document = run_document or {"schema":"offline_run/v1", "source_identity":identity,
         "corpus_digest":corpus.digest,"session_id":session_id,"ecu":ecu,"trajectory_id":trajectory_id,
-        "quote_policy":quote_policy,"ticks":tick_document,"fixture_digest":getattr(responder,"fixture_digest",None),
+        "quote_policy":quote_policy,"ticks":tick_document,
+"fixture_digest":getattr(responder,"fixture_digest",None),
         "venue_lane":venue_lane}
+    if controlled_quotes is not None and "controlled_quotes_digest" not in run_document:
+        run_document = {**run_document, "controlled_quotes_digest": C.digest(controlled_quotes)}
     run_digest = C.digest(run_document)
     out_root = Path(out_root)
     # A child's own request/scratch directory is the only thing allowed to precede the run.
@@ -493,7 +502,10 @@ def run_offline(*, corpus_path, session_id: str, out_root, responder, ecu: bool,
         quote_port = None
         if quote_policy == "ARCHIVED":
             C.require(bool(entry["quotes"]), "QUOTE_ARCHIVE_MISSING", "/quotes")
-        if quote_policy != "MISSING" and entry["quotes"]:
+        if quote_policy == "CONTROLLED":
+            quote_port = P.LocalQuotePort(controlled_quotes, clock, contract_id=entry["contract_id"],
+                                          origin="CONTROLLED")
+        elif quote_policy != "MISSING" and entry["quotes"]:
             # An explicit sided quote stream (archived, or CONSTRUCTED for a CONSTRUCTED corpus) is
             # the only quote source; no settled close is substituted for it.
             quotes = C.loads_strict(C.verify_artifact(entry["quotes"], corpus.root).decode("utf-8"))

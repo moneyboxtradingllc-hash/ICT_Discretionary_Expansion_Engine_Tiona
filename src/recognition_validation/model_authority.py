@@ -138,18 +138,37 @@ class ModelAuthority:
 
 
 class BudgetLedger:
-    """Durable reservation ledger; append-only JSONL, fsynced per record."""
+    """Durable reservation ledger; append-only JSONL, fsynced per record.
 
-    def __init__(self, path, authorization: dict, per_request_bound: Decimal):
+    One ledger spends one authorization's budget across every lane, case,
+    process and run identity. With `binding` (the authorization seal digest)
+    its first record names that authorization and any other authorization is
+    refused, so a new run cannot open a fresh budget under the same consent
+    by pointing at the same ledger. A halt (unknown usage, transport failure,
+    usage above reservation, or an attempt reserved but never settled) is
+    itself a durable record: after it no reservation is ever granted again.
+    """
+
+    def __init__(self, path, authorization: dict, per_request_bound: Decimal, *, binding: str | None = None):
         self.path = Path(path)
         self.caps = {k: authorization[k] for k in ("max_external_requests", "max_repair_requests",
                                                    "max_transport_retries")}
         self.max_cost = Decimal(authorization["max_cost_usd"])
         self.per_request_bound = per_request_bound
+        self.binding = binding
         self.reservations: dict = {}
         self.orphans: list = []
+        self.halted: str | None = None
+        self._bound_by: str | None = None
         if self.path.exists():
             self._replay()
+        if binding is not None:
+            C.require(self._bound_by in (None, binding), "LEDGER_AUTHORIZATION_MISMATCH", "/binding",
+                      f"{self._bound_by}!={binding}")
+            C.require(self._bound_by is not None or not self.reservations, "LEDGER_UNBOUND_HISTORY", "/binding")
+            if self._bound_by is None:
+                self._append({"kind": "bind", "reservation_id": None, "authorization_digest": binding})
+                self._bound_by = binding
 
     # -- persistence -------------------------------------------------------
     def _append(self, record: dict) -> None:
@@ -164,6 +183,13 @@ class BudgetLedger:
         for number, line in enumerate(self.path.read_text(encoding="utf-8").splitlines(), 1):
             record = C.loads_strict(line, pointer=f"/{self.path.name}:{number}")
             rid = record["reservation_id"]
+            if record["kind"] == "bind":
+                C.require(number == 1 and self._bound_by is None, "LEDGER_STATE_INVALID", f"/{number}")
+                self._bound_by = record["authorization_digest"]
+                continue
+            if record["kind"] == "halt":
+                self.halted = self.halted or record["reason"]
+                continue
             if record["kind"] == "reserve":
                 C.require(rid not in self.reservations, "DUPLICATE_RESERVATION", f"/{number}")
                 self.reservations[rid] = dict(record, state="OPEN", charged=record["reserved_usd"])
@@ -178,6 +204,16 @@ class BudgetLedger:
         self.orphans = [rid for rid, r in self.reservations.items() if r["state"] == "OPEN"]
         for rid in self.orphans:
             self.reservations[rid]["state"] = "ORPHANED_CHARGED"
+        if self.orphans and not self.halted:
+            # Its usage is unknown: the same halt as a live unknown-usage reply.
+            self.halt("ORPHANED_RESERVATION_USAGE_UNKNOWN")
+
+    def halt(self, reason: str) -> None:
+        """Durably stop the run; idempotent, and never lifted by a restart."""
+        if self.halted:
+            return
+        self._append({"kind": "halt", "reservation_id": None, "reason": reason})
+        self.halted = reason
 
     # -- accounting --------------------------------------------------------
     def _count(self, predicate) -> int:
@@ -200,6 +236,7 @@ class BudgetLedger:
         return sum((Decimal(r["charged"]) for r in self.reservations.values()), Decimal(0))
 
     def reserve(self, *, reservation_id: str, purpose: str, transport_attempt: int, scan_key: str) -> dict:
+        C.require(not self.halted, "RUN_HALTED", "/halted", str(self.halted))
         C.require(reservation_id not in self.reservations, "DUPLICATE_RESERVATION", "/reservation_id")
         C.require(self.requests < self.caps["max_external_requests"], "REQUEST_CAP_EXHAUSTED",
                   "/max_external_requests")

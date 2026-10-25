@@ -104,10 +104,14 @@ class MissingQuote:
 
 
 class LocalQuotePort:
-    """Archived or explicitly constructed quotes, available by t; never a candle close."""
+    """Archived, constructed or CONTROLLED quotes, available by t; never a candle close.
+
+    CONTROLLED is a sealed evaluation assumption on a non-constructed tape: an
+    eligibility result under it is conditional on that stated quote, never a
+    historical quote, fill or execution."""
 
     def __init__(self, quotes, clock: DecisionClock, *, contract_id: str, origin: str):
-        C.require(origin in ("ARCHIVED", "CONSTRUCTED"), "QUOTE_ORIGIN_UNKNOWN", "/origin", origin)
+        C.require(origin in ("ARCHIVED", "CONSTRUCTED", "CONTROLLED"), "QUOTE_ORIGIN_UNKNOWN", "/origin", origin)
         self.clock, self.contract_id, self.origin = clock, contract_id, origin
         self._quotes = sorted(quotes, key=lambda q: C.instant(q["captured_at_utc"]))
 

@@ -123,8 +123,15 @@ def _redact(text: str) -> str:
     return _SECRET_VALUE.sub("[REDACTED]", text)
 
 
-def run_in_child(request: dict, *, out_root, timeout_seconds: float = 3600.0, extra_env: dict | None = None) -> dict:
-    """Run one trajectory in a fresh interpreter; returns the parent-side status record."""
+def run_in_child(request: dict, *, out_root, timeout_seconds: float = 3600.0, extra_env: dict | None = None,
+                 stdin_secret: str | None = None) -> dict:
+    """Run one trajectory in a fresh interpreter; returns the parent-side status record.
+
+    `stdin_secret` (a released CURRENT_EXTERNAL run only) reaches the child on
+    its stdin, never its environment, argv or request file; the child reads it
+    only after its authority admission passed."""
+    C.require((stdin_secret is not None) == ((request.get("responder") or {}).get("kind") == "CURRENT_EXTERNAL"),
+              "CHILD_SECRET_CHANNEL", "/responder/kind")
     out_root = Path(out_root)
     C.require(not out_root.exists() or not any(out_root.iterdir()), "OUTPUT_ROOT_REUSE", "/" + str(out_root))
     C.require(request.get("schema") == REQUEST_SCHEMA, "CHILD_REQUEST_SCHEMA", "/schema")
@@ -140,8 +147,10 @@ def run_in_child(request: dict, *, out_root, timeout_seconds: float = 3600.0, ex
               "parent_pid": os.getpid(), "executable": sys.executable, "isolation_flags": ["-I"],
               "timeout_seconds": timeout_seconds, "env_names": sorted(env)}
     try:
+        stdin = ({"input": (stdin_secret + "\n").encode("utf-8")} if stdin_secret is not None
+                 else {"stdin": subprocess.DEVNULL})
         completed = subprocess.run(command, cwd=child_root, env=env, capture_output=True, timeout=timeout_seconds,
-                                   stdin=subprocess.DEVNULL)
+                                   **stdin)
         status.update(state="EXITED", exit_code=completed.returncode, stdout=completed.stdout, stderr=completed.stderr)
     except subprocess.TimeoutExpired as expired:
         status.update(state="TIMEOUT", exit_code=None, stdout=expired.stdout or b"", stderr=expired.stderr or b"")
@@ -249,6 +258,33 @@ def _refuse_dotenv(attempts: list) -> None:
         setattr(dotenv.main, name, refused)
 
 
+def _current_external(spec: dict, trajectory_id: str, receipt: dict):
+    """A released Mode C responder: plan, authority and ledger first; the credential last.
+
+    Every refusal here happens before stdin is read, so a DISABLED, unsealed,
+    expired, mismatched or unpriced authorization never sees a credential."""
+    import openai
+    from recognition_validation import eval_plan as EP
+    from recognition_validation import model_authority as MA
+    from recognition_validation import provider_transport as PT
+    plan = EP.load_plan(spec["plan_path"])
+    C.require(plan["seal"]["sha256"] == spec["plan_seal"], "PLAN_SEAL_MISMATCH", "/responder/plan_seal")
+    authorization = C.loads_strict(Path(spec["authorization_path"]).read_text(encoding="utf-8"),
+                                   pointer="/authorization")
+    pricing = C.loads_strict(Path(spec["pricing_path"]).read_text(encoding="utf-8"), pointer="/pricing")
+    authority = EP.admit_release(plan, authorization, pricing, receipt_root=spec["receipt_root"])
+    ledger = MA.BudgetLedger(spec["ledger_path"], authority.authorization, authority.per_request_bound,
+                             binding=authorization["seal"]["sha256"])
+    C.require(not ledger.halted, "RUN_HALTED", "/ledger", str(ledger.halted))
+    secret = sys.stdin.readline().strip()
+    C.require(bool(secret), "CREDENTIAL_MISSING", "/stdin")
+    transport = PT.OpenAIChatTransport(openai, lambda: secret, timeout=float(spec["client_timeout_seconds"]))
+    receipt["current_external"] = {"plan_seal": plan["seal"]["sha256"], "ledger_binding": ledger.binding,
+                                   "sdk_version": transport.sdk_version, "endpoint": PT.ENDPOINT,
+                                   "credential_channel": "STDIN_AFTER_ADMISSION"}
+    return PT.CurrentExternalResponder(authority, ledger, transport, trajectory_id=trajectory_id)
+
+
 def _responder(spec: dict, contract_id: str):
     from recognition_validation import brain_gateway as G
     data = Path(spec["path"]).read_bytes()
@@ -265,9 +301,22 @@ def _responder(spec: dict, contract_id: str):
     return G.HistoricalResponder(records, contract_id=contract_id)
 
 
+def _requested_kind(request_path: str):
+    try:
+        return (json.loads(Path(request_path).read_bytes()).get("responder") or {}).get("kind")
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
 def child_main(request_path: str) -> int:
     from recognition_validation import ports as P
-    guard = P.NetworkGuard()
+    external = _requested_kind(request_path) == "CURRENT_EXTERNAL"
+    if external:
+        # The pinned provider host only; every venue, broker and other host stays refused.
+        from recognition_validation import provider_transport as PT
+        guard = PT.ProviderOnlyNetworkGuard()
+    else:
+        guard = P.NetworkGuard()
     deny = guard.deny()
     deny.__enter__()  # for the child's whole lifetime, before any runtime import
     exit_record = {"schema": "trajectory_child_exit/v1"}
@@ -301,20 +350,25 @@ def child_main(request_path: str) -> int:
                    "preloaded_runtime_modules": preloaded, "cold_state": cold, "source_identity": identity,
                    "network_denied_from_start": True, "memory_policy": request["memory_policy"]}
         from recognition_validation import driver as DR
-        responder = _responder(request["responder"], request["contract_id"])
+        if external:
+            C.require(request.get("mode") == "C", "CHILD_RESPONDER_KIND", "/mode")
+            responder = _current_external(request["responder"], request["trajectory_id"], receipt)
+        else:
+            responder = _responder(request["responder"], request["contract_id"])
         ticks = [DR.Tick(t["ordinal"], C.instant(t["decision_time"]), t["kind"]) for t in request["ticks"]]
         summary = DR.run_offline(corpus_path=request["corpus_path"], session_id=request["session_id"],
                                  out_root=out_root, responder=responder, ecu=request["ecu"],
                                  trajectory_id=request["trajectory_id"], ticks=ticks,
                                  quote_policy=request["quote_policy"], run_document=request["run_document"],
                                  fingerprints=request["fingerprints"], process_receipt=receipt,
-                                 network_guard=guard)
+                                 network_guard=guard, controlled_quotes=request.get("controlled_quotes"))
         after = sorted(os.environ)
         exit_record.update(
             final_provider_circuit=N.provider_circuit_state(), dotenv_refused=dotenv_attempts,
             env_names_after=after, env_grew_outside_allowlist=unallowlisted_env(os.environ),
             launcher_modules_loaded=[m for m in LAUNCHER_MODULES if m in sys.modules],
             network_attempts=[str(a) for a in guard.attempts], infrastructure_error=summary["infrastructure_error"],
+            provider_connections=[str(a) for a in getattr(guard, "admitted", [])],
             status="RUN_COMPLETE" if not summary["infrastructure_error"] else "RUN_INCOMPLETE")
         refused_writes_expected = request["run_document"].get("venue_lane", "DISARMED") == "REFUSING_VENUE_DOUBLE"
         code = 5 if summary["infrastructure_error"] else 4 if (summary["network_attempts"]

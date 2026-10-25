@@ -59,6 +59,8 @@ class ProviderReply:
     usage: dict = field(default_factory=lambda: {"prompt_tokens": 0, "completion_tokens": 0})
     request_id: str | None = None
     response_id: str | None = None
+    finish_reason: str | None = None
+    service_tier: str | None = None
 
 
 class _Message:
@@ -224,7 +226,13 @@ class CurrentModelResponder:
     """Mode C under a validated authority; every attempt reserved before transport.
 
     `transport` exposes `endpoint_identity` and `send(payload) -> ProviderReply`.
-    Only fake transports exist in this repository.
+    This class keeps origin MOCK for any transport; the one CURRENT_EXTERNAL
+    responder is `provider_transport.CurrentExternalResponder`, which admits
+    only the genuine SDK transport.
+
+    A transport error or unknown usage keeps the full reservation and halts
+    the run in the durable ledger, so no restart, lane or new run identity
+    can send another request against the same authorization.
     """
 
     # This build contains fake transports only. Exercising authorization and
@@ -240,10 +248,19 @@ class CurrentModelResponder:
     def _refuse(self, code: str, detail: str = ""):
         raise ProviderRefusal(code, detail)
 
+    def _halt(self, reason: str) -> None:
+        self.halted = reason
+        halt = getattr(self.ledger, "halt", None)
+        if halt is not None:
+            halt(reason)
+
     def respond(self, request: dict) -> ProviderReply:
         from recognition_validation import model_authority as MA
         if self.halted:
             self._refuse(self.halted)
+        if getattr(self.ledger, "halted", None):
+            self.halted = self.ledger.halted
+            self._refuse("RUN_HALTED", self.halted)
         try:
             self.authority.admit()
         except C.ContractError as error:
@@ -264,6 +281,8 @@ class CurrentModelResponder:
         parameters = dict(request.get("parameters") or {})
         parameters["max_completion_tokens"] = self.authority.parameters.max_completion_tokens
         payload = {**parameters, "messages": messages}
+        if request.get("client_request_headers"):
+            payload["extra_headers"] = dict(request["client_request_headers"])
         request["evaluation_parameter_digest"] = self.authority.parameters.digest
         last = None
         for transport_attempt in range(1 + doc["max_transport_retries"]):
@@ -289,9 +308,15 @@ class CurrentModelResponder:
                 reservation_id, {"input_tokens": usage.get("prompt_tokens"),
                                  "output_tokens": usage.get("completion_tokens")}, self.authority.pricing)
             if settled.get("exceeded"):
-                self.halted = "USAGE_EXCEEDED_RESERVATION"
+                self._halt("USAGE_EXCEEDED_RESERVATION")
+            elif not settled.get("usage_known"):
+                self._halt("USAGE_UNKNOWN")
             request["usage_known"] = settled.get("usage_known")
+            request["finish_reason"] = reply.finish_reason
+            request["service_tier"] = reply.service_tier
             return reply
+        # Every authorized attempt failed with unknown usage: nothing further is sent.
+        self._halt("TRANSPORT_ERROR_USAGE_UNKNOWN")
         self._refuse("TRANSPORT_FAILED", str(last))
 
 
@@ -361,6 +386,8 @@ class BrainGateway:
             "system_prompt": system, "user_contents": users, "payload": payload,
             "parameters": {k: v for k, v in kwargs.items() if k not in ("messages", "extra_headers")},
             "client_parameters": {k: v for k, v in client_kwargs.items() if k != "api_key"},
+            # Production's own identity header (X-Client-Request-Id), forwarded unchanged by a real transport.
+            "client_request_headers": dict(kwargs.get("extra_headers") or {}),
             "input_digest": C.sha256_hex(users[0].encode("utf-8")) if users else None,
             "semantic_input_digest": CMP.semantic_input_digest(users[0]) if users else None,
             "prompt_digest": C.sha256_hex(system.encode("utf-8")),
