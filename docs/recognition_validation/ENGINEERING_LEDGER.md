@@ -1649,3 +1649,42 @@ retrieval unchanged. Defensive provenance check only; participation unchanged.
   "receipt_digest": "ab00c1e1d6f0339c596a18bf24720a07cfe299340d2da0ed283a4dc8b208170e"
 }
 ```
+
+## PROTECTED_STRUCTURE_RECONCILIATION_20261025: protected-life fact vs transfer authority (tests only)
+
+Parent 357668e. No source change: Brain brain:62fe5ecf46d75dc4 over 49 sources, retrieval
+unchanged, 32 protected pins unchanged. Adds permanent fact/authority separation regressions.
+
+```json ledger-entry
+{
+  "schema": "engineering_ledger_entry/v1",
+  "mission_id": "PROTECTED_STRUCTURE_RECONCILIATION_20261025",
+  "parent_sha": "357668ea8742cb4a7916580908be6fff5a0b82d7",
+  "parent_tree": "7dc4bb9ead0420b8352a155d9cfcd688109026a7",
+  "parent_tracked_status": "",
+  "brain_fingerprint": "brain:62fe5ecf46d75dc4",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_count": 49,
+  "closure_digest": "06087c8db29ded37d2f23525fd25e929d296bdc450d7ab702b524608ffcabddf",
+  "protected_count": 32,
+  "protected_digest": "79988f0ea3e84e15e34485a8510e78efc667f6e274d41fcde5d6e3c0307ab79a",
+  "policy_refs": [
+    "Codex PHASE 2 SCOPE LOCK (PHASE2_PROTECTED_STRUCTURE_CONTRACT_20261025.zip sha256 f135fdc8...): factual continuity of protected highs/lows is distinct from transfer authority; no blanket admission or birth-time rejection; D3=B/STRICT/INDEPENDENT_SUPPORTING_LIFE unchanged",
+    "Owner selection 2026-10-09 (M2 MISSION.md): D0=a; D1=a; roles 5m/15m; K=1; D3=B; D3_TIME=STRICT; BEARING=INDEPENDENT_SUPPORTING_LIFE; D4=a; D5=a; D6=a"
+  ],
+  "scoped_files": [
+    "tests/test_protected_structure_continuity.py",
+    "tests/fixtures/session_20261023_settled_tape.json",
+    "docs/recognition_validation/*"
+  ],
+  "proof_ids": [
+    "FRIDAY-FACT-AT-PROVIDER-SEAM-BOTH-LANES-NO-TRANSFER",
+    "C2-SURVIVING-HIGH-FACT-NOT-TRANSFER",
+    "ACTIVATED-MUTANTS-LOST-TRANSPORT-STALE-FUTURE-DUPLICATE-F6",
+    "FINAL-FROZEN-OFFLINE-SUITE"
+  ],
+  "closure_change_rationale": "No source change. Tests and a tape-only fixture pin the existing separation: the producer's current protected life reaches the next Brain input with its original identity across an ownership change, while a life registered before the incumbent's death does not become the new owner's load-bearing structure or complete a transfer. Brain brain:62fe5ecf46d75dc4, retrieval retr:0c241bdb8234d1ba, closure 49 and the 32 protected pins are unchanged.",
+  "predecessor_receipt_digest": "ab00c1e1d6f0339c596a18bf24720a07cfe299340d2da0ed283a4dc8b208170e",
+  "receipt_digest": "678b94c87cf86be97677b334e4fc957fc56803d8e0b5520b538c61f554966d95"
+}
+```
