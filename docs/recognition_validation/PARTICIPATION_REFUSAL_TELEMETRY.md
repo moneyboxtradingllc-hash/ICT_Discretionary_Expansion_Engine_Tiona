@@ -31,6 +31,14 @@ Strings ≤200 chars, lists ≤8, depth ≤2; a capture error yields a typed UNK
 
 - v1 (`candidate_decision.v1`) rows keep their original semantics exactly; parent journals are never rewritten.
 - `PARTICIPATION_REFUSED` is accounted only for a v2 record with a known gate, observed reason, matching identity, a recognized Lifecycle state with a reason (or the producer's own `current_campaign_lifecycle_assessment_unavailable`), and no consistency problems.
+- Identity is complete and belongs to the enclosing record (owner audit of 14c996c):
+  - `scan_id`, `contract` and `session_id` are required and equal the record's own;
+  - `settled_cutoff` is required, is a strict canonical instant (`market_data.object_identity.canonical_instant`), and equals the record's `timestamp_et`, which the loop writes from the same scan's settled `market_data_timestamp`. The scan-id clock (one minute later) is never used.
+- Every duplicated Lifecycle field equals the SAME record's `campaign_lifecycle_assessment`. Those fields are status, state, reason, permission, authorized direction, control state, phase, episode and objective.
+  - A producer gate's `campaign_lifecycle_refused:<STATE>` label names that state.
+  - `campaign_lifecycle_direction_mismatch` and a loop-binding refusal require a permissive assessment; `ACTIVE_DELIVERY` is valid for both.
+  - A missing or malformed assessment is incomplete, except the internally consistent assessment-unavailable refusal.
+- Optional supporting evidence (Draw, acceptance, scope, authored intent) stays typed UNKNOWN/ABSENT and is not required. This detects inconsistency; it does not authenticate an archive that was coherently rewritten.
 - A v1 row reclassified by `tools/topstepx_reclassify_decision_audit.py` (a separate copy that keeps `original_final_disposition`) becomes `PARTICIPATION_REFUSED` but stays incomplete: `legacy_record_lacks_participation_refusal_evidence`.
 - A v2 record whose stored disposition contradicts its own reason is `contradictory`; unknown reasons stay `UNCLASSIFIED`.
 

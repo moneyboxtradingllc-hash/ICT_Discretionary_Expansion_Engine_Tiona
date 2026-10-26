@@ -542,6 +542,48 @@ def attach_participation_evidence(record: dict, **kwargs) -> dict:
     return record
 
 
+def _instant_or_none(value):
+    """Canonical instant under the existing object-identity semantics, or None."""
+    try:
+        from market_data.object_identity import canonical_instant
+        return canonical_instant(value, strict=True) if value else None
+    except Exception:  # noqa: BLE001 -- unparseable chronology is not identity
+        return None
+
+
+#: Fields `participation_refusal` duplicates from `campaign_lifecycle_assessment`.
+_DUPLICATED_ASSESSMENT_FIELDS = (("lifecycle_state", "state"), ("lifecycle_reason", "reason"),
+                                 ("participation_permitted", "participation_permitted"),
+                                 ("authorized_direction", "authorized_direction"),
+                                 ("narrative_control_state", "narrative_control_state"),
+                                 ("narrative_phase", "narrative_phase"),
+                                 ("campaign_episode_id", "campaign_episode_id"),
+                                 ("objective_identity", "objective_identity"))
+
+
+def _assessment_disagreements(record: dict, block: dict, observed) -> list:
+    """The refusal's duplicated Lifecycle fields against the SAME record's assessment."""
+    assessment = record.get("campaign_lifecycle_assessment")
+    if not isinstance(assessment, dict) or assessment.get("schema") != LIFECYCLE_ASSESSMENT_SCHEMA:
+        return ["lifecycle_assessment_missing_or_malformed"]
+    if block.get("lifecycle_status") != assessment.get("status"):
+        return ["lifecycle_status_disagrees_with_assessment"]
+    if assessment.get("status") != "AVAILABLE":
+        return []
+    out = [f"{mine}_disagrees_with_assessment" for mine, theirs in _DUPLICATED_ASSESSMENT_FIELDS
+           if block.get(mine) != assessment.get(theirs)]
+    # The producer gate's own label names the state it refused on.
+    if block.get("gate") == PRODUCER_LIFECYCLE_GATE and isinstance(observed, str):
+        if observed.startswith("campaign_lifecycle_refused:") and \
+                observed.split(":", 1)[1] != assessment.get("state"):
+            out.append("gate_state_label_disagrees_with_assessment")
+        if observed == "campaign_lifecycle_direction_mismatch" and assessment.get("participation_permitted") is not True:
+            out.append("direction_mismatch_on_non_permissive_assessment")
+    if block.get("gate") == LOOP_PARTICIPATION_BINDING and assessment.get("participation_permitted") is not True:
+        out.append("binding_refusal_on_non_permissive_assessment")
+    return out
+
+
 def refusal_problems(record: dict) -> list:
     """Why a PARTICIPATION_REFUSED record is not (yet) accounted; [] when complete."""
     if record.get("schema_version") != SCHEMA_VERSION_V2:
@@ -561,11 +603,21 @@ def refusal_problems(record: dict) -> list:
     if not isinstance(observed, str) or not observed.strip():
         problems.append("observed_gate_reason_missing")
     identity = block.get("identity") if isinstance(block.get("identity"), dict) else {}
-    for key in ("scan_id", "contract"):
+    for key in ("scan_id", "contract", "session_id", "settled_cutoff"):
         if not isinstance(identity.get(key), str) or not identity.get(key).strip():
             problems.append(f"identity_{key}_missing")
-    if identity.get("scan_id") != record.get("scan_id") or identity.get("contract") != record.get("contract"):
+    if (identity.get("scan_id") != record.get("scan_id") or identity.get("contract") != record.get("contract")
+            or identity.get("session_id") != record.get("session_id")):
         problems.append("identity_disagrees_with_record")
+    # The enclosing record's `timestamp_et` is the scan's settled market timestamp
+    # (`market_data_timestamp` = snapshot timestamp), the same instant as the
+    # nested settled cutoff. Compared as canonical instants; never the scan-id clock.
+    cutoff = _instant_or_none(identity.get("settled_cutoff"))
+    if identity.get("settled_cutoff") and cutoff is None:
+        problems.append("identity_settled_cutoff_invalid")
+    if cutoff is not None and cutoff != _instant_or_none(record.get("timestamp_et")):
+        problems.append("identity_settled_cutoff_disagrees_with_record")
+    problems.extend(_assessment_disagreements(record, block, observed))
     if block.get("lifecycle_status") == "AVAILABLE":
         if block.get("gate") == PRODUCER_LIFECYCLE_GATE and block.get("lifecycle_state") not in \
                 _REFUSING_STATES + _PERMITTED_STATES:

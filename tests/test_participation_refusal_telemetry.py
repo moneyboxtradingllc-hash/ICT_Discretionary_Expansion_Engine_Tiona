@@ -282,7 +282,7 @@ def _scan_fixture(**over):
                  "authorized_direction": None, "campaign_episode_id": None, "objective_identity": None,
                  "campaign_draw_status": "UNKNOWN", "campaign_draw_binding": None,
                  "narrative_control_state": "developing_transfer", "narrative_phase": "transition"}
-    scan = {"snapshot_id": "scan-1", "scan_count": 7,
+    scan = {"snapshot_id": "scan-1", "scan_count": 7, "market_data_timestamp": "2026-08-19T03:10:00+00:00",
             "snapshot": {"timestamp": "2026-08-19T03:10:00+00:00", "contract_id": "CON.F.US.MNQ.Z26",
                          "campaign_lifecycle": lifecycle},
             "campaign_lifecycle": copy.deepcopy(lifecycle), "campaign_draw_acceptance": None}
@@ -298,7 +298,9 @@ def _producer_refusal(detail="campaign_lifecycle_refused:TRANSFER_UNRESOLVED"):
 
 def _evidence(scan, refusal, *, current=True, contract="CON.F.US.MNQ.Z26"):
     trace = getattr(refusal, "decision_trace", None)
-    record = R.build_record(session_id="S", scan_id=scan.get("snapshot_id"), timestamp_et="t", instrument="MNQ",
+    # As the loop writes it: timestamp_et is the scan's settled market timestamp.
+    record = R.build_record(session_id="S", scan_id=scan.get("snapshot_id"),
+                            timestamp_et=scan.get("market_data_timestamp"), instrument="MNQ",
                             contract=contract, parsed={"current_action": "stand_down"}, trace={},
                             disposition=R.terminal_disposition("campaign_lifecycle_refused"),
                             rejection_reason="campaign_lifecycle_refused", detail=str(refusal))
@@ -503,3 +505,121 @@ def test_a_refusal_handed_over_for_another_scan_is_never_read_and_is_consumed(tm
     record = _journal(tmp_path)[-1]
     assert record["participation_refusal"]["gate"] == R.PRODUCER_LIFECYCLE_GATE
     assert R.refusal_problems(record) == []
+
+
+# -- 6. the real session report on actual loop-emitted records (owner audit 14c996c) ----
+#
+# Each case copies ONE actual v2 record the disarmed loop wrote, changes one
+# diagnostic field, writes a JSONL journal and calls the real report consumer
+# (`tools/topstepx_session_outcome_report.py::decisions` -> reconcile ->
+# refusal_problems). No market, Brain or permission input changes.
+
+@pytest.fixture(scope="module", params=[False, True], ids=["non-ecu", "ecu"])
+def emitted(request, tmp_path_factory):
+    root = tmp_path_factory.mktemp("emitted")
+    with pytest.MonkeyPatch.context() as mp:
+        G._loop(root / "healthy", mp, C._HEALTHY, ecu=request.param, arm_at=None)
+        records = _journal(root / "healthy")
+    refused = [r for r in records if r["final_rejection_reason"] == "campaign_lifecycle_refused"]
+    assert refused and all(r["participation_refusal"]["gate"] == R.PRODUCER_LIFECYCLE_GATE for r in refused)
+    return refused
+
+
+def _through_report(tmp_path, monkeypatch, rows):
+    monkeypatch.setenv("REPLAY_SESSIONS_DIR", str(tmp_path))
+    from ai_retrieval.retrieval_telemetry import session_root
+    session = rows[0]["session_id"]
+    root = Path(session_root(session))
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "candidate_decisions.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    return _tool("topstepx_session_outcome_report").decisions(session)["reconciliation"]
+
+
+def _scan_id_clock(record):
+    # scan-20260819T143700 -> 2026-08-19T14:37:00+00:00: the scan clock, NOT the settled cutoff.
+    stamp = record["scan_id"].split("-", 1)[1]
+    return f"{stamp[:4]}-{stamp[4:6]}-{stamp[6:8]}T{stamp[9:11]}:{stamp[11:13]}:{stamp[13:15]}+00:00"
+
+
+READER_ATTACKS = {
+    # The four owner-audit cases, verbatim.
+    "foreign_identity_session": lambda r: r["participation_refusal"]["identity"].update(session_id="FOREIGN-SESSION"),
+    "missing_settled_cutoff": lambda r: r["participation_refusal"]["identity"].update(settled_cutoff=None),
+    "conflicting_lifecycle_reason": lambda r: r["participation_refusal"].update(
+        lifecycle_reason="opposite_to_the_same_record_assessment"),
+    "conflicting_lifecycle_state": lambda r: r["participation_refusal"].update(
+        lifecycle_state="DESTINATION_SUBSTANTIALLY_DELIVERED"),
+    # The same two relations, other ways to break them.
+    "missing_identity_session": lambda r: r["participation_refusal"]["identity"].update(session_id=None),
+    "naive_settled_cutoff": lambda r: r["participation_refusal"]["identity"].update(
+        settled_cutoff=r["timestamp_et"][:19]),
+    "unparseable_settled_cutoff": lambda r: r["participation_refusal"]["identity"].update(settled_cutoff="soon"),
+    "scan_clock_as_settled_cutoff": lambda r: r["participation_refusal"]["identity"].update(
+        settled_cutoff=_scan_id_clock(r)),
+    "conflicting_permission": lambda r: r["participation_refusal"].update(participation_permitted=True),
+    "conflicting_control_state": lambda r: r["participation_refusal"].update(narrative_control_state="campaign_x"),
+    "conflicting_status": lambda r: r["participation_refusal"].update(lifecycle_status="UNKNOWN"),
+    "assessment_removed": lambda r: r.update(campaign_lifecycle_assessment=None),
+    "assessment_state_rewritten_alone": lambda r: r["campaign_lifecycle_assessment"].update(state="ESTABLISHING"),
+}
+
+
+def test_untouched_emitted_records_reconcile_through_the_real_report(emitted, tmp_path, monkeypatch):
+    assert _through_report(tmp_path, monkeypatch, emitted)["status"] == "RECONCILED"
+
+
+@pytest.mark.parametrize("attack", list(READER_ATTACKS))
+def test_inconsistent_or_incomplete_refusal_evidence_never_reports_complete(emitted, tmp_path, monkeypatch,
+                                                                            attack):
+    row = copy.deepcopy(emitted[0])
+    assert R.refusal_problems(row) == []
+    READER_ATTACKS[attack](row)
+    result = _through_report(tmp_path, monkeypatch, [row])
+    assert result["status"] == "CANDIDATE_DECISION_ACCOUNTING_FAILURE", (attack, result)
+    assert result["participation_refusal_incomplete"] == 1 and result["problems"]
+
+
+def test_scan_clock_differs_from_the_settled_cutoff_in_real_records(emitted):
+    row = emitted[0]
+    assert row["participation_refusal"]["identity"]["settled_cutoff"] == row["timestamp_et"]
+    assert _scan_id_clock(row) != row["timestamp_et"], "the scan clock is one minute after the settled bar"
+
+
+def test_equal_instants_in_other_spellings_still_reconcile(emitted, tmp_path, monkeypatch):
+    row = copy.deepcopy(emitted[0])
+    row["participation_refusal"]["identity"]["settled_cutoff"] = row["timestamp_et"].replace("+00:00", "Z")
+    assert _through_report(tmp_path, monkeypatch, [row])["status"] == "RECONCILED"
+
+
+def test_valid_binding_direction_and_unavailable_refusals_still_reconcile_through_the_report(tmp_path,
+                                                                                             monkeypatch):
+    permissive = {"schema_version": 1, "state": "ACTIVE_DELIVERY", "reason": "validated_brain_delivery_with_intact_owner",
+                  "participation_permitted": True, "authorized_direction": "bearish",
+                  "campaign_episode_id": "episode-1", "objective_identity": "objective-1",
+                  "campaign_draw_status": "PROVEN_NOT_DELIVERED", "campaign_draw_binding": None,
+                  "narrative_control_state": "campaign_established", "narrative_phase": "continuation"}
+    binding = _evidence(_scan_fixture(snapshot={**_scan_fixture()["snapshot"], "campaign_lifecycle": permissive}),
+                        NoCandidate("campaign_lifecycle_refused", "campaign_draw_scope_mismatch"), current=False)
+    direction_scan = _scan_fixture(snapshot_id="scan-2", snapshot={**_scan_fixture()["snapshot"],
+                                                                   "campaign_lifecycle": permissive})
+    mismatch = _producer_refusal("campaign_lifecycle_direction_mismatch")
+    mismatch.decision_trace = {"campaign_lifecycle_state": "ACTIVE_DELIVERY",
+                               "campaign_lifecycle_refusal": "campaign_lifecycle_direction_mismatch"}
+    direction = _evidence(direction_scan, mismatch)
+    absent_snapshot = {k: v for k, v in _scan_fixture()["snapshot"].items() if k != "campaign_lifecycle"}
+    unavailable_refusal = _producer_refusal("current_campaign_lifecycle_assessment_unavailable")
+    unavailable_refusal.decision_trace = {"campaign_lifecycle_state": None,
+                                          "campaign_lifecycle_refusal": "current_campaign_lifecycle_assessment_unavailable"}
+    unavailable = _evidence(_scan_fixture(snapshot_id="scan-3", snapshot=absent_snapshot, campaign_lifecycle=None),
+                            unavailable_refusal)
+    for record in (binding, direction, unavailable):
+        assert R.refusal_problems(record) == [], record["participation_refusal"]
+    assert binding["participation_refusal"]["gate"] == R.LOOP_PARTICIPATION_BINDING
+    assert direction["participation_refusal"]["lifecycle_state"] == "ACTIVE_DELIVERY"
+    assert unavailable["participation_refusal"]["lifecycle_status"] == "UNKNOWN"
+    assert _through_report(tmp_path, monkeypatch, [binding, direction, unavailable])["status"] == "RECONCILED"
+    # A direction mismatch on a NON-permissive assessment is a contradiction.
+    wrong = copy.deepcopy(direction)
+    for record_part in (wrong["campaign_lifecycle_assessment"], wrong["participation_refusal"]):
+        record_part["participation_permitted"] = False
+    assert "direction_mismatch_on_non_permissive_assessment" in R.refusal_problems(wrong)

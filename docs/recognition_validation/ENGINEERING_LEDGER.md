@@ -1802,3 +1802,48 @@ natural-model recognition remain unproven; production remains disarmed.
   "receipt_digest": "3b415ed2180e369643473df41e28c81c07a2d98a1f2603b224ae7bd9fc844873"
 }
 ```
+
+## PARTICIPATION_REFUSAL_TELEMETRY_CORRECTION_20261026: refusal identity and assessment relationships in reconciliation
+
+Parent 14c996c (the audited telemetry submission). Brain fingerprint unchanged brain:43569c8bd11004d7;
+retrieval unchanged retr:0c241bdb8234d1ba; closure 49; 32 protected pins unchanged. Codex's independent
+audit showed the real session report reconciling refusal records with a foreign nested session, no
+settled cutoff, or a nested Lifecycle state/reason contradicting the same record's assessment. The
+reader now requires session and settled-cutoff identity belonging to the enclosing record and every
+duplicated Lifecycle field agreeing with that record's assessment. Reader validation only; no capture,
+loop, participation, Lifecycle, Draw, D3, risk or execution change.
+
+```json ledger-entry
+{
+  "schema": "engineering_ledger_entry/v1",
+  "mission_id": "PARTICIPATION_REFUSAL_TELEMETRY_CORRECTION_20261026",
+  "parent_sha": "14c996cea5b636beaba9d0e0a3d4d73dee8b4fdc",
+  "parent_tree": "5cb9414e5958e27a2b588e88b4301b57be1112de",
+  "parent_tracked_status": "",
+  "brain_fingerprint": "brain:43569c8bd11004d7",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_count": 49,
+  "closure_digest": "e15f849323e1cdbaa2266b1ddffbe91c6af638083e3724b9bcb9d1d5f5fffc0f",
+  "protected_count": 32,
+  "protected_digest": "79988f0ea3e84e15e34485a8510e78efc667f6e274d41fcde5d6e3c0307ab79a",
+  "policy_refs": [
+    "Codex independent telemetry audit of 14c996c (email 1a1761ba4f60d14b; OWNER_TELEMETRY_AUDIT_14c996c.zip sha256 e8700d5fa162c7f176959e2a7126d4bdbda715728f8fe18e12cd881edae14a9b; 00_INDEPENDENT_TELEMETRY_AUDIT.md, 01_BOUNDED_CORRECTION_REQUEST.txt): validate refusal session/settled-cutoff identity against the enclosing record under existing timestamp semantics and duplicated Lifecycle fields against the same record's assessment; preserve valid binding, direction-mismatch and assessment-unavailable refusals; optional evidence stays UNKNOWN/ABSENT",
+    "Codex telemetry repair contract (email 1a17533dba44f946): observational only; no participation, Lifecycle, Draw, D3, risk or execution change"
+  ],
+  "scoped_files": [
+    "src/broker/candidate_decision_record.py",
+    "tests/test_participation_refusal_telemetry.py",
+    "docs/recognition_validation/*"
+  ],
+  "proof_ids": [
+    "OWNER-READER-AUDIT-2-PASS-8-FAIL-AT-14C996C-10-PASS-AT-FINAL",
+    "PERMANENT-REAL-READER-13-ATTACKS-BOTH-LANES-24-FAIL-AT-14C996C",
+    "VALID-BINDING-DIRECTION-UNAVAILABLE-STILL-RECONCILE",
+    "ACTIVATED-READER-MUTANTS-M7-M9",
+    "FINAL-FROZEN-OFFLINE-SUITE"
+  ],
+  "closure_change_rationale": "No bound Brain closure source changes: only candidate_decision_record (not bound, not protected) gains reader relationship checks, so the measured Brain fingerprint stays brain:43569c8bd11004d7 and retrieval retr:0c241bdb8234d1ba (closure 49, 32 protected pins unchanged); no literal is repinned. refusal_problems now requires the refusal identity's session_id and settled_cutoff, requires them to belong to the enclosing record (session equal; cutoff a strict canonical instant equal to the record's settled timestamp_et, never the scan-id clock), and requires every duplicated Lifecycle field and the producer gate's state label to agree with the same record's campaign_lifecycle_assessment. Reader validation only.",
+  "predecessor_receipt_digest": "3b415ed2180e369643473df41e28c81c07a2d98a1f2603b224ae7bd9fc844873",
+  "receipt_digest": "7a900a64c417add61caac0106923ae91238576bb3facab0401f126ce1366c1c0"
+}
+```
