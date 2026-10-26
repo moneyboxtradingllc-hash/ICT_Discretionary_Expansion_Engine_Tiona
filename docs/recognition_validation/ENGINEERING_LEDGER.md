@@ -1847,3 +1847,54 @@ loop, participation, Lifecycle, Draw, D3, risk or execution change.
   "receipt_digest": "7a900a64c417add61caac0106923ae91238576bb3facab0401f126ce1366c1c0"
 }
 ```
+
+
+## LOCAL_AUTHORITY_MEMBER_ORDER_20261026: source-owned constituent member order (profile-gated)
+
+Parent ec8197e (accepted telemetry correction). Mission 1 of the bounded local-authority assignment.
+A same-direction successor whose native parent raid bucket opens before the local failure may use the
+CURRENT producer's constituent member-order witness to prove the first strict crossing settled after
+the failure (Friday 11:40 bucket, 11:43 failure, 11:44 crossing). The 12:23 same-minute case stays
+refused. Native ids/times and scoped D3 R are unchanged. Produced and consumed only when the cycle is
+built with the exact offline profile; a default cycle publishes the accepted snapshots. Brain
+fingerprint becomes brain:920427791c12a485 (closure 50); retrieval unchanged; 32 protected pins unchanged.
+
+```json ledger-entry
+{
+  "schema": "engineering_ledger_entry/v1",
+  "mission_id": "LOCAL_AUTHORITY_MEMBER_ORDER_20261026",
+  "parent_sha": "ec8197ec5411fcbcae5b25ba5a4c395f82c122cc",
+  "parent_tree": "f28923b6b758cff123cb661600fca14dff9fd503",
+  "parent_tracked_status": "",
+  "brain_fingerprint": "brain:43569c8bd11004d7",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_count": 49,
+  "closure_digest": "e15f849323e1cdbaa2266b1ddffbe91c6af638083e3724b9bcb9d1d5f5fffc0f",
+  "protected_count": 32,
+  "protected_digest": "79988f0ea3e84e15e34485a8510e78efc667f6e274d41fcde5d6e3c0307ab79a",
+  "policy_refs": [
+    "Maurice/Codex bounded engineering assignment (email 1a17a3c81f0186b6; TIONA_COMPLETE_LOCAL_AUTHORITY_ENGINEERING_HANDOFF_20261026.zip sha256 5776e5225a93c3562058f52be522c49d5302845a90b27901a7416132897f25b6; 02_CLAUDE_COMPLETE_ENGINEERING_MISSION.md Mission 1; support/doctrine_reconciliation/01_MEMBER_ORDER_ENGINEERING_CONTRACT.md): source-owned constituent member-order witness for the same-direction successor only; native ids/times and scoped D3 R unchanged; same-minute order stays refused",
+    "Permission-changing routes disabled by default with an explicit versioned offline test profile; default-off behaviour and 32 protected pins unchanged"
+  ],
+  "scoped_files": [
+    "src/market_data/local_authority.py",
+    "src/live_scan/production_scan_cycle.py",
+    "src/ai_brain/narrative_continuity.py",
+    "src/ai_brain/production_model.py",
+    "src/recognition_validation/examples/*",
+    "tests/*",
+    "docs/recognition_validation/*"
+  ],
+  "proof_ids": [
+    "FRIDAY-11-44-WITNESS-POSITIVE-11-49-SUCCESSOR",
+    "FRIDAY-12-23-SAME-MINUTE-REFUSED",
+    "DEFAULT-OFF-PARENT-REFUSAL-AND-PATH-IDENTITY",
+    "CONSTRUCTED-MIRRORED-BEARISH-POSITIVE",
+    "COPIED-REVOKED-STALE-DUPLICATE-RESTART-REVISION",
+    "DISARMED-LOOP-BOTH-ECU-CANDIDATE-AND-CONSUMER-REFUSALS"
+  ],
+  "closure_change_rationale": "Bound sources change: production_scan_cycle gains an optional local_authority_profile (default None = DISABLED) and a pre-publication _advance_local_authority step sealed by the existing campaign-scope publication; narrative_continuity's same-direction successor proof may use the current producer's authenticated constituent member-order witness for the origin-versus-failure order only (all other checks unchanged; later progression/support must follow the proved crossing) and a witness-dependent generation continues only while the witness is current; production_model binds the new local_authority module (closure 49 -> 50). A disabled cycle publishes the accepted snapshots. The measured Brain fingerprint becomes brain:920427791c12a485 (retrieval unchanged); the seven literal expectations and the closure-count literal are repinned. Participation-policy expansion under the offline profile only; no risk, execution, Draw, Lifecycle or scoped D3 change.",
+  "predecessor_receipt_digest": "7a900a64c417add61caac0106923ae91238576bb3facab0401f126ce1366c1c0",
+  "receipt_digest": "94aca33a3a53a3d6f6055c60450681d9e73a4b0a0a54868000e518946c6e8b9c"
+}
+```

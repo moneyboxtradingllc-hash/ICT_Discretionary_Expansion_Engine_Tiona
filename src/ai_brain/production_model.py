@@ -316,6 +316,9 @@ _CONTRACT_SOURCES = (
     # unfingerprinted change to how survival is measured.
     ("campaign_premise", "market_data/campaign_premise.py"),
     ("campaign_scope", "market_data/campaign_scope.py"),
+    # LOCAL-AUTHORITY-20261026. Profile-gated local proof producer/resolver.
+    # Disabled by default, but load-bearing whenever enabled, so it is bound.
+    ("local_authority", "market_data/local_authority.py"),
 )
 
 #: REPO-ROOT-RELATIVE closure. Same contract, different anchor.

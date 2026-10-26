@@ -274,10 +274,24 @@ def _same_direction_successor_proof(path, snapshot, direction):
     origin_source = _aware_datetime(origin.get("source_bar_time"))
     invalidated_observed = _aware_datetime(invalidated.get("at"))
     origin_observed = _aware_datetime(origin.get("at"))
-    if not (invalidated_source and origin_source and origin_source > invalidated_source
-            and invalidated_observed and origin_observed
+    if not (invalidated_observed and origin_observed
             and origin_observed > invalidated_observed):
         return None
+    # The causal source event every later fact must follow. Natively it is the
+    # origin's own bucket open. LOCAL-AUTHORITY-20261026 (profile-gated): when
+    # that coarse bucket opened before the failure, the CURRENT producer's
+    # constituent-member witness may prove the first strict crossing happened
+    # after the failure settled; the event is then that crossing minute. The
+    # native ids/times stay untouched and every later check is unchanged.
+    witness = None
+    causal_source = origin_source
+    if not (invalidated_source and origin_source and origin_source > invalidated_source):
+        from market_data.local_authority import authenticated_member_order
+        witness = authenticated_member_order(path, snapshot, direction)
+        causal_source = _aware_datetime(
+            ((witness or {}).get("first_crossing") or {}).get("timestamp"))
+        if not (witness and invalidated_source and origin_source and causal_source):
+            return None
 
     progression = path.get("progression")
     supporting = (progression.get("supporting_timeframes")
@@ -295,7 +309,7 @@ def _same_direction_successor_proof(path, snapshot, direction):
             or not _aware_datetime(latest.get("at"))):
         return None
     latest_source = _aware_datetime(latest.get("source_bar_time"))
-    if not (latest_source and latest_source > origin_source
+    if not (latest_source and latest_source > causal_source
             and _aware_datetime(latest.get("at")) > origin_observed):
         return None
 
@@ -310,7 +324,7 @@ def _same_direction_successor_proof(path, snapshot, direction):
             and bearing.get("occurrence_id")
             and bearing.get("intact") is True
             and bearing.get("producer_backed") is True
-            and bearing_source and bearing_source > origin_source):
+            and bearing_source and bearing_source > causal_source):
         return None
 
     evidence = path.get("transfer_evidence")
@@ -324,7 +338,7 @@ def _same_direction_successor_proof(path, snapshot, direction):
     if any(evidence.get(name) is True for name in required_flags):
         return None
 
-    return {
+    proof = {
         "status": "verified",
         "direction": direction,
         "prior_invalidation": dict(invalidated),
@@ -334,6 +348,13 @@ def _same_direction_successor_proof(path, snapshot, direction):
         "contract_id": snapshot_contract,
         "session": current_session,
     }
+    if witness is not None:
+        # The evidence basis is explicit; native event_time/source_bar_time
+        # inside `successor_origin` are the producer's, never overwritten.
+        proof["order_basis"] = "constituent_member_order_witness"
+        proof["causal_source_event_time"] = causal_source.isoformat()
+        proof["member_order_witness_id"] = witness.get("witness_id")
+    return proof
 
 
 def _transfer_proof(path, from_direction, to_direction):
@@ -446,6 +467,16 @@ def build_narrative_continuity(snapshot: dict, stance_history: dict) -> dict:
     successor = (_same_direction_successor_proof(path, snap, prior_direction)
                  if (not path_identity_conflict and incumbent_failed
                      and owner == prior_direction) else None)
+    # LOCAL-AUTHORITY-20261026 (profile-gated; a default path carries no
+    # witness, so this is always False there). A generation that exists only
+    # by the member-order witness is legitimate only while the CURRENT
+    # producer still issues that witness, on every continuing scan.
+    witness_unproven = False
+    if not path_identity_conflict and owner:
+        from market_data.local_authority import (authenticated_member_order,
+                                                 member_order_dependent)
+        witness_unproven = bool(member_order_dependent(path, owner)
+                                and authenticated_member_order(path, snap, owner) is None)
 
     transfer_flags = ((path.get("transfer_evidence") or {})
                       if isinstance(path.get("transfer_evidence"), dict) else {})
@@ -468,6 +499,9 @@ def build_narrative_continuity(snapshot: dict, stance_history: dict) -> dict:
         # structure and does not constitute a directional transfer.
         control_state = "campaign_established"
         dominant_direction = owner
+    elif witness_unproven:
+        control_state = "unresolved"
+        dominant_direction = None
     elif prior_established:
         dominant_direction = None if incumbent_failed else prior_direction
         if not path_available:

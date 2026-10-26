@@ -49,7 +49,8 @@ class ProductionScanCycle:
 
     def __init__(self, symbol: str = "MNQ", *, account_provider=None,
                  capital_identity: dict = None, session_id: str = "",
-                 contract_id: str = "", quote_provider=None) -> None:
+                 contract_id: str = "", quote_provider=None,
+                 local_authority_profile=None) -> None:
         # Supplies the REAL pinned Topstep account. Without it capital metrics
         # have no equity and contribute nothing — which is correct, and far
         # better than the retired fallback that read an Alpaca balance.
@@ -191,6 +192,12 @@ class ProductionScanCycle:
         if isinstance(prior_scope, CampaignScopeCustody):
             prior_scope.reset("history_revision")
         self.campaign_scope_custody = CampaignScopeCustody()
+        # LOCAL-AUTHORITY-20261026. Explicit, versioned and DISABLED unless the
+        # exact offline profile object is passed; no launch path passes one.
+        # Only that object's identity enables a refinement (`resolve_profile`).
+        from market_data.local_authority import LocalAuthority
+        self._local_authority_profile = local_authority_profile
+        self.local_authority = LocalAuthority(local_authority_profile)
 
     # ── candle-derived state, re-derived from repaired history ────────────────
     #
@@ -247,6 +254,9 @@ class ProductionScanCycle:
         # tape; a revised tape retires them. Production retains no chains.
         "campaign_premise_shadow",
         "campaign_scope_custody",
+        # LOCAL-AUTHORITY-20261026. Its issue record certifies facts of the
+        # exact settled tape; a revised tape retires it with the custody.
+        "local_authority",
         "_processed_tip", "_chronology_owned", "_chronology_rows", "_chronology_window",
         "_chronology_pre_trackers",
         "_chronology_state_cache", "_chronology_coverage",
@@ -286,6 +296,9 @@ class ProductionScanCycle:
         "contract_id", "occurrence_ledger", "occurrence_ledger_status",
         "occurrence_ledger_error", "last_occurrence_persistence_status",
         "last_occurrence_persistence_error",
+        # LOCAL-AUTHORITY-20261026. Launch configuration (normally None), not a
+        # fact: the rebuilt issue record is re-resolved from this same value.
+        "_local_authority_profile",
     )
 
     #: COGNITIVE state — RE-ANCHORED, never replayed. (CONTINUITY-2B.)
@@ -366,6 +379,9 @@ class ProductionScanCycle:
         if isinstance(prior_scope, CampaignScopeCustody):
             prior_scope.reset("history_revision")
         self.campaign_scope_custody = CampaignScopeCustody()
+        from market_data.local_authority import LocalAuthority
+        self.local_authority = LocalAuthority(
+            getattr(self, "_local_authority_profile", None))
         from market_data.reversal_formation import ReversalFormationCustody
         prior_formation = getattr(self, "reversal_formation_custody", None)
         if isinstance(prior_formation, ReversalFormationCustody):
@@ -1616,13 +1632,16 @@ class ProductionScanCycle:
         from market_data.campaign_scope import CampaignScopeCustody
         facts = snapshot.get("campaign_premise_shadow") or {}
         try:
-            return self.campaign_scope_custody.advance(
+            self._advance_local_authority(snapshot, raw_data)
+            published = self.campaign_scope_custody.advance(
                 owner=self, snapshot=snapshot,
                 settled_1m=(raw_data or {}).get("1m") or [],
                 ledger_rows=self._current_chronology_occurrences(),
                 history_revision=self._history.revision, contract_id=self.contract_id,
                 market_session=production_session_key(snapshot.get("timestamp")),
                 available=facts.get("status") == "AVAILABLE" and self.derived_state_is_current())
+            self.local_authority.seal(self.campaign_scope_custody)
+            return published
         except Exception as exc:  # Consumer ownership checks fail closed.
             custody = getattr(self, "campaign_scope_custody", None)
             if isinstance(custody, CampaignScopeCustody):
@@ -1634,6 +1653,29 @@ class ProductionScanCycle:
             snapshot["campaign_scope_custody"] = dict(refused)
             snapshot.pop("campaign_premise_catalog", None)
             return refused
+
+    def _advance_local_authority(self, snapshot: dict, raw_data: dict) -> None:
+        """LOCAL-AUTHORITY-20261026: profile-gated producer facts, pre-publication.
+
+        A disabled cycle (every launch path) returns at once and publishes the
+        accepted snapshot unchanged. An enabled one attaches only witnesses it
+        derived from this cutoff's own settled prefix and chronology, before
+        the scope custody seals `active_path_state` into its publication.
+        """
+        from market_state.active_path import production_session_key
+        authority = getattr(self, "local_authority", None)
+        if authority is None or not authority.enabled:
+            return
+        try:
+            authority.advance(
+                cycle=self, snapshot=snapshot,
+                settled_1m=(raw_data or {}).get("1m") or [],
+                ledger_rows=self._current_chronology_occurrences(),
+                contract_id=self.contract_id,
+                market_session=production_session_key(snapshot.get("timestamp")),
+                history_revision=self._history.revision)
+        except Exception as exc:  # noqa: BLE001 -- unverifiable authority is absent
+            authority.revoke(f"local_authority_error:{type(exc).__name__}")
 
     def _advance_campaign_premise_shadow(self, snapshot: dict, raw_data: dict) -> dict:
         """STAGE 3C-1: detached shadow premise facts, authority "none".
