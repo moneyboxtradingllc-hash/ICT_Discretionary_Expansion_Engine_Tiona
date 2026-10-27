@@ -201,7 +201,7 @@ def _owner_has_live_structure(path, direction):
                 and bearing.get("intact") is True)
 
 
-def _authoritative_opposing_origin(origin, to_direction):
+def _authoritative_opposing_origin(origin, to_direction, *, local_route=None):
     """Validate a typed deterministic origin family without defining reversal.
 
     A new family must be separately derived from existing deterministic facts
@@ -215,6 +215,15 @@ def _authoritative_opposing_origin(origin, to_direction):
     if family == "rejected_raid_reclaim":
         return (origin.get("event") == expected_event
                 and origin.get("direction") == to_direction)
+    # LOCAL-AUTHORITY-20261026: the profile-gated earlier-raid/later-confirmed
+    # delivery-change family. Valid only when the CURRENT producer issued this
+    # exact market proof for this snapshot; a label or digest alone is nothing.
+    from market_data.local_authority import DELIVERY_CHANGE_EVENT, DELIVERY_CHANGE_FAMILY
+    if family == DELIVERY_CHANGE_FAMILY:
+        return bool(isinstance(local_route, dict) and origin.get("local_proof_id")
+                    and local_route.get("delivery_change") == origin.get("local_proof_id")
+                    and origin.get("event") == DELIVERY_CHANGE_EVENT
+                    and origin.get("direction") == to_direction)
     return False
 
 
@@ -357,13 +366,21 @@ def _same_direction_successor_proof(path, snapshot, direction):
     return proof
 
 
-def _transfer_proof(path, from_direction, to_direction):
+def _transfer_proof(path, from_direction, to_direction, *, snapshot=None):
     """Return a verified state proof, or None when the chain is incomplete.
 
     `confirmed_transfer` names the market state. `proof_family` names the
     deterministic causal route currently supporting that state.
+
+    LOCAL-AUTHORITY-20261026: a path carrying a profile-gated local refinement
+    (delivery-change origin or revalidated retained support) proves nothing
+    unless `snapshot` is the current producer publication that issued it.
     """
     if not isinstance(path, dict) or path.get("state_available") is not True:
+        return None
+    from market_data.local_authority import authenticated_local_route
+    local_route = authenticated_local_route(path, snapshot)
+    if local_route is None:
         return None
     if (_direction(from_direction) is None or _direction(to_direction) is None
             or from_direction == to_direction):
@@ -379,14 +396,14 @@ def _transfer_proof(path, from_direction, to_direction):
     if not (
         died.get("owner") == from_direction
         and died_at and origin_at and _timestamp_after(origin_at, died_at)
-        and _authoritative_opposing_origin(origin, to_direction)
+        and _authoritative_opposing_origin(origin, to_direction, local_route=local_route)
         and (progression.get("supporting_timeframes")
              or progression.get("highest_confirmed"))
         and bearing and bearing.get("side") == expected_side
         and bearing.get("intact") is True
     ):
         return None
-    return {
+    proof = {
         "status": "verified",
         "from_direction": from_direction,
         "to_direction": to_direction,
@@ -403,6 +420,9 @@ def _transfer_proof(path, from_direction, to_direction):
         "opposing_owner": path.get("owner"),
         "load_bearing_structure": bearing,
     }
+    if local_route:
+        proof["local_authority_route"] = dict(local_route)
+    return proof
 
 
 def _same_session(last, snapshot, path):
@@ -458,7 +478,7 @@ def build_narrative_continuity(snapshot: dict, stance_history: dict) -> dict:
               and _timestamp_after(last_invalidated_at, prior_at))
              or prior_leg_failure_status == "occurred")
     )
-    proof = (_transfer_proof(path, prior_direction, owner)
+    proof = (_transfer_proof(path, prior_direction, owner, snapshot=snap)
              if (not path_identity_conflict
                  and (prior_established or incumbent_failed)
                  and owner and incumbent_failed) else None)
@@ -473,10 +493,12 @@ def build_narrative_continuity(snapshot: dict, stance_history: dict) -> dict:
     # producer still issues that witness, on every continuing scan.
     witness_unproven = False
     if not path_identity_conflict and owner:
-        from market_data.local_authority import (authenticated_member_order,
+        from market_data.local_authority import (authenticated_local_route,
+                                                 authenticated_member_order,
                                                  member_order_dependent)
-        witness_unproven = bool(member_order_dependent(path, owner)
-                                and authenticated_member_order(path, snap, owner) is None)
+        witness_unproven = bool((member_order_dependent(path, owner)
+                                 and authenticated_member_order(path, snap, owner) is None)
+                                or authenticated_local_route(path, snap) is None)
 
     transfer_flags = ((path.get("transfer_evidence") or {})
                       if isinstance(path.get("transfer_evidence"), dict) else {})
@@ -741,6 +763,13 @@ def _apply_campaign_scope(snapshot, local):
         return local
     # Continuing custody does not replay the accepted activation proof. A local
     # opposing transfer, failure or challenge cannot replace this campaign.
+    # LOCAL-AUTHORITY-20261026: a profile-gated local refinement is UNBOUND-only;
+    # it never counts as a bound campaign's live leg.
+    from market_data.local_authority import local_refinements
+    if any(local_refinements(path).values()):
+        local.update(control_state="unresolved", transfer_confirmed=False, transfer_proof=None,
+                     confirmed_from=None, confirmed_to=None)
+        return local
     flags = path.get("transfer_evidence") or {}
     names = ("opposing_structure_break", "load_bearing_failure",
              "load_bearing_replaced_against_path", "ambiguous_load_bearing_invalidation")

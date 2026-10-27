@@ -222,6 +222,10 @@ def capture(*, scope, candidate, scan, brain_block, brain_result,
 
     snapshot = (scan or {}).get("snapshot") or {}
     campaign_scope = _current_scope_binding(snapshot)
+    try:
+        local_authority = _current_local_binding(snapshot, (candidate.direction or ""))
+    except ValueError:
+        raise ValueError("conditional_plan_local_authority_not_current") from None
     output = (brain_block or {}).get("output")
     parsed = (brain_result or {}).get("parsed")
     lifecycle = snapshot.get("campaign_lifecycle")
@@ -374,6 +378,9 @@ def capture(*, scope, candidate, scan, brain_block, brain_result,
         "objective": objective,
         "transfer_evidence": extras.get("conditional_plan_transfer_evidence"),
     }
+    if local_authority is not None:
+        # LOCAL-AUTHORITY-20261026: only a profile-gated local route adds this.
+        payload["local_authority_binding"] = local_authority
     return ConditionalPlanAuthority(_json(payload), scope, _SEAL)
 
 
@@ -474,6 +481,12 @@ def validate(*, authority, scope, candidate, candidate_at_trigger,
         return refuse("campaign_scope_changed")
     if current_scope != bound.get("campaign_scope_binding"):
         return refuse("campaign_scope_changed")
+    try:
+        current_local = _current_local_binding(snap, direction)
+    except ValueError:
+        return refuse("conditional_plan_local_authority_changed")
+    if current_local != bound.get("local_authority_binding"):
+        return refuse("conditional_plan_local_authority_changed")
     if (bound.get("tool_family") == ["po3_reversal_order_block"]
             and (not bound.get("participation_object")
                  or _current_po3_binding(snap, direction, bound.get("occurrence_id"))
@@ -525,7 +538,7 @@ def validate(*, authority, scope, candidate, candidate_at_trigger,
         current_proof = _transfer_proof(
             snap.get("active_path_state") or {},
             bound_transfer.get("from_direction"),
-            bound_transfer.get("to_direction"))
+            bound_transfer.get("to_direction"), snapshot=snap)
         current_binding = _transfer_binding(
             current_proof, contract_id=contract_id,
             session=current_path.get("session"))
@@ -594,6 +607,8 @@ def validate(*, authority, scope, candidate, candidate_at_trigger,
                     "narrative_phase": lifecycle.get("narrative_phase"),
                 },
                 "authoring_transfer_proof": bound.get("authoring_transfer_proof")}
+    if current_local is not None:
+        evidence["local_authority_binding"] = current_local
     _CURRENT_CHECKS[authority] = {"snapshot": snap,
                                 "trigger_snapshot_id": evidence["trigger_snapshot_id"]}
     return True, None, evidence
@@ -618,6 +633,17 @@ def _current_po3_binding(snapshot, direction, occurrence_id):
         return json.loads(_json(row))
     except (TypeError, ValueError, AttributeError):
         return None
+
+
+def _current_local_binding(snapshot, direction):
+    """LOCAL-AUTHORITY-20261026: the current producer's local route, or None.
+
+    None when the snapshot relies on no profile-gated local proof (every
+    accepted path). Raises ValueError when it does and the current issuer no
+    longer authenticates it for this exact snapshot.
+    """
+    from market_data.local_authority import plan_binding
+    return plan_binding(snapshot, direction)
 
 
 def _current_scope_binding(snapshot):
@@ -736,6 +762,16 @@ def validate_final_quote(*, authority, scope, candidate, contract_id,
         return refuse("campaign_scope_changed")
     if authority_evidence.get("campaign_scope_binding") != bound.get("campaign_scope_binding"):
         return refuse("campaign_scope_changed")
+    # The UNBOUND scope binding (None) cannot reauthenticate a local route:
+    # resolve the local proof again on the authenticated trigger snapshot.
+    try:
+        final_local = _current_local_binding(checked["snapshot"], bound.get("direction"))
+    except ValueError:
+        return refuse("conditional_plan_local_authority_changed")
+    if (final_local != bound.get("local_authority_binding")
+            or authority_evidence.get("local_authority_binding")
+            != bound.get("local_authority_binding")):
+        return refuse("conditional_plan_local_authority_changed")
     if (bound.get("tool_family") == ["po3_reversal_order_block"]
             and (not bound.get("participation_object")
                  or _current_po3_binding(checked["snapshot"], bound.get("direction"),

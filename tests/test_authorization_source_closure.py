@@ -41,6 +41,7 @@ SRC = os.path.join(ROOT, "src")
 #: TRADE. Each entry names why it is decision-relevant.
 MUST_BE_BOUND = {
     "market_data/campaign_scope.py": "pre-cognition premise catalog, proposal qualification and pending/activation custody published to the Brain",
+    "market_data/local_authority.py": "profile-gated local proofs (member-order witness, retained support, delivery-change composite) that decide which narrative directions the Brain input admits (LOCAL-AUTHORITY-20261026; disabled by default)",
     "ai_brain/brain_prompt.py": "the instructions themselves",
     "ai_brain/brain_schema.py": "the shape of an acceptable answer",
     "ai_brain/brain_validation.py": "which answers are accepted or repaired",

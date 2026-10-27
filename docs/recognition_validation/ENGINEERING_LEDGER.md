@@ -1898,3 +1898,63 @@ fingerprint becomes brain:920427791c12a485 (closure 50); retrieval unchanged; 32
   "receipt_digest": "94aca33a3a53a3d6f6055c60450681d9e73a4b0a0a54868000e518946c6e8b9c"
 }
 ```
+
+
+## LOCAL_AUTHORITY_DELIVERY_CHANGE_COMPOSITION_20261026: delivery change, retained support, plans and route telemetry (profile-gated)
+
+Parent e49cd3a (Mission 1). Missions 2-3 of the bounded local-authority assignment, as one coherent change.
+An explicit UNBOUND-only participation expansion under exact offline profile objects: the earlier-raid /
+later-confirmed DELIVERY_CHANGE_CONFIRMED composite (Friday 12:24 ET open cutoff, first settled 12:25 ET) and
+retained-support revalidation (Friday 13:15 ET retained 5m 29294.5 high), both revalidated each cutoff, never
+adopted beside a bound/pending campaign and excluded from scoped D3-B at its own consumer. Conditional plans
+bind the route identity; the brainless trigger and final quote reauthenticate it; v2 records name the route.
+A default cycle publishes the accepted snapshots. Brain fingerprint becomes brain:5f43a3a434eec2eb (closure 50);
+retrieval unchanged; 32 protected pins unchanged.
+
+```json ledger-entry
+{
+  "schema": "engineering_ledger_entry/v1",
+  "mission_id": "LOCAL_AUTHORITY_DELIVERY_CHANGE_COMPOSITION_20261026",
+  "parent_sha": "e49cd3a0013c056d6552d3c8193843572be2d59c",
+  "parent_tree": "a4fb6fc43730aecd9f1932872c765f621813a711",
+  "parent_tracked_status": "",
+  "brain_fingerprint": "brain:920427791c12a485",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_count": 50,
+  "closure_digest": "71832ac40c4516f2587fab4921df7ddce5e572322ef7b293fa94e9480fbc4563",
+  "protected_count": 32,
+  "protected_digest": "79988f0ea3e84e15e34485a8510e78efc667f6e274d41fcde5d6e3c0307ab79a",
+  "policy_refs": [
+    "Maurice/Codex bounded engineering assignment (email 1a17a3c81f0186b6; TIONA_COMPLETE_LOCAL_AUTHORITY_ENGINEERING_HANDOFF_20261026.zip sha256 5776e5225a93c3562058f52be522c49d5302845a90b27901a7416132897f25b6; 02_CLAUDE_COMPLETE_ENGINEERING_MISSION.md Missions 2-3; verified_study/00_EFFECTIVE_PARTICIPATION_IMPACT.md; verified_study/01_REQUIRED_PROOF_AND_ACTIVATION_CONTRACT.md; support/doctrine_reconciliation/02_PROPOSED_DELIVERY_CHANGE_CONTRACT.md): explicit UNBOUND-only participation expansion -- retained-support revalidation and the earlier-raid/later-delivery-change composite (DELIVERY_CHANGE_CONFIRMED) -- both excluded from scoped D3-B; plan capture/trigger/final-quote reauthentication; narrow v2 route telemetry",
+    "Permission-changing routes disabled by default; only exact versioned offline test profile objects enable them and never beside an armed/permitted execution environment; default-off behaviour and the 32 protected pins unchanged; no risk, economics, execution, sizing or Draw rule changed"
+  ],
+  "scoped_files": [
+    "src/market_data/local_authority.py",
+    "src/market_state/active_path.py",
+    "src/ai_brain/narrative_continuity.py",
+    "src/market_data/campaign_scope.py",
+    "src/broker/conditional_plan_authority.py",
+    "src/broker/candidate_decision_record.py",
+    "src/recognition_validation/examples/*",
+    "tests/*",
+    "docs/recognition_validation/*"
+  ],
+  "proof_ids": [
+    "FRIDAY-12-24-DELIVERY-CHANGE-COMPOSITE-ADOPTED-AND-REVALIDATED",
+    "FRIDAY-13-15-RETAINED-HIGH-REVALIDATED-WITHDRAWN-ON-CONTRADICTION",
+    "DEFAULT-OFF-IDENTITY-AND-NO-REFINEMENT",
+    "CONSTRUCTED-MIRRORED-BULLISH-AND-5M-15M-BODY-BREAK",
+    "SCOPED-D3-B-EXCLUSION-BOTH-BASES-WITH-B3-PASSING-ROW",
+    "BOUND-CAMPAIGN-NEVER-SHADOWED",
+    "COPIED-REVOKED-DUPLICATE-RESTART-REVISION",
+    "DISARMED-LOOP-BOTH-ECU-CANDIDATE-RISK-AND-CONSUMER-REFUSALS",
+    "PLAN-CAPTURE-BRAINLESS-TRIGGER-FINAL-QUOTE-REAUTHENTICATION",
+    "V2-ROUTE-TELEMETRY",
+    "C2-ADJUDICATED-NO-CURRENT-SUPPORTING-LIFE"
+  ],
+  "closure_change_rationale": "Bound sources change inside the unchanged 50-source closure: local_authority adds the profile-gated delivery-change composite (settled body-open break + independent structure break on an earlier rejected raid's still-INTACT 5m/15m life, completed after the released incumbent's settled failure) and retained-support revalidation, both revalidated each cutoff, UNBOUND-only at the producer, never ladder-credited; active_path gains adopt/release/withdraw methods and a composite-origin projection (legacy projection byte-identical) that only the profile-gated authority calls; narrative_continuity admits the delivery-change family only with the current producer's issued proof and refuses any unauthenticated local refinement (including on incumbent continuation); campaign_scope excludes both local bases before B1 of scoped D3-B; conditional_plan_authority binds the route's stable identity at capture and reauthenticates it at the brainless trigger and final quote (the reversal transfer recheck passes the current snapshot). candidate_decision_record (not closure-bound) adds a route block only when a local route is present. A default cycle publishes the accepted snapshots and plans. The measured Brain fingerprint becomes brain:5f43a3a434eec2eb (retrieval unchanged); the seven literal expectations are repinned. Participation-policy expansion under explicit offline profiles only; no risk, economics, execution, sizing, Draw or Lifecycle rule change.",
+  "predecessor_receipt_digest": "94aca33a3a53a3d6f6055c60450681d9e73a4b0a0a54868000e518946c6e8b9c",
+  "receipt_digest": "c6e8cd0918f1d1af263d86eb83b58710aaea728a28411d55419d9b41c3cfd117"
+}
+
+```

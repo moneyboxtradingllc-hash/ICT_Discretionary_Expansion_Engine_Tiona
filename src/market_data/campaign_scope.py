@@ -85,6 +85,13 @@ def campaign_scope_proof(snapshot, row, *, from_direction=None):
     if (path.get("contract_id") != snapshot.get("contract_id")
             or path.get("session") != CP._session_of(snapshot.get("timestamp"))):
         return None, "lt_context_unavailable"
+    # LOCAL-AUTHORITY-20261026. B1 shares the local `_transfer_proof`, so the
+    # scoped domain is enforced HERE, before B1: neither the local-only
+    # delivery-change family nor a retained-support revalidation may supply
+    # scoped D3-B, whatever B3 would say. Accepted families are unaffected.
+    from market_data.local_authority import LOCAL_ONLY_SCOPE_REASON, local_refinements
+    if any(local_refinements(path).values()):
+        return None, LOCAL_ONLY_SCOPE_REASON
     proof = _transfer_proof(path, before, to)
     if proof is None or cutoff is None:
         return None, "lt_not_verified"

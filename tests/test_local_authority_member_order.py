@@ -101,8 +101,10 @@ def friday(tmp_path_factory):
     with pytest.MonkeyPatch.context() as m:
         _isolate(m, tmp_path_factory.mktemp("m1_friday"))
         default = ProductionScanCycle(symbol="MNQ", contract_id=P.C, session_id="M1-DEFAULT")
+        # Mission 1 in isolation: the witness-only component profile (the full
+        # offline profile's 12:24 ET delivery change is Mission 2's subject).
         offline = ProductionScanCycle(symbol="MNQ", contract_id=P.C, session_id="M1-OFFLINE",
-                                      local_authority_profile=LA.OFFLINE_TEST_PROFILE_V1)
+                                      local_authority_profile=LA.OFFLINE_MEMBER_ORDER_TEST_PROFILE_V1)
         rows_default = _walk(default, P.TAPE, "15:40", "16:30", "bullish")
         rows_offline = _walk(offline, P.TAPE, "15:40", "16:30", "bullish", inspect)
         yield {"default": rows_default, "offline": rows_offline, "captured": captured,
@@ -337,7 +339,7 @@ def test_constructed_mirror_proves_the_bearish_order_and_refuses_its_same_minute
     """CONSTRUCTED: the Friday tape reflected in price. Not a historical session."""
     _isolate(monkeypatch, tmp_path)
     cycle = ProductionScanCycle(symbol="MNQ", contract_id=P.C, session_id="M1-MIRROR",
-                                local_authority_profile=LA.OFFLINE_TEST_PROFILE_V1)
+                                local_authority_profile=LA.OFFLINE_MEMBER_ORDER_TEST_PROFILE_V1)
     rows = _walk(cycle, H.mirrored_tape(P.TAPE), "15:40", "16:25", "bearish")
     at = rows["15:49"]
     witness = _origin(at["path"])["member_order_witness"]

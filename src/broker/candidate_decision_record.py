@@ -481,6 +481,18 @@ def participation_evidence(*, scan: dict, parsed: dict, reason, refusal=None, pr
                    "trace_lifecycle_refusal": _safe((trace or {}).get("campaign_lifecycle_refusal")),
                    "note": "a scan-level assessment never implies the producer ran"},
                "participation_refusal": None}
+        # LOCAL-AUTHORITY-20261026: present only when the decision saw a
+        # profile-gated local route, so accepted records are unchanged.
+        from market_data.local_authority import route_evidence
+        local = route_evidence(scan.get("snapshot"))
+        if local is not None:
+            observed = getattr(refusal, "detail", None) if refusal is not None else None
+            local["first_refusal"] = ({"code": _safe(reason),
+                                       "observed_gate_reason": _safe(observed)
+                                       if isinstance(observed, str) and observed.strip()
+                                       else None}
+                                      if reason else None)
+            out["local_authority_route"] = local
         if str(reason or "") not in MECHANICAL_REFUSAL_CODES:
             return out
         gate, basis, observed, problems = _gate(reason, refusal, producer_current, trace)

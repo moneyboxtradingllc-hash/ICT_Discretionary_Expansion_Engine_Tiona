@@ -35,7 +35,9 @@ def source_bytes(monkeypatch):
 @pytest.mark.parametrize("style", ["lf", "crlf", "mixed_files", "mixed_lines"])
 def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     assert len(source_bytes) == 50  # M2 adds campaign_scope; NARRATIVE-FIRST-1 adds market_narrative;
-    # LOCAL-AUTHORITY-20261026 binds the profile-gated local_authority producer.
+    # LOCAL-AUTHORITY-20261026 binds the profile-gated local_authority producer;
+    # its delivery-change/retained-support bases and plan binding rotate the
+    # identity again inside the same 50-source closure.
     for index, (path, data) in enumerate(source_bytes.items()):
         if style == "crlf" or (style == "mixed_files" and index % 2):
             source_bytes[path] = data.replace(b"\n", b"\r\n")
@@ -118,7 +120,7 @@ def test_all_closure_sources_have_one_canonical_identity(source_bytes, style):
     # window as rollout, not as a deleted witness.
     # N1: the rolling chronology accepts a coherent window's alignment eviction
     # (at most one partial 15m bucket shorter) instead of refusing any shrink.
-    assert PM.brain_contract_fingerprint() == "brain:920427791c12a485"
+    assert PM.brain_contract_fingerprint() == "brain:5f43a3a434eec2eb"
 
 
 @pytest.mark.parametrize("addition", [

@@ -74,6 +74,12 @@ MSS_HAS_NO_DIRECTION = "mss carries no direction in this producer"
 
 STATE_UNAVAILABLE = "path_state_unavailable"
 
+#: LOCAL-AUTHORITY-20261026. A composite generation that only the profile-gated
+#: local authority may adopt: the settled confirmation of a delivery change on
+#: an earlier rejected raid. Never minted from a detector occurrence, never a
+#: fictitious post-failure raid, never written to the occurrence ledger.
+DELIVERY_CHANGE_CONFIRMED = "DELIVERY_CHANGE_CONFIRMED"
+
 #: Why derived ownership was released. Diagnostic only -- no business logic may
 #: branch on these strings.
 RESET_NEW_SESSION = "new_production_session"
@@ -585,6 +591,91 @@ class ActivePath:
                 self.latest_progression = None
                 self.adverse_replacements = []
 
+    # ── LOCAL-AUTHORITY-20261026 (profile-gated; never called by default) ──
+    def adopt_local_generation(self, *, direction, origin, load_bearing, progression):
+        """Adopt a producer-verified DELIVERY_CHANGE_CONFIRMED generation.
+
+        Only on a RELEASED path whose last failure belongs to the opposing leg:
+        an established owner must be lawfully failed first, and a forming
+        hypothesis is superseded without being treated as an incumbent. The
+        support is an existing life revalidated with zero ladder credit; no
+        registration is replayed and no occurrence is appended.
+        """
+        failure = self.last_invalidated or {}
+        if (direction not in OPPOSITE or self.owner != "none"
+                or failure.get("owner") != OPPOSITE[direction]
+                or not isinstance(origin, dict)
+                or origin.get("event_type") != DELIVERY_CHANGE_CONFIRMED
+                or not isinstance(load_bearing, dict) or not isinstance(progression, dict)):
+            return False
+        self.owner, self.forming_direction, self.status = direction, None, "active"
+        self.origin = dict(origin)
+        self.load_bearing = dict(load_bearing)
+        self.progression_tfs = {progression.get("source_tf")}
+        self.latest_progression = dict(progression)
+        self.ladder, self.adverse_replacements, self.ambiguous_invalidations = [], [], []
+        return True
+
+    def release_local_generation(self):
+        """Withdraw an adopted generation whose current proof no longer holds."""
+        if (self.origin or {}).get("event_type") != DELIVERY_CHANGE_CONFIRMED:
+            return False
+        self.owner, self.forming_direction, self.status = "none", None, "none"
+        self.origin, self.load_bearing = None, None
+        self.progression_tfs, self.ladder = set(), []
+        self.latest_progression = None
+        self.adverse_replacements, self.ambiguous_invalidations = [], []
+        return True
+
+    def adopt_support(self, load_bearing):
+        """Revalidate an existing life as an established owner's absent support."""
+        if (self.owner not in OPPOSITE or self.load_bearing is not None
+                or not isinstance(load_bearing, dict) or not load_bearing.get("adoption")):
+            return False
+        self.load_bearing = dict(load_bearing)
+        return True
+
+    def withdraw_adopted_support(self):
+        if not (self.load_bearing or {}).get("adoption"):
+            return False
+        self.load_bearing = None
+        return True
+
+    def _origin_projection(self, d):
+        if self.origin.get("event_type") == DELIVERY_CHANGE_CONFIRMED:
+            # The composite keeps every native identity it cites, separately.
+            return {"event": "delivery_change_confirmed",
+                    "proof_family": self.origin.get("proof_family"),
+                    "direction": d, "at": self.origin.get("event_time"),
+                    "source_bar_time": self.origin.get("source_bar_time"),
+                    "settled_edge_time": self.origin.get("settled_edge_time"),
+                    "observed_at": self.origin.get("observed_at"),
+                    "source_tf": self.origin.get("source_tf"),
+                    "occurrence_id": self.origin.get("occurrence_id"),
+                    "local_proof_id": self.origin.get("local_proof_id"),
+                    "earlier_raid": self.origin.get("earlier_raid"),
+                    "body_confirmation_id": self.origin.get("body_confirmation_id"),
+                    "structure_id": self.origin.get("structure_id"),
+                    "failure_id": self.origin.get("failure_id")}
+        return {
+                "event": ("sell_side_raid_rejected" if d == "bullish"
+                          else "buy_side_raid_rejected"),
+                # The transfer state is a market-state conclusion; this is the
+                # typed causal proof family that currently supports this origin.
+                # Keep the family explicit so consumers do not mistake one
+                # origin morphology for the definition of every reversal.
+                "proof_family": ("rejected_raid_reclaim"
+                                 if self.origin.get("event_type") == LIQUIDITY_SWEEP
+                                 and self.origin.get("reclaimed") is True else None),
+                "direction": d,
+                "at": self.origin.get("event_time"),
+                "source_bar_time": self.origin.get("source_bar_time"),
+                "settled_edge_time": self.origin.get("settled_edge_time"),
+                "observed_at": (self.origin.get("observed_at")
+                                or self.origin.get("event_time")),
+                "source_tf": self.origin.get("source_tf"),
+                "occurrence_id": self.origin.get("occurrence_id")}
+
     # ── derived views ───────────────────────────────────────────────────────
     def last_confirmation_time(self):
         stamps = [e.get("event_time") for e in self.events
@@ -659,24 +750,7 @@ class ActivePath:
             "owner": self.owner,
             "forming_direction": self.forming_direction,
             "status": self.resolve_status(),
-            "origin": None if not self.origin else {
-                "event": ("sell_side_raid_rejected" if d == "bullish"
-                          else "buy_side_raid_rejected"),
-                # The transfer state is a market-state conclusion; this is the
-                # typed causal proof family that currently supports this origin.
-                # Keep the family explicit so consumers do not mistake one
-                # origin morphology for the definition of every reversal.
-                "proof_family": ("rejected_raid_reclaim"
-                                 if self.origin.get("event_type") == LIQUIDITY_SWEEP
-                                 and self.origin.get("reclaimed") is True else None),
-                "direction": d,
-                "at": self.origin.get("event_time"),
-                "source_bar_time": self.origin.get("source_bar_time"),
-                "settled_edge_time": self.origin.get("settled_edge_time"),
-                "observed_at": (self.origin.get("observed_at")
-                                or self.origin.get("event_time")),
-                "source_tf": self.origin.get("source_tf"),
-                "occurrence_id": self.origin.get("occurrence_id")},
+            "origin": None if not self.origin else self._origin_projection(d),
             "load_bearing_structure": self.load_bearing,
             "progression": {
                 "supporting_timeframes": prog,

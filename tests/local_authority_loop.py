@@ -38,7 +38,7 @@ def mirrored_tape(tape, axis=58_500.0):
     return out
 
 
-def controlled_reply(out, payload, *, direction, act, entry, story="CONTROLLED"):
+def controlled_reply(out, payload, *, direction, act, entry, story="CONTROLLED", watch=False):
     """A stand-down read in `direction`, or an entry using real catalog rows."""
     if not act:
         return {**out, "narrative_direction": direction, "allowed_direction": direction,
@@ -60,15 +60,20 @@ def controlled_reply(out, payload, *, direction, act, entry, story="CONTROLLED")
                                      f"toward {toward} liquidity. PO3 is context, and "
                                      "existing risk and execution rules still apply."),
                  campaign_scope_proposal=None)
+    tools = [r for r in payload.get("authorized_tool_catalog", [])
+             if r.get("direction") == direction and r.get("execution_eligible") is True
+             and r.get("tool_family") in ("fvg", "po3_reversal_order_block")]
+    if watch and tools:
+        # A `watching` plan waits for its zone: geometry is chosen from the
+        # zone's far edge, not from the current price.
+        edge = tools[0].get("zone_high" if above else "zone_low")
+        entry = edge if isinstance(edge, (int, float)) else entry
     stops = [r for r in payload.get("authorized_invalidations", [])
              if isinstance(r.get("price"), (int, float))
              and (r["price"] > entry if above else r["price"] < entry)]
     targets = [r for r in payload.get("authorized_objectives", [])
                if isinstance(r.get("price"), (int, float))
                and (r["price"] < entry if above else r["price"] > entry)]
-    tools = [r for r in payload.get("authorized_tool_catalog", [])
-             if r.get("direction") == direction and r.get("execution_eligible") is True
-             and r.get("tool_family") in ("fvg", "po3_reversal_order_block")]
     if stops and targets and tools:
         stop = (min if above else max)(stops, key=lambda r: r["price"])
         target = (min if above else max)(targets, key=lambda r: r["price"])
@@ -84,14 +89,18 @@ def controlled_reply(out, payload, *, direction, act, entry, story="CONTROLLED")
 
 class Candles:
     def __init__(self, tape):
+        from live_scan.wake_registry import WakeRegistry
         self.tape, self.end = tape, 0
+        # The real production registry a published conditional plan arms.
+        self.wake_registry = WakeRegistry()
 
     def fetch_1m_candles(self, symbol, lookback_bars=300):
         return [dict(b) for b in self.tape[:self.end][-lookback_bars:]]
 
 
 def run(monkeypatch, root, *, ecu, profile, warmup, schedule, act_from, direction,
-        tape=None, session="LA-OFFLINE", cycle_class=ProductionScanCycle):
+        tape=None, session="LA-OFFLINE", cycle_class=ProductionScanCycle, watch=False,
+        plan_seconds=1800):
     """Drive the real disarmed loop. Returns every scan, output and object."""
     tape = tape or P.TAPE
     for key in ("OCCURRENCE_LEDGER_DIR", "AI_BRAIN_DIR", "AI_RETRIEVAL_DIR",
@@ -111,7 +120,7 @@ def run(monkeypatch, root, *, ecu, profile, warmup, schedule, act_from, directio
                            mission_id="LA", store_dir=str(root), runtime=runtime,
                            quote_provider=quotes, clock=lambda: clock[0])
     auth = G.authorization(root, session_id=session, contract_id=P.C,
-                           session_date="20261023", decision_window="09:30-16:00",
+                           session_date="20261023", decision_window="09:00-14:00",
                            issued_at="2026-10-23T13:00:00+00:00")
     mission = SA.ProductionSessionMission(authorization=auth, store_dir=str(root))
     kwargs = {"local_authority_profile": profile} if profile is not None else {}
@@ -132,13 +141,14 @@ def run(monkeypatch, root, *, ecu, profile, warmup, schedule, act_from, directio
 
     monkeypatch.setattr(cycle, "scan", capture)
 
-    def tick(hm, brain):
+    def tick(hm, brain, bid=None):
+        """One settled minute; `bid` is a CONTROLLED quote override (not historical)."""
         cutoff = P._cut(hm)
         candles.end = next(i + 1 for i, b in enumerate(tape) if b["timestamp"] == cutoff)
         bar = tape[candles.end - 1]
         clock[0] = datetime.fromisoformat(cutoff) + timedelta(minutes=1)
-        venue.market_hub.emit("GatewayQuote",
-                              [P.C, {"bestBid": bar["close"], "bestAsk": bar["close"] + .25}])
+        price = bar["close"] if bid is None else bid
+        venue.market_hub.emit("GatewayQuote", [P.C, {"bestBid": price, "bestAsk": price + .25}])
         return loop._scan_once(invoke_brain=brain)
 
     tick(warmup, False)
@@ -147,15 +157,21 @@ def run(monkeypatch, root, *, ecu, profile, warmup, schedule, act_from, directio
 
     def mutate(out, n, payload):
         entry = tape[candles.end - 1]["close"]
-        return controlled_reply(out, payload, direction=direction,
-                                act=current["hm"] >= act_from, entry=entry)
+        reply = controlled_reply(out, payload, direction=direction,
+                                 act=current["hm"] >= act_from, entry=entry, watch=watch)
+        if watch and reply.get("current_action") == "propose_entry":
+            # A CONTROLLED `watching` plan over the same catalog geometry.
+            reply = {**reply, "current_action": "watching",
+                     "plan_expires_at": (clock[0] + timedelta(seconds=plan_seconds)).isoformat()}
+        return reply
 
     RF._mock_current_brain(monkeypatch, calls, output_mutator=mutate)
     monkeypatch.setenv("BRAIN_ECU_MODE", "true" if ecu else "false")
     outputs = {}
     for hm in schedule:
         current["hm"] = hm
-        outputs[hm] = tick(hm, True)
+        # As `scan_once`: no Brain call while a conditional plan is armed.
+        outputs[hm] = tick(hm, loop.active_conditional_plan is None)
     candidates = [hm for hm, out in outputs.items()
                   if out.get("outcome") == PL.QUALIFIED_CANDIDATE_OBSERVED]
     return {"outputs": outputs, "candidates": candidates, "scans": scans, "loop": loop,
