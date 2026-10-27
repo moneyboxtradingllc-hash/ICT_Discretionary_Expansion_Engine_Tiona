@@ -65,7 +65,7 @@ def _trajectory(root, monkeypatch, *, ecu, install_on_wrong_target=False, ticks_
         script, state = _script()
         gateway = G.BrainGateway(G.ScriptedResponder(script, fixture_digest=C.digest("daw-script-v1")),
                                  trajectory_id="S5-B-1", clock=clock, recorder=recorder,
-                                 fingerprints={"brain": "brain:5f43a3a434eec2eb", "retrieval": "retr:0c241bdb8234d1ba"})
+                                 fingerprints={"brain": "brain:9bb7ac73616bd5cf", "retrieval": "retr:0c241bdb8234d1ba"})
         if install_on_wrong_target:
             # WRONG PATCH TARGET control: the fake provider is attached to a
             # module production never reads; the gateway's own seam is a no-op.

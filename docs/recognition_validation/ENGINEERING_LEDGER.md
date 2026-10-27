@@ -1958,3 +1958,53 @@ retrieval unchanged; 32 protected pins unchanged.
 }
 
 ```
+
+## LOCAL_AUTHORITY_DORMANT_RELEASE_CONNECTION_20261027: dormant production profile and launcher wiring (selection OFF)
+
+Parent 6e30453. One versioned production-capable profile (local_authority_production/v1) over the same accepted proof
+functions; one compiled, fingerprint-bound release selection that stays None/OFF in this source; the real launcher ->
+ProductionLoop -> its own ProductionScanCycle propagation with the real account/capital/quote bindings; startup
+telemetry of the requested/resolved selection; loud refusal of invalid, offline, copied or conflicting selections
+before any venue, model or authorization. Offline profiles keep their execution-switch refusal. Brain fingerprint
+becomes brain:9bb7ac73616bd5cf (closure 50); retrieval unchanged; 32 protected pins unchanged.
+
+```json ledger-entry
+{
+  "schema": "engineering_ledger_entry/v1",
+  "mission_id": "LOCAL_AUTHORITY_DORMANT_RELEASE_CONNECTION_20261027",
+  "parent_sha": "6e30453b70022ee66240716b72683b798ad4f523",
+  "parent_tree": "09429e544f9514754462a1950db19e854c706228",
+  "parent_tracked_status": "",
+  "brain_fingerprint": "brain:5f43a3a434eec2eb",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_count": 50,
+  "closure_digest": "5d0eb6b0548dfcca2a576fd3a714c93ea74742fc7c0b9d0d6a3a058e7b3dd386",
+  "protected_count": 32,
+  "protected_digest": "79988f0ea3e84e15e34485a8510e78efc667f6e274d41fcde5d6e3c0307ab79a",
+  "policy_refs": [
+    "Maurice/Codex final architectural disposition and bounded dormant release-connection delegation (email 1a17dedfa7ea2464; FINAL_LOCAL_AUTHORITY_DISPOSITION_AND_DORMANT_RELEASE_MISSION_20261027.zip sha256 e14b7ae518337ec9afe4071439060bbd2eb12c773823b1943d91b4e8cf93879a; 01_RELEASE_CONNECTION_MISSION.md)",
+    "Compiled release selection stays OFF (RELEASE_SELECTION = None); activation diff returned UNAPPLIED; no ratification, deployment, rebind, arming, orders, provider/model/venue calls; 32 protected sources unchanged; existing SessionAuthorization and source fingerprint remain the only execution gate"
+  ],
+  "scoped_files": [
+    "src/market_data/local_authority.py",
+    "src/broker/topstepx_production_loop.py",
+    "tools/topstepx_production_session.py",
+    "src/recognition_validation/examples/*",
+    "tests/*",
+    "docs/recognition_validation/*"
+  ],
+  "proof_ids": [
+    "NORMAL-OFF-LAUNCH-DEFAULT-CYCLE-DISABLED",
+    "CONTROLLED-SELECTION-THROUGH-REAL-LAUNCHER-LOOP-CYCLE-WITH-REAL-BINDINGS",
+    "INVALID-OFFLINE-COPY-CONFLICT-SELECTIONS-REFUSE-BEFORE-VENUE-MODEL-AUTH",
+    "OFFLINE-PROFILES-STILL-REFUSE-BESIDE-EXECUTION-SWITCHES",
+    "SELECTION-LITERAL-ROTATES-BRAIN-FINGERPRINT",
+    "LAUNCH-BUILT-5M-CANDIDATE-PLAN-TRIGGER-FINAL-QUOTE-BOTH-ECU",
+    "CONSTRUCTED-15M-BEARISH-COMPOSITE-CANDIDATE-BOTH-ECU-WITH-MATCHED-NEGATIVES",
+    "RELEASE-MUTANTS-R1-R7"
+  ],
+  "closure_change_rationale": "Bound sources change inside the unchanged 50-source closure: local_authority adds PRODUCTION_PROFILE_V1 (the same three reviewed cases and proof functions), the compiled RELEASE_SELECTION (None/OFF) and its strict resolver; the ProductionLoop constructor forwards an optional profile to its own cycle and refuses conflicts or refused profiles; the production entrypoint resolves the compiled selection before authorization and prints it. A reviewed change to the selection literal rotates the Brain fingerprint.",
+  "predecessor_receipt_digest": "c6e8cd0918f1d1af263d86eb83b58710aaea728a28411d55419d9b41c3cfd117",
+  "receipt_digest": "e94530bb78ec898412e1bcc51d4b90a07991448d64176315ce366d0d3d6b4af6"
+}
+```

@@ -98,7 +98,14 @@ class ProductionLoop:
 
     def __init__(self, *, production_session, session_mission, producer, candles,
                  runtime, account_id: int, symbol: str = "MNQ", armed: bool = False,
-                 scan_cycle=None, clock=None, in_window=None) -> None:
+                 scan_cycle=None, clock=None, in_window=None,
+                 local_authority_profile=None) -> None:
+        from market_data import local_authority as LA
+        if (scan_cycle is not None and local_authority_profile is not None
+                and getattr(scan_cycle, "_local_authority_profile", None)
+                is not local_authority_profile):
+            # A requested profile is never silently ignored beside a supplied cycle.
+            raise LA.ProfileSelectionRefused("profile_conflicts_with_supplied_scan_cycle")
         self.ps = production_session
         self.mission = session_mission
         self.producer = producer
@@ -121,7 +128,14 @@ class ProductionLoop:
             # for the submit boundary. The DECISION lane never saw it, so Luna
             # priced her stops off a settled close while the venue knew the real
             # bid and ask. Same provider, second consumer — no new market data.
-            quote_provider=getattr(production_session, "quote_provider", None))
+            quote_provider=getattr(production_session, "quote_provider", None),
+            local_authority_profile=local_authority_profile)
+        if (local_authority_profile is not None
+                and self.cycle.local_authority.profile is not local_authority_profile):
+            # Refused (e.g. offline beside execution switches): fail, never run
+            # as legacy DISABLED while the caller believes the profile is on.
+            raise LA.ProfileSelectionRefused(
+                self.cycle.local_authority.profile_reason or "requested_profile_refused")
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self._in_window = in_window or (lambda: True)
         self.outcomes: list = []

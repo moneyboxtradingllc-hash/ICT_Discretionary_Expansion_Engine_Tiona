@@ -87,6 +87,40 @@ def controlled_reply(out, payload, *, direction, act, entry, story="CONTROLLED",
     return reply
 
 
+def stretched_tape(tape, *, anchor, factor=3, shift_hours=0):
+    """CONSTRUCTED 15m tape: every 1m bar at/after `anchor` becomes `factor`
+    lawful 1m bars (open -> first extreme -> second extreme -> close) whose
+    aggregate is the original bar, so each original 5m bucket becomes one 15m
+    bucket. Bars before the anchor are kept; the whole tape is then moved by
+    `shift_hours`. A synthetic chronology, never a historical session."""
+    a = datetime.fromisoformat(P._cut(anchor))
+    shift = timedelta(hours=shift_hours)
+    out = []
+    for bar in tape:
+        t = datetime.fromisoformat(bar["timestamp"])
+        if t < a:
+            out.append({**bar, "timestamp": (t + shift).isoformat()})
+            continue
+        o, h, l, c = bar["open"], bar["high"], bar["low"], bar["close"]
+        legs = ([(o, l), (l, h), (h, c)] if c >= o else [(o, h), (h, l), (l, c)])
+        base = a + (t - a) * factor + shift
+        volume = bar.get("volume")
+        for i, (start, end) in enumerate(legs[:factor]):
+            out.append({**bar, "timestamp": (base + timedelta(minutes=i)).isoformat(),
+                        "open": start, "high": max(start, end), "low": min(start, end),
+                        "close": end,
+                        "volume": volume / factor if isinstance(volume, (int, float))
+                        else volume})
+    return out
+
+
+def stretched_minute(hm, *, anchor, factor=3, shift_hours=0):
+    """Where original minute `hm` lands on `stretched_tape` (HH:MM, UTC)."""
+    a = datetime.fromisoformat(P._cut(anchor))
+    t = a + (datetime.fromisoformat(P._cut(hm)) - a) * factor + timedelta(hours=shift_hours)
+    return t.strftime("%H:%M")
+
+
 class Candles:
     def __init__(self, tape):
         from live_scan.wake_registry import WakeRegistry
@@ -98,9 +132,44 @@ class Candles:
         return [dict(b) for b in self.tape[:self.end][-lookback_bars:]]
 
 
+def launch(monkeypatch, root, *, ps, runtime, candles, venue, session):
+    """The REAL launcher constructs the loop: `run_production_scans(scans=0)`.
+
+    Returns the ProductionLoop it built (captured, not replaced) and the startup
+    lines it printed. Disarmed; no durable authorization exists in `root`, so the
+    launcher builds its in-memory rehearsal record; tape archiving is stubbed.
+    """
+    import io
+    import os
+    import sys
+    from contextlib import redirect_stdout
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "tools"))
+    import topstepx_production_session as TOOL
+    from broker import trade_lineage
+    built, original = [], PL.ProductionLoop.__init__
+
+    def spy(self, *a, **k):
+        original(self, *a, **k)
+        built.append(self)
+
+    monkeypatch.setattr(PL.ProductionLoop, "__init__", spy)
+    monkeypatch.setattr(TOOL, "STORE_DIR", str(root))
+    monkeypatch.setattr(trade_lineage, "archive_tape", lambda **_k: {})
+    monkeypatch.setenv("TOPSTEPX_ACCOUNT_FINGERPRINT", G.FP)
+    out = io.StringIO()
+    with redirect_stdout(out):
+        TOOL.run_production_scans(ps=ps, runtime=runtime, candles=candles, session=venue,
+                                  contract=RF.MNQ, armed=False, symbol="MNQ",
+                                  mission_id=session, scans=0, interval=0)
+    monkeypatch.setattr(PL.ProductionLoop, "__init__", original)
+    assert len(built) == 1
+    return built[0], out.getvalue()
+
+
 def run(monkeypatch, root, *, ecu, profile, warmup, schedule, act_from, direction,
         tape=None, session="LA-OFFLINE", cycle_class=ProductionScanCycle, watch=False,
-        plan_seconds=1800):
+        plan_seconds=1800, launcher=False):
     """Drive the real disarmed loop. Returns every scan, output and object."""
     tape = tape or P.TAPE
     for key in ("OCCURRENCE_LEDGER_DIR", "AI_BRAIN_DIR", "AI_RETRIEVAL_DIR",
@@ -123,15 +192,26 @@ def run(monkeypatch, root, *, ecu, profile, warmup, schedule, act_from, directio
                            session_date="20261023", decision_window="09:00-14:00",
                            issued_at="2026-10-23T13:00:00+00:00")
     mission = SA.ProductionSessionMission(authorization=auth, store_dir=str(root))
-    kwargs = {"local_authority_profile": profile} if profile is not None else {}
-    cycle = cycle_class(symbol="MNQ", contract_id=P.C, session_id=session,
-                        quote_provider=quotes, **kwargs)
     candles = Candles(tape)
-    producer = CandidateProducer(account_fingerprint=G.FP, contract=RF.MNQ)
-    loop = PL.ProductionLoop(production_session=ps, session_mission=mission,
-                             producer=producer, candles=candles, runtime=runtime,
-                             account_id=77, armed=False, scan_cycle=cycle,
-                             clock=lambda: clock[0], in_window=lambda: True)
+    launched = None
+    if launcher:
+        # `profile` is ignored: the launcher resolves LA.RELEASE_SELECTION itself.
+        loop, startup = launch(monkeypatch, root, ps=ps, runtime=runtime,
+                               candles=candles, venue=venue, session=session)
+        launched = {"startup": startup, "mission": loop.mission}
+        # CONTROLLED clock/window/mission: the archived date, not wall time. The
+        # launcher-built cycle, producer and bindings are kept untouched.
+        loop.mission, loop.clock, loop._in_window = mission, (lambda: clock[0]), (lambda: True)
+        cycle, producer = loop.cycle, loop.producer
+    else:
+        kwargs = {"local_authority_profile": profile} if profile is not None else {}
+        cycle = cycle_class(symbol="MNQ", contract_id=P.C, session_id=session,
+                            quote_provider=quotes, **kwargs)
+        producer = CandidateProducer(account_fingerprint=G.FP, contract=RF.MNQ)
+        loop = PL.ProductionLoop(production_session=ps, session_mission=mission,
+                                 producer=producer, candles=candles, runtime=runtime,
+                                 account_id=77, armed=False, scan_cycle=cycle,
+                                 clock=lambda: clock[0], in_window=lambda: True)
     scans, original = [], cycle.scan
 
     def capture(*a, **k):
@@ -177,6 +257,7 @@ def run(monkeypatch, root, *, ecu, profile, warmup, schedule, act_from, directio
     return {"outputs": outputs, "candidates": candidates, "scans": scans, "loop": loop,
             "cycle": cycle, "producer": producer, "venue": venue, "mission": mission,
             "clock": clock, "payloads": payloads, "calls": calls, "tick": tick,
+            "launched": launched, "quotes": quotes, "ps": ps,
             "zero_orders": venue.place_calls == 0 and payloads == [],
             "tokens": mission.token_count, "attempts": mission.entry_attempt_count,
             "control": dict(CONTROL)}
@@ -204,5 +285,5 @@ def fresh_root(tmp_path_factory, name):
     return tmp_path_factory.mktemp(name)
 
 
-__all__ = ["run", "produce", "minutes", "mirrored_tape", "controlled_reply", "CONTROL",
-           "copy", "pytest"]
+__all__ = ["run", "launch", "produce", "minutes", "mirrored_tape", "stretched_tape",
+           "stretched_minute", "controlled_reply", "CONTROL", "copy", "pytest"]

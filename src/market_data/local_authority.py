@@ -103,12 +103,33 @@ OFFLINE_MEMBER_ORDER_TEST_PROFILE_V1 = LocalAuthorityProfile(
     "local_authority_offline_member_order_test/v1", True, False, False)
 _OFFLINE_PROFILES = (OFFLINE_TEST_PROFILE_V1, OFFLINE_RETAINED_SUPPORT_TEST_PROFILE_V1,
                      OFFLINE_MEMBER_ORDER_TEST_PROFILE_V1)
+#: The production-capable profile: the same three reviewed cases, the same
+#: proof functions, no other law. Unlike the offline objects it may run beside
+#: truthy execution switches; whether an armed session may run at all is still
+#: decided only by the durable SessionAuthorization and the source fingerprint.
+PRODUCTION_PROFILE_V1 = LocalAuthorityProfile(
+    "local_authority_production/v1", True, True, True)
+_PRODUCTION_PROFILES = (PRODUCTION_PROFILE_V1,)
+
+#: THE compiled release selection, read by the production launcher. None is
+#: OFF: the legacy DISABLED participation. It lives in this closure-bound file
+#: so a reviewed change to it rotates the Brain contract fingerprint (and with
+#: it every prior session authorization); no env, CLI, JSON or account record
+#: can select a profile. Activation is reserved to the owner -- do not edit.
+RELEASE_SELECTION = None
+RELEASE_SELECTION_SOURCE = "src/market_data/local_authority.py:RELEASE_SELECTION"
+
+
+class ProfileSelectionRefused(ValueError):
+    """An explicit selection that cannot run; never a silent legacy fallback."""
 
 
 def resolve_profile(value):
-    """(profile, reason). Only the exact offline object enables anything."""
+    """(profile, reason). Only an exact known object enables anything."""
     if value is None:
         return DISABLED, "default_disabled"
+    if any(value is profile for profile in _PRODUCTION_PROFILES):
+        return value, None
     if not any(value is profile for profile in _OFFLINE_PROFILES):
         return DISABLED, "unrecognized_profile_disabled"
     armed = [name for name in _EXECUTION_SWITCHES
@@ -116,6 +137,34 @@ def resolve_profile(value):
     if armed:
         return DISABLED, "offline_profile_refused_execution_environment"
     return value, None
+
+
+def release_selection():
+    """Resolve the compiled RELEASE_SELECTION; raise rather than fall back.
+
+    None is the legitimate legacy OFF. Anything else must be the exact
+    production object, or the launch is refused before any provider is used.
+    """
+    requested = RELEASE_SELECTION
+    if requested is None:
+        return {"requested": None, "profile": None, "resolved": DISABLED.version,
+                "cases": [], "reason": "release_selection_off",
+                "source": RELEASE_SELECTION_SOURCE}
+    if not any(requested is profile for profile in _PRODUCTION_PROFILES):
+        known = any(requested is profile for profile in _OFFLINE_PROFILES)
+        raise ProfileSelectionRefused(
+            "offline_profile_not_releasable" if known else "unknown_release_selection")
+    profile, reason = resolve_profile(requested)
+    if profile is not requested:
+        raise ProfileSelectionRefused(reason or "release_selection_refused")
+    return {"requested": requested.version, "profile": profile, "resolved": profile.version,
+            "cases": profile_cases(profile), "reason": None,
+            "source": RELEASE_SELECTION_SOURCE}
+
+
+def profile_cases(profile):
+    return [name for name in ("member_order_witness", "retained_support", "delivery_change")
+            if getattr(profile, name)]
 
 
 def digest(value) -> str:

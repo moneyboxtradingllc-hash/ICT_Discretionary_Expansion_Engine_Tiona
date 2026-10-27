@@ -171,6 +171,29 @@ def descriptive_memory_telemetry() -> dict:
     }
 
 
+def local_authority_telemetry() -> list:
+    """The compiled local-authority release selection, resolved, never restated.
+
+    OFF is the legacy DISABLED participation. A refused selection is printed as
+    REFUSED; `main` and `run_production_scans` refuse to start on it.
+    """
+    from market_data import local_authority as LA
+
+    try:
+        sel = LA.release_selection()
+    except LA.ProfileSelectionRefused as exc:
+        return [f"  LOCAL AUTHORITY SELECTION    : REFUSED ({exc})",
+                f"  LOCAL AUTHORITY SOURCE       : {LA.RELEASE_SELECTION_SOURCE}"]
+    if sel["profile"] is None:
+        return ["  LOCAL AUTHORITY SELECTION    : OFF (legacy DISABLED; no local cases)",
+                f"  LOCAL AUTHORITY SOURCE       : {sel['source']}"]
+    return [f"  LOCAL AUTHORITY SELECTION    : requested {sel['requested']}, "
+            f"resolved {sel['resolved']}",
+            f"  LOCAL AUTHORITY CASES        : {', '.join(sel['cases'])}",
+            f"  LOCAL AUTHORITY SOURCE       : {sel['source']} "
+            "(bound by the Brain contract fingerprint)"]
+
+
 def execution_path_telemetry(*, armed: bool, mission_id: str, symbol: str,
                              authorization=None, governor=None,
                              contract_id: str = "") -> str:
@@ -330,6 +353,7 @@ def execution_path_telemetry(*, armed: bool, mission_id: str, symbol: str,
         f"  REASONING EFFORT             : {_brain['reasoning_effort'] or 'API default (unset)'}",
         f"  BRAIN CONTRACT FINGERPRINT   : ...{_brain['contract_fingerprint'][-6:]}",
         f"  MODEL FALLBACK               : {_brain['model_fallback']}",
+        *local_authority_telemetry(),
         f"  CAPITAL STATE                : {_cap['state']}",
         f"  PEAK EQUITY SOURCE           : {_cap['peak_source']}",
         f"  ACTIVE THESIS                : {_cap['thesis']}",
@@ -417,7 +441,11 @@ def run_production_scans(*, ps, runtime, candles, session, contract, armed: bool
     from broker import topstepx_session_lifecycle as LIFECYCLE
     from broker.luna_candidate_producer import CandidateProducer
     from broker.topstepx_production_loop import ProductionLoop
+    from market_data import local_authority as LA
 
+    # Resolved before any authorization, venue or model use; a refused
+    # selection raises ProfileSelectionRefused here, never runs as legacy.
+    selection = LA.release_selection()
     now = datetime.now(timezone.utc)
     session_id = mission_id or f"PROD-{now.strftime('%Y%m%d')}"
     fingerprint = os.environ["TOPSTEPX_ACCOUNT_FINGERPRINT"]
@@ -459,7 +487,8 @@ def run_production_scans(*, ps, runtime, candles, session, contract, armed: bool
         producer=CandidateProducer(account_fingerprint=fingerprint, contract=contract),
         candles=candles, runtime=runtime, account_id=session.account.id,
         symbol=symbol, armed=armed,
-        in_window=lambda: production_window_open())
+        in_window=lambda: production_window_open(),
+        local_authority_profile=selection["profile"])
 
     def should_continue(i: int) -> bool:
         """Continuous mode: the window governs ENTRIES, exposure governs exit.
@@ -1026,6 +1055,15 @@ def main(argv=None) -> int:
     ap.add_argument("--interval", type=float, default=60.0,
                     help="seconds between production scans")
     args = ap.parse_args(argv)
+
+    from market_data import local_authority as LA
+    try:
+        LA.release_selection()
+    except LA.ProfileSelectionRefused as exc:
+        # Before authentication: an invalid selection reaches no venue or model.
+        print("PRODUCTION SESSION REFUSED")
+        print(f"  - LOCAL AUTHORITY RELEASE SELECTION {exc}: {LA.RELEASE_SELECTION_SOURCE}")
+        return 2
 
     from broker.topstepx_live_session import TopstepXLiveSession
     from broker.topstepx_market_runtime import TopstepXMarketRuntime
