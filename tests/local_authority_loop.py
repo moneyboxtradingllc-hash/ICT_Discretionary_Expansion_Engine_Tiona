@@ -63,6 +63,24 @@ def controlled_reply(out, payload, *, direction, act, entry, story="CONTROLLED",
     tools = [r for r in payload.get("authorized_tool_catalog", [])
              if r.get("direction") == direction and r.get("execution_eligible") is True
              and r.get("tool_family") in ("fvg", "po3_reversal_order_block")]
+    if watch == "nearest" and tools:
+        # CONTROLLED choice of the nearest lawful zone on the waiting side, so
+        # the plan's geometry is the one the market is about to revisit.
+        side = [t for t in tools if isinstance(t.get("zone_high" if above else "zone_low"),
+                                               (int, float))
+                and ((t["zone_low"] >= entry) if above else (t["zone_high"] <= entry))]
+        if side:
+            key, edge_key = ("zone_low", "zone_high") if above else ("zone_high", "zone_low")
+            prices = [r["price"] for r in payload.get("authorized_invalidations", [])
+                      if isinstance(r.get("price"), (int, float))]
+
+            def stop_room(tool):
+                edge = tool[edge_key]
+                beyond = [p for p in prices if (p > edge if above else p < edge)]
+                return min(abs(p - edge) for p in beyond) if beyond else float("inf")
+            # Prefer a zone whose nearest real invalidation lies inside the
+            # doctrine's preferred stop range; economics are not changed.
+            tools = sorted(side, key=lambda t: (stop_room(t) > 35.0, abs(t[key] - entry)))
     if watch and tools:
         # A `watching` plan waits for its zone: geometry is chosen from the
         # zone's far edge, not from the current price.

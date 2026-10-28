@@ -2055,3 +2055,47 @@ retrieval unchanged; 32 protected pins unchanged; RELEASE_SELECTION stays None.
   "receipt_digest": "497562e0cb50339bb6692e4925665fd742188f15e1bd6ce34bfe6d0008c0f0c7"
 }
 ```
+
+## LOCAL_AUTHORITY_EXISTING_POLICY_RELEASE_CANDIDATE_20261028: review candidate selecting the existing-policy repair
+
+Parent e948f37. Codex's exact configuration: PRODUCTION_EXISTING_POLICY_REPAIR_V1 (member_order_witness only;
+retained_support and delivery_change unselected) is the compiled release selection. The all-three profile and its
+experimental evidence are preserved but unselected. Review candidate only: not merged, deployed or authorized.
+Brain fingerprint becomes brain:10bbf12edd6376e0 (closure 50); retrieval unchanged; 32 protected pins unchanged.
+
+```json ledger-entry
+{
+  "schema": "engineering_ledger_entry/v1",
+  "mission_id": "LOCAL_AUTHORITY_EXISTING_POLICY_RELEASE_CANDIDATE_20261028",
+  "parent_sha": "e948f37a0358b9ad4b27e1fe633dc7ddf12084b7",
+  "parent_tree": "838123e479e2939630075db483e212a20d2ae190",
+  "parent_tracked_status": "",
+  "brain_fingerprint": "brain:58528ed2e83d1c29",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_count": 50,
+  "closure_digest": "f961da6db57b81f6c45f92252ddf6c8076361afabe875c306ec0947c6bc5593d",
+  "protected_count": 32,
+  "protected_digest": "79988f0ea3e84e15e34485a8510e78efc667f6e274d41fcde5d6e3c0307ab79a",
+  "policy_refs": [
+    "Codex final release disposition under Maurice's direction (email 2026-10-28 04:29 UTC, FINAL RELEASE CONFIGURATION; FINAL_RELEASE_DISPOSITION_e948f37_20261028.zip sha256 cb0855542cb8fcfba9b6a8b4ae5c446f8ebdb2edbce01780324f63220365de6f; 01_RELEASE_PREPARATION_ORDER.md, 03_REVIEW_CANDIDATE_CONFIG.diff)",
+    "Exactly 03_REVIEW_CANDIDATE_CONFIG.diff: PRODUCTION_EXISTING_POLICY_REPAIR_V1 (member_order_witness=True, retained_support=False, delivery_change=False) recognized and selected; all-three profile and experimental evidence preserved unselected; superseded all-three prepared commit 9f0d2fb not used. No merge, deployment, operator checkout, rebind, credentials, real SessionAuthorization, provider/model/venue calls, arming or orders"
+  ],
+  "scoped_files": [
+    "src/market_data/local_authority.py",
+    "src/recognition_validation/examples/*",
+    "tests/*",
+    "docs/recognition_validation/*"
+  ],
+  "proof_ids": [
+    "COMPILED-SELECTION-EXACT-EXISTING-POLICY-REPAIR-FLAGS",
+    "NORMAL-LAUNCH-ACTUAL-COMPILED-SELECTION-REAL-BINDINGS",
+    "MEMBER-ORDER-SAME-DIRECTION-CANDIDATE-BOTH-ECU",
+    "MEMBER-ORDER-PLAN-BRAINLESS-TRIGGER-FINAL-QUOTE-BOTH-ECU",
+    "NO-RETAINED-OR-DELIVERY-AUTHORITY-IN-NORMAL-RELEASE",
+    "RELEASE-MUTANTS-PROPAGATION-AND-POLICY"
+  ],
+  "closure_change_rationale": "One bound source changes inside the unchanged 50-source closure: local_authority adds the PRODUCTION_EXISTING_POLICY_REPAIR_V1 object (member order witness only), recognizes it as a production profile and selects it as RELEASE_SELECTION; the Brain fingerprint becomes the projected brain:10bbf12edd6376e0, so every earlier session authorization stops verifying.",
+  "predecessor_receipt_digest": "497562e0cb50339bb6692e4925665fd742188f15e1bd6ce34bfe6d0008c0f0c7",
+  "receipt_digest": "488f3250cca3413ff7c5ef85ad906b75987b0367acbf06a9826ff6cc6407dc26"
+}
+```

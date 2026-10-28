@@ -109,14 +109,18 @@ _OFFLINE_PROFILES = (OFFLINE_TEST_PROFILE_V1, OFFLINE_RETAINED_SUPPORT_TEST_PROF
 #: decided only by the durable SessionAuthorization and the source fingerprint.
 PRODUCTION_PROFILE_V1 = LocalAuthorityProfile(
     "local_authority_production/v1", True, True, True)
-_PRODUCTION_PROFILES = (PRODUCTION_PROFILE_V1,)
+#: Release the existing-family chronology correction only.
+#: Retained-support adoption and the additional delivery family stay unselected.
+PRODUCTION_EXISTING_POLICY_REPAIR_V1 = LocalAuthorityProfile(
+    "local_authority_existing_policy_repair/v1", True, False, False)
+_PRODUCTION_PROFILES = (PRODUCTION_PROFILE_V1, PRODUCTION_EXISTING_POLICY_REPAIR_V1)
 
 #: THE compiled release selection, read by the production launcher. None is
 #: OFF: the legacy DISABLED participation. It lives in this closure-bound file
 #: so a reviewed change to it rotates the Brain contract fingerprint (and with
 #: it every prior session authorization); no env, CLI, JSON or account record
 #: can select a profile. Activation is reserved to the owner -- do not edit.
-RELEASE_SELECTION = None
+RELEASE_SELECTION = PRODUCTION_EXISTING_POLICY_REPAIR_V1
 RELEASE_SELECTION_SOURCE = "src/market_data/local_authority.py:RELEASE_SELECTION"
 
 

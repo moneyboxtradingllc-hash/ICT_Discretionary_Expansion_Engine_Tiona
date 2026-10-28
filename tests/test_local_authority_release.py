@@ -74,12 +74,14 @@ def _copy(profile):
 
 
 # ── the profile contract ──────────────────────────────────────────────────────
-def test_delivered_release_selection_is_the_literal_none():
+def test_delivered_release_selection_is_the_existing_policy_repair_literal(monkeypatch):
     tree = ast.parse(open(os.path.join(ROOT, "src/market_data/local_authority.py")).read())
     values = [node.value for node in tree.body if isinstance(node, ast.Assign)
               and any(getattr(t, "id", None) == "RELEASE_SELECTION" for t in node.targets)]
-    assert len(values) == 1 and isinstance(values[0], ast.Constant) and values[0].value is None
-    assert LA.RELEASE_SELECTION is None
+    assert len(values) == 1 and isinstance(values[0], ast.Name)
+    assert values[0].id == "PRODUCTION_EXISTING_POLICY_REPAIR_V1"
+    assert LA.RELEASE_SELECTION is LA.PRODUCTION_EXISTING_POLICY_REPAIR_V1
+    _select(monkeypatch, None)                  # CONTROLLED OFF fixture
     off = LA.release_selection()
     assert off["profile"] is None and off["resolved"] == "disabled" and off["cases"] == []
     assert off["source"] == "src/market_data/local_authority.py:RELEASE_SELECTION"
@@ -149,12 +151,16 @@ def test_a_reviewed_selection_change_rotates_the_brain_contract_fingerprint(tmp_
         copies[name] = dest
     target = copies["on"] / "src/market_data/local_authority.py"
     text = target.read_text()
-    assert text.count("\nRELEASE_SELECTION = None\n") == 1
-    target.write_text(text.replace("\nRELEASE_SELECTION = None\n",
-                                   "\nRELEASE_SELECTION = PRODUCTION_PROFILE_V1\n"))
+    selected = "\nRELEASE_SELECTION = PRODUCTION_EXISTING_POLICY_REPAIR_V1\n"
+    assert text.count(selected) == 1
+    # The delivered source selects the repair; flipping it either way rotates.
+    target.write_text(text.replace(selected, "\nRELEASE_SELECTION = PRODUCTION_PROFILE_V1\n"))
+    other = copies["off"] / "src/market_data/local_authority.py"
+    other.write_text(other.read_text().replace(selected, "\nRELEASE_SELECTION = None\n"))
     off, on = fingerprint(copies["off"]), fingerprint(copies["on"])
     from ai_brain.production_model import brain_contract_fingerprint
-    assert off == brain_contract_fingerprint() and on and on != off
+    current = brain_contract_fingerprint()
+    assert len({off, on, current}) == 3 and off and on
 
 
 # ── the ProductionLoop constructor seam ───────────────────────────────────────
@@ -231,7 +237,8 @@ def _launch(m, root):
     return loop, startup, ps
 
 
-def test_normal_off_launch_builds_the_real_default_cycle_disabled(tmp_path, monkeypatch):
+def test_controlled_off_launch_builds_the_real_default_cycle_disabled(tmp_path, monkeypatch):
+    _select(monkeypatch, None)                  # CONTROLLED OFF fixture
     loop, _startup, ps = _launch(monkeypatch, tmp_path)
     assert type(loop.cycle) is ProductionScanCycle
     assert loop.cycle.local_authority.profile is LA.DISABLED
@@ -258,6 +265,10 @@ def test_controlled_selection_reaches_the_launch_built_cycle(tmp_path, monkeypat
 
 
 def test_startup_banner_prints_the_resolved_selection_without_identifiers(monkeypatch):
+    out = TOOL.execution_path_telemetry(armed=False, mission_id="X", symbol="MNQ")
+    assert "resolved local_authority_existing_policy_repair/v1" in out
+    assert "LOCAL AUTHORITY CASES        : member_order_witness" in out
+    _select(monkeypatch, None)                  # CONTROLLED OFF fixture
     out = TOOL.execution_path_telemetry(armed=False, mission_id="X", symbol="MNQ")
     assert "LOCAL AUTHORITY SELECTION    : OFF (legacy DISABLED; no local cases)" in out
     _select(monkeypatch, LA.PRODUCTION_PROFILE_V1)
