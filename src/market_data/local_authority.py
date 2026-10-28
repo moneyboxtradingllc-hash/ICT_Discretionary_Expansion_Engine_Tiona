@@ -116,7 +116,7 @@ _PRODUCTION_PROFILES = (PRODUCTION_PROFILE_V1,)
 #: so a reviewed change to it rotates the Brain contract fingerprint (and with
 #: it every prior session authorization); no env, CLI, JSON or account record
 #: can select a profile. Activation is reserved to the owner -- do not edit.
-RELEASE_SELECTION = None
+RELEASE_SELECTION = PRODUCTION_PROFILE_V1
 RELEASE_SELECTION_SOURCE = "src/market_data/local_authority.py:RELEASE_SELECTION"
 
 

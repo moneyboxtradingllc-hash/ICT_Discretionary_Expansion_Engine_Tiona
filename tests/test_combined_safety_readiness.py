@@ -616,7 +616,7 @@ class TestStrategyUntouched:
         # coverage starts at the first whole bucket, so it rotates once more.
         # N1: the rolling chronology accepts a coherent window's alignment
         # eviction (one partial 15m bucket), so it rotates again.
-        assert brain_contract_fingerprint() == "brain:58528ed2e83d1c29"
+        assert brain_contract_fingerprint() == "brain:893a252a0d555ebc"
 
     def test_no_safety_commit_touched_luna_cognition(self):
         """The safety commits are execution-layer only.

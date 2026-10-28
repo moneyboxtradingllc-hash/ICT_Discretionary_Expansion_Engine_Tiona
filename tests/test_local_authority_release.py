@@ -74,15 +74,18 @@ def _copy(profile):
 
 
 # ── the profile contract ──────────────────────────────────────────────────────
-def test_delivered_release_selection_is_the_literal_none():
+def test_delivered_release_selection_is_the_reviewed_production_profile():
+    """ACTIVATION: the one reviewed literal. Any other value fails here."""
     tree = ast.parse(open(os.path.join(ROOT, "src/market_data/local_authority.py")).read())
     values = [node.value for node in tree.body if isinstance(node, ast.Assign)
               and any(getattr(t, "id", None) == "RELEASE_SELECTION" for t in node.targets)]
-    assert len(values) == 1 and isinstance(values[0], ast.Constant) and values[0].value is None
-    assert LA.RELEASE_SELECTION is None
-    off = LA.release_selection()
-    assert off["profile"] is None and off["resolved"] == "disabled" and off["cases"] == []
-    assert off["source"] == "src/market_data/local_authority.py:RELEASE_SELECTION"
+    assert len(values) == 1 and isinstance(values[0], ast.Name)
+    assert values[0].id == "PRODUCTION_PROFILE_V1"
+    assert LA.RELEASE_SELECTION is LA.PRODUCTION_PROFILE_V1
+    on = LA.release_selection()
+    assert on["profile"] is LA.PRODUCTION_PROFILE_V1
+    assert on["resolved"] == "local_authority_production/v1"
+    assert on["source"] == "src/market_data/local_authority.py:RELEASE_SELECTION"
 
 
 def test_production_profile_is_exact_and_runs_beside_execution_switches(monkeypatch):
@@ -147,14 +150,15 @@ def test_a_reviewed_selection_change_rotates_the_brain_contract_fingerprint(tmp_
         shutil.copytree(os.path.join(ROOT, "tools"), dest / "tools",
                         ignore=shutil.ignore_patterns("__pycache__"))
         copies[name] = dest
-    target = copies["on"] / "src/market_data/local_authority.py"
+    # Activated source: the reviewed literal is ON; reverting it must rotate too.
+    target = copies["off"] / "src/market_data/local_authority.py"
     text = target.read_text()
-    assert text.count("\nRELEASE_SELECTION = None\n") == 1
-    target.write_text(text.replace("\nRELEASE_SELECTION = None\n",
-                                   "\nRELEASE_SELECTION = PRODUCTION_PROFILE_V1\n"))
+    assert text.count("\nRELEASE_SELECTION = PRODUCTION_PROFILE_V1\n") == 1
+    target.write_text(text.replace("\nRELEASE_SELECTION = PRODUCTION_PROFILE_V1\n",
+                                   "\nRELEASE_SELECTION = None\n"))
     off, on = fingerprint(copies["off"]), fingerprint(copies["on"])
     from ai_brain.production_model import brain_contract_fingerprint
-    assert off == brain_contract_fingerprint() and on and on != off
+    assert on == brain_contract_fingerprint() and off and on != off
 
 
 # ── the ProductionLoop constructor seam ───────────────────────────────────────
@@ -231,7 +235,18 @@ def _launch(m, root):
     return loop, startup, ps
 
 
-def test_normal_off_launch_builds_the_real_default_cycle_disabled(tmp_path, monkeypatch):
+def test_normal_launch_builds_the_selected_production_cycle(tmp_path, monkeypatch):
+    """ACTIVATION: the unpatched launcher now selects the reviewed profile."""
+    loop, _startup, ps = _launch(monkeypatch, tmp_path)
+    assert loop.cycle.local_authority.profile is LA.PRODUCTION_PROFILE_V1
+    assert loop.cycle._local_authority_profile is LA.PRODUCTION_PROFILE_V1
+    assert loop.cycle.account_provider == loop._topstep_account
+    assert loop.cycle.quote_provider is ps.quote_provider and loop.armed is False
+    assert "resolved local_authority_production/v1" in "\n".join(TOOL.local_authority_telemetry())
+
+
+def test_controlled_off_launch_builds_the_real_default_cycle_disabled(tmp_path, monkeypatch):
+    _select(monkeypatch, None)                  # CONTROLLED fixture: the legacy OFF
     loop, _startup, ps = _launch(monkeypatch, tmp_path)
     assert type(loop.cycle) is ProductionScanCycle
     assert loop.cycle.local_authority.profile is LA.DISABLED
@@ -259,10 +274,10 @@ def test_controlled_selection_reaches_the_launch_built_cycle(tmp_path, monkeypat
 
 def test_startup_banner_prints_the_resolved_selection_without_identifiers(monkeypatch):
     out = TOOL.execution_path_telemetry(armed=False, mission_id="X", symbol="MNQ")
-    assert "LOCAL AUTHORITY SELECTION    : OFF (legacy DISABLED; no local cases)" in out
-    _select(monkeypatch, LA.PRODUCTION_PROFILE_V1)
-    out = TOOL.execution_path_telemetry(armed=False, mission_id="X", symbol="MNQ")
     assert "resolved local_authority_production/v1" in out
+    _select(monkeypatch, None)
+    out = TOOL.execution_path_telemetry(armed=False, mission_id="X", symbol="MNQ")
+    assert "LOCAL AUTHORITY SELECTION    : OFF (legacy DISABLED; no local cases)" in out
     assert "TOPSTEPX_ACCOUNT" not in out
 
 

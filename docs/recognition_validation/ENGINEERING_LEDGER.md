@@ -2055,3 +2055,47 @@ retrieval unchanged; 32 protected pins unchanged; RELEASE_SELECTION stays None.
   "receipt_digest": "497562e0cb50339bb6692e4925665fd742188f15e1bd6ce34bfe6d0008c0f0c7"
 }
 ```
+
+## LOCAL_AUTHORITY_ACTIVATION_PREPARED_20261028: activation commit PREPARED, NOT APPROVED
+
+Parent e948f37 (accepted). Prepared at the operator's request so that an owner go-decision needs only verification:
+exactly the reviewed one-line selection RELEASE_SELECTION = PRODUCTION_PROFILE_V1 plus measured pins, the ON guard test
+and this entry. NOT approved, merged, deployed or authorized; activation remains Maurice's decision and release
+disposition Codex's. Brain fingerprint becomes brain:893a252a0d555ebc (closure 50); retrieval unchanged; 32 protected
+pins unchanged. A fresh durable SessionAuthorization is required before any session.
+
+```json ledger-entry
+{
+  "schema": "engineering_ledger_entry/v1",
+  "mission_id": "LOCAL_AUTHORITY_ACTIVATION_PREPARED_20261028",
+  "parent_sha": "e948f37a0358b9ad4b27e1fe633dc7ddf12084b7",
+  "parent_tree": "838123e479e2939630075db483e212a20d2ae190",
+  "parent_tracked_status": "",
+  "brain_fingerprint": "brain:58528ed2e83d1c29",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_count": 50,
+  "closure_digest": "f961da6db57b81f6c45f92252ddf6c8076361afabe875c306ec0947c6bc5593d",
+  "protected_count": 32,
+  "protected_digest": "79988f0ea3e84e15e34485a8510e78efc667f6e274d41fcde5d6e3c0307ab79a",
+  "policy_refs": [
+    "PREPARED, NOT APPROVED: activation commit prepared at the operator's request (Tiona, 2026-10-28) so an owner go-decision needs only verification; Maurice/Codex acceptance of e948f37 (CLOCK REPAIR ACCEPTED, OWNER_FAILURE_CLOCK_ACCEPTANCE_e948f37_20261027.zip sha256 774c977b368a1e64ff6b737ca99abdbd84a1513acdbdc3d2ef2f2f37f9e22fe3) keeps activation reserved to Maurice and release disposition to Codex",
+    "Exactly the reviewed one-line selection (RELEASE_SELECTION = PRODUCTION_PROFILE_V1) plus measured pins, the ON guard test and this entry; no other source change; not merged, deployed, armed or authorized; a fresh durable SessionAuthorization is still required"
+  ],
+  "scoped_files": [
+    "src/market_data/local_authority.py",
+    "src/recognition_validation/examples/*",
+    "tests/*",
+    "docs/recognition_validation/*"
+  ],
+  "proof_ids": [
+    "SELECTION-LITERAL-IS-REVIEWED-PRODUCTION-PROFILE",
+    "NORMAL-LAUNCH-SELECTS-PRODUCTION-PROFILE",
+    "CONTROLLED-OFF-LAUNCH-STILL-DISABLED",
+    "REVERTING-LITERAL-ROTATES-FINGERPRINT",
+    "FULL-ISOLATED-SUITE-AT-PREPARED-SHA"
+  ],
+  "closure_change_rationale": "One bound line changes inside the unchanged 50-source closure: local_authority.RELEASE_SELECTION becomes PRODUCTION_PROFILE_V1, the exact UNAPPLIED diff reviewed at e948f37; the Brain fingerprint rotates to the independently computed brain:893a252a0d555ebc, so every earlier session authorization stops verifying.",
+  "predecessor_receipt_digest": "497562e0cb50339bb6692e4925665fd742188f15e1bd6ce34bfe6d0008c0f0c7",
+  "receipt_digest": "49b8c759dd4e3e2474f8104250e3b78f8322aadb653b6b44d6af0629e504fdfd"
+}
+```
