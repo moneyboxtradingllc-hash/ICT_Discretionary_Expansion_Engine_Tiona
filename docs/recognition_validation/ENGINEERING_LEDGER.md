@@ -2008,3 +2008,50 @@ becomes brain:9bb7ac73616bd5cf (closure 50); retrieval unchanged; 32 protected p
   "receipt_digest": "e94530bb78ec898412e1bcc51d4b90a07991448d64176315ce366d0d3d6b4af6"
 }
 ```
+
+## LOCAL_AUTHORITY_FAILURE_CLOCK_20261027: failure availability in the closing-edge clock domain
+
+Parent d412676. local_authority.failure_available_at returned the native settled_edge_time -- the OPEN of the
+failure bucket's terminal 1m constituent -- while the body/structure completion edges are bucket CLOSES, so a 3m
+failure looked one minute earlier than it was knowable and a simultaneous failure/completion satisfied the strict
+ordering. It now returns the source bucket close and refuses an inconsistent edge. Strict ordering, same-minute
+refusal, scoped D3 R and native fields unchanged. Brain fingerprint becomes brain:58528ed2e83d1c29 (closure 50);
+retrieval unchanged; 32 protected pins unchanged; RELEASE_SELECTION stays None.
+
+```json ledger-entry
+{
+  "schema": "engineering_ledger_entry/v1",
+  "mission_id": "LOCAL_AUTHORITY_FAILURE_CLOCK_20261027",
+  "parent_sha": "d41267635f80b43e191c0a5c86d99172236457bf",
+  "parent_tree": "12eb8a9f024af57a5e6dec4110731c2136ae14c7",
+  "parent_tracked_status": "",
+  "brain_fingerprint": "brain:9bb7ac73616bd5cf",
+  "retrieval_fingerprint": "retr:0c241bdb8234d1ba",
+  "closure_count": 50,
+  "closure_digest": "f7bde988e5c8b57d8d34284b20e2858b42c26eca5fafa5fd7b3e52a40b898b77",
+  "protected_count": 32,
+  "protected_digest": "79988f0ea3e84e15e34485a8510e78efc667f6e274d41fcde5d6e3c0307ab79a",
+  "policy_refs": [
+    "Maurice/Codex consolidated final scope (email 1a17f89dbdc7f8b2; OWNER_RELEASE_AUDIT_CLOCK_CORRECTION_d412676_20261027.zip sha256 5830238492731a2cebfa7d728d042bbec5a3646d5ae85f41674595bd95635b35; 01_BOUNDED_COMPLETION.md) and release audit (email 1a17f859b3c85d21)",
+    "One engineering repair only: failure availability in the body/structure closing-edge domain; strict failure-before-completion, same-minute refusal, scoped D3 R, native fields, doctrine, economics, risk, execution and the 32 protected sources unchanged; RELEASE_SELECTION stays None; activation diff regenerated UNAPPLIED"
+  ],
+  "scoped_files": [
+    "src/market_data/local_authority.py",
+    "src/recognition_validation/examples/*",
+    "tests/*",
+    "docs/recognition_validation/*"
+  ],
+  "proof_ids": [
+    "FAILURE-CLOCK-SOURCE-BUCKET-CLOSE-1M-3M-5M-15M",
+    "INCONSISTENT-OR-MALFORMED-FAILURE-CLOCK-PROVES-NOTHING",
+    "HEALTHY-3M-FAILURE-15M-COMPOSITE-PRESERVED-PREFIX",
+    "SIMULTANEOUS-3M-FAILURE-AND-COMPLETION-PUBLISHES-NO-COMPOSITE",
+    "LAUNCH-BUILT-LOOP-SIMULTANEOUS-NO-COMPOSITE-BOTH-ECU",
+    "CLOCK-MUTANTS-C1-C3",
+    "BULLISH-15M-COMPOSITE-UNPROVEN-FIRST-WITNESS"
+  ],
+  "closure_change_rationale": "One bound source changes inside the unchanged 50-source closure: local_authority.failure_available_at returns the close of the failure's settled source bucket (source_bar_time + timeframe), the same clock domain as the body/structure completion edges, instead of the native settled_edge_time (the OPEN of the terminal 1m constituent); an edge that does not name a constituent minute of that bucket, an unknown timeframe or an unreadable source proves nothing.",
+  "predecessor_receipt_digest": "e94530bb78ec898412e1bcc51d4b90a07991448d64176315ce366d0d3d6b4af6",
+  "receipt_digest": "497562e0cb50339bb6692e4925665fd742188f15e1bd6ce34bfe6d0008c0f0c7"
+}
+```

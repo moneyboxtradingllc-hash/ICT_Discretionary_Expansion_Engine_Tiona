@@ -206,15 +206,29 @@ def _session_of(value):
 
 
 def failure_available_at(failure):
-    """When a local failure became knowable: its settled edge, else its bar's close."""
+    """When a local failure became knowable: the CLOSE of its settled source bucket.
+
+    One clock domain with the body/structure completion edges (source + tf).
+    Native clocks (snapshot_builder.settled_source_provenance): source_bar_time
+    is the bucket OPEN; settled_edge_time is the OPEN of its terminal 1m
+    constituent (None on 1m), so it is never itself a close. It is only checked
+    to name a constituent minute of that bucket; an inconsistent or unreadable
+    edge proves nothing (None). The native fields are not rewritten.
+    """
     if not isinstance(failure, dict):
         return None
-    edge = _dt(failure.get("settled_edge_time"))
-    if edge is not None:
-        return edge
     source = _dt(failure.get("source_bar_time"))
     minutes = _TF_MINUTES.get(failure.get("source_tf"))
-    return source + timedelta(minutes=minutes) if source and minutes else None
+    if source is None or not minutes:
+        return None
+    close = source + timedelta(minutes=minutes)
+    raw_edge = failure.get("settled_edge_time")
+    if raw_edge not in (None, ""):
+        edge = _dt(raw_edge)
+        if (edge is None or not source <= edge < close
+                or (edge - source) % timedelta(minutes=1)):
+            return None
+    return close
 
 
 # ── Mission 1: constituent member-order witness ─────────────────────────────
