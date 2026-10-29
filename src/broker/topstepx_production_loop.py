@@ -169,7 +169,7 @@ class ProductionLoop:
                       ((scan.get("brain_block") or {}).get("output") or {}))
             from broker.candidate_decision_record import (build_record,
                                                           terminal_disposition)
-            producer = getattr(self.cycle, "producer", None)
+            producer = self.producer
             trace = dict(getattr(producer, "last_decision_trace", None) or {})
             qual = scan.get("qualification_evidence")
             if isinstance(qual, dict) and trace.get("qualification_result") is None:
@@ -1402,23 +1402,8 @@ class ProductionLoop:
                         "conditional_plan_id": plan["plan_id"],
                         "candidate_id": fresh.candidate_id, "sizing": sized}
             result = self._execute(fresh, scan, sized, in_window)
-            economics = dict(getattr(self.ps.runner, "final_quote_economics", {}) or {})
-            self._record_plan_events(plan["plan_id"], [
-                {"event": "final_quote_captured",
-                 "timestamp": economics.get("final_quote_timestamp"),
-                 "price": economics.get("final_entry_reference")},
-                {"event": "economics_completed",
-                 "timestamp": economics.get("final_economics_completed_timestamp")},
-                {"event": "submission_started",
-                 "timestamp": economics.get("venue_submit_timestamp"),
-                 "elapsed_economics_to_submit_ms": economics.get(
-                     "elapsed_economics_to_submit_ms")},
-                {"event": ("economics_refused" if economics.get("refusal_reason")
-                           else "execution_result"),
-                 "timestamp": economics.get("final_economics_completed_timestamp"),
-                 "reason": economics.get("refusal_reason"),
-                 "outcome": result.get("outcome")},
-            ])
+            self._record_plan_events(plan["plan_id"],
+                                     self._conditional_execution_events(result))
             return result
         except (NoCandidate, CandidateStale, RiskRejection) as exc:
             reason = getattr(exc, "reason", type(exc).__name__)
@@ -1600,6 +1585,30 @@ class ProductionLoop:
                 "sizing": final_sizing, "mission_id": mission.mission_id,
                 "mission_state": mission.state, "result": result,
                 "attempt_consumed": mission.attempt_count > 0}
+
+    @staticmethod
+    def _conditional_execution_events(result):
+        """Report only this execution's evidence, never an earlier runner."""
+        economics = dict(result.get("final_quote_economics")
+                         or (result.get("sizing") or {}).get("final_quote_economics") or {})
+        rows = []
+        if economics.get("final_quote_timestamp"):
+            rows.append({"event": "final_quote_captured",
+                         "timestamp": economics["final_quote_timestamp"],
+                         "price": economics.get("final_entry_reference")})
+        if economics.get("final_economics_completed_timestamp"):
+            rows.append({"event": "economics_completed",
+                         "timestamp": economics["final_economics_completed_timestamp"]})
+        if economics.get("venue_submit_timestamp"):
+            rows.append({"event": "submission_started",
+                         "timestamp": economics["venue_submit_timestamp"],
+                         "elapsed_economics_to_submit_ms": economics.get(
+                             "elapsed_economics_to_submit_ms")})
+        rows.append({"event": "economics_refused" if economics.get("refusal_reason") else "execution_result",
+                     "timestamp": economics.get("final_economics_completed_timestamp"),
+                     "reason": economics.get("refusal_reason"),
+                     "outcome": result.get("outcome")})
+        return rows
 
     @staticmethod
     def _freeze_conditional_order_guard(old, plan_id, contract_id):
