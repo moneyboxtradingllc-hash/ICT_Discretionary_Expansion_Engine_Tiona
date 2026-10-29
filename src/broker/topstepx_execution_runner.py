@@ -520,23 +520,7 @@ class ExecutionRunner:
         final_market = dict(market or {})
         final_market["current_executable_price"] = reference
         final_market["now"] = now
-        conditional = bool((candidate_snapshot.extras or {}).get("conditional_plan_id"))
-        if conditional or self.conditional_order_guard is not None:
-            try:
-                if not callable(self.conditional_order_guard):
-                    reason = "conditional_order_guard_missing"
-                else:
-                    reason = self.conditional_order_guard(candidate_snapshot, reference, now)
-            except Exception:
-                reason = "conditional_order_guard_invalid"
-            if reason:
-                self.final_quote_economics = {
-                    "decision": "REFUSE", "refusal_reason": reason,
-                    "final_entry_reference": reference,
-                    "final_quote_timestamp": capture.captured_at.isoformat()}
-                self._invalidate(reason)
-                self._halt(STALE_CANDIDATE, reason,
-                           {"final_quote_refusal": reason})
+        self._assert_conditional_order(candidate_snapshot, reference, now)
         self.final_quote_economics = {
             "decision": "PENDING_FINAL_FRESHNESS",
             "final_quote": capture.evidence(self.contract.tick_size),
@@ -553,6 +537,26 @@ class ExecutionRunner:
                 "detail": exc.detail})
             raise
         return reference
+
+    def _assert_conditional_order(self, candidate, reference, now):
+        conditional = bool((candidate.extras or {}).get("conditional_plan_id"))
+        if not conditional and self.conditional_order_guard is None:
+            return
+        try:
+            reason = (self.conditional_order_guard(candidate, reference, now)
+                      if callable(self.conditional_order_guard)
+                      else "conditional_order_guard_missing")
+            if reason is not None and not isinstance(reason, str):
+                reason = "conditional_order_guard_invalid"
+        except Exception:
+            reason = "conditional_order_guard_invalid"
+        if reason:
+            self.final_quote_economics.update({
+                "decision": "REFUSE", "refusal_reason": reason,
+                "final_entry_reference": reference,
+                "final_quote_timestamp": self.entry_capture.captured_at.isoformat()})
+            self._invalidate(reason)
+            self._halt(STALE_CANDIDATE, reason, {"final_quote_refusal": reason})
 
     def _reprice_production_economics(self, candidate_snapshot,
                                      entry_reference: float) -> BracketGeometry:
@@ -739,6 +743,9 @@ class ExecutionRunner:
                 {**market, "current_executable_price": float("nan")})
 
         # Authorization is minted only after final production economics pass.
+        if self.execution_lane == "production":
+            # Sizing must not let a plan expire between quote capture and mint.
+            self._assert_conditional_order(candidate_snapshot, executable, self.clock())
         self.token = mint_token()
         ledger.record_token(self.token.token_id)
         self._to(AUTHORIZED, "token minted after all gates passed",

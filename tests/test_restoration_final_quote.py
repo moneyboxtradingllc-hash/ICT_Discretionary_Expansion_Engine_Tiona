@@ -71,6 +71,21 @@ def test_callback_failure_refuses_before_mint(tmp_path):
     assert runner.final_quote_economics['refusal_reason']=='conditional_order_guard_invalid'
 
 
+def test_plan_expiring_during_final_economics_refuses_before_mint(tmp_path):
+    def attach(r,c):
+        attach_guard(r,c)
+        original=r._reprice_production_economics
+        def slow(*args):
+            result=original(*args)
+            r.clock=lambda:T.NOW+timedelta(seconds=2)
+            return result
+        r._reprice_production_economics=slow
+    status,runner,_=trajectory(tmp_path,29865,attach=attach)
+    assert status==R.STALE_CANDIDATE
+    assert runner.final_quote_economics['refusal_reason']=='conditional_order_expired'
+    assert runner._entry_attempted is False
+
+
 def test_activated_removed_zone_check_reproduces_parent_leak(tmp_path):
     def broken(r,c):
         r.conditional_order_guard=lambda *_:None
