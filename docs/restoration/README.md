@@ -51,6 +51,14 @@ value instead of assuming EXECUTION_ENABLED was true. This strengthens the
 restoration check for a disarmed runner. No replay or production code changes
 were made for that test portability issue.
 
+The two synthetic Aug-6 retrieval-corpus fixtures now use an Aug-7 reference
+clock. Four original assertions failed on both cbfaddb and the restored build
+with the real Oct-29 clock because their records had correctly expired. The
+same records and assertions pass at the fixture date; explicit expired-record
+negative controls still refuse. No production retention, record timestamp,
+market evidence, similarity threshold or candidate rule was changed. These
+are test-clock corrections, not a policy expansion.
+
 ## Evidence limits
 
 Controlled Brain responses prove software pathways, not natural discretionary

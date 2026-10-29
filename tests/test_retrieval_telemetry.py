@@ -95,6 +95,8 @@ def snap(session="lunch", regime="range_rotation", vol="toxic",
 def live(tmp_path, monkeypatch):
     """An isolated corpus seeded from the real ten August 6 records when they
     are present, else a synthetic stand-in."""
+    # This fixture tests Aug-6 retrieval accounting, not expiry months later.
+    monkeypatch.setattr(R, "_today_et", lambda: "2026-08-07")
     monkeypatch.setenv("AI_RETRIEVAL_DIR", str(tmp_path / "r"))
     monkeypatch.setenv("REPLAY_SESSIONS_DIR", str(tmp_path / "sessions"))
     monkeypatch.setenv("AI_RETRIEVAL_ENABLED", "true")

@@ -91,6 +91,7 @@ def record(**over):
 @pytest.fixture
 def corpus(tmp_path, monkeypatch):
     """An isolated store holding one descriptive record."""
+    monkeypatch.setattr(R, "_today_et", lambda: "2026-08-07")
     monkeypatch.setenv("AI_RETRIEVAL_DIR", str(tmp_path / "r"))
     vector_store.add_record(record())
     return tmp_path
