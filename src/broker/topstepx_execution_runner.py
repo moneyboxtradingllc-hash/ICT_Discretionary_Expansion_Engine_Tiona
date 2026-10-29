@@ -221,6 +221,9 @@ class ExecutionRunner:
     #: into the evidence -- V13 recorded the smoke constants on a production
     #: submission because `evidence()` imported them instead of being told.
     execution_lane: str = "smoke"
+    # Existing watching-plan conditions, frozen by the production loop. This
+    # validates order constraints only; it does not establish market authority.
+    conditional_order_guard: Optional[Any] = None
     #: EXEC-PRICE-ANCHOR-1 — does this runner own the PROMPT post-fill lifecycle?
     #:
     #: Set by `ProductionSession.build_runner` and nowhere else, so the smoke
@@ -517,6 +520,23 @@ class ExecutionRunner:
         final_market = dict(market or {})
         final_market["current_executable_price"] = reference
         final_market["now"] = now
+        conditional = bool((candidate_snapshot.extras or {}).get("conditional_plan_id"))
+        if conditional or self.conditional_order_guard is not None:
+            try:
+                if not callable(self.conditional_order_guard):
+                    reason = "conditional_order_guard_missing"
+                else:
+                    reason = self.conditional_order_guard(candidate_snapshot, reference, now)
+            except Exception:
+                reason = "conditional_order_guard_invalid"
+            if reason:
+                self.final_quote_economics = {
+                    "decision": "REFUSE", "refusal_reason": reason,
+                    "final_entry_reference": reference,
+                    "final_quote_timestamp": capture.captured_at.isoformat()}
+                self._invalidate(reason)
+                self._halt(STALE_CANDIDATE, reason,
+                           {"final_quote_refusal": reason})
         self.final_quote_economics = {
             "decision": "PENDING_FINAL_FRESHNESS",
             "final_quote": capture.evidence(self.contract.tick_size),

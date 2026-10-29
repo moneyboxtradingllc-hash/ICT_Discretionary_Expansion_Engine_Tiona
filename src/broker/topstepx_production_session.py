@@ -212,7 +212,8 @@ class ProductionSession:
         return joined[0][1] if len(joined) == 1 else None
 
     # ── entry ─────────────────────────────────────────────────────────────────
-    def build_runner(self, candidate, *, max_risk_usd: float = None) -> "R.ExecutionRunner":
+    def build_runner(self, candidate, *, max_risk_usd: float = None,
+                     conditional_order_guard=None) -> "R.ExecutionRunner":
         """Size the candidate under PRODUCTION doctrine and arm a runner.
 
         LUNA-DAILY-LOSS-BUDGET-GOVERNOR-1. `max_risk_usd` lets the session loss
@@ -260,6 +261,7 @@ class ProductionSession:
                                    account_fingerprint=self.account_fingerprint,
                                    contract=self.contract, clock=self.clock)
         runner.execution_lane = "production"
+        runner.conditional_order_guard = conditional_order_guard
         # The evidence block must name the ceilings that actually judged this
         # trade, not the smoke defaults its module happens to import.
         runner.geometry = sized["geometry"].governed_by(

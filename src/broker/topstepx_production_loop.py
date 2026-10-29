@@ -1377,7 +1377,9 @@ class ProductionLoop:
             managed_runner = self.ps.runner
             try:
                 runner = self.ps.build_runner(
-                    fresh, max_risk_usd=budget["allowed_planned_risk"])
+                    fresh, max_risk_usd=budget["allowed_planned_risk"],
+                    conditional_order_guard=self._freeze_conditional_order_guard(
+                        old, plan["plan_id"], self.ps.contract.id))
             finally:
                 if self.mission.active_mission is not None:
                     self.ps.runner = managed_runner
@@ -1600,11 +1602,55 @@ class ProductionLoop:
                 "attempt_consumed": mission.attempt_count > 0}
 
     @staticmethod
+    def _freeze_conditional_order_guard(old, plan_id, contract_id):
+        """Carry the existing authored conditions to the final executable quote.
+
+        Copy scalar identities now: mutable candidate extras cannot expand the
+        zone, extend expiry, or replace the objective after trigger validation.
+        No campaign, direction-voting, or new recognition rule is introduced.
+        """
+        import math
+        extras = old.extras or {}
+        zone = extras.get("activation_zone") or {}
+        low, high = float(zone["low"]), float(zone["high"])
+        expiry = datetime.fromisoformat(str(extras["plan_expires_at"]).replace("Z", "+00:00"))
+        if not (math.isfinite(low) and math.isfinite(high) and low <= high
+                and expiry.tzinfo is not None):
+            raise NoCandidate("conditional_order_guard_invalid", "invalid authored order conditions")
+        expected = (old.direction, extras.get("playbook"), tuple(extras.get("tool_family") or []),
+                    zone.get("occurrence_id"), low, high, old.invalidation_price,
+                    (extras.get("structural_invalidation") or {}).get("structure_identity"),
+                    old.objective.identity, old.objective.price)
+
+        def validate(candidate, price, now):
+            e = candidate.extras or {}
+            z = e.get("selected_tool_zone") or {}
+            current = (candidate.direction, e.get("playbook"), tuple(e.get("tool_family") or []),
+                       e.get("selected_tool_occurrence_id"), z.get("low"), z.get("high"),
+                       candidate.invalidation_price,
+                       (e.get("structural_invalidation") or {}).get("structure_identity"),
+                       candidate.objective.identity, candidate.objective.price)
+            if (e.get("conditional_plan_id") != plan_id
+                    or candidate.contract_id != contract_id or current != expected):
+                return "conditional_order_identity_changed"
+            if now.tzinfo is None or now >= expiry:
+                return "conditional_order_expired"
+            if not math.isfinite(price) or not low <= price <= high:
+                return "conditional_order_outside_zone"
+            return None
+        return validate
+
+    @staticmethod
     def _terminalize_unused_freshness_mission(mission, exc, runner) -> bool:
         """Close only a freshness-refused mission proven never attempted."""
         from broker import topstepx_execution_runner as R
+        conditional_refusal = (
+            isinstance(exc, R.RunnerHalt) and exc.state == R.STALE_CANDIDATE
+            and (getattr(runner, "final_quote_economics", {}) or {}).get(
+                "refusal_reason", "").startswith("conditional_order_"))
         if (not isinstance(exc, R.RunnerHalt)
-                or exc.state not in set(R._STALE_REASON_STATE.values())
+                or (exc.state not in set(R._STALE_REASON_STATE.values())
+                    and not conditional_refusal)
                 or mission.attempt_count != 0 or mission.order_id is not None
                 or mission.token_spent
                 or getattr(runner, "_entry_attempted", False)):
