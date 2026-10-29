@@ -83,7 +83,7 @@ def scan(shadow_block=None):
             "two_brain_shadow": shadow_block,
             "brain_result": {"model": "gpt-5.6-terra", "source": "llm",
                              "parsed": {"narrative_direction": "bullish",
-                                        "current_action": "propose bullish entry",
+                                        "current_action": "propose_entry",
                                         "objective_id": "OBJ_LIQ_BSL_1",
                                         "invalidation_id": "INV_PL_1"}}}
 

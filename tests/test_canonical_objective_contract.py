@@ -67,7 +67,7 @@ def catalog():
 def parsed(**over):
     p = {"narrative_direction": "bearish", "allowed_direction": "bearish",
          "narrative_phase": "distribution",
-         "current_action": "propose bearish liquidity_sweep_reversal entry",
+         "current_action": "propose_entry",
          "recommended_playbook_family": "liquidity_sweep_reversal",
          "recommended_tool_family": [EXEMPLAR],
          "invalidation_level": 29780.0,

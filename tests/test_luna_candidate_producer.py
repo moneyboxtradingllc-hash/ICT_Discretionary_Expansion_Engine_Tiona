@@ -74,7 +74,7 @@ def parsed(**over):
          "active_draw": "buy side liquidity above",
          "recommended_playbook_family": "continuation",
          "recommended_tool_family": ["fvg"], "market_story": "bullish continuation",
-         "current_action": "await_retest"}
+         "current_action": "propose_entry"}
     p.update(over)
     return p
 

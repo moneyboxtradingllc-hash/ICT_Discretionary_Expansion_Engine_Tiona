@@ -330,7 +330,7 @@ class TestOwnerIsNotAuthorisation:
     def test_a_bearish_reaction_stays_lawful_under_a_bullish_path(self):
         from broker.luna_candidate_producer import CandidateProducer as P
         luna = {"narrative_direction": "bearish",
-                "current_action": "propose bearish reaction entry",
+                "current_action": "propose_entry",
                 "recommended_tool_family": ["fvg"]}
         P._assert_action_permits_entry(luna)
         assert P._direction(luna, {}) == "bearish"
@@ -338,7 +338,7 @@ class TestOwnerIsNotAuthorisation:
     def test_a_bullish_reaction_stays_lawful_under_a_bearish_path(self):
         from broker.luna_candidate_producer import CandidateProducer as P
         luna = {"narrative_direction": "bullish",
-                "current_action": "propose bullish reaction entry",
+                "current_action": "propose_entry",
                 "recommended_tool_family": ["fvg"]}
         P._assert_action_permits_entry(luna)
         assert P._direction(luna, {}) == "bullish"

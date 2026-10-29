@@ -56,7 +56,7 @@ def produce(objective_price):
     assert match, f"no catalog entry at {objective_price}"
     parsed = {"narrative_direction": "bearish", "allowed_direction": "bearish",
               "narrative_phase": "distribution",
-              "current_action": "propose bearish entry",
+              "current_action": "propose_entry",
               "recommended_playbook_family": "liquidity_sweep_reversal",
               "recommended_tool_family": [EXEMPLAR],
               "invalidation_level": STOP,

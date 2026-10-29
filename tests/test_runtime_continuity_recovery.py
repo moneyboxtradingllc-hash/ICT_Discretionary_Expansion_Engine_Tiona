@@ -478,7 +478,7 @@ class TestCognitiveStateIsReAnchored:
         memory.record("t1", {"narrative_direction": "bearish",
                              "narrative_phase": "manipulation",
                              "phase_confidence": 64,
-                             "current_action": "propose bearish entry"})
+                             "current_action": "propose_entry"})
         memory.supersede(2, note="repaired")
         assert memory._buf[-1]["superseded_by_history_revision"] == 2
 

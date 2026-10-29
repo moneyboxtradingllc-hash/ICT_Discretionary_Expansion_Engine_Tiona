@@ -461,7 +461,7 @@ class TestRetrievedMemoryCannotAct:
 
     def test_26_a_retrieved_analog_cannot_supply_a_missing_invalidation(self):
         parsed = {"narrative_direction": "bearish", "allowed_direction": "bearish",
-                  "current_action": "enter on retest of 29500",
+                  "current_action": "propose_entry",
                   "recommended_playbook_family": "trend_continuation",
                   "recommended_tool_family": ["fvg"], "invalidation_level": None,
                   "active_draw": "Sell-side liquidity at 29241.0"}
@@ -474,7 +474,7 @@ class TestRetrievedMemoryCannotAct:
 
     def test_27_a_retrieved_analog_cannot_supply_a_liquidity_objective(self):
         parsed = {"narrative_direction": "bearish", "allowed_direction": "bearish",
-                  "current_action": "enter on retest of 29500",
+                  "current_action": "propose_entry",
                   "recommended_playbook_family": "trend_continuation",
                   "recommended_tool_family": ["fvg"], "invalidation_level": 29500.0,
                   "active_draw": None}

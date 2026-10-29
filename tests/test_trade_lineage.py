@@ -52,7 +52,7 @@ class Ctx:
 
 BRAIN = {"model": "gpt-5.6-terra",
          "parsed": {"narrative_direction": "bullish",
-                    "current_action": "propose bullish entry",
+                    "current_action": "propose_entry",
                     "objective_id": "OBJ_LIQ_BSL_1",
                     "invalidation_id": "INV_PL_1"}}
 
