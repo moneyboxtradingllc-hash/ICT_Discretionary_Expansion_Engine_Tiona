@@ -1,0 +1,305 @@
+{
+  "continuation": {
+    "path": {
+      "state_available": true,
+      "owner": "bullish",
+      "status": "active",
+      "origin": {
+        "event": "sell_side_raid_rejected",
+        "proof_family": "rejected_raid_reclaim",
+        "direction": "bullish",
+        "at": "2026-08-05T15:00:00+00:00",
+        "source_tf": "5m",
+        "occurrence_id": "origin-bullish"
+      },
+      "load_bearing_structure": {
+        "level": 29875.0,
+        "side": "low",
+        "timeframe": "5m",
+        "basis": "protected_swing",
+        "swing_id": "swing-bullish",
+        "at": "2026-08-05T15:00:00+00:00",
+        "intact": true
+      },
+      "progression": {
+        "supporting_timeframes": [
+          "5m"
+        ],
+        "highest_confirmed": "5m"
+      },
+      "transfer_evidence": {},
+      "last_invalidated": null,
+      "session": "20260805",
+      "contract_id": "CON.F.US.MNQ.U26"
+    },
+    "continuity": {
+      "state_version": 1,
+      "control_state": "incumbent_intact",
+      "dominant_direction": "bullish",
+      "prior_thesis": {
+        "direction": "bullish",
+        "campaign_established": true,
+        "timestamp": "2026-08-05T15:00:00+00:00",
+        "phase": null,
+        "market_story": "incumbent campaign delivery",
+        "causal_reason": "causal delivery and protected structure",
+        "invalidation_level": 29875.0,
+        "thesis_falsifier": {
+          "level": 110.0
+        },
+        "active_draw": "external liquidity",
+        "objective_id": "OBJ-1",
+        "falsifier_status": null
+      },
+      "thesis_falsifier_status": "not_occurred",
+      "current_thesis_falsifier": {
+        "level": 29875.0,
+        "side": "low",
+        "timeframe": "5m",
+        "basis": "protected_swing",
+        "swing_id": "swing-bullish",
+        "at": "2026-08-05T15:00:00+00:00",
+        "intact": true
+      },
+      "active_path": {
+        "available": true,
+        "record_present": true,
+        "owner": "bullish",
+        "status": "active",
+        "origin": {
+          "event": "sell_side_raid_rejected",
+          "proof_family": "rejected_raid_reclaim",
+          "direction": "bullish",
+          "at": "2026-08-05T15:00:00+00:00",
+          "source_tf": "5m",
+          "occurrence_id": "origin-bullish"
+        },
+        "load_bearing_structure": {
+          "level": 29875.0,
+          "side": "low",
+          "timeframe": "5m",
+          "basis": "protected_swing",
+          "swing_id": "swing-bullish",
+          "at": "2026-08-05T15:00:00+00:00",
+          "intact": true
+        },
+        "progression": {
+          "supporting_timeframes": [
+            "5m"
+          ],
+          "highest_confirmed": "5m"
+        },
+        "transfer_evidence": {},
+        "last_invalidated": null
+      },
+      "transfer_confirmed": false,
+      "transfer_proof": null,
+      "confirmed_from": null,
+      "confirmed_to": null,
+      "same_production_session": true,
+      "legacy_or_prior_session_stance_ignored": false
+    }
+  },
+  "counterflow": {
+    "path": {
+      "state_available": true,
+      "owner": "bearish",
+      "status": "active",
+      "origin": {
+        "event": "buy_side_raid_rejected",
+        "proof_family": "rejected_raid_reclaim",
+        "direction": "bearish",
+        "at": "2026-08-05T15:00:00+00:00",
+        "source_tf": "5m",
+        "occurrence_id": "origin-bearish"
+      },
+      "load_bearing_structure": {
+        "level": 29915.0,
+        "side": "high",
+        "timeframe": "5m",
+        "basis": "protected_swing",
+        "swing_id": "swing-bearish",
+        "at": "2026-08-05T15:00:00+00:00",
+        "intact": true
+      },
+      "progression": {
+        "supporting_timeframes": [
+          "5m"
+        ],
+        "highest_confirmed": "5m"
+      },
+      "transfer_evidence": {},
+      "last_invalidated": null,
+      "session": "20260805",
+      "contract_id": "CON.F.US.MNQ.U26"
+    },
+    "continuity": {
+      "state_version": 1,
+      "control_state": "incumbent_intact",
+      "dominant_direction": "bearish",
+      "prior_thesis": {
+        "direction": "bearish",
+        "campaign_established": true,
+        "timestamp": "2026-08-05T15:00:00+00:00",
+        "phase": null,
+        "market_story": "incumbent campaign delivery",
+        "causal_reason": "causal delivery and protected structure",
+        "invalidation_level": 29915.0,
+        "thesis_falsifier": {
+          "level": 110.0
+        },
+        "active_draw": "external liquidity",
+        "objective_id": "OBJ-1",
+        "falsifier_status": null
+      },
+      "thesis_falsifier_status": "not_occurred",
+      "current_thesis_falsifier": {
+        "level": 29915.0,
+        "side": "high",
+        "timeframe": "5m",
+        "basis": "protected_swing",
+        "swing_id": "swing-bearish",
+        "at": "2026-08-05T15:00:00+00:00",
+        "intact": true
+      },
+      "active_path": {
+        "available": true,
+        "record_present": true,
+        "owner": "bearish",
+        "status": "active",
+        "origin": {
+          "event": "buy_side_raid_rejected",
+          "proof_family": "rejected_raid_reclaim",
+          "direction": "bearish",
+          "at": "2026-08-05T15:00:00+00:00",
+          "source_tf": "5m",
+          "occurrence_id": "origin-bearish"
+        },
+        "load_bearing_structure": {
+          "level": 29915.0,
+          "side": "high",
+          "timeframe": "5m",
+          "basis": "protected_swing",
+          "swing_id": "swing-bearish",
+          "at": "2026-08-05T15:00:00+00:00",
+          "intact": true
+        },
+        "progression": {
+          "supporting_timeframes": [
+            "5m"
+          ],
+          "highest_confirmed": "5m"
+        },
+        "transfer_evidence": {},
+        "last_invalidated": null
+      },
+      "transfer_confirmed": false,
+      "transfer_proof": null,
+      "confirmed_from": null,
+      "confirmed_to": null,
+      "same_production_session": true,
+      "legacy_or_prior_session_stance_ignored": false
+    }
+  },
+  "contested_same_direction": {
+    "path": {
+      "state_available": true,
+      "owner": "bullish",
+      "status": "contested",
+      "origin": {
+        "event": "sell_side_raid_rejected",
+        "proof_family": "rejected_raid_reclaim",
+        "direction": "bullish",
+        "at": "2026-08-05T15:00:00+00:00",
+        "source_tf": "5m",
+        "occurrence_id": "origin-bullish"
+      },
+      "load_bearing_structure": {
+        "level": 29875.0,
+        "side": "low",
+        "timeframe": "5m",
+        "basis": "protected_swing",
+        "swing_id": "swing-bullish",
+        "at": "2026-08-05T15:00:00+00:00",
+        "intact": false
+      },
+      "progression": {
+        "supporting_timeframes": [
+          "5m"
+        ],
+        "highest_confirmed": "5m"
+      },
+      "transfer_evidence": {},
+      "last_invalidated": null,
+      "session": "20260805",
+      "contract_id": "CON.F.US.MNQ.U26"
+    },
+    "continuity": {
+      "state_version": 1,
+      "control_state": "developing_transfer",
+      "dominant_direction": "bullish",
+      "prior_thesis": {
+        "direction": "bullish",
+        "campaign_established": true,
+        "timestamp": "2026-08-05T15:00:00+00:00",
+        "phase": null,
+        "market_story": "incumbent campaign delivery",
+        "causal_reason": "causal delivery and protected structure",
+        "invalidation_level": 29875.0,
+        "thesis_falsifier": {
+          "level": 110.0
+        },
+        "active_draw": "external liquidity",
+        "objective_id": "OBJ-1",
+        "falsifier_status": null
+      },
+      "thesis_falsifier_status": "not_occurred",
+      "current_thesis_falsifier": {
+        "level": 29875.0,
+        "side": "low",
+        "timeframe": "5m",
+        "basis": "protected_swing",
+        "swing_id": "swing-bullish",
+        "at": "2026-08-05T15:00:00+00:00",
+        "intact": false
+      },
+      "active_path": {
+        "available": true,
+        "record_present": true,
+        "owner": "bullish",
+        "status": "contested",
+        "origin": {
+          "event": "sell_side_raid_rejected",
+          "proof_family": "rejected_raid_reclaim",
+          "direction": "bullish",
+          "at": "2026-08-05T15:00:00+00:00",
+          "source_tf": "5m",
+          "occurrence_id": "origin-bullish"
+        },
+        "load_bearing_structure": {
+          "level": 29875.0,
+          "side": "low",
+          "timeframe": "5m",
+          "basis": "protected_swing",
+          "swing_id": "swing-bullish",
+          "at": "2026-08-05T15:00:00+00:00",
+          "intact": false
+        },
+        "progression": {
+          "supporting_timeframes": [
+            "5m"
+          ],
+          "highest_confirmed": "5m"
+        },
+        "transfer_evidence": {},
+        "last_invalidated": null
+      },
+      "transfer_confirmed": false,
+      "transfer_proof": null,
+      "confirmed_from": null,
+      "confirmed_to": null,
+      "same_production_session": true,
+      "legacy_or_prior_session_stance_ignored": false
+    }
+  }
+}

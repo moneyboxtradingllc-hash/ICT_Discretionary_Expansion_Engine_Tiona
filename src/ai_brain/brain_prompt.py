@@ -165,7 +165,7 @@ Output ONLY valid JSON, exactly this schema, no prose, no markdown:
  "contradiction_flags": ["<string>", ...],
  "warnings": ["<string>", ...],
  "confidence_by_component": {"delivery": <int>, "liquidity": <int>, "structure": <int>},
- "current_action": "<string>",
+  "current_action": "<propose_entry|stand_down|watching>",
  "reason": "<string>",
  "must_not_do": ["<string>", ...],
  "protected_high_status": "approaching|rejecting|violating|below|none",

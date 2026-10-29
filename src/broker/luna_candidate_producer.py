@@ -1460,6 +1460,15 @@ class CandidateProducer:
                     "action_declines_entry",
                     f"current_action={action!r} declines entry; the direction is a "
                     f"market narrative, not a trade")
+        # Restoration safety boundary: narrative prose and an unrecognized
+        # action are not affirmative order permission. Exact watching is
+        # already restricted to the existing plan/trigger path in produce().
+        # `enter` retains the historical explicit entry token.
+        if action not in {"propose_entry", "enter", "watching"}:
+            raise NoCandidate(
+                "brain_action_invalid",
+                "entry requires propose_entry or enter; a conditional plan "
+                "requires watching (prose is never immediate permission)")
 
     @staticmethod
     def _check_brain(brain_result: dict, ai_state: str) -> None:
